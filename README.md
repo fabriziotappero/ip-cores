@@ -1,1 +1,1 @@
-# ip-cores
+collection of VHDL and Verilog open-source IP Cores from opencores.org
