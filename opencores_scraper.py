@@ -32,8 +32,8 @@ pwd='xxxx'                      # opencores.org password
 #_______________________________ github upload _________________________________
 #
 _github_addr = 'xxxx'
-_ftp_login = 'xxxx'
-_ftp_pw = 'xxxx'
+_github_login = 'xxxx'
+_github_pw = 'xxxx'
 #_______________________________________________________________________________
 
 
