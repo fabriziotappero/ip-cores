@@ -4,34 +4,36 @@
 '''
 This is a stand alone Python script which will download the WHOLE content of the
 project section of the opencores.org website. The content will be stored locally
-and also uploaded to your FTP server.
-An opencores account is needed. Also note that the whole opencores.org database
+and also uploaded to github.
+An opencores.org account is needed. Also note that the whole opencores.org database
 could be around 3GB of data.
 The Python libraries "BeautifulSoup" and "mechanize" are needed. So install them
 with the command:
 
-easy_install beautifulsoup meachanize
+    easy_install beautifulsoup meachanize
 '''
-
-# open, login and scrape the website opencores.org
-# HOW TO RUN:
-#               ./opencores_scraper.py >> oc.log
+#
+# HOW TO USE THIS SCRIPT
+#
+# 0) install python and its dependencies: easy_install beautifulsoup meachanize
+# 1) make an account in opencores.org
+# 2) complete the "basic setup" section below
+# 3) run this script with the command:  ./opencores_scraper.py >> oc.log
 #
 #
 #_______________________________ basic setup ___________________________________
 #
 prj_to_download = 1E99          # set to 1E99 to get all projects
 download_prj_svn = False        # set to True to get project svn acchives (.zip)
-ftp_upload = False              # set to True to upload "cores" to ftp server
+github_upload = False           # set to True to upload all cores to github
 user='xxxx'                     # opencores.org login
 pwd='xxxx'                      # opencores.org password
-#_______________________________ your FTP info _________________________________
+
+#_______________________________ github upload _________________________________
 #
-# your FTF info. Not needed if "ftp_upload = False"
-_ftp_addr = 'xxxx'
+_github_addr = 'xxxx'
 _ftp_login = 'xxxx'
 _ftp_pw = 'xxxx'
-_ftp_dir = 'xxxx'
 #_______________________________________________________________________________
 
 
@@ -187,7 +189,7 @@ def get_size(_path = '.'):
         _out = str(round(total_size/1.0E6,2))+' MB' # return size in MB
     return _out
 
-################################ MAIN ##################################
+################################ MAIN ##########################################
 
 # create a structure to save all information from opencores.org
 opencores_mem = opencores()
@@ -916,117 +918,6 @@ print 'Local jquery.quicksearch.js file created.'
 
 
 
-# upload the whole local ./cores folder via FTP to a remote FTP server.
-if ftp_upload != True:
+# upload the whole ./cores content to a github, one repo per project.
+if github_upload != True:
     sys.exit(0)
-
-# On a remote FTP server create remote folder structure
-# based on the local "cores" folder
-try:
-    host = ftputil.FTPHost(_ftp_addr,_ftp_login, _ftp_pw)
-    host.chdir(_ftp_dir) # change directory
-    print 'Successfully logged to', _ftp_addr
-    print 'Current files/folders:',host.listdir(host.curdir) # list current dirs
-except:
-    print 'ERROR. Problems in connecting with the remote FTP server. Exiting'
-    print '[' + time.asctime() + ']'
-    sys.exit(1)
-
-# create remote "cores" folder if already doesn't  exist
-
-if not 'cores' in host.listdir(host.curdir):
-    host.mkdir("cores")
-    print 'Creating remote folder: cores'
-host.chdir('cores') # change directory in host server
-print 'Moving inside folder "cores".'
-
-# copy opencores directory content.
-if os.path.isdir('cores'):
-    os.chdir('cores')
-else:
-    print 'No local "cores" folder found. Exiting.'
-    sys.exit(0)
-
-# create cetegory folders
-for item in os.listdir('./'):
-    if os.path.isdir(item):
-        if not item in host.listdir(host.curdir):
-            host.mkdir(item)
-            print 'Creating remote folder:', item
-        else:
-            print item+' '*(30-len(item))+'remote folder already exists. Nothing to do.'
-for item1 in os.listdir('./'):
-    if os.path.isdir(item1):
-        for item2 in os.listdir(item1):
-            if not item2 in host.listdir(item1):
-                host.mkdir(item1+'/'+item2)
-                print 'Creating remote folder:', item1+'/'+item2
-            else:
-                print item1+'/'+item2+' '*(70-len(item1+item2))+' remote folder already exists. Nothing to do'
-
-# upload all files inside ./cores folder
-ftp_cnt = 0
-host.synchronize_times()
-for item in os.listdir('./'):
-    if os.path.isfile(item):
-        try:
-            if host.upload_if_newer(item, item, 'b'): # wait al least one min. for differences
-                print 'Created remote file:', item
-                ftp_cnt = ftp_cnt + 1
-            else:
-                print 'File', item+' '*(30-len(item))+'already exists on the remote server. Nothing to do.'
-        except:
-            # the FTP connection seems to have some problem. Let's authenticate
-            # and try just once to save the same file.
-            print 'FTP file upload problem. Trying to re-autenticate in 10s.'
-            time.sleep(10)
-            try:
-                host = ftputil.FTPHost(_ftp_addr,_ftp_login, _ftp_pw)
-                host.chdir(_ftp_dir)
-                host.chdir('cores')
-                print 'Successfully re-logged to', _ftp_addr+', continuing copying files...'
-                if host.upload_if_newer(item, item, 'b'):
-                    print 'Created remote file:', item
-                    ftp_cnt = ftp_cnt + 1
-                else:
-                    print 'File', item+' '*(30-len(item))+'already exists on the remote server. Nothing to do.'
-
-            except:
-                print 'FTP file upload problem. Giving up on file:', item
-
-# copy files in "cores/category/project_name/*"
-for item1 in os.listdir(host.curdir): # item1 = categories folder
-    if os.path.isdir(item1):
-        for item2 in os.listdir(item1): # item2 = projects folder
-            for item3 in os.listdir(item1+'/'+item2): # item3 = files inside each project folder
-                if os.path.isfile(item1+'/'+item2+'/'+item3):
-                    try:
-                        if host.upload_if_newer(item1+'/'+item2+'/'+item3, item1+'/'+item2+'/'+item3, 'b'):
-                            print 'Created remote file:', item1+'/'+item2+'/'+item3
-                            ftp_cnt = ftp_cnt + 1
-                        else:
-                            print 'File',item2+'/'+item3+' '*(70-len(item2+item3)) + \
-                                  'already exists on the remote server. Nothing to do.'
-                    except:
-                        # the FTP connection seems to have some problem. Let's authenticate
-                        # and try just once to save the same file.
-                        print 'FTP file upload problem. Trying to re-autenticate in 10s.'
-                        time.sleep(10)
-                        try:
-                            host = ftputil.FTPHost(_ftp_addr,_ftp_login, _ftp_pw)
-                            host.chdir(_ftp_dir)
-                            host.chdir('cores')
-                            print 'Successfully re-logged to', _ftp_addr+', continuing copying files...'
-                            if host.upload_if_newer(item1+'/'+item2+'/'+item3, item1+'/'+item2+'/'+item3, 'b'):
-                                print 'Created remote file:', item1+'/'+item2+'/'+item3
-                                ftp_cnt = ftp_cnt + 1
-                            else:
-                                print 'File',item2+'/'+item3+' '*(70-len(item2+item3)) + \
-                                      'already exists on the remote server. Nothing to do.'
-                        except:
-                            print 'FTP file upload problem. Giving up on file:', item2+'/'+item3
-                            print '[' + time.asctime() + ']'
-
-print '[' + time.asctime() + ']','FTP upload done !'
-print 'Total number of uploaded files:', ftp_cnt
-host.close()
