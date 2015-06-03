@@ -954,9 +954,12 @@ if github_upload != True:
     for x in prjs:
         prj_cat = x[0]
         prj_name = x[1]
-        os.system('git checkout -b ' + prj_name) # create new branch
+        _txt="Project Name: "+prj_car+"\nProject Category: "+prj_cat
+        os.system("echo"+_txt+">>"+prj_cat+"/"+prj_name+"/INFO.txt")
+        os.system('git branch ' + prj_name) # create new branch
+        os.system('git checkout ' + prj_name) # point to new branch
         os.system('git add ./'+ prj_cat +'/'+ prj_name +'/*') # add project into branch
-        os.system("git commit -m 'added project content'") # add project into branch
+        os.system("git commit -m 'added content project: "+prj_name+"'") # add project into branch
 
     # upload one by one all branches to github
     for x in prjs:
