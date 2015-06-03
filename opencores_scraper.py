@@ -2,12 +2,13 @@
 #-*- coding:utf-8 -*-
 #
 '''
-This is a stand alone Python script which will download the WHOLE content of the
-project section of the opencores.org website. The content will be stored locally
-and also uploaded to github.
-An opencores.org account is needed. Also note that the whole opencores.org database
-could be around 3GB of data.
-The Python libraries "BeautifulSoup" and "mechanize" are needed. So install them
+This is a one-file python script that download locally the content of the WHOLE
+project section of the website opencores.org. 
+The downloaded content is then stored in a local folder.
+To use this script, an opencores.org account is needed. Also note that the whole
+opencores.org database is around 3GB of data.
+
+The Python libraries "BeautifulSoup" and "mechanize" are needed. You can install them
 with the command:
 
     easy_install beautifulsoup meachanize
@@ -17,7 +18,7 @@ with the command:
 #
 # 0) install python and its dependencies: easy_install beautifulsoup meachanize
 # 1) make an account in opencores.org
-# 2) complete the "basic setup" section below
+# 2) complete the "basic setup" section below with the login data
 # 3) run this script with the command:  ./opencores_scraper.py >> oc.log
 #
 #
