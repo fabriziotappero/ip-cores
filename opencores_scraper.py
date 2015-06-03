@@ -3,15 +3,15 @@
 #
 '''
 This is a one-file python script that download locally the content of the WHOLE
-project section of the website opencores.org. 
+project section of the website opencores.org.
 The downloaded content is then stored in a local folder.
 To use this script, an opencores.org account is needed. Also note that the whole
 opencores.org database is around 3GB of data.
 
-The Python libraries "BeautifulSoup" and "mechanize" are needed. You can install them
+The Python libraries "BeautifulSoup, mechanize" are needed. You can install them
 with the command:
 
-    easy_install beautifulsoup meachanize
+    pip install beautifulsoup meachanize
 '''
 #
 # HOW TO USE THIS SCRIPT
@@ -25,14 +25,15 @@ with the command:
 #_______________________________ basic setup ___________________________________
 #
 prj_to_download = 1E99          # set to 1E99 to get all projects
-download_prj_svn = False        # set to True to get project svn acchives (.zip)
-github_upload = False           # set to True to upload all cores to github
-user='xxxx'                     # opencores.org login
-pwd='xxxx'                      # opencores.org password
+download_prj_svn = False        # set to True to get opencores project svn acchives (.zip)
+github_upload = False           # set to True to upload all local folder to
+                                # your github repository
+oc_user='xxxx'                  # opencores.org login
+oc_pwd='xxxx'                   # opencores.org password
 
 #_______________________________ github upload _________________________________
 #
-_github_addr = 'xxxx'
+_github_addr = 'https://github.com/fabriziotappero/ip-cores.git'
 _github_login = 'xxxx'
 _github_pw = 'xxxx'
 #_______________________________________________________________________________
@@ -227,8 +228,8 @@ r = br.open("http://www.opencores.org/login")
 br.select_form(nr=0)
 
 #Aauthenticate and submit
-br['user'] = user
-br['pass'] = pwd
+br['user'] = oc_user
+br['pass'] = oc_pwd
 
 # TODO check that you have successfully authenticated
 res = br.submit()
@@ -918,7 +919,47 @@ fl.close()
 print 'Local jquery.quicksearch.js file created.'
 
 
-
-# upload the whole ./cores content to a github, one repo per project.
+# upload the whole local folder ./cores to a github repository
+# note that each local project will be uploaded in a separate branch
 if github_upload != True:
     sys.exit(0)
+
+    # quickly analyze local folder structure and extract all project names
+    if os.path.isdir('./cores')==False:
+        print 'Local ./cores folder does not exist.'
+        sys.exit(0)
+    prj_categ = os.listdir('./cores')
+    prjs = []
+    for x in prj_categ:
+        _path = './cores/'+ x
+        prjs.append([[x][ f for f in os.listdir(_path) if os.path.isfile(os.path.join(_path,f)) ]])
+
+    # create a fresh git repository
+    if len(prjs)=0:
+        print 'No projects available locally'
+        sys.exit(0)
+
+    os.chdir('./cores')
+    os.system('rm ./.git') # delete current git project
+    # download only master branch from the defaul github repository that
+    # you specified at the beginning of this file
+    os.system('git clone --depth=1 '+ _github_addr)
+
+    # create a new branch per project. Copy the project content in it.
+    # The branch name is derived from the local folder structure
+    for x in prj_categ:
+        _path = x
+        prjs.append([ f for f in os.listdir(_path) if os.path.isfile(os.path.join(_path,f)) ])
+
+    for x in prjs:
+        prj_cat = x[0]
+        prj_name = x[1]
+        os.system('git checkout -b ' + prj_name) # create new branch
+        os.system('git add ./'+ prj_cat +'/'+ prj_name +'/*') # add project into branch
+        os.system("git commit -m 'added project content'") # add project into branch
+
+    # upload one by one all branches to github
+    for x in prjs:
+        prj_name = x[1]
+        os.system('git push origin ' + prj_name)
+        # manually enter login and password
