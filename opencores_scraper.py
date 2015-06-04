@@ -8,10 +8,9 @@ The downloaded content is then stored in a local folder.
 To use this script, an opencores.org account is needed. Also note that the whole
 opencores.org database is around 3GB of data.
 
-The Python libraries "BeautifulSoup, mechanize" are needed. You can install them
-with the command:
+The Python libraries needed for this script can be installed with the command:
 
-    pip install beautifulsoup meachanize
+    sudo pip install beautifulsoup mechanize cssselect
 '''
 #
 # HOW TO USE THIS SCRIPT
@@ -33,7 +32,7 @@ oc_pwd='xxxx'                   # opencores.org password
 
 #_______________________________ github upload _________________________________
 #
-_github_addr = 'https://github.com/fabriziotappero/ip-cores.git'
+_github_addr = 'xxxx'
 _github_login = 'xxxx'
 _github_pw = 'xxxx'
 #_______________________________________________________________________________
@@ -41,7 +40,8 @@ _github_pw = 'xxxx'
 
 # import web scrape tools and other libs
 import re, sys, os, time
-import lxml.html, pickle, ftputil
+import lxml.html, pickle
+#import ftputil
 from BeautifulSoup import BeautifulSoup, Comment
 import mechanize, cookielib
 
@@ -648,7 +648,7 @@ for i,x in enumerate(opencores_mem.projects_download_url):
         fl.write(opencores_mem.projects_license[i][ii])               # license type
         fl.write("</td></tr>\n")
 fl.write("</tbody></table>\n")
-fl.write("<p id='foot'>"+time.strftime('Updated on %d %B %Y by freerangefactory.org')+"</p>\n")
+fl.write("<p id='foot'>"+time.strftime('Updated on %d %B %Y')+"</p>\n")
 fl.write(' </body>\n</html>\n')
 fl.close()
 
@@ -932,10 +932,10 @@ if github_upload != True:
     prjs = []
     for x in prj_categ:
         _path = './cores/'+ x
-        prjs.append([[x][ f for f in os.listdir(_path) if os.path.isfile(os.path.join(_path,f)) ]])
+        prjs.append([[x],[f for f in os.listdir(_path) if os.path.isfile(os.path.join(_path,f)) ]])
 
     # create a fresh git repository
-    if len(prjs)=0:
+    if len(prjs)==0:
         print 'No projects available locally'
         sys.exit(0)
 
