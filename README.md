@@ -1,4 +1,4 @@
-## VHDL/VERILOG IP CORES
+## VHDL/Verilog IP CORES
 
 This repository is a collection of VHDL and Verilog open-source IP cores taken from opencores.org.
 
