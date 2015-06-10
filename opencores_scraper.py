@@ -24,17 +24,16 @@ The Python libraries needed for this script can be installed with the command:
 #_______________________________ basic setup ___________________________________
 #
 prj_to_download = 1E99        # set to 1E99 to get all projects
-download_prj_svn = True       # set to True to get opencores project svn acchives (.zip)
-github_upload = True          # set to True to upload all local folder to
+download_prj_svn = False       # set to True to get opencores project svn acchives (.zip)
+github_upload = False          # set to True to upload all local folder to
                               # your github repository
-oc_user='xxxxxxxx'            # opencores.org login
-oc_pwd='xxxxxxxxxxxx'         # opencores.org password
+oc_user='vincent_'            # opencores.org login
+oc_pwd='oc36bx84nv19'         # opencores.org password
 
 #_______________________________ github upload _________________________________
 #
 _github_addr = 'https://github.com/fabriziotappero/ip-cores.git'
-_github_login = 'xxxx'
-_github_pw = 'xxxx'
+#
 #_______________________________________________________________________________
 
 
@@ -79,6 +78,11 @@ def get_projects(_url):
         x = x.lower()
         x = re.sub('(\\n *)','',x)
         x = re.sub(' +',' ',x)
+        x = re.sub("'","",x)
+        x = re.sub(',','',x)
+        x = re.sub(':','',x)
+        x = re.sub(';','',x)
+        #x = re.sub('.','-',x)
         x = re.sub(' - ','-',x)
         x = re.sub(' / ','/',x)
         x = x.lstrip().rstrip()
@@ -190,6 +194,113 @@ def get_size(_path = '.'):
     else:
         _out = str(round(total_size/1.0E6,2))+' MB' # return size in MB
     return _out
+
+
+
+
+
+
+
+
+
+
+
+
+
+# analyze the current ./cores folder structure and update its content to _github_addr
+def upload_to_github(_github_addr, cores_adrs):
+    # quickly analyze local folder structure and extract all project names
+
+    cores_adrs = "./cores_full"
+    if os.path.isdir(cores_adrs)==False:
+        print 'Local cores folder does not exist.'
+        sys.exit(0)
+
+    prj_categ = next(os.walk(cores_adrs))[1]
+    prjs = []
+    empty_prjs = 0
+    for x in prj_categ:
+        _path = cores_adrs +'/'+ x
+        for y in next(os.walk(_path))[1]:
+            # get only projects with a tar.gz file in it (not empty)
+            z = os.listdir(_path+"/"+y)
+            for elem in z:
+                if elem.endswith(".tar.gz"):
+                    prjs.append([[x],[y]])
+                    break
+
+        #no prjs stores both categories and projects
+        print "Number of local non-empty projects: ", len(prjs)
+        print "Number of local project categories: ", len(prj_categ)
+
+        if len(prjs)==0:
+            print 'No projects available locally'
+            sys.exit(0)
+
+        # unzip project files and move them in its prj folder
+        for x in prjs[:7]:
+            prj_cat = x[0][0]
+            prj_name = x[1][0]
+            z = os.listdir(cores_adrs +'/'+prj_cat+'/'+prj_name+'/')
+            for _fl in z:
+                if _fl.endswith('.tar.gz'):
+                    tfile = tarfile.open(cores_adrs +'/'+prj_cat+'/'+prj_name+'/'+_fl, 'r:gz')
+                    tfile.extractall(cores_adrs +'/'+prj_cat+'/'+prj_name+'/')
+                    print "unzipping project: ", prj_name
+                    os.system('mv '+cores_adrs +'/'+prj_cat+'/'+prj_name+'/'+_fl[:-7]+'/trunk/* '+cores_adrs +'/'+prj_cat+'/'+prj_name+'/')
+                    os.system('rm '+cores_adrs +'/'+prj_cat+'/'+prj_name+'/'+_fl)      # remove tar.gz file
+                    os.system('rm -Rf '+cores_adrs +'/'+prj_cat+'/'+prj_name+'/'+_fl[:-7]) # remove original unzipped folder
+
+        # proceed by cloning remote githup repo master branch
+        os.chdir(cores_adrs)
+        os.system('mkdir git_repo ')
+        os.chdir('./git_repo')
+        os.system('rm -rf ./* ./.*')
+        os.system('git clone --depth=1 '+_github_addr+' .')
+        os.system('touch master.txt')
+        os.system('git add .')
+        os.system('git commit -m "adding files"')
+
+        # create a new branch per project. Copy the project content in it.
+        for x in prjs[:3]:
+            prj_cat = x[0][0]
+            prj_name = x[1][0]
+            # clean local folder
+            os.system('rm -rf ./*')
+            os.system('git checkout --orphan '+prj_name)
+            print "Branch "+prj_name+" just created."
+            os.system('git rm -rf .')
+            os.system('touch README.md')
+            os.system('echo project:'+prj_name+', category:'+prj_cat+' > README.md')
+            # add here all project files
+            os.system('cp -rf ../'+prj_cat+'/'+prj_name+'/* ./')
+            os.system('git add .')
+            os.system('git commit -m "adding all project files"')
+            os.system('git checkout master') # point back to master branch
+
+        # upload (for now one by one) all branches to github
+        print "Uploading all on GITHUB"
+        os.system('git push origin master')
+        for x in prjs[:3]:
+            prj_name = x[1][0]
+            os.system("git push "+_github_addr+" '*:*'")
+
+        return 0
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ################################ MAIN ##########################################
 
@@ -918,76 +1029,4 @@ print 'Local jquery.quicksearch.js file created.'
 # note that each local project will be uploaded in a separate branch
 if github_upload != True:
     sys.exit(0)
-
-# quickly analyze local folder structure and extract all project names
-if os.path.isdir('./cores')==False:
-    print 'Local ./cores folder does not exist.'
-    sys.exit(0)
-
-prj_categ = next(os.walk('./cores'))[1]
-prjs = []
-empty_prjs = 0
-for x in prj_categ:
-    _path = './cores/'+ x
-    for y in next(os.walk(_path))[1]:
-        # get only projects with a tar.gz file in it (not empty)
-        z = os.listdir(_path+"/"+y)
-        for elem in z:
-            if elem.endswith(".tar.gz"):
-                prjs.append([[x],[y]])
-                break
-
-    #no prjs stores both categories and projects
-    print "Number of local non empty projects: ", len(prjs)
-
-    # create a fresh git repository
-    if len(prjs)==0:
-        print 'No projects available locally'
-        sys.exit(0)
-
-    # FROM THIS POINT ON THE CODE IS UNTESTED #
-
-    # unzip project files and move them in its prj folder
-    for x in prjs:
-        prj_cat = x[0][0]
-        prj_name = x[1][0]
-        z = os.listdir('./cores/'+prj_cat+'/'+prj_name+'/')
-        for _fl in z:
-            if _fl.endswith('.tar.gz'):
-                tfile = tarfile.open('./cores/'+prj_cat+'/'+prj_name+'/'+_fl, 'r:gz')
-                tfile.extractall('./cores/'+prj_cat+'/'+prj_name+'/')
-                os.system('mv ./cores/'+prj_cat+'/'+prj_name+'/'+_fl[:-7]+'/trunk/* ./cores/'+prj_cat+'/'+prj_name+'/')
-                os.system('rm ./cores/'+prj_cat+'/'+prj_name+'/'+_fl)      # remove tar.gz file
-                os.system('rm -Rf ./cores/'+prj_cat+'/'+prj_name+'/'+_fl[:-7]) # remove original unzipped folder
-
-    # proceed with git
-    os.chdir('./cores')
-    os.system('rm -Rf ./git_dir') # delete current git master project
-
-    # download (locally) only master branch from the defaul github repository that
-    # you specified at the beginning of this file
-    os.system('git clone --depth=1 ' + _github_addr + ' git_dir')
-    os.chdir('./git_dir')
-
-    # create a new branch per project. Copy the project content in it.
-    for x in prjs:
-        prj_cat = x[0][0]
-        prj_name = x[1][0]
-        os.system('git checkout --orphan ' + prj_name + ' >/dev/null') # create new indipended branch
-        os.system('git rm --cached -r .'+ ' >/dev/null') # empty the new branch
-
-        _txt="echo Project Category: "+prj_cat+", Project Name: "+prj_name+" > INFO.txt"
-        os.system(_txt)
-
-        os.system('cp -Rf ../'+ prj_cat +'/'+ prj_name +'/* ./') # add project into branch
-
-        os.system('git add .') # add project into branch
-        os.system("git commit -m 'added content for project'") # add project into branch
-
-
-    # upload one by one all branches to github
-    for x in prjs:
-        prj_name = x[1][0]
-        os.system('git checkout ' + prj_name)
-        os.system('git checkout ' + prj_name) git push origin --all
-        # manually enter login and password
+upload_to_github(_github_addr, "./cores")
