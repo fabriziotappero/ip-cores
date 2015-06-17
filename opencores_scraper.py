@@ -27,8 +27,8 @@ prj_to_download = 1E99        # set to 1E99 to get all projects
 download_prj_svn = False       # set to True to get opencores project svn acchives (.zip)
 github_upload = False          # set to True to upload all local folder to
                               # your github repository
-oc_user='vincent_'            # opencores.org login
-oc_pwd='oc36bx84nv19'         # opencores.org password
+oc_user='xxxxxxxx'            # opencores.org login
+oc_pwd='xxxxxxxxxxxx'         # opencores.org password
 
 #_______________________________ github upload _________________________________
 #
