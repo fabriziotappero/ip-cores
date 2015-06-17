@@ -6,4 +6,5 @@ The repository accounts for approximately 1102 projects spread in 16 categories.
 
 A list of all projects is available at this link.
 
-The Python script opencores_scraper.py is what was used to create this repository.
+The Python script opencores_scraper.py is what was used to download all opencores.org projects locally (in a local folder in your PC). the second script local2github.py is used to upload all the local folder to this github repository.
+
