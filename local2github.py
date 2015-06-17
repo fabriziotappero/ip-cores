@@ -3,22 +3,21 @@
 #
 '''
 This is a one-file python script that analyze the content of a local folder
-name ./cores and upload its content to git hub
+name ./cores and upload its content to github.
 
-This script is to be used with opencores_scraper.py for the purpose of getting
-all opencores.org code and upload it to a github account
+This script is to be used after opencores_scraper.py for the purpose of getting
+all opencores.org code upload to a github account.
 
 The Python libraries needed for this script can be installed with the command:
 
     sudo pip install tarfile
+
+ HOW TO USE THIS SCRIPT
+
+ 1) install python and its dependencies
+ 2) configure the git address _github_addr
+ 3) run this script with the command:  ./local2git.py
 '''
-#
-# HOW TO USE THIS SCRIPT
-#
-# 1) install python and its dependencies
-# 2) configure the git address _github_addr
-# 3) run this script with the command:  ./local2git.py
-#
 
 _github_addr = 'https://github.com/fabriziotappero/ip-cores.git'
 
@@ -79,7 +78,6 @@ for _ind,x in enumerate(prjs):
     prj_name = x[1][0]
     prj_branch = str(_ind) + "_" + prj_name
     _dir = os.path.join('cores', prj_cat, prj_name)
-    _ind +=1
     for _fl in os.listdir(_dir):
         if _fl.endswith('.tar.gz'):
             prj_real_name = _fl[: -7]
@@ -118,3 +116,53 @@ for _ind,x in enumerate(prjs):
                     os.remove(os.path.join(_dir, _fl))# remove tar.gz file
             if os.path.isdir(os.path.join(_dir, 'tmp')):
                 shutil.rmtree(os.path.join(_dir, 'tmp'))# remove original unzipped folder
+
+
+# proceed with git, created a local git folder
+_git_dir = os.path.join('cores', 'git_dir')
+if os.path.isdir(_git_dir):
+    shutil.rmtree(_git_dir)
+os.mkdir(_git_dir)
+
+# download (locally) only master branch from the defaul github repository that
+# you specified at the beginning of this file
+os.system('git clone --depth=1 ' + _github_addr + ' '+_git_dir)
+
+# create a new branch per project. Copy the project content in it.
+for _ind,x in enumerate(prjs):
+    prj_cat = x[0][0]
+    prj_name = x[1][0]
+    prj_branch = str(_ind) + "_" + prj_name
+    prj_dir = os.path.join('cores', prj_cat, prj_name)
+
+    if len(os.listdir(os.path.join(prj_dir,'src')))>0:
+        # this project is not empty
+        os.chdir(_git_dir)
+        os.system('git checkout --orphan ' + prj_branch + ' >/dev/null') # create new branch
+        os.system('git rm --cached -r .'+ ' >/dev/null') # empty the new branch
+        os.system('rm -Rf ./*')
+
+        copy_tree(os.path.join('..','..',prj_dir), '.') # add all project files into branch
+
+        os.system('git add .') # add project into branch
+        os.system("git commit -m 'added content for project'") # add project into branch
+        os.chdir(os.path.join('..','..'))
+
+if True:
+    # upload one by one all branches to github
+    for _ind,x in enumerate(prjs):
+        prj_name = x[1][0]
+        prj_branch = str(_ind) + "_" + prj_name
+        prj_dir = os.path.join('cores', prj_cat, prj_name)
+
+        if len(os.listdir(os.path.join(prj_dir,'src')))>0:
+            os.chdir(_git_dir)
+            os.system('git checkout ' + prj_branch)
+            os.system('git push origin '+ prj_branch)
+            # manually enter login and password
+            os.chdir(os.path.join('..','..'))
+            
+if False:
+    # push all branches at once
+    os.system('git push --all origin')
+    # manually enter login and password
