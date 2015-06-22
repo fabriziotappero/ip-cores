@@ -3,16 +3,13 @@
 
 This branch contains the following VHDL/VERILOG IP Code.
 
-   Project name: fixed_extensions
-   Project category: library
-   Project branch: library_fixed_extensions
+    Project name: fixed_extensions
+    Project category: library
+    Project branch: library_fixed_extensions
 
-This whole github repository contains approximately **4.5GB of free and open source
-IP cores**. To download only this project you can use the git command:
+To download only this (branch) project you can use the git command:
 
 **git clone -b library_fixed_extensions --single-branch https://github.com/fabriziotappero/ip-cores.git**
-
-
 
 ### License
 
