@@ -7,9 +7,15 @@ you are interested in.
 A cool searchable index is available from www.freerangefactory.org.
 
 These are the available branches:
+
 library_random_number_generator_library
+
 library_funbase_ip_library
+
 library_mitrion_virtual_processor_starter_kit
+
 library_real-time_clock
+
 library_robot_control_library
+
 library_fixed_extensions
