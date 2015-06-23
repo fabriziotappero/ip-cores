@@ -1,0 +1,1 @@
+The gpu_hw source files folder of this directory are practically the same as used for the synthesis, the only difference is that it has added the standard header OpenCores HDL modeling guidelines at the beginning of each file and additional comments in the code.
