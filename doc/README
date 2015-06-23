@@ -1,0 +1,121 @@
+			CFI Controller IP Core
+			======================
+
+
+This core implements a very simple controller that will provide an interface to
+16-bit data-bus flash memories using the common flash interface (CFI).
+
+It uses asynchronous communication only, and thus should be configured with the
+cycle counts for write (usually 50ns, so usually roundup(50ns / Tsys_clk) and
+read (usually 85-115 ns - see your part's spec for exact details.) These cycle
+counts are set via paramters to the core, and each read or write access 
+performed by the core will ensure the signals are held for this long.
+
+== Interface Modes ==
+
+Two interface modes are avilable. 
+
+=== Simple Mode ===
+
+First is a very simple interface with the flash bus - essentially each classic 
+Wishbone access is mapped onto the flash bus (address is shifted right by 1 
+bit.) The only "advanced" feature of this mode, is that 32-bit reads will work,
+that is the controller will perform two reads if a full-word read is requested,
+which means this controller can be used for XIP (execute-in-place) by a 
+processor.
+
+The functionality is demonstrated in the testbench cfi_ctrl_wb_bench.v
+
+This mode appears to be compliant with the basic CFI software drivers available
+under u-boot/Linux. It is the recommended mode if the controller is to be used
+in a system running software such as this. The complexity is handled by the 
+driver software, meaning the controller implementation can be simple.
+
+=== CFI Engine Mode ===
+
+The second is the "CFI engine" mode, which aims to simplify the interface to the
+flash, allowing single-access block unlock, erase and 16/32-bit writes.
+
+This engine core can be used standalone (the source file 
+rtl/verilog/cfi_ctrl_engine.v) to provide access to a flash part for another FSM
+or may be wrapped in a different bus interface wrapper.
+
+The testbench for the standalone engine core is cfi_ctrl_engine_bench.v
+
+The engine is provided with a Wishbone wrapper, and the core's capabilities are 
+mapped to the Wishbone bus as outlined below.
+
+The testbench for the Wishbone-wrapped engine is cfi_ctrl_engine_wb_bench.v
+
+==== Commands ====
+
+Commands are essentially encoded on the address bus for the core. The following
+is an outline of how this interface works:
+
+Basic functionality:
+ Bits [27:26] decode the operation.
+ 2'b00 : read/write to the flash memory
+ 2'b01 : unlock block
+ 2'b10 : erase block
+ 2'b11 : block registers, other flash control features. See below.
+
+Therefore:
+ Addresses under 0x000_0000 cause direct access to the flash
+ Addresses under 0x400_0000 cause the block (addressed in [24:0]) to be unlocked
+ Addresses under 0x800_0000 cause the block (addressed in [24:0]) to be erased
+  
+==== Registers ====
+ 0xc00_0000 : block status/control register
+ bits:
+ [0]: r/o : CFI controller busy
+ [1]: w/o : clear flash status register
+ [2]: w/o : reset flash device and controller
+ 
+ 0xc00_0004 : flash device status register
+ bits
+ [7:0] : r/o : flash device status register
+
+ 0xe00_0000 : read device identifier information
+ User is able to access the device identifier information such as:
+ offset 0x0 : manufacturer code
+ offset 0x2 : device id
+ offset bba + 0x4 : block (add increments of 128KB block size)
+ offset 0xa : read config register
+ See CFI docs for further details (shift offset left by 1)
+
+0xe01_0000 : CFI query
+ User is able to access the CFI query information
+ The hex offsets in the CFI spec should be shifted left by one before
+ applying to the Wishbone bus.
+
+
+== Timing ==
+
+Set the parameters flash_write_cycles and flash_read_cycles at the top-level to
+ensure that CFI bus timing is met (usually 50ns for write, 85-115ns for read.) 
+The single clock going to the core is the clock used to count these accesses.
+
+flash_write_cycles is used to count the wlwh (write-low-to-write-high) parameter
+and flash_read_cycles is used to count elqv, or enable-low-data-valid.
+
+== Simulations ==
+
+The core's 3 configurations come with testbenches under bench/verilog.
+
+To run these simulations, install Icarus Verilog (sudo apt-get install verilog)
+, http://iverilog.icarus.com/.
+
+from sim/run run "make all" to run all the tests - a VCD for each will be 
+automatically generated in sim/out. Or run individual tests with the following:
+
+Simple mode controller:
+    make cfi_ctrl_wb_bench
+Engine mode controller, generic bus interface:
+    make cfi_engine_bench
+Engine mode controller, Wishbone bus interface:
+    make cfi_ctrl_engine_wb_bench
+
+The model used is in bench/verilog/x28fxxxp30.v
+
+= Author =
+Julius Baxter, julius@opencores.org
