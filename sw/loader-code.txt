@@ -1,0 +1,51 @@
+loader as read in papertapeImages/20060517/musicPlayingProgram.bin
+
+origin 7751
+7751   73_0002	rpb		read paper binary
+7752   32_7760	dio 7760	deposit IO in 7760
+7753   10_7760	xct 7760	execute recently read instruction
+7754   32_7776	dio 7776
+7755   73_0002	rpb
+7756   32_7777	dio 7777
+7757   73_0002	rpb
+7760   60_1411	jmp 1411	jump to 1411 (overwritten by 7752!)	-- holds DIO/write pointer
+7761   21_7760	lac [7760]	load ac from wherever 7760 points	\
+7762   40_7776	add 7776	add value from 7776 to AC  		 } *7776 += *7760
+7763   24_7776	dac 7776	save AC there  	       			/
+7764   44_7760	idx 7760	AC <- ++*7760
+7765   52_7777	sas 7777	skip if AC=*7777
+7766   60_7757	jmp 7757	jump back to 7757 if *7760!=*7777
+7767   20_7776	lac 7776	AC <- *7776
+7770   40_7777	add 7777	AC += *7777
+7771   73_0002	rpb
+7772   32_7776	dio 7776
+7773   52_7776	sas 7776	skip if AC=*7776
+7774   76_0400	hlt 		halt if checksums didn't match?
+7775   60_7751	jmp 7751	restart loader (executing the next tape instruction)
+jumps to entry point 7751 after loading that code
+
+from this we gather:
+first word will be DIO origin, where origin is the first address the program is loaded to
+this instruction will be stored at write pointer (7760), 7776 (checksum in progress) and origin
+second word is deposited in 7777; this is DIO to the end address (first address NOT written)
+third word etc is written at origin and added to checksum 7776 until write pointer=end address
+we've now reached 7767
+AC is loaded with end address plus checksum thus far, another word is read and deposited as checksum
+if calculated checksum in AC does not match this newly read checksum at end, halt
+otherwise, start loading all over again
+
+this allows a block format, where each block is:
+DIO start
+DIO end
+end-start data words
+checksum
+
+Finally, as the first word always executes, a jump instruction can start the program.
+So, in papertapeImages/20060517/musicPlayingProgram.bin the program blocks are:
+0003-0100 checksum 716574
+0100-0200 checksum 623702	(assuming from here on 000000s are block boundaries)
+0200-0300
+0300-0400
+0400-0500
+0500-0546
+jump to 0404, the entry point of the program
