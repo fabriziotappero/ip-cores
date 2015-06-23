@@ -1,0 +1,140 @@
+
+<defines>
+`define CMD_AAA     #AUTOGEN_NEXT_CMD
+`define CMD_AAS     #AUTOGEN_NEXT_CMD
+`define CMD_DAA     #AUTOGEN_NEXT_CMD
+`define CMD_DAS     #AUTOGEN_NEXT_CMD
+</defines>
+
+<decode>
+dec_ready_one && decoder[7:0] == 8'h37
+`CMD_AAA
+SET(dec_is_8bit);
+SET(consume_one);
+</decode>
+
+<decode>
+dec_ready_one && decoder[7:0] == 8'h3F
+`CMD_AAS
+SET(dec_is_8bit);
+SET(consume_one);
+</decode>
+
+<decode>
+dec_ready_one && decoder[7:0] == 8'h27
+`CMD_DAA
+SET(dec_is_8bit);
+SET(consume_one);
+</decode>
+
+<decode>
+dec_ready_one && decoder[7:0] == 8'h2F
+`CMD_DAS
+SET(dec_is_8bit);
+SET(consume_one);
+</decode>
+
+<read>
+IF(rd_cmd == `CMD_AAA || rd_cmd == `CMD_AAS || rd_cmd == `CMD_DAA || rd_cmd == `CMD_DAS);
+    
+    SET(rd_dst_is_eax);
+        
+    SET(rd_req_eflags);
+    SET(rd_req_eax);
+
+    IF(rd_mutex_busy_eax); SET(rd_waiting); ENDIF();
+ENDIF();
+</read>
+
+<execute_local>
+wire e_bcd_condition_cf;
+
+wire exe_bcd_condition_af;
+wire exe_bcd_condition_cf;
+
+wire [15:0] e_aaa_sum_ax;
+wire [15:0] e_aaa_result;
+
+wire [15:0] e_aas_sub_ax;
+wire [15:0] e_aas_result;
+
+wire [7:0]  e_daa_sum_low;
+wire [7:0]  e_daa_step1;
+wire [7:0]  e_daa_sum_high;
+wire [7:0]  e_daa_result;
+
+wire [7:0]  e_das_sub_low;
+wire [7:0]  e_das_step1;
+wire [7:0]  e_das_sub_high;
+wire [7:0]  e_das_result;
+
+//---------
+
+assign e_bcd_condition_cf = (dst[7:0] > 8'h99 || cflag);
+
+assign exe_bcd_condition_af = dst[3:0] > 4'd9 || aflag;
+assign exe_bcd_condition_cf = e_bcd_condition_cf || (exe_bcd_condition_af && (cflag || (exe_cmd == `CMD_DAA)? dst[7:0] > 8'hF9 : dst[7:0] < 8'h06));
+
+// AAA
+assign e_aaa_sum_ax = dst[15:0] + 16'h0106;
+assign e_aaa_result = (exe_bcd_condition_af)? { e_aaa_sum_ax[15:8], 4'b0, e_aaa_sum_ax[3:0] } : { dst[15:8], 4'd0, dst[3:0] };
+
+// AAS
+assign e_aas_sub_ax = dst[15:0] - 16'h0106;
+assign e_aas_result = (exe_bcd_condition_af)? { e_aas_sub_ax[15:8], 4'b0, e_aas_sub_ax[3:0] } : { dst[15:8], 4'b0, dst[3:0] };
+
+// DAA
+assign e_daa_sum_low  = dst[7:0] + 8'h06;
+assign e_daa_step1    = (exe_bcd_condition_af)? e_daa_sum_low : dst[7:0];
+assign e_daa_sum_high = e_daa_step1 + 8'h60;
+assign e_daa_result   = (e_bcd_condition_cf)? e_daa_sum_high : e_daa_step1;
+
+// DAS
+assign e_das_sub_low  = dst[7:0] - 8'h06;
+assign e_das_step1    = (exe_bcd_condition_af)? e_das_sub_low : dst[7:0];
+assign e_das_sub_high = e_das_step1 - 8'h60;
+assign e_das_result   = (e_bcd_condition_cf)? e_das_sub_high : e_das_step1;
+</execute_local>
+
+<execute>
+IF(exe_cmd == `CMD_AAA || exe_cmd == `CMD_AAS || exe_cmd == `CMD_DAA || exe_cmd == `CMD_DAS);
+        
+    SET(exe_result, (exe_cmd == `CMD_AAA)?  { 16'd0, e_aaa_result } :
+                    (exe_cmd == `CMD_AAS)?  { 16'd0, e_aas_result } :
+                    (exe_cmd == `CMD_DAA)?  { 16'd0, dst[15:8], e_daa_result } :
+                                            { 16'd0, dst[15:8], e_das_result });
+    
+    SET(exe_result_signals, { 3'b0, exe_bcd_condition_af, exe_bcd_condition_cf });
+    
+    IF(exe_mutex_current[`MUTEX_EFLAGS_BIT]); SET(exe_waiting); ENDIF();
+ENDIF();
+</execute>
+
+<write>
+IF(wr_cmd == `CMD_AAA || wr_cmd == `CMD_AAS);
+    SAVE(eax, { eax[31:16], result[15:0] });
+    
+    SAVE(zflag, zflag_result);
+    SAVE(sflag, sflag_result);
+    SAVE(pflag, pflag_result);
+
+    SAVE(aflag, result_signals[1]);
+    SAVE(cflag, result_signals[1]);
+    SAVE(oflag, oflag_arith);
+ENDIF();
+</write>
+
+<write>
+IF(wr_cmd == `CMD_DAA || wr_cmd == `CMD_DAS);
+    SAVE(eax, { eax[31:16], result[15:0] });
+    
+    SAVE(zflag, zflag_result);
+    SAVE(sflag, sflag_result);
+    SAVE(pflag, pflag_result);
+
+    SAVE(aflag, result_signals[1]);
+    SAVE(cflag, result_signals[0]);
+    SAVE(oflag, oflag_arith);
+ENDIF();
+</write>
+

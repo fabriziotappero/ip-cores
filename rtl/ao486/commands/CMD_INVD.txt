@@ -1,0 +1,81 @@
+
+<defines>
+`define CMD_INVD        #AUTOGEN_NEXT_CMD
+
+// check CPL
+`define CMDEX_INVD_STEP_0     4'd0
+// do invalidate
+`define CMDEX_INVD_STEP_1     4'd1
+// idle
+`define CMDEX_INVD_STEP_2     4'd2
+</defines>
+
+<decode>
+dec_ready_2byte_one && decoder[7:0] == 8'h08
+`CMD_INVD
+SET(dec_cmdex, `CMDEX_INVD_STEP_0);
+SET(consume_one);
+SET(dec_is_complex);
+</decode>
+
+<microcode>
+`CMDEX_INVD_STEP_0
+`CMDEX_INVD_STEP_1
+LOOP(`CMDEX_INVD_STEP_2);
+</microcode>
+
+<execute>
+IF(exe_cmd == `CMD_INVD && exe_cmdex == `CMDEX_INVD_STEP_0);
+    IF(cpl > 2'd0);
+        SET(exe_waiting);
+        SET(exe_trigger_gp_fault); //exception GP(0)
+    ENDIF(); 
+ENDIF();
+</execute>
+
+<execute_local>
+reg e_invd_code_done;
+reg e_invd_data_done;
+
+always @(posedge clk or negedge rst_n) begin
+    if(rst_n == 1'b0)       e_invd_code_done <= `FALSE;
+    else if(exe_reset)      e_invd_code_done <= `FALSE;
+    else if(exe_ready)      e_invd_code_done <= `FALSE;
+    else if(invdcode_done)  e_invd_code_done <= `TRUE;
+end
+
+always @(posedge clk or negedge rst_n) begin
+    if(rst_n == 1'b0)       e_invd_data_done <= `FALSE;
+    else if(exe_reset)      e_invd_data_done <= `FALSE;
+    else if(exe_ready)      e_invd_data_done <= `FALSE;
+    else if(invddata_done)  e_invd_data_done <= `TRUE;
+end
+</execute_local>
+
+<execute>
+IF(exe_cmd == `CMD_INVD && exe_cmdex == `CMDEX_INVD_STEP_1);
+    
+    SET(invdcode_do, ~(e_invd_code_done));
+    SET(invddata_do, ~(e_invd_data_done));
+
+    IF(~(e_invd_code_done && e_invd_data_done));
+        SET(exe_waiting);
+    ENDIF(); 
+ENDIF();
+</execute>
+
+<write>
+IF(wr_cmd == `CMD_INVD && wr_cmdex == `CMDEX_INVD_STEP_0);
+    SET(wr_not_finished);
+ENDIF();
+</write>
+
+<write>
+IF(wr_cmd == `CMD_INVD && wr_cmdex == `CMDEX_INVD_STEP_1);
+    
+    // reset part of pipeline
+    SET(wr_req_reset_micro);
+    SET(wr_req_reset_rd);
+    SET(wr_req_reset_exe);
+ENDIF();
+</write>

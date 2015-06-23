@@ -1,0 +1,118 @@
+
+<defines>
+`define CMD_debug_reg       #AUTOGEN_NEXT_CMD
+
+`define CMDEX_debug_reg_MOV_store_STEP_0    4'd0
+
+`define CMDEX_debug_reg_MOV_load_STEP_0     4'd1
+`define CMDEX_debug_reg_MOV_load_STEP_1     4'd2
+</defines>
+
+<decode>
+dec_ready_2byte_modregrm && { decoder[7:2], 1'b0, decoder[0] } == 8'h21
+`CMD_debug_reg
+IF(decoder[1]); SET(dec_cmdex, `CMDEX_debug_reg_MOV_load_STEP_0); ELSE(); SET(dec_cmdex, `CMDEX_debug_reg_MOV_store_STEP_0); ENDIF();
+SET(consume_modregrm_one);
+IF(decoder[1]); SET(dec_is_complex); ENDIF();
+</decode>
+
+<microcode>
+`CMDEX_debug_reg_MOV_load_STEP_0
+LOOP(`CMDEX_debug_reg_MOV_load_STEP_1);
+</microcode>
+
+<read>
+IF(rd_cmd == `CMD_debug_reg && rd_cmdex == `CMDEX_debug_reg_MOV_store_STEP_0);
+        
+    SET(rd_dst_is_rm);
+
+    SET(rd_req_rm);
+        
+    // wait for prev step; not to set dr7.GD before
+    IF(rd_mutex_busy_active); SET(rd_waiting); ENDIF();
+ENDIF();
+</read>
+
+<read>
+IF(rd_cmd == `CMD_debug_reg && rd_cmdex == `CMDEX_debug_reg_MOV_load_STEP_0);
+        
+    SET(rd_src_is_rm);
+    
+    // wait for prev step; not to set dr7.GD before // no req required
+    IF(rd_mutex_busy_active); SET(rd_waiting); ENDIF();
+ENDIF();
+</read>
+
+<execute>
+IF(exe_cmd == `CMD_debug_reg && (exe_cmdex == `CMDEX_debug_reg_MOV_store_STEP_0 || exe_cmdex == `CMDEX_debug_reg_MOV_load_STEP_0));
+    
+    IF(exe_cmdex == `CMDEX_debug_reg_MOV_load_STEP_0);
+        SET(exe_result2, src);
+    ENDIF();
+
+    IF(exe_cmdex == `CMDEX_debug_reg_MOV_store_STEP_0 && exe_modregrm_reg == 3'd0); SET(exe_result, dr0); ENDIF();
+    IF(exe_cmdex == `CMDEX_debug_reg_MOV_store_STEP_0 && exe_modregrm_reg == 3'd1); SET(exe_result, dr1); ENDIF();
+    IF(exe_cmdex == `CMDEX_debug_reg_MOV_store_STEP_0 && exe_modregrm_reg == 3'd2); SET(exe_result, dr2); ENDIF();
+    IF(exe_cmdex == `CMDEX_debug_reg_MOV_store_STEP_0 && exe_modregrm_reg == 3'd3); SET(exe_result, dr3); ENDIF();
+    
+    IF(exe_cmdex == `CMDEX_debug_reg_MOV_store_STEP_0 && (exe_modregrm_reg == 3'd4 || exe_modregrm_reg == 3'd6));
+        SET(exe_result, { 16'hFFFF, dr6_bt, dr6_bs, dr6_bd, dr6_b12, 8'hFF, dr6_breakpoints });
+    ENDIF();
+
+    IF(exe_cmdex == `CMDEX_debug_reg_MOV_store_STEP_0 && (exe_modregrm_reg == 3'd5 || exe_modregrm_reg == 3'd7));
+        SET(exe_result, dr7);
+    ENDIF();
+
+    IF(dr7[`DR7_BIT_GD]);
+        SET(dr6_bd_set, `TRUE);
+
+        SET(exe_waiting);
+        SET(exe_trigger_db_fault); //exception DB(0)
+    ELSE();
+        IF(cpl > 2'd0);
+            SET(exe_waiting);
+            SET(exe_trigger_gp_fault); //exception GP(0)
+        ENDIF(); 
+    ENDIF();
+ENDIF();
+</execute>
+
+<write>
+IF(wr_cmd == `CMD_debug_reg && wr_cmdex == `CMDEX_debug_reg_MOV_store_STEP_0);
+    SET(wr_regrm_dword);
+    SET(write_regrm);
+ENDIF();  
+</write>
+
+<write>
+IF(wr_cmd == `CMD_debug_reg && wr_cmdex == `CMDEX_debug_reg_MOV_load_STEP_0);
+    SET(wr_not_finished);
+
+    IF(wr_decoder[13:11] == 3'd0); SAVE(dr0, result2); ENDIF();
+    IF(wr_decoder[13:11] == 3'd1); SAVE(dr1, result2); ENDIF();
+    IF(wr_decoder[13:11] == 3'd2); SAVE(dr2, result2); ENDIF();
+    IF(wr_decoder[13:11] == 3'd3); SAVE(dr3, result2); ENDIF();
+    
+    IF((wr_decoder[13:11] == 3'd4 || wr_decoder[13:11] == 3'd6));
+        SAVE(dr6_breakpoints, result2[3:0]);
+        
+        SAVE(dr6_b12,    result2[12]);
+        SAVE(dr6_bd,     result2[13]);
+        SAVE(dr6_bs,     result2[14]);
+        SAVE(dr6_bt,     result2[15]);
+    ENDIF();
+
+    IF((wr_decoder[13:11] == 3'd5 || wr_decoder[13:11] == 3'd7));
+        SAVE(dr7,    result2 | 32'h00000400);
+    ENDIF();
+ENDIF();
+</write>
+
+<write>
+IF(wr_cmd == `CMD_debug_reg && wr_cmdex == `CMDEX_debug_reg_MOV_load_STEP_1);
+    // reset pipeline
+    SET(wr_req_reset_micro);
+    SET(wr_req_reset_rd);
+    SET(wr_req_reset_exe);
+ENDIF();
+</write>

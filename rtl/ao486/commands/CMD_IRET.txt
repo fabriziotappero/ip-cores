@@ -1,0 +1,709 @@
+
+<defines>
+`define CMD_IRET        #AUTOGEN_NEXT_CMD
+// mc_param_1       --> cs
+// mc_param_2       --> eip
+// mc_param_3       --> eflags
+
+`define CMDEX_IRET_real_v86_STEP_0      4'd0
+`define CMDEX_IRET_real_v86_STEP_1      4'd1
+`define CMDEX_IRET_real_v86_STEP_2      4'd2
+`define CMDEX_IRET_real_v86_STEP_3      4'd3
+
+`define CMDEX_IRET_protected_STEP_0     4'd4
+`define CMDEX_IRET_task_switch_STEP_0   4'd5
+`define CMDEX_IRET_task_switch_STEP_1   4'd6
+
+`define CMDEX_IRET_protected_STEP_1     4'd7
+`define CMDEX_IRET_protected_STEP_2     4'd8
+`define CMDEX_IRET_protected_STEP_3     4'd9
+
+`define CMDEX_IRET_protected_to_v86_STEP_0  4'd10
+`define CMDEX_IRET_protected_to_v86_STEP_1  4'd11
+`define CMDEX_IRET_protected_to_v86_STEP_2  4'd12
+`define CMDEX_IRET_protected_to_v86_STEP_3  4'd13
+`define CMDEX_IRET_protected_to_v86_STEP_4  4'd14
+`define CMDEX_IRET_protected_to_v86_STEP_5  4'd15
+
+//------------------------------------------------------------------------------
+
+`define CMD_IRET_2      #AUTOGEN_NEXT_CMD
+
+`define CMDEX_IRET_2_idle                   4'd0
+`define CMDEX_IRET_2_protected_same_STEP_0  4'd1
+`define CMDEX_IRET_2_protected_same_STEP_1  4'd2
+
+`define CMDEX_IRET_2_protected_outer_STEP_0 4'd3
+// glob_param_1           --> ss
+// glob_param_2           --> eip
+// glob_descriptor        --> ss desc
+// glob_param_3           --> saved cs
+// glob_descriptor_2      --> saved cs desc
+`define CMDEX_IRET_2_protected_outer_STEP_1 4'd4
+`define CMDEX_IRET_2_protected_outer_STEP_2 4'd5
+`define CMDEX_IRET_2_protected_outer_STEP_3 4'd6
+// glob_param_2           --> eip
+// glob_param_4           --> esp
+// glob_param_5           --> eflags
+
+// after step 3/exe:
+// glob_param_1           --> cs
+// glob_descriptor        --> cs desc
+// glob_param_3           --> ss
+// glob_descriptor_2      --> ss desc
+// glob_param_2           --> eip
+// glob_param_4           --> esp
+// glob_param_5           --> eflags
+
+`define CMDEX_IRET_2_protected_outer_STEP_4 4'd7
+`define CMDEX_IRET_2_protected_outer_STEP_5 4'd8
+// after step 5/exe:
+// glob_param_1           --> ss
+// glob_descriptor        --> ss desc
+// glob_param_3           --> cs
+// glob_descriptor_2      --> cs desc
+// glob_param_2           --> eip
+// glob_param_4           --> esp
+// glob_param_5           --> eflags
+
+`define CMDEX_IRET_2_protected_outer_STEP_6     4'd9
+
+`define CMDEX_IRET_2_protected_to_v86_STEP_6    4'd10
+</defines>
+
+<decode>
+dec_ready_one && decoder[7:0] == 8'hCF
+`CMD_IRET
+IF(~(protected_mode)); SET(dec_cmdex, `CMDEX_IRET_real_v86_STEP_0); ELSE(); SET(dec_cmdex, `CMDEX_IRET_protected_STEP_0); ENDIF();
+SET(consume_one);
+SET(dec_is_complex);
+</decode>
+
+<microcode>
+IF(`CMDEX_IRET_real_v86_STEP_0);
+    `CMDEX_IRET_real_v86_STEP_1
+    `CMDEX_IRET_real_v86_STEP_2
+    CALL(`CMDEX_load_seg_STEP_1);
+    LOOP(`CMDEX_IRET_real_v86_STEP_3);
+ENDIF();
+
+IF(`CMDEX_IRET_protected_STEP_0 && ntflag);
+    `CMDEX_IRET_task_switch_STEP_0
+    `CMDEX_IRET_task_switch_STEP_1
+    JMP(`CMDEX_task_switch_STEP_1);
+ENDIF();
+
+IF(`CMDEX_IRET_protected_STEP_0 && ~(ntflag));
+    `CMDEX_IRET_protected_STEP_1
+    `CMDEX_IRET_protected_STEP_2
+    `CMDEX_IRET_protected_STEP_3
+    
+    //iret to v86
+    IF(`CMDEX_IRET_protected_STEP_3 && mc_operand_32bit && glob_param_3[`EFLAGS_BIT_VM] && cpl == 2'd0);
+        `CMDEX_IRET_protected_to_v86_STEP_0
+        
+        IF(mc_cmd == `CMD_IRET && mc_cmdex_last >= `CMDEX_IRET_protected_to_v86_STEP_0 && mc_cmdex_last < `CMDEX_IRET_protected_to_v86_STEP_5);
+            DIRECT(`CMD_IRET, mc_cmdex_last + 4'd1);
+        ENDIF();
+        
+        IF(`CMDEX_IRET_protected_to_v86_STEP_5);
+            `CMDEX_IRET_2_protected_to_v86_STEP_6
+            LOOP(`CMDEX_IRET_2_idle);
+        ENDIF();
+    ENDIF();
+    
+    //iret same or outer
+    IF(`CMDEX_IRET_protected_STEP_3 && ~(mc_operand_32bit && glob_param_3[`EFLAGS_BIT_VM] && cpl == 2'd0));
+        CALL(`CMDEX_load_seg_STEP_1);
+        DIRECT(`CMD_IRET_2, (glob_param_1[`SELECTOR_BITS_RPL] == cpl)? `CMDEX_IRET_2_protected_same_STEP_0 : `CMDEX_IRET_2_protected_outer_STEP_0);
+    ENDIF();
+    
+    IF(`CMDEX_IRET_2_protected_same_STEP_0);
+        `CMDEX_IRET_2_protected_same_STEP_1
+        LOOP(`CMDEX_IRET_2_idle);
+    ENDIF();
+        
+    IF(`CMDEX_IRET_2_protected_outer_STEP_0);
+        CALL(`CMDEX_load_seg_STEP_1);
+        `CMDEX_IRET_2_protected_outer_STEP_1
+        
+        IF(mc_cmd == `CMD_IRET_2 && mc_cmdex_last >= `CMDEX_IRET_2_protected_outer_STEP_1 && mc_cmdex_last < `CMDEX_IRET_2_protected_outer_STEP_6);
+            DIRECT(`CMD_IRET_2, mc_cmdex_last + 4'd1);
+        ENDIF();
+        
+        IF(`CMDEX_IRET_2_protected_outer_STEP_6);
+            LOOP(`CMDEX_IRET_2_idle);
+        ENDIF();
+    ENDIF();
+ENDIF();
+</microcode>
+
+<read>
+IF(rd_cmd == `CMD_IRET && rd_cmdex <= `CMDEX_IRET_real_v86_STEP_2);
+            
+    SET(address_stack_pop);
+    IF(rd_cmdex >`CMDEX_IRET_real_v86_STEP_0); SET(address_stack_pop_speedup); ENDIF();
+
+    IF(rd_cmdex == `CMDEX_IRET_real_v86_STEP_0); 
+        SET(rd_glob_param_2_set);
+        SET(rd_glob_param_2_value, (rd_operand_16bit)? { 16'd0, read_4[15:0] } : read_4); // read eip
+    ENDIF();
+    
+    IF(rd_cmdex == `CMDEX_IRET_real_v86_STEP_1);
+        SET(rd_glob_param_1_set);
+        SET(rd_glob_param_1_value, { 13'd0, `SEGMENT_CS, read_4[15:0] }); // read cs
+    ENDIF();
+    
+    IF(rd_cmdex == `CMDEX_IRET_real_v86_STEP_2);
+        SET(rd_glob_param_3_set);
+        SET(rd_glob_param_3_value, (rd_operand_16bit)? { 16'd0, read_4[15:0] } : read_4); // read eflags
+    ENDIF();
+    
+    IF(rd_mutex_busy_memory || (rd_mutex_busy_eflags && v8086_mode)); SET(rd_waiting); // waiting for esp in 'address_waiting'
+    ELSE();
+        IF(~(v8086_mode) || iopl == 2'd3);
+    
+            SET(read_virtual);
+
+            IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+        ENDIF();
+    ENDIF();
+ENDIF();
+</read>
+
+<read>
+IF(rd_cmd == `CMD_IRET && rd_cmdex == `CMDEX_IRET_protected_STEP_0);
+            
+    IF(rd_mutex_busy_memory || rd_mutex_busy_eflags); SET(rd_waiting); ENDIF(); // waiting for esp in 'address_waiting'
+ENDIF();
+</read>
+
+<read>
+IF(rd_cmd == `CMD_IRET && rd_cmdex == `CMDEX_IRET_task_switch_STEP_0);
+    
+    SET(rd_system_linear, tr_base);
+
+    SET(read_system_word);
+    
+    SET(rd_glob_param_1_set);
+    SET(rd_glob_param_1_value, { 14'd0, `TASK_SWITCH_FROM_IRET, read_4[15:0] });
+    
+    IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+ENDIF();
+</read>
+
+<read>
+IF(rd_cmd == `CMD_IRET && rd_cmdex == `CMDEX_IRET_task_switch_STEP_1);
+         
+    SET(rd_glob_param_3_set);
+    SET(rd_glob_param_3_value, { 10'd0, rd_consumed, 18'd0 });
+
+    IF(rd_mutex_busy_active); SET(rd_waiting); // wait for previous step -- exception possible
+    ELSE();
+        
+        IF(~(rd_descriptor_not_in_limits));
+    
+            SET(rd_glob_descriptor_set);
+            SET(rd_glob_descriptor_value, read_8);
+            
+            SET(rd_glob_param_2_set);
+            SET(rd_glob_param_2_value, 32'd0);
+            
+            SET(read_system_descriptor);
+
+            IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+            
+        ELSE();
+            SET(rd_glob_param_2_set);
+            SET(rd_glob_param_2_value, { 30'd0, rd_descriptor_not_in_limits, glob_param_1[15:2] == 14'd0 });
+        ENDIF();
+    ENDIF();
+ENDIF();
+</read>
+
+<read>
+IF(rd_cmd == `CMD_IRET && rd_cmdex >= `CMDEX_IRET_protected_STEP_1 && rd_cmdex <= `CMDEX_IRET_protected_STEP_3);
+            
+    SET(address_stack_pop_next);
+    
+    IF(rd_cmdex == `CMDEX_IRET_protected_STEP_1);
+        SET(address_stack_save);
+        SET(address_stack_for_iret_first);
+        
+        SET(rd_glob_param_3_set);
+        SET(rd_glob_param_3_value, (rd_operand_16bit)? { 16'd0, read_4[15:0] } : read_4); //eflags
+    ENDIF();
+    
+    IF(rd_cmdex == `CMDEX_IRET_protected_STEP_2);
+        SET(rd_glob_param_1_set);
+        SET(rd_glob_param_1_value, { `MC_PARAM_1_FLAG_NO_WRITE, `SEGMENT_CS, read_4[15:0] }); //cs
+    ENDIF();
+    
+    IF(rd_cmdex == `CMDEX_IRET_protected_STEP_3);
+        SET(rd_glob_param_2_set);
+        SET(rd_glob_param_2_value, (rd_operand_16bit)? { 16'd0, read_4[15:0] } : read_4); //eip
+    ENDIF();
+    
+    SET(read_virtual);
+
+    IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+
+ENDIF();
+</read>
+
+<read>
+IF(rd_cmd == `CMD_IRET && rd_cmdex >= `CMDEX_IRET_protected_to_v86_STEP_0);
+    SET(address_stack_pop_next);
+    SET(address_stack_add_4_to_saved);
+    
+    IF(rd_cmdex == `CMDEX_IRET_protected_to_v86_STEP_0);
+        SET(address_stack_save);
+        SET(address_stack_for_iret_to_v86);
+    ENDIF();
+    
+    SET(rd_src_is_memory);
+    
+    SET(read_virtual);
+
+    IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+ENDIF();
+</read>
+
+<read>
+IF(rd_cmd == `CMD_IRET_2 && rd_cmdex == `CMDEX_IRET_2_protected_outer_STEP_0);
+
+    SET(address_stack_pop_next);
+    SET(address_stack_for_iret_second);
+    
+    SET(rd_glob_param_1_set, rd_ready);
+    SET(rd_glob_param_1_value, { `MC_PARAM_1_FLAG_NP_NOT_SS | `MC_PARAM_1_FLAG_CPL_FROM_PARAM_3, `SEGMENT_SS, read_4[15:0] }); // read ss
+    
+    SET(rd_glob_param_3_set);
+    SET(rd_glob_param_3_value, glob_param_1); 
+    
+    SET(rd_glob_descriptor_2_set);
+    SET(rd_glob_descriptor_2_value, glob_descriptor); 
+    
+    SET(read_length_word);
+    SET(read_virtual);
+
+    IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+ENDIF();
+</read>
+    
+<read>
+IF(rd_cmd == `CMD_IRET_2 && rd_cmdex >= `CMDEX_IRET_2_protected_outer_STEP_1 && rd_cmdex <= `CMDEX_IRET_2_protected_outer_STEP_3);
+            
+    SET(address_stack_pop_next);
+
+    IF(rd_cmdex == `CMDEX_IRET_2_protected_outer_STEP_1);
+        SET(address_stack_save);
+        SET(address_stack_for_iret_third);
+        
+        SET(rd_glob_param_4_set);
+        SET(rd_glob_param_4_value, (rd_operand_16bit)? { 16'd0, read_4[15:0] } : read_4); // read esp
+    ENDIF();
+    
+    IF(rd_cmdex == `CMDEX_IRET_2_protected_outer_STEP_2);
+        SET(rd_glob_param_5_set);
+        SET(rd_glob_param_5_value, (rd_operand_16bit)? { 16'd0, read_4[15:0] } : read_4); // read eflags
+    ENDIF();
+    
+    IF(rd_cmdex == `CMDEX_IRET_2_protected_outer_STEP_3);
+        SET(address_stack_for_iret_last);
+        
+        SET(rd_glob_param_2_set);
+        SET(rd_glob_param_2_value, (rd_operand_16bit)? { 16'd0, read_4[15:0] } : read_4); // read eip
+    ENDIF();
+    
+    SET(read_virtual);
+    
+    IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+ENDIF();
+</read>
+
+<read>
+IF(rd_cmd == `CMD_IRET_2 && rd_cmdex >= `CMDEX_IRET_2_protected_outer_STEP_6);
+    IF(rd_mutex_busy_active); SET(rd_waiting); ENDIF(); // wait for previous step -- loading ss
+ENDIF();
+</read>
+
+<execute>
+IF(exe_cmd == `CMD_IRET_2 && exe_cmdex == `CMDEX_IRET_2_protected_same_STEP_0);
+    
+    SET(offset_iret);
+
+    IF(glob_param_2 > glob_desc_limit);
+        SET(exe_waiting);
+        SET(exe_trigger_gp_fault); //exception GP(0)
+    ENDIF();
+
+ENDIF();
+</execute>
+
+<execute>
+IF(exe_cmd == `CMD_IRET_2 && exe_cmdex == `CMDEX_IRET_2_protected_same_STEP_1);
+    SET(exe_eip_from_glob_param_2);
+ENDIF();
+</execute>
+
+<execute>
+IF(exe_cmd == `CMD_IRET_2  && exe_cmdex == `CMDEX_IRET_2_protected_outer_STEP_3);
+            
+    IF(glob_param_2 > glob_desc_2_limit);
+    
+        SET(exe_waiting);
+        SET(exe_trigger_gp_fault); //exception GP(0)
+    ELSE();
+        SET(exe_glob_descriptor_set);
+        SET(exe_glob_descriptor_value, glob_descriptor_2);
+        
+        SET(exe_glob_descriptor_2_set);
+        SET(exe_glob_descriptor_2_value, glob_descriptor);
+        
+        SET(exe_glob_param_1_set);
+        SET(exe_glob_param_1_value, glob_param_3);
+        
+        SET(exe_glob_param_3_set);
+        SET(exe_glob_param_3_value, glob_param_1);
+    ENDIF();
+ENDIF();
+</execute>
+
+<execute>
+IF(exe_cmd == `CMD_IRET_2  && exe_cmdex == `CMDEX_IRET_2_protected_outer_STEP_5);
+    
+    SET(exe_glob_descriptor_set);
+    SET(exe_glob_descriptor_value, glob_descriptor_2);
+    
+    SET(exe_glob_descriptor_2_set);
+    SET(exe_glob_descriptor_2_value, glob_descriptor);
+
+    SET(exe_glob_param_1_set);
+    SET(exe_glob_param_1_value, glob_param_3);
+    
+    SET(exe_glob_param_3_set);
+    SET(exe_glob_param_3_value, glob_param_1);
+ENDIF();
+</execute>
+
+<execute>
+IF(exe_cmd == `CMD_IRET_2 && exe_cmdex == `CMDEX_IRET_2_protected_outer_STEP_6);
+
+    SET(offset_iret_glob_param_4);
+    SET(exe_eip_from_glob_param_2);
+ENDIF();
+</execute>
+
+<execute>
+IF(exe_cmd == `CMD_IRET && exe_cmdex == `CMDEX_IRET_real_v86_STEP_0);
+    
+    SET(offset_pop);
+
+    IF(v8086_mode && iopl < 2'd3);
+        SET(exe_waiting);
+        SET(exe_trigger_gp_fault); //exception GP(0)
+    ENDIF();
+ENDIF();
+</execute>
+
+<execute>
+IF(exe_cmd == `CMD_IRET && exe_cmdex == `CMDEX_IRET_real_v86_STEP_1);
+    SET(offset_pop);
+ENDIF();
+</execute>
+
+<execute>
+IF(exe_cmd == `CMD_IRET && exe_cmdex == `CMDEX_IRET_real_v86_STEP_2);
+
+    SET(offset_pop);
+
+    IF(~(v8086_mode) && glob_param_2 > cs_limit);
+        SET(exe_waiting);
+        SET(exe_trigger_gp_fault); //exception GP(0)
+    ENDIF();
+ENDIF();
+</execute>
+
+<execute>
+IF(exe_cmd == `CMD_IRET && exe_cmdex == `CMDEX_IRET_real_v86_STEP_3);
+    SET(exe_eip_from_glob_param_2);
+ENDIF();
+</execute>
+
+<execute>
+IF(exe_cmd == `CMD_IRET && exe_cmdex == `CMDEX_IRET_task_switch_STEP_0);
+    IF(glob_param_1[`SELECTOR_BIT_TI]);
+        SET(exe_waiting);
+        
+        SET(exe_trigger_ts_fault);
+        SET(exe_error_code, `SELECTOR_FOR_CODE(glob_param_1));
+    ENDIF();
+ENDIF();
+</execute>
+
+<execute>
+IF(exe_cmd == `CMD_IRET && exe_cmdex == `CMDEX_IRET_task_switch_STEP_1);
+    
+    IF(glob_param_2[1] || exe_descriptor[`DESC_BIT_SEG] || (exe_descriptor[`DESC_BITS_TYPE] != `DESC_TSS_BUSY_386 && exe_descriptor[`DESC_BITS_TYPE] != `DESC_TSS_BUSY_286));
+        SET(exe_waiting);
+
+        SET(exe_trigger_ts_fault);
+        SET(exe_error_code, `SELECTOR_FOR_CODE(glob_param_1));
+    ENDIF();
+    
+    IF(glob_param_2[1] == 1'b0 && ~(exe_trigger_ts_fault) && ~(exe_descriptor[`DESC_BIT_P]));
+        SET(exe_waiting);
+
+        SET(exe_trigger_np_fault);
+        SET(exe_error_code, `SELECTOR_FOR_CODE(glob_param_1));
+    ENDIF();
+ENDIF();
+</execute>
+    
+<execute>
+IF(exe_cmd == `CMD_IRET && exe_cmdex >= `CMDEX_IRET_protected_to_v86_STEP_0);
+    IF(exe_ready);
+        SAVE(exe_buffer, src);
+        SET(exe_buffer_shift);
+    ENDIF();
+ENDIF();
+</execute>
+
+<execute>
+IF(exe_cmd == `CMD_IRET_2 && exe_cmdex == `CMDEX_IRET_2_protected_to_v86_STEP_6);
+    SET(exe_eip_from_glob_param_2_16bit);
+ENDIF();
+</execute>
+
+<execute>
+// special case: check if (cs.rpl != ss.rpl) before LOAD_SEG
+IF(exe_cmd == `CMD_IRET_2 && exe_cmdex == `CMDEX_IRET_2_protected_outer_STEP_0);
+    
+    IF(glob_param_1[`SELECTOR_BITS_RPL] != glob_param_3[`SELECTOR_BITS_RPL]); // new_ss.rpl != new_cs.rpl
+    
+        SET(exe_waiting);
+        SET(exe_trigger_gp_fault); //exception GP(val)
+        SET(exe_error_code, { glob_param_1[15:2], 2'd0 });
+    ENDIF();
+ENDIF();
+</execute>
+
+<write>
+IF(wr_cmd == `CMD_IRET && wr_cmdex <= `CMDEX_IRET_real_v86_STEP_2);
+    SET(wr_not_finished);
+    
+    SAVE(esp, wr_stack_esp);
+    IF(wr_cmdex == `CMDEX_IRET_real_v86_STEP_0); SET(wr_make_esp_speculative); ENDIF(); //NOTE: esp update can not be every cycle; must be at least every second cycle
+ENDIF();
+</write>
+
+<write>
+IF(wr_cmd == `CMD_IRET && wr_cmdex == `CMDEX_IRET_real_v86_STEP_3);
+    
+    SET(wr_make_esp_commit);
+    
+    SAVE(cflag,  glob_param_3[0]);
+    SAVE(pflag,  glob_param_3[2]);
+    SAVE(aflag,  glob_param_3[4]);
+    SAVE(zflag,  glob_param_3[6]);
+    SAVE(sflag,  glob_param_3[7]);
+    SAVE(tflag,  glob_param_3[8]);
+    SAVE(iflag,  glob_param_3[9]);
+    SAVE(dflag,  glob_param_3[10]);
+    SAVE(oflag,  glob_param_3[11]);
+    SAVE(ntflag, glob_param_3[14]);
+    
+    IF(real_mode);
+        SAVE(iopl,  glob_param_3[13:12]);
+    ENDIF();
+    
+    IF(wr_operand_32bit);
+        SAVE(rflag,  glob_param_3[16]);
+        SAVE(acflag, glob_param_3[18]);
+        SAVE(idflag, glob_param_3[21]);
+    ENDIF();
+    
+    // clear pipeline
+    SET(wr_req_reset_pr);
+    SET(wr_req_reset_dec);
+    SET(wr_req_reset_micro);
+    SET(wr_req_reset_rd);
+    SET(wr_req_reset_exe);
+ENDIF();
+</write>
+
+<write>
+IF(wr_cmd == `CMD_IRET && (wr_cmdex == `CMDEX_IRET_protected_STEP_0 || wr_cmdex == `CMDEX_IRET_task_switch_STEP_0 || wr_cmdex == `CMDEX_IRET_task_switch_STEP_1));
+    SET(wr_not_finished);
+ENDIF();
+</write>
+
+<write>
+IF(wr_cmd == `CMD_IRET && wr_cmdex >= `CMDEX_IRET_protected_STEP_1 && wr_cmdex <= `CMDEX_IRET_protected_STEP_3);
+    SET(wr_not_finished);
+ENDIF();
+</write>
+
+<write>
+IF(wr_cmd == `CMD_IRET && wr_cmdex >= `CMDEX_IRET_protected_to_v86_STEP_0 && wr_cmdex <= `CMDEX_IRET_protected_to_v86_STEP_4);
+    SET(wr_not_finished);
+ENDIF();
+</write>
+
+<write_local>
+wire [15:0] wr_IRET_to_v86_es;
+wire [15:0] wr_IRET_to_v86_cs;
+wire [15:0] wr_IRET_to_v86_ss;
+wire [15:0] wr_IRET_to_v86_ds;
+wire [15:0] wr_IRET_to_v86_fs;
+wire [15:0] wr_IRET_to_v86_gs;
+
+assign wr_IRET_to_v86_es = exe_buffer_shifted[79:64];
+assign wr_IRET_to_v86_cs = glob_param_1[15:0];
+assign wr_IRET_to_v86_ss = exe_buffer_shifted[111:96];
+assign wr_IRET_to_v86_ds = exe_buffer_shifted[47:32];
+assign wr_IRET_to_v86_fs = exe_buffer_shifted[15:0];
+assign wr_IRET_to_v86_gs = exe_buffer[15:0];
+</write_local>
+
+<write>
+IF(wr_cmd == `CMD_IRET && wr_cmdex == `CMDEX_IRET_protected_to_v86_STEP_5);
+    
+    SET(wr_not_finished);
+    
+    SAVE(cflag,  glob_param_3[0]);
+    SAVE(pflag,  glob_param_3[2]);
+    SAVE(aflag,  glob_param_3[4]);
+    SAVE(zflag,  glob_param_3[6]);
+    SAVE(sflag,  glob_param_3[7]);
+    SAVE(tflag,  glob_param_3[8]);
+    SAVE(iflag,  glob_param_3[9]);
+    SAVE(dflag,  glob_param_3[10]);
+    SAVE(oflag,  glob_param_3[11]);
+    SAVE(iopl,   glob_param_3[13:12]);
+    SAVE(ntflag, glob_param_3[14]);
+    SAVE(rflag,  glob_param_3[16]);
+    SAVE(vmflag, glob_param_3[`EFLAGS_BIT_VM]);
+    SAVE(acflag, glob_param_3[18]);
+    SAVE(idflag, glob_param_3[21]);
+    
+    SAVE(esp, exe_buffer_shifted[159:128]);
+    
+    //seg
+    SAVE(es, wr_IRET_to_v86_es);
+    SAVE(cs, wr_IRET_to_v86_cs);
+    SAVE(ss, wr_IRET_to_v86_ss);
+    SAVE(ds, wr_IRET_to_v86_ds);
+    SAVE(fs, wr_IRET_to_v86_fs);
+    SAVE(gs, wr_IRET_to_v86_gs);
+    
+    SAVE(es_rpl, 2'd3);
+    SAVE(cs_rpl, 2'd3);
+    SAVE(ss_rpl, 2'd3);
+    SAVE(ds_rpl, 2'd3);
+    SAVE(fs_rpl, 2'd3);
+    SAVE(gs_rpl, 2'd3);
+    
+    SAVE(es_cache_valid, `TRUE);
+    SAVE(cs_cache_valid, `TRUE);
+    SAVE(ss_cache_valid, `TRUE);
+    SAVE(ds_cache_valid, `TRUE);
+    SAVE(fs_cache_valid, `TRUE);
+    SAVE(gs_cache_valid, `TRUE);
+    
+    SAVE(es_cache, `DESC_MASK_P | `DESC_MASK_DPL | `DESC_MASK_SEG | `DESC_MASK_DATA_RWA | { 24'd0, 4'd0,wr_IRET_to_v86_es[15:12], wr_IRET_to_v86_es[11:0],4'd0, 16'hFFFF });
+    SAVE(cs_cache, `DESC_MASK_P | `DESC_MASK_DPL | `DESC_MASK_SEG | `DESC_MASK_DATA_RWA | { 24'd0, 4'd0,wr_IRET_to_v86_cs[15:12], wr_IRET_to_v86_cs[11:0],4'd0, 16'hFFFF });
+    SAVE(ss_cache, `DESC_MASK_P | `DESC_MASK_DPL | `DESC_MASK_SEG | `DESC_MASK_DATA_RWA | { 24'd0, 4'd0,wr_IRET_to_v86_ss[15:12], wr_IRET_to_v86_ss[11:0],4'd0, 16'hFFFF });
+    SAVE(ds_cache, `DESC_MASK_P | `DESC_MASK_DPL | `DESC_MASK_SEG | `DESC_MASK_DATA_RWA | { 24'd0, 4'd0,wr_IRET_to_v86_ds[15:12], wr_IRET_to_v86_ds[11:0],4'd0, 16'hFFFF });
+    SAVE(fs_cache, `DESC_MASK_P | `DESC_MASK_DPL | `DESC_MASK_SEG | `DESC_MASK_DATA_RWA | { 24'd0, 4'd0,wr_IRET_to_v86_fs[15:12], wr_IRET_to_v86_fs[11:0],4'd0, 16'hFFFF });
+    SAVE(gs_cache, `DESC_MASK_P | `DESC_MASK_DPL | `DESC_MASK_SEG | `DESC_MASK_DATA_RWA | { 24'd0, 4'd0,wr_IRET_to_v86_gs[15:12], wr_IRET_to_v86_gs[11:0],4'd0, 16'hFFFF });
+ENDIF();
+</write>
+
+<write>
+IF(wr_cmd == `CMD_IRET_2 && wr_cmdex == `CMDEX_IRET_2_protected_to_v86_STEP_6);
+
+    // clear pipeline
+    SET(wr_req_reset_pr);
+    SET(wr_req_reset_dec);
+    SET(wr_req_reset_micro);
+    SET(wr_req_reset_rd);
+    SET(wr_req_reset_exe);
+ENDIF();
+</write>
+
+<write>
+IF(wr_cmd == `CMD_IRET_2 && wr_cmdex == `CMDEX_IRET_2_protected_same_STEP_1);
+    
+    // save eflags
+    SAVE(cflag,  glob_param_3[0]);
+    SAVE(pflag,  glob_param_3[2]);
+    SAVE(aflag,  glob_param_3[4]);
+    SAVE(zflag,  glob_param_3[6]);
+    SAVE(sflag,  glob_param_3[7]);
+    SAVE(tflag,  glob_param_3[8]);
+    SAVE(dflag,  glob_param_3[10]);
+    SAVE(oflag,  glob_param_3[11]);
+    SAVE(ntflag, glob_param_3[14]);
+    
+    IF(cpl <= iopl);
+        SAVE(iflag,  glob_param_3[9]);
+    ENDIF();
+    
+    IF(cpl == 2'd0);
+        SAVE(iopl,  glob_param_3[13:12]);
+    ENDIF();
+    
+    IF(wr_operand_32bit);
+        SAVE(rflag,  glob_param_3[16]);
+        SAVE(acflag, glob_param_3[18]);
+        SAVE(idflag, glob_param_3[21]);
+    ENDIF();
+    
+    // clear pipeline
+    SET(wr_req_reset_pr);
+    SET(wr_req_reset_dec);
+    SET(wr_req_reset_micro);
+    SET(wr_req_reset_rd);
+    SET(wr_req_reset_exe);
+ENDIF();
+</write>
+
+<write>
+IF(wr_cmd == `CMD_IRET_2 && wr_cmdex >= `CMDEX_IRET_2_protected_outer_STEP_0 && wr_cmdex <= `CMDEX_IRET_2_protected_outer_STEP_2);
+    SET(wr_not_finished);
+ENDIF();
+</write>
+
+<write>
+IF(wr_cmd == `CMD_IRET_2 && wr_cmdex == `CMDEX_IRET_2_protected_outer_STEP_4);
+    SET(wr_not_finished);
+    
+    // save eflags
+    
+    SAVE(cflag,  glob_param_5[0]);
+    SAVE(pflag,  glob_param_5[2]);
+    SAVE(aflag,  glob_param_5[4]);
+    SAVE(zflag,  glob_param_5[6]);
+    SAVE(sflag,  glob_param_5[7]);
+    SAVE(tflag,  glob_param_5[8]);
+    SAVE(dflag,  glob_param_5[10]);
+    SAVE(oflag,  glob_param_5[11]);
+    SAVE(ntflag, glob_param_5[14]);
+    
+    IF(wr_task_rpl <= iopl);
+        SAVE(iflag,  glob_param_5[9]);
+    ENDIF();
+    
+    IF(wr_task_rpl == 2'd0);
+        SAVE(iopl,  glob_param_5[13:12]);
+    ENDIF();
+    
+    IF(wr_operand_32bit);
+        SAVE(rflag,  glob_param_5[16]);
+        SAVE(acflag, glob_param_5[18]);
+        SAVE(idflag, glob_param_5[21]);
+    ENDIF();
+ENDIF();
+</write>

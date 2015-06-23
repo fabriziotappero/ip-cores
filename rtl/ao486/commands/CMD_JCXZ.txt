@@ -1,0 +1,46 @@
+
+<defines>
+`define CMD_JCXZ        #AUTOGEN_NEXT_CMD
+</defines>
+
+<decode>
+dec_ready_one_one && decoder[7:0] == 8'hE3
+`CMD_JCXZ
+SET(dec_is_8bit);
+SET(consume_one_one);
+</decode>
+
+<execute_local>
+wire exe_jecxz_condition;
+
+assign exe_jecxz_condition = (exe_address_16bit)? ecx[15:0] == 16'd0 : ecx == 32'd0;
+</execute_local>
+
+<execute>
+IF(exe_cmd == `CMD_JCXZ);
+    IF(exe_mutex_current[`MUTEX_ECX_BIT]); SET(exe_waiting);
+    ELSE();
+        
+        IF(exe_jecxz_condition && exe_branch_eip > cs_limit);
+            SET(exe_waiting);
+            SET(exe_trigger_gp_fault); //exception GP(0)
+        ENDIF();
+        
+        SET(exe_branch,         exe_jecxz_condition);
+        SET(exe_result_signals, { 4'd0, exe_jecxz_condition });
+    ENDIF();
+ENDIF();
+</execute>
+
+<write>
+IF(wr_cmd == `CMD_JCXZ);
+    IF(result_signals[0]);
+        // clear pipeline
+        SET(wr_req_reset_pr);
+        SET(wr_req_reset_dec);
+        SET(wr_req_reset_micro);
+        SET(wr_req_reset_rd);
+        SET(wr_req_reset_exe);
+    ENDIF();
+ENDIF();
+</write>

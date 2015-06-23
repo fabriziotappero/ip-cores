@@ -1,0 +1,138 @@
+
+<defines>
+`define CMD_PUSH_MOV_SEG        #AUTOGEN_NEXT_CMD
+
+`define CMDEX_PUSH_MOV_SEG_implicit     4'd0
+`define CMDEX_PUSH_MOV_SEG_implicit_ES  4'd0
+`define CMDEX_PUSH_MOV_SEG_implicit_CS  4'd1
+`define CMDEX_PUSH_MOV_SEG_implicit_SS  4'd2
+`define CMDEX_PUSH_MOV_SEG_implicit_DS  4'd3
+`define CMDEX_PUSH_MOV_SEG_implicit_FS  4'd4
+`define CMDEX_PUSH_MOV_SEG_implicit_GS  4'd5
+`define CMDEX_PUSH_MOV_SEG_implicit_LDT 4'd6
+`define CMDEX_PUSH_MOV_SEG_implicit_TR  4'd7
+
+`define CMDEX_PUSH_MOV_SEG_modregrm     4'd8
+`define CMDEX_PUSH_MOV_SEG_modregrm_ES  4'd8
+`define CMDEX_PUSH_MOV_SEG_modregrm_CS  4'd9
+`define CMDEX_PUSH_MOV_SEG_modregrm_SS  4'd10
+`define CMDEX_PUSH_MOV_SEG_modregrm_DS  4'd11
+`define CMDEX_PUSH_MOV_SEG_modregrm_FS  4'd12
+`define CMDEX_PUSH_MOV_SEG_modregrm_GS  4'd13
+`define CMDEX_PUSH_MOV_SEG_modregrm_LDT 4'd14
+`define CMDEX_PUSH_MOV_SEG_modregrm_TR  4'd15
+</defines>
+
+<decode>
+(dec_ready_one && (decoder[7:0] == 8'h06 || decoder[7:0] == 8'h16 || decoder[7:0] == 8'h0E || decoder[7:0] == 8'h1E)) || (dec_ready_2byte_one && (decoder[7:0] == 8'hA0 || decoder[7:0] == 8'hA8))
+`CMD_PUSH_MOV_SEG
+SET(dec_cmdex, `CMDEX_PUSH_MOV_SEG_implicit | { 1'b0, decoder[5:3] });
+SET(consume_one);
+</decode>
+
+<decode>
+dec_ready_modregrm_one && decoder[7:0] == 8'h8C
+prefix_group_1_lock || decoder[13:11] >= 3'd6
+`CMD_PUSH_MOV_SEG
+SET(dec_cmdex, `CMDEX_PUSH_MOV_SEG_modregrm | { 1'b0, decoder[13:11] });
+SET(consume_modregrm_one);
+</decode>
+
+<decode>
+dec_ready_2byte_modregrm && decoder[7:0] == 8'h00 && decoder[13:11] == 3'd0
+prefix_group_1_lock || ~(protected_mode)
+`CMD_PUSH_MOV_SEG
+SET(dec_cmdex, `CMDEX_PUSH_MOV_SEG_modregrm_LDT);
+SET(consume_modregrm_one);
+</decode>
+
+<decode>
+dec_ready_2byte_modregrm && decoder[7:0] == 8'h00 && decoder[13:11] == 3'd1
+prefix_group_1_lock || ~(protected_mode)
+`CMD_PUSH_MOV_SEG
+SET(dec_cmdex, `CMDEX_PUSH_MOV_SEG_modregrm_TR);
+SET(consume_modregrm_one);
+</decode>
+
+<read>
+IF(rd_cmd == `CMD_PUSH_MOV_SEG && { rd_cmdex[3], 3'b0 } == `CMDEX_PUSH_MOV_SEG_implicit);
+        
+    SET(rd_req_memory);
+    SET(rd_req_esp);
+ENDIF();
+</read>
+
+<read>
+IF(rd_cmd == `CMD_PUSH_MOV_SEG && { rd_cmdex[3], 3'b0 } == `CMDEX_PUSH_MOV_SEG_modregrm);
+    // dst: reg, src: seg
+    IF(rd_modregrm_mod == 2'b11);
+
+        SET(rd_dst_is_rm);
+            
+        SET(rd_req_rm);
+    ENDIF();
+
+    // dst: memory, src: seg
+    IF(rd_modregrm_mod != 2'b11);
+        
+        SET(rd_dst_is_memory);
+        
+        SET(rd_req_memory);
+        
+        IF(rd_mutex_busy_memory); SET(rd_waiting);
+        ELSE();
+            SET(write_virtual_check);
+
+            IF(~(write_virtual_check_ready)); SET(rd_waiting); ENDIF();
+        ENDIF();
+    ENDIF();
+ENDIF();
+</read>
+
+<execute>
+IF(exe_cmd == `CMD_PUSH_MOV_SEG && { exe_cmdex[3], 3'b0 } == `CMDEX_PUSH_MOV_SEG_implicit);
+    
+    SET(exe_result_push, { 16'd0, e_seg_by_cmdex });
+
+    IF(exe_mutex_current[`MUTEX_ESP_BIT]); SET(exe_waiting); ENDIF();
+ENDIF();
+</execute>
+
+<execute>
+IF(exe_cmd == `CMD_PUSH_MOV_SEG && { exe_cmdex[3], 3'b0 } == `CMDEX_PUSH_MOV_SEG_modregrm);
+    
+    SET(exe_result, { 16'd0, e_seg_by_cmdex });
+
+ENDIF();
+</execute>
+
+<write>
+IF(wr_cmd == `CMD_PUSH_MOV_SEG && { wr_cmdex[3], 3'b0 } == `CMDEX_PUSH_MOV_SEG_implicit);
+
+    SET(wr_push_length_word);
+    SET(wr_push_ss_fault_check);
+    SET(wr_one_cycle_wait);
+    
+    IF(~(write_for_wr_ready)); SET(wr_waiting); ENDIF();
+    
+    IF(~(wr_push_ss_fault));
+        SET(write_stack_virtual);
+    ENDIF();
+    
+    IF(write_for_wr_ready && ~(wr_push_ss_fault));
+        SAVE(esp, wr_stack_esp);
+    ENDIF();
+ENDIF();
+</write>
+
+<write>
+IF(wr_cmd == `CMD_PUSH_MOV_SEG && { wr_cmdex[3], 3'b0 } == `CMDEX_PUSH_MOV_SEG_modregrm);
+    IF(wr_dst_is_memory && ~(write_for_wr_ready)); SET(wr_waiting); ENDIF();
+    
+    SET(write_length_word);
+    
+    SET(write_regrm,     wr_dst_is_rm);
+    SET(write_virtual,   wr_dst_is_memory);
+ENDIF();  
+</write>
+

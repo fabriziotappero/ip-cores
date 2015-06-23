@@ -1,0 +1,139 @@
+
+<defines>
+`define CMD_XCHG        #AUTOGEN_NEXT_CMD
+
+`define CMDEX_XCHG_implicit         4'd0
+`define CMDEX_XCHG_modregrm         4'd1
+`define CMDEX_XCHG_modregrm_LAST    4'd2
+</defines>
+
+<decode>
+dec_ready_one && { decoder[7:3], 3'b0 } == 8'h90
+`CMD_XCHG
+SET(dec_cmdex, `CMDEX_XCHG_implicit);
+SET(consume_one);
+</decode>
+
+<decode>
+dec_ready_modregrm_one && { decoder[7:1], 1'b0 } == 8'h86
+prefix_group_1_lock && `DEC_MODREGRM_IS_MOD_11
+`CMD_XCHG
+SET(dec_cmdex, `CMDEX_XCHG_modregrm);
+IF(decoder[0] == 1'b0); SET(dec_is_8bit); ENDIF();
+SET(consume_modregrm_one);
+SET(dec_is_complex);
+</decode>
+
+<microcode>
+`CMDEX_XCHG_modregrm
+LAST(`CMDEX_XCHG_modregrm_LAST);
+</microcode>
+
+<read>
+IF(rd_cmd == `CMD_XCHG && rd_cmdex == `CMDEX_XCHG_implicit);
+    
+    SET(rd_src_is_eax);
+    SET(rd_dst_is_implicit_reg);
+
+    SET(rd_req_implicit_reg);
+    SET(rd_req_eax);
+
+    IF(rd_mutex_busy_implicit_reg || rd_mutex_busy_eax); SET(rd_waiting); ENDIF();
+ENDIF();
+</read>
+
+<read>
+IF(rd_cmd == `CMD_XCHG && rd_cmdex == `CMDEX_XCHG_modregrm);
+    
+    SET(rd_src_is_reg);
+    
+    // dst: reg, src: reg
+    IF(rd_modregrm_mod == 2'b11);
+        
+        SET(rd_dst_is_rm);
+           
+        IF(rd_mutex_busy_modregrm_reg || rd_mutex_busy_modregrm_rm); SET(rd_waiting); ENDIF();
+    ENDIF();
+
+    // dst: memory, src: reg
+    IF(rd_modregrm_mod != 2'b11);
+            
+        SET(rd_dst_is_memory);
+            
+        IF(rd_mutex_busy_modregrm_reg || rd_mutex_busy_memory); SET(rd_waiting);
+        ELSE();
+            SET(read_rmw_virtual);
+
+            IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+        ENDIF();
+    ENDIF();
+ENDIF();
+</read>
+
+<read>
+IF(rd_cmd == `CMD_XCHG && rd_cmdex == `CMDEX_XCHG_modregrm_LAST);
+    
+    SET(rd_dst_is_reg);
+    SET(rd_req_reg);
+    
+    IF(rd_modregrm_mod == 2'b11);
+        SET(rd_req_rm);
+    ENDIF();
+    
+    IF(rd_modregrm_mod != 2'b11);
+        SET(rd_req_memory);
+    ENDIF();
+ENDIF();
+</read>
+
+<execute>
+IF(exe_cmd == `CMD_XCHG && exe_cmdex == `CMDEX_XCHG_implicit);
+    
+    SET(exe_result,  src);
+    SET(exe_result2, dst);
+
+ENDIF();
+</execute>
+
+<execute>
+IF(exe_cmd == `CMD_XCHG && exe_cmdex == `CMDEX_XCHG_modregrm);
+    
+    SET(exe_result,  src);
+    SAVE(exe_buffer, dst);
+ENDIF();
+</execute>
+
+<execute>
+IF(exe_cmd == `CMD_XCHG && exe_cmdex == `CMDEX_XCHG_modregrm_LAST);
+    
+    SET(exe_result, exe_buffer);
+    
+ENDIF();
+</execute>
+
+<write>
+IF(wr_cmd == `CMD_XCHG && wr_cmdex == `CMDEX_XCHG_implicit);
+    SET(write_regrm);
+    
+    SAVE(eax, (wr_operand_16bit)? { eax[31:16], result2[15:0] } : result2);
+ENDIF();
+</write>
+
+<write>
+IF(wr_cmd == `CMD_XCHG && wr_cmdex == `CMDEX_XCHG_modregrm);
+    IF(wr_dst_is_memory && ~(write_for_wr_ready)); SET(wr_waiting); ENDIF();
+
+    SET(write_regrm,             wr_dst_is_rm);
+    SET(write_rmw_virtual,       wr_dst_is_memory);
+    
+    SET(wr_not_finished);
+ENDIF();
+</write>
+
+<write>
+IF(wr_cmd == `CMD_XCHG && wr_cmdex == `CMDEX_XCHG_modregrm_LAST);
+    
+    SET(write_regrm);
+ENDIF();
+</write>
+

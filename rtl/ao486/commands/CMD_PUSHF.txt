@@ -1,0 +1,50 @@
+
+<defines>
+`define CMD_PUSHF       #AUTOGEN_NEXT_CMD
+</defines>
+
+<decode>
+dec_ready_one && decoder[7:0] == 8'h9C
+`CMD_PUSHF
+SET(consume_one);
+</decode>
+
+<read>
+IF(rd_cmd == `CMD_PUSHF);
+    SET(rd_req_memory);
+    SET(rd_req_esp);
+ENDIF();
+</read>
+
+<execute>
+IF(exe_cmd == `CMD_PUSHF);
+
+    SET(exe_result_push, exe_pushf_eflags);
+
+    IF(exe_mutex_current[`MUTEX_ESP_BIT] || exe_mutex_current[`MUTEX_EFLAGS_BIT]); SET(exe_waiting);
+    ELSE();
+        IF(v8086_mode && iopl < 2'd3);
+            SET(exe_waiting);
+            SET(exe_trigger_gp_fault);
+        ENDIF(); //exception GP(0)
+    ENDIF();
+ENDIF();
+</execute>
+
+<write>
+IF(wr_cmd == `CMD_PUSHF);
+
+    SET(wr_push_ss_fault_check);
+    SET(wr_one_cycle_wait);
+    
+    IF(~(write_for_wr_ready)); SET(wr_waiting); ENDIF();
+    
+    IF(~(wr_push_ss_fault));
+        SET(write_stack_virtual);
+    ENDIF();
+    
+    IF(write_for_wr_ready && ~(wr_push_ss_fault));
+        SAVE(esp, wr_stack_esp);
+    ENDIF();
+ENDIF();
+</write>

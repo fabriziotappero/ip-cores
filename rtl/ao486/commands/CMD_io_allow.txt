@@ -1,0 +1,99 @@
+
+<defines>
+`define CMD_io_allow    #AUTOGEN_NEXT_CMD
+// glob_param_1[15:0] - IO address
+
+//NOTE: CMDEX_IO_ALLOW_1 does not use port number in exe_buffer
+
+`define CMDEX_io_allow_1        4'd0
+`define CMDEX_io_allow_2        4'd1
+</defines>
+
+<microcode>
+`CMDEX_io_allow_1
+`CMDEX_io_allow_2
+RETURN();
+</microcode>
+
+<read_local>
+wire rd_io_allow_1_fault;
+wire rd_io_allow_2_fault;
+
+assign rd_io_allow_1_fault =
+    rd_cmd == `CMD_io_allow && rd_cmdex == `CMDEX_io_allow_1 &&
+    (   ~(tr_cache_valid) ||
+        (tr_cache[`DESC_BITS_TYPE] != `DESC_TSS_AVAIL_386 && tr_cache[`DESC_BITS_TYPE] != `DESC_TSS_BUSY_386) ||
+        tr_limit < 32'd103
+    );
+
+assign rd_io_allow_2_fault =
+    rd_cmd == `CMD_io_allow && rd_cmdex == `CMDEX_io_allow_2 &&
+    ({ 16'd0, rd_memory_last[15:0] } + { 16'd0, 3'd0, glob_param_1[15:3] }) >= tr_limit;
+
+assign rd_io_allow_fault = rd_io_allow_1_fault || rd_io_allow_2_fault;
+</read_local>
+
+<read>
+IF(rd_cmd == `CMD_io_allow && rd_cmdex == `CMDEX_io_allow_1);
+    
+    SET(rd_system_linear, tr_base + 32'd102);
+
+    IF(rd_io_allow_1_fault || rd_mutex_busy_active); SET(rd_waiting); // read only when last operation finished
+    ELSE();
+        // memory read saved to rd_memory_last
+    
+        SET(read_system_word);
+
+        IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+    ENDIF();
+ENDIF();
+</read>
+
+<read>
+IF(rd_cmd == `CMD_io_allow && rd_cmdex == `CMDEX_io_allow_2);
+    
+    SET(rd_system_linear, tr_base + { 16'd0, rd_memory_last[15:0] } + { 16'd0, 3'd0, glob_param_1[15:3] });
+
+    IF(rd_io_allow_2_fault); SET(rd_waiting);
+    ELSE();
+        SET(rd_src_is_memory);
+    
+        SET(read_system_word);
+
+        IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+    ENDIF();
+ENDIF();
+</read>
+
+<execute_local>
+wire [3:0] e_io_allow_bits;
+
+assign e_io_allow_bits =
+    (glob_param_1[2:0] == 3'd0)?  src[3:0] :
+    (glob_param_1[2:0] == 3'd1)?  src[4:1] :
+    (glob_param_1[2:0] == 3'd2)?  src[5:2] :
+    (glob_param_1[2:0] == 3'd3)?  src[6:3] :
+    (glob_param_1[2:0] == 3'd4)?  src[7:4] :
+    (glob_param_1[2:0] == 3'd5)?  src[8:5] :
+    (glob_param_1[2:0] == 3'd6)?  src[9:6] :
+                                src[10:7]; 
+</execute_local>
+
+<execute>
+IF(exe_cmd == `CMD_io_allow && exe_cmdex == `CMDEX_io_allow_2);
+
+    IF((  exe_is_8bit                       && e_io_allow_bits[0]   != 1'd0) ||
+       (~(exe_is_8bit) && exe_operand_16bit && e_io_allow_bits[1:0] != 2'd0) ||
+       (~(exe_is_8bit) && exe_operand_32bit && e_io_allow_bits[3:0] != 4'd0));
+    
+        SET(exe_waiting);
+        SET(exe_trigger_gp_fault); //exception GP(0)
+    ENDIF();
+ENDIF();
+</execute>
+
+<write>
+IF(wr_cmd == `CMD_io_allow && (wr_cmdex == `CMDEX_io_allow_1 || wr_cmdex == `CMDEX_io_allow_2));
+    SET(wr_not_finished);
+ENDIF();
+</write>

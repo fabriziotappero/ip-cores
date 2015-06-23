@@ -1,0 +1,39 @@
+
+<defines>
+`define CMD_Jcc         #AUTOGEN_NEXT_CMD
+</defines>
+
+<decode>
+(dec_ready_one_one && decoder[7:4] == 4'h7) || (dec_ready_2byte_imm && decoder[7:4] == 4'h8)
+`CMD_Jcc
+IF(~(dec_prefix_2byte)); SET(dec_is_8bit); ENDIF();
+IF(dec_prefix_2byte); SET(consume_one_imm); ELSE(); SET(consume_one_one); ENDIF();
+</decode>
+
+<execute>
+IF(exe_cmd == `CMD_Jcc);
+    IF(exe_mutex_current[`MUTEX_EFLAGS_BIT]); SET(exe_waiting);
+    ELSE();
+        IF(exe_condition && exe_branch_eip > cs_limit); 
+            SET(exe_waiting);
+            SET(exe_trigger_gp_fault); //exception GP(0)
+        ENDIF();
+        
+        SET(exe_branch,         exe_condition);
+        SET(exe_result_signals, { 4'd0, exe_condition });
+    ENDIF();
+ENDIF();
+</execute>
+
+<write>
+IF(wr_cmd == `CMD_Jcc);
+    IF(result_signals[0]);
+        // clear pipeline
+        SET(wr_req_reset_pr);
+        SET(wr_req_reset_dec);
+        SET(wr_req_reset_micro);
+        SET(wr_req_reset_rd);
+        SET(wr_req_reset_exe);
+    ENDIF();
+ENDIF();
+</write>

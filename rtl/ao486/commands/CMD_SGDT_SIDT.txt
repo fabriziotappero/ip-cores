@@ -1,0 +1,100 @@
+
+<defines>
+`define CMD_SGDT        #AUTOGEN_NEXT_CMD
+
+`define CMD_SIDT        #AUTOGEN_NEXT_CMD
+
+`define CMDEX_SGDT_SIDT_STEP_1  4'd0
+`define CMDEX_SGDT_SIDT_STEP_2  4'd1
+</defines>
+
+<decode>
+dec_ready_2byte_modregrm && decoder[7:0] == 8'h01 && decoder[13:11] == 3'd0
+prefix_group_1_lock || `DEC_MODREGRM_IS_MOD_11
+`CMD_SGDT
+SET(dec_cmdex, `CMDEX_SGDT_SIDT_STEP_1);
+SET(consume_modregrm_one);
+SET(dec_is_complex);
+</decode>
+
+<decode>
+dec_ready_2byte_modregrm && decoder[7:0] == 8'h01 && decoder[13:11] == 3'd1
+prefix_group_1_lock || `DEC_MODREGRM_IS_MOD_11
+`CMD_SIDT
+SET(dec_cmdex, `CMDEX_SGDT_SIDT_STEP_1);
+SET(consume_modregrm_one);
+SET(dec_is_complex);
+</decode>
+
+<microcode>
+IF(mc_cmd == `CMD_SGDT || mc_cmd == `CMD_SIDT);
+    LAST_DIRECT(mc_cmd, `CMDEX_SGDT_SIDT_STEP_2);
+ENDIF();
+</microcode>
+
+<read>
+IF((rd_cmd == `CMD_SGDT || rd_cmd == `CMD_SIDT));
+    
+    SET(address_ea_buffer_plus_2);
+    
+    IF(rd_cmdex == `CMDEX_SGDT_SIDT_STEP_1);
+        SET(read_length_word);
+    ENDIF();
+    
+    IF(rd_cmdex == `CMDEX_SGDT_SIDT_STEP_2);
+        SET(address_ea_buffer);
+        SET(read_length_dword);
+    ENDIF();
+
+    SET(rd_req_memory);
+    
+    // only memory operand
+    SET(write_virtual_check);
+
+    IF(~(write_virtual_check_ready)); SET(rd_waiting); ENDIF();
+ENDIF();
+</read>
+
+<execute>
+IF(exe_cmd == `CMD_SGDT);
+    
+    IF(exe_cmdex == `CMDEX_SGDT_SIDT_STEP_1);
+        SET(exe_result, { 16'd0, gdtr_limit });
+    ENDIF();
+    
+    IF(exe_cmdex == `CMDEX_SGDT_SIDT_STEP_2);
+        SET(exe_result, gdtr_base);
+    ENDIF();
+ENDIF();
+</execute>
+
+<execute>
+IF(exe_cmd == `CMD_SIDT);
+    
+    IF(exe_cmdex == `CMDEX_SGDT_SIDT_STEP_1);
+        SET(exe_result, { 16'd0, idtr_limit });
+    ENDIF();
+    
+    IF(exe_cmdex == `CMDEX_SGDT_SIDT_STEP_2);
+        SET(exe_result, idtr_base);
+    ENDIF();
+ENDIF();
+</execute>
+
+<write>
+IF((wr_cmd == `CMD_SGDT || wr_cmd == `CMD_SIDT));
+    IF(wr_cmdex == `CMDEX_SGDT_SIDT_STEP_1);
+        SET(write_length_word);
+        SET(wr_not_finished);
+    ENDIF();
+    
+    IF(wr_cmdex == `CMDEX_SGDT_SIDT_STEP_2);
+        SET(write_length_dword);
+    ENDIF();
+
+    IF(~(write_for_wr_ready)); SET(wr_waiting); ENDIF();
+    
+    SET(write_virtual);
+ENDIF();
+</write>
+

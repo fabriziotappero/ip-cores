@@ -1,0 +1,81 @@
+
+<defines>
+`define CMD_RET_near    #AUTOGEN_NEXT_CMD
+
+// glob_param_2 --> eip
+
+`define CMDEX_RET_near                  4'd0
+`define CMDEX_RET_near_imm              4'd1
+`define CMDEX_RET_near_LAST             4'd2
+</defines>
+
+<decode>
+(dec_ready_one && decoder[7:0] == 8'hC3) || (dec_ready_one_two && decoder[7:0] == 8'hC2)
+`CMD_RET_near
+IF(decoder[0] == 1'b0); SET(dec_cmdex, `CMDEX_RET_near_imm); ELSE(); SET(dec_cmdex, `CMDEX_RET_near); ENDIF();
+IF(decoder[0] == 1'b0); SET(consume_one_two); ELSE(); SET(consume_one); ENDIF();
+SET(dec_is_complex);
+</decode>
+
+<microcode>
+IF(`CMDEX_RET_near_imm);
+    LAST(`CMDEX_RET_near_LAST);
+ENDIF();
+
+IF(`CMDEX_RET_near);
+    LAST(`CMDEX_RET_near_LAST);
+ENDIF();
+</microcode>
+
+<read>
+IF(rd_cmd == `CMD_RET_near && rd_cmdex != `CMDEX_RET_near_LAST);
+    
+    SET(address_stack_pop);
+    // waiting for esp in 'address_ready'
+    
+    SET(rd_glob_param_2_set);
+    SET(rd_glob_param_2_value, (rd_operand_16bit)? { 16'd0, read_4[15:0] } : read_4);
+    
+    SET(rd_req_esp);
+    
+    IF(rd_mutex_busy_memory); SET(rd_waiting);
+    ELSE();
+        SET(read_virtual);
+
+        IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+    ENDIF();
+ENDIF();
+</read>
+
+<execute>
+IF(exe_cmd == `CMD_RET_near && exe_cmdex != `CMDEX_RET_near_LAST);
+    
+    IF(exe_cmdex == `CMDEX_RET_near);
+        SET(offset_pop);
+    ENDIF();
+
+    IF(exe_cmdex == `CMDEX_RET_near_imm);
+        SET(offset_ret);
+    ENDIF();
+    
+    SET(exe_eip_from_glob_param_2);
+
+    IF(glob_param_2 > cs_limit);
+        SET(exe_waiting);
+        SET(exe_trigger_gp_fault); //exception GP(0)
+    ENDIF();
+ENDIF();
+</execute>
+
+<write>
+IF(wr_cmd == `CMD_RET_near && wr_cmdex != `CMDEX_RET_near_LAST);
+    
+    SAVE(esp, wr_stack_esp);
+    
+    SET(wr_req_reset_pr);
+    SET(wr_req_reset_dec);
+    SET(wr_req_reset_micro);
+    SET(wr_req_reset_rd);
+    SET(wr_req_reset_exe);
+ENDIF();
+</write>

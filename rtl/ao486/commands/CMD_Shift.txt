@@ -1,0 +1,138 @@
+
+<defines>
+`define CMD_Shift       #AUTOGEN_NEXT_CMD
+
+`define CMDEX_Shift_implicit        4'd0
+`define CMDEX_Shift_modregrm        4'd1
+`define CMDEX_Shift_modregrm_imm    4'd2
+</defines>
+
+<decode>
+dec_ready_modregrm_one && { decoder[7:2], 2'b0 } == 8'hD0
+`CMD_Shift
+IF(decoder[1]); SET(dec_cmdex, `CMDEX_Shift_implicit); ELSE(); SET(dec_cmdex, `CMDEX_Shift_modregrm); ENDIF();
+IF(decoder[0] == 1'b0); SET(dec_is_8bit); ENDIF();
+SET(consume_modregrm_one);
+</decode>
+
+<decode>
+dec_ready_modregrm_imm && { decoder[7:1], 1'b0 } == 8'hC0
+`CMD_Shift
+SET(dec_cmdex, `CMDEX_Shift_modregrm_imm);
+IF(decoder[0] == 1'b0); SET(dec_is_8bit); ENDIF();
+SET(consume_modregrm_imm);
+</decode>
+
+<read>
+IF(rd_cmd == `CMD_Shift && rd_cmdex != `CMDEX_Shift_implicit);
+        
+    SET(rd_src_is_modregrm_imm, rd_cmdex == `CMDEX_Shift_modregrm_imm);
+    SET(rd_src_is_1,            rd_cmdex == `CMDEX_Shift_modregrm);
+    
+    SET(rd_req_eflags);
+    
+    // dst: reg, src: imm or 1
+    IF(rd_modregrm_mod == 2'b11);
+
+        SET(rd_dst_is_rm);
+            
+        SET(rd_req_rm);
+            
+        IF(rd_mutex_busy_modregrm_rm); SET(rd_waiting); ENDIF();
+    ENDIF();
+
+    // dst: memory, src: imm or 1
+    IF(rd_modregrm_mod != 2'b11);
+
+        SET(rd_dst_is_memory);
+            
+        SET(rd_req_memory);
+            
+        IF(rd_mutex_busy_memory); SET(rd_waiting);
+        ELSE();
+            SET(read_rmw_virtual);
+
+            IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+        ENDIF();
+    ENDIF();
+ENDIF();
+</read>
+
+<read>
+IF(rd_cmd == `CMD_Shift && rd_cmdex == `CMDEX_Shift_implicit);
+    
+    SET(rd_src_is_ecx);
+    
+    SET(rd_req_eflags);
+    
+    // dst: reg, src: CL
+    IF(rd_modregrm_mod == 2'b11);
+
+        SET(rd_dst_is_rm);
+            
+        SET(rd_req_rm);
+            
+        IF(rd_mutex_busy_modregrm_rm || rd_mutex_busy_ecx); SET(rd_waiting); ENDIF();
+    ENDIF();
+
+    // dst: memory, src: imm or 1
+    IF(rd_modregrm_mod != 2'b11);
+        
+        SET(rd_dst_is_memory);
+            
+        SET(rd_req_memory);
+    
+        IF(rd_mutex_busy_memory || rd_mutex_busy_ecx); SET(rd_waiting);
+        ELSE();
+            SET(read_rmw_virtual);
+
+            IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+        ENDIF();
+    ENDIF();
+ENDIF();
+</read>
+
+<execute>
+IF(exe_cmd == `CMD_Shift && exe_decoder[13:12] == 2'b01);
+
+    SET(exe_result, e_shift_result);
+    SET(exe_result_signals, { e_shift_no_write, e_shift_oszapc_update, e_shift_cf_of_update, e_shift_oflag, e_shift_cflag });
+    
+    IF(exe_mutex_current[`MUTEX_EFLAGS_BIT]); SET(exe_waiting); ENDIF();
+ENDIF();
+</execute>
+
+<execute>
+IF(exe_cmd == `CMD_Shift && exe_decoder[13:12] != 2'b01);
+    
+    SET(exe_result, e_shift_result);
+    SET(exe_result_signals, { e_shift_no_write, e_shift_oszapc_update, e_shift_cf_of_update, e_shift_oflag, e_shift_cflag });
+ENDIF();
+</execute>
+
+<write>
+IF(wr_cmd == `CMD_Shift);
+
+    // result_signals
+    // { e_shift_no_write, e_shift_oszapc_update, e_shift_cf_of_update, e_shift_oflag, e_shift_cflag }
+
+    IF(~(result_signals[4])); //e_shift_no_write
+        IF(wr_dst_is_memory && ~(write_for_wr_ready)); SET(wr_waiting); ENDIF();
+    
+        SET(write_regrm,         wr_dst_is_rm);
+        SET(write_rmw_virtual,   wr_dst_is_memory);
+    ENDIF();
+    
+    IF(result_signals[3]); //e_shift_oszapc_update
+        SAVE(zflag, zflag_result);
+        SAVE(sflag, sflag_result);
+        SAVE(pflag, pflag_result);
+        SAVE(aflag, aflag_arith);
+    ENDIF();
+    
+    IF(result_signals[2]); //e_shift_cf_of_update
+        SAVE(cflag, result_signals[0]);
+        SAVE(oflag, result_signals[1]);
+    ENDIF();
+ENDIF();  
+</write>

@@ -1,0 +1,135 @@
+diff -ruN bochs-2.6.2/bios/rombios.c bochs-2.6.2-ao486/bios/rombios.c
+--- bochs-2.6.2/bios/rombios.c	2013-04-21 22:09:49.000000000 +0200
++++ bochs-2.6.2-ao486/bios/rombios.c	2014-03-30 14:27:08.000000000 +0200
+@@ -182,7 +182,7 @@
+   ;; However, users can choose to make panics non-fatal and continue.
+ #if BX_VIRTUAL_PORTS
+   mov dx,#PANIC_PORT
+-  mov ax,#?1
++  mov ax,#0x21 //ao #?1
+   out dx,ax
+ #else
+   mov dx,#0x80
+@@ -1537,8 +1537,12 @@
+   uart_tx_byte(BX_DEBUG_PORT, c);
+ #endif
+ #if BX_VIRTUAL_PORTS
+-  if (action & BIOS_PRINTF_DEBUG) outb(DEBUG_PORT, c);
+-  if (action & BIOS_PRINTF_INFO) outb(INFO_PORT, c);
++  if((action & BIOS_PRINTF_DEBUG) || (action & BIOS_PRINTF_INFO) || (action & BIOS_PRINTF_SCREEN)) {
++    while(inw(DEBUG_PORT+6) == 0) { ; }
++  }
++  if (action & BIOS_PRINTF_DEBUG)  outb(DEBUG_PORT, c);
++  if (action & BIOS_PRINTF_INFO)   outb(INFO_PORT, c);
++  if (action & BIOS_PRINTF_SCREEN) outb(INFO_PORT, c);
+ #endif
+   if (action & BIOS_PRINTF_SCREEN) {
+     if (c == '\n') wrch('\r');
+@@ -1702,7 +1706,7 @@
+ 
+   if ((action & BIOS_PRINTF_DEBHALT) == BIOS_PRINTF_DEBHALT) {
+ #if BX_VIRTUAL_PORTS
+-    outb(PANIC_PORT2, 0x00);
++    outb(PANIC_PORT2, '&'); //ao 0x00
+ #endif
+     bios_printf (BIOS_PRINTF_SCREEN, "FATAL: ");
+   }
+@@ -2509,7 +2513,9 @@
+   Bit16u base;
+   Bit16u timeout;
+ {
+-  Bit32u time=0,last=0;
++//AO modif
++  Bit16u time=0,last=0;
++//AO modif
+   Bit16u status;
+   Bit8u result;
+   status = inb(base + ATA_CB_STAT); // for the times you're supposed to throw one away
+@@ -2530,17 +2536,27 @@
+       result = 0;
+ 
+     if (result) return 0;
+-    if (time>>16 != last) // mod 2048 each 16 ms
++//AO modif
++    if (time>>8 != last) // mod 2048 each 16 ms
++//AO modif
+     {
+-      last = time >>16;
+-      BX_DEBUG_ATA("await_ide: (TIMEOUT,BSY,!BSY,!BSY_DRQ,!BSY_!DRQ,!BSY_RDY) %d time= %ld timeout= %d\n",when_done,time>>11, timeout);
++//AO modif
++      last = time >>8;
++//AO modif
++//AO modif
++      BX_DEBUG_ATA("await_ide: (TIMEOUT,BSY,!BSY,!BSY_DRQ,!BSY_!DRQ,!BSY_RDY) %d time= %ld timeout= %d, status= %x\n",when_done,time>>3, timeout, status);
++//AO modif
+     }
+     if (status & ATA_CB_STAT_ERR)
+     {
+-      BX_DEBUG_ATA("await_ide: ERROR (TIMEOUT,BSY,!BSY,!BSY_DRQ,!BSY_!DRQ,!BSY_RDY) %d time= %ld timeout= %d\n",when_done,time>>11, timeout);
++//AO modif
++      BX_DEBUG_ATA("await_ide: ERROR (TIMEOUT,BSY,!BSY,!BSY_DRQ,!BSY_!DRQ,!BSY_RDY) %d time= %ld timeout= %d\n",when_done,time>>3, timeout);
++//AO modif
+       return -1;
+     }
+-    if ((timeout == 0) || ((time>>11) > timeout)) break;
++//AO modif
++    if ((timeout == 0) || ((time>>3) > timeout)) break;
++//AO modif
+   }
+   BX_INFO("IDE time out\n");
+   return -1;
+@@ -3099,7 +3115,10 @@
+     current++;
+     write_word_DS(&EbdaData->ata.trsfsectors,current);
+     count--;
+-    if(ioflag == 0) await_ide(NOT_BSY, iobase1, IDE_TIMEOUT);
++//AO modification start
++//modif    if(ioflag == 0) await_ide(NOT_BSY, iobase1, IDE_TIMEOUT);
++    await_ide(NOT_BSY, iobase1, IDE_TIMEOUT);
++//AO modification end
+     status = inb(iobase1 + ATA_CB_STAT);
+     if(ioflag == 0)
+     {
+diff -ruN bochs-2.6.2/bios/rombios.h bochs-2.6.2-ao486/bios/rombios.h
+--- bochs-2.6.2/bios/rombios.h	2012-11-11 09:11:17.000000000 +0100
++++ bochs-2.6.2-ao486/bios/rombios.h	2014-03-30 14:29:31.000000000 +0200
+@@ -39,10 +39,10 @@
+ #define DEBUG_INT74        0
+ #define DEBUG_APM          0
+ 
+-#define PANIC_PORT  0x400
+-#define PANIC_PORT2 0x401
+-#define INFO_PORT   0x402
+-#define DEBUG_PORT  0x403
++#define PANIC_PORT  0x8888 //ao 0x400
++#define PANIC_PORT2 0x8888 //ao 0x401
++#define INFO_PORT   0x8888 //ao 0x402
++#define DEBUG_PORT  0x8888 //ao 0x403
+ 
+ #define BIOS_PRINTF_HALT     1
+ #define BIOS_PRINTF_SCREEN   2
+@@ -95,19 +95,19 @@
+ #define BX_USE_EBDA      1
+ #define BX_SUPPORT_FLOPPY 1
+ #define BX_FLOPPY_ON_CNT 37   /* 2 seconds */
+-#define BX_PCIBIOS       1
+-#define BX_APM           1
+-#define BX_PNPBIOS       1
++#define BX_PCIBIOS       0 //ao
++#define BX_APM           0 //ao
++#define BX_PNPBIOS       0 //ao
+ /* define it if the (emulated) hardware supports SMM mode */
+ #define BX_USE_SMM
+ 
+ #define BX_USE_ATADRV    1
+-#define BX_ELTORITO_BOOT 1
++#define BX_ELTORITO_BOOT 0 //ao
+ 
+ #define BX_MAX_ATA_INTERFACES   4
+ #define BX_MAX_ATA_DEVICES      (BX_MAX_ATA_INTERFACES*2)
+ 
+-#define BX_VIRTUAL_PORTS 1 /* normal output to Bochs ports */
++#define BX_VIRTUAL_PORTS 0 //ao /* normal output to Bochs ports */
+ #define BX_DEBUG_SERIAL  0 /* output to COM1 */
+ 
+    /* model byte 0xFC = AT */

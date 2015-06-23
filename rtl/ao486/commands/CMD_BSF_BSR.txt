@@ -1,0 +1,166 @@
+
+<defines>
+`define CMD_BSx     #AUTOGEN_NEXT_CMD_MOD2
+`define CMD_BSF     #AUTOGEN_NEXT_CMD_LIKE_PREV
+`define CMD_BSR     #AUTOGEN_NEXT_CMD
+</defines>
+
+<decode>
+dec_ready_2byte_modregrm && decoder[7:0] == 8'hBC
+`CMD_BSF
+SET(consume_modregrm_one);
+</decode>
+
+<decode>
+dec_ready_2byte_modregrm && decoder[7:0] == 8'hBD
+`CMD_BSR
+SET(consume_modregrm_one);
+</decode>
+
+<read>
+IF({ rd_cmd[6:1], 1'd0 } == `CMD_BSx);
+    
+    SET(rd_dst_is_reg);
+    
+    SET(rd_req_reg);
+    SET(rd_req_eflags);
+    
+    // dst: reg, src: reg
+    IF(rd_modregrm_mod == 2'b11);
+        SET(rd_src_is_rm);
+        
+        IF(rd_mutex_busy_modregrm_rm); SET(rd_waiting); ENDIF();
+    ENDIF();
+    
+    // dst: memory, src: reg
+    IF(rd_modregrm_mod != 2'b11);
+        
+        SET(rd_src_is_memory);
+        
+        IF(rd_mutex_busy_memory); SET(rd_waiting);
+        ELSE();
+            SET(read_virtual);
+            
+            IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+        ENDIF();
+    ENDIF();
+ENDIF();
+</read>
+
+<execute_local>
+//----------------------- BSF, BSR
+
+wire [4:0]  e_bit_scan_forward;
+wire        e_bit_scan_zero;
+wire [31:0] e_src_ze;
+wire [4:0]  e_bit_scan_reverse;
+
+assign e_bit_scan_forward =
+    (src[0])?  5'd0 :
+    (src[1])?  5'd1 :
+    (src[2])?  5'd2 :
+    (src[3])?  5'd3 :
+    (src[4])?  5'd4 :
+    (src[5])?  5'd5 :
+    (src[6])?  5'd6 :
+    (src[7])?  5'd7 :
+    (src[8])?  5'd8 :
+    (src[9])?  5'd9 :
+    (src[10])? 5'd10 :
+    (src[11])? 5'd11 :
+    (src[12])? 5'd12 :
+    (src[13])? 5'd13 :
+    (src[14])? 5'd14 :
+    (src[15])? 5'd15 :
+    (src[16])? 5'd16 :
+    (src[17])? 5'd17 :
+    (src[18])? 5'd18 :
+    (src[19])? 5'd19 :
+    (src[20])? 5'd20 :
+    (src[21])? 5'd21 :
+    (src[22])? 5'd22 :
+    (src[23])? 5'd23 :
+    (src[24])? 5'd24 :
+    (src[25])? 5'd25 :
+    (src[26])? 5'd26 :
+    (src[27])? 5'd27 :
+    (src[28])? 5'd28 :
+    (src[29])? 5'd29 :
+    (src[30])? 5'd30 :
+    (src[31])? 5'd31 :
+               5'd0;
+
+assign e_src_ze = (exe_operand_16bit)? { 16'd0, src[15:0] } : src;
+
+assign e_bit_scan_reverse =
+    (e_src_ze[31])? 5'd31 :
+    (e_src_ze[30])? 5'd30 :
+    (e_src_ze[29])? 5'd29 :
+    (e_src_ze[28])? 5'd28 :
+    (e_src_ze[27])? 5'd27 :
+    (e_src_ze[26])? 5'd26 :
+    (e_src_ze[25])? 5'd25 :
+    (e_src_ze[24])? 5'd24 :
+    (e_src_ze[23])? 5'd23 :
+    (e_src_ze[22])? 5'd22 :
+    (e_src_ze[21])? 5'd21 :
+    (e_src_ze[20])? 5'd20 :
+    (e_src_ze[19])? 5'd19 :
+    (e_src_ze[18])? 5'd18 :
+    (e_src_ze[17])? 5'd17 :
+    (e_src_ze[16])? 5'd16 :
+    (e_src_ze[15])? 5'd15 :
+    (e_src_ze[14])? 5'd14 :
+    (e_src_ze[13])? 5'd13 :
+    (e_src_ze[12])? 5'd12 :
+    (e_src_ze[11])? 5'd11 :
+    (e_src_ze[10])? 5'd10 :
+    (e_src_ze[9])?  5'd9 :
+    (e_src_ze[8])?  5'd8 :
+    (e_src_ze[7])?  5'd7 :
+    (e_src_ze[6])?  5'd6 :
+    (e_src_ze[5])?  5'd5 :
+    (e_src_ze[4])?  5'd4 :
+    (e_src_ze[3])?  5'd3 :
+    (e_src_ze[2])?  5'd2 :
+    (e_src_ze[1])?  5'd1 :
+    (e_src_ze[0])?  5'd0 :
+                    5'd0;
+
+assign e_bit_scan_zero = (exe_operand_16bit)? src[15:0] == 16'd0 : src[31:0] == 32'd0;
+</execute_local>
+
+<execute>
+IF({ exe_cmd[6:1], 1'd0 } == `CMD_BSx);
+    
+    SET(exe_result_signals, { 4'd0, e_bit_scan_zero });
+
+    IF(exe_cmd == `CMD_BSF);
+        SET(exe_result, { 27'd0, e_bit_scan_forward });
+    ENDIF();
+    
+    IF(exe_cmd == `CMD_BSR);
+        SET(exe_result, { 27'd0, e_bit_scan_reverse });
+    ENDIF();
+
+ENDIF();
+</execute>
+
+<write>
+IF({ wr_cmd[6:1], 1'd0 } == `CMD_BSx);
+    
+    IF(result_signals[0]);
+        SAVE(zflag, `TRUE);
+    ELSE();
+        SET(write_regrm);
+
+        SAVE(zflag, `FALSE);
+        SAVE(sflag, sflag_result);
+        SAVE(pflag, pflag_result);
+
+        SAVE(aflag, aflag_arith);
+        SAVE(cflag, cflag_arith);
+        SAVE(oflag, oflag_arith);
+    ENDIF();
+ENDIF();
+</write>

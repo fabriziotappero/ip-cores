@@ -1,0 +1,118 @@
+
+<defines>
+`define CMD_LxS         #AUTOGEN_NEXT_CMD
+// glob_param_2        --> new reg value
+
+`define CMDEX_LxS_STEP_1        4'd0
+`define CMDEX_LxS_STEP_2        4'd1
+`define CMDEX_LxS_STEP_3        4'd2
+`define CMDEX_LxS_STEP_LAST     4'd3
+</defines>
+
+<decode>
+(dec_ready_modregrm_one && (decoder[7:0] == 8'hC4 || decoder[7:0] == 8'hC5)) || (dec_ready_2byte_modregrm && (decoder[7:0] == 8'hB2 || decoder[7:0] == 8'hB4 || decoder[7:0] == 8'hB5))
+prefix_group_1_lock || `DEC_MODREGRM_IS_MOD_11
+`CMD_LxS
+SET(dec_cmdex, `CMDEX_LxS_STEP_1);
+SET(consume_modregrm_one);
+SET(dec_is_complex);
+</decode>
+
+<microcode>
+`CMDEX_LxS_STEP_1
+`CMDEX_LxS_STEP_2
+`CMDEX_LxS_STEP_3
+CALL(`CMDEX_load_seg_STEP_1);
+LOOP(`CMDEX_LxS_STEP_LAST);
+</microcode>
+
+<read>
+IF(rd_cmd == `CMD_LxS && rd_cmdex == `CMDEX_LxS_STEP_1);
+            
+    IF(~(rd_address_effective_ready) || rd_mutex_busy_memory); SET(rd_waiting);
+    ELSE();
+        
+        IF(rd_operand_16bit);
+            SET(rd_glob_param_2_set);
+            SET(rd_glob_param_2_value, read_4);
+        
+            SET(read_virtual);
+
+            IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+        ENDIF();
+    ENDIF();
+ENDIF();
+</read>
+
+<read>
+IF(rd_cmd == `CMD_LxS && rd_cmdex == `CMDEX_LxS_STEP_2);
+    
+    SET(address_ea_buffer);
+
+    IF(rd_operand_32bit);
+        
+        SET(read_length_word);
+    
+        SET(rd_glob_param_1_set);
+        SET(rd_glob_param_1_value, { 13'd0, rd_decoder[4] & rd_decoder[2], (rd_decoder[6] & rd_decoder[0]) | rd_decoder[1], rd_decoder[0], read_4[15:0] });
+
+        SET(read_virtual);
+
+        IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+
+    ENDIF();
+ENDIF();
+</read>
+
+
+<read>
+IF(rd_cmd == `CMD_LxS && rd_cmdex == `CMDEX_LxS_STEP_3);
+            
+    IF(rd_operand_16bit);
+        SET(address_ea_buffer);
+        
+        SET(rd_glob_param_1_set);
+        SET(rd_glob_param_1_value, { 13'd0, rd_decoder[4] & rd_decoder[2], (rd_decoder[6] & rd_decoder[0]) | rd_decoder[1], rd_decoder[0], read_4[15:0] });
+    ELSE();
+        SET(rd_glob_param_2_set);
+        SET(rd_glob_param_2_value, read_4);
+    ENDIF();
+    
+    SET(read_virtual);
+
+    IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+ENDIF();
+</read>
+
+<read>
+IF(rd_cmd == `CMD_LxS && rd_cmdex == `CMDEX_LxS_STEP_LAST);
+    SET(rd_dst_is_reg);
+    
+    SET(rd_req_reg);
+ENDIF();
+</read>
+
+<execute>
+IF(exe_cmd == `CMD_LxS);
+    SET(exe_result, glob_param_2);
+ENDIF();
+</execute>
+
+<write>
+IF(wr_cmd == `CMD_LxS && wr_cmdex != `CMDEX_LxS_STEP_LAST);
+    SET(wr_not_finished);
+ENDIF();
+</write>
+
+<write>
+IF(wr_cmd == `CMD_LxS && wr_cmdex == `CMDEX_LxS_STEP_LAST);
+    
+    SET(write_regrm);
+    
+    // clear pipeline
+    SET(wr_req_reset_micro);
+    SET(wr_req_reset_rd);
+    SET(wr_req_reset_exe);
+ENDIF();
+</write>
+

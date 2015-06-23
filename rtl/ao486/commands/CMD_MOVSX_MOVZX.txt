@@ -1,0 +1,71 @@
+
+<defines>
+`define CMD_MOVZX       #AUTOGEN_NEXT_CMD
+
+`define CMD_MOVSX       #AUTOGEN_NEXT_CMD
+</defines>
+
+<decode>
+dec_ready_2byte_modregrm && { decoder[7:1], 1'b0 } == 8'hB6
+`CMD_MOVZX
+IF(decoder[0] == 1'b0); SET(dec_is_8bit); ENDIF();
+SET(consume_modregrm_one);
+</decode>
+
+<decode>
+dec_ready_2byte_modregrm && { decoder[7:1], 1'b0 } == 8'hBE
+`CMD_MOVSX
+IF(decoder[0] == 1'b0); SET(dec_is_8bit); ENDIF();
+SET(consume_modregrm_one);
+</decode>
+
+<read>
+IF(rd_cmd == `CMD_MOVSX || rd_cmd == `CMD_MOVZX);
+        
+    SET(rd_dst_is_reg);
+    
+    SET(rd_req_reg_not_8bit);
+
+    // dst: reg, src: reg
+    IF(rd_modregrm_mod == 2'b11);
+            
+        SET(rd_src_is_rm);
+    
+        IF(rd_mutex_busy_modregrm_rm); SET(rd_waiting); ENDIF();
+    ENDIF();
+
+    // dst: memory, src: reg
+    IF(rd_modregrm_mod != 2'b11);
+        
+        SET(read_length_word);
+    
+        SET(rd_src_is_memory);
+    
+        IF(rd_mutex_busy_memory); SET(rd_waiting);
+        ELSE();
+            SET(read_virtual);
+
+            IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+        ENDIF();
+    ENDIF();
+ENDIF();
+</read>
+
+<execute>
+IF(exe_cmd == `CMD_MOVSX || exe_cmd == `CMD_MOVZX);
+    
+    SET(exe_result, (exe_cmd == `CMD_MOVSX && exe_is_8bit)?     { {24{src[7]}},  src[7:0] } :
+                    (exe_cmd == `CMD_MOVSX)?                    { {16{src[15]}}, src[15:0] } :
+                    (exe_cmd == `CMD_MOVZX && exe_is_8bit)?     { 24'd0, src[7:0] } :
+                                                                { 16'd0, src[15:0] });
+    
+    SET(exe_is_8bit_clear, exe_is_8bit);
+    
+ENDIF();
+</execute>
+
+<write>
+IF(wr_cmd == `CMD_MOVSX || wr_cmd == `CMD_MOVZX);
+    SET(write_regrm);
+ENDIF();
+</write>

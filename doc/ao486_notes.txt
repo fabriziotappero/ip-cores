@@ -1,0 +1,564 @@
+RET near
+
+1) D: 
+   M: repeat CMD_RET_near with CMDEX_NULL
+   R: pop new_EIP to dst
+   E: check new_EIP; copy dst to exe_buffer; prepare next ESP (imm: add imm to ESP)
+   W: commit ESP; reset P,M,R,E,W
+   
+
+CMD_MC_LOAD_SEG 1,2
+
+    D: 
+    M:
+    R: prepare real/v86 descriptor; prepare null descriptor
+    E: verify SS,TR not null; LDT,TR not from LDT --> #GP
+    W: write real/v86 descriptor; write null descriptor
+
+    D:
+    M:
+    R: read descriptor
+    E: verify loaded descriptor --> #GP,#SS,#NP
+    W: touch descriptor; write descriptor registers
+    
+RET far
+
+1) D:
+   M:
+   R: pop eip to dst;                               read cs from ESP+(4/2)
+   E: save eip to mc_param_2
+   W: ESP speculative
+   
+2) D:
+   M:
+   R: pop cs;                                       read eip from ESP
+   E: check new_EIP; save cs to mc_param_1
+   W:
+   
+3) D:
+   M: CMD_MC_LOAD_SEG 1;
+   R:
+   E:                                               cs null --> #GP(sel);
+   W:
+
+4) D:
+   M: CMD_MC_LOAD_SEG 2;
+   R:                                               read descriptor
+   E:                                               rpl < cpl --> #GP(sel); check_cs
+   W:                                               if(cpl == rpl) touch; update EIP,ESP
+   
+
+check_cs:
+must be segment; must be code segment;
+non conforming && dpl != rpl --> #GP(sel)
+(non conforming + check_rpl) ignored
+conforming && dpl > rpl --> #GP(sel)
+not present --> #NP(sel)
+
+if(cpl == rpl)
+branch_far64: (ret_far,exception,iret,jmp,call)
+    new_EIP > new_cs_limit --> #GP(0)
+
+    load_cs: (exception,call_far)
+        touch_segment:
+            if(not accessed segment) write 1 byte
+        save selector, descriptor; selector.value with rpl
+    
+    EIP = new_EIP
+(ESP/SP) += (4/2) + pop_bytes
+
+if(cpl != rpl)
+read ss      from ESP + (12/6) + pop_bytes
+read new_esp from ESP + (8/4)  + pop_bytes
+ss null --> #GP(sel)
+not segment || not data segment || not data writable --> #GP(ss sel)
+ss.rpl != cs.rpl --> #GP(ss sel)
+not present --> #SS(ss sel)
+branch_far64: (the same as above)
+load_ss: (iret,exception,ret_far,call_far)
+    if(new_ss.rpl != 0) --> touch_segment: if(not accessed segment) --> write 1 byte
+    save selector, descriptor; selector.value with rpl
+
+ESP=new_ESP + pop_bytes
+validate_seg_regs: (iret,ret_far)
+    for ds,es,fs,gs: if(dpl < cpl && (not valid || not segment || data segment || code non conforming)
+    selector=0; valid=0
+    
+   R:
+   E:
+   W:
+   
+5) D:
+   M:
+   R:
+   E: prepare next ESP (imm: add imm to ESP)
+   W: comit ESP; reset P,M,R,E,W
+   
+   
+IRET
+Note 1: in protected mode: NT and VM can not be set together -- NT not checked if not protected mode
+Note 2: in protected mode: NT and TR not valid can not be set together -- TR always valid
+
+    real                                    v8086                                           protected NT:                           protected:
+1)  D:                                      D:                                              D:                                      D:
+    M:                                      M:                                              M:                                      M:
+    R: read eip 16/32                       R: check IOPL --> skip; read eip 16/32          R: read system ts 16                    R: read eflags temp_esp+8/4
+    E:                                      E: check IOPL --> #GP(0);                       E: check ts --> #TS(val)                E:
+    W:                                      W:                                              W:                                      W:
+
+2)  D:                                      D:                                              D:                                      D:
+    M:                                      M:                                              M:                                      M:
+    R: read cs 16/32                        R: read cs 16/32                                R: read desc --> #TS(0)                 R: read cs temp_esp+4/2
+    E:                                      E:                                              E: check desc --> #TS(val), #NP(val)    E:
+    W:                                      W:                                              W:                                      W:
+    
+3)  D:                                      D:                                              D:                                      D:
+    M:                                      M:                                              M: TASK_SWITCH                          M:
+    R: read eflags 16/32                    R: read eflags 16/32                            R:                                      R: read eip temp_esp+0/0
+    E: check eip --> #GP(0)                 E: --                                           E:                                      E:
+    W:                                      W:                                              W:                                      W:
+    
+4-5)D:                                      D:                                                                                      D:
+    M: load_seg: 1,2 CS                     M: load_seg: 1,2 CS                                                                     M: load_seg 1,2 CS (load_seg 1 CS: check null, fix RET_far)
+    R:                                      R:                                                                                      R:          
+    E:                                      E:                                                                                      E:
+    W:                                      W:                                                                                      W:
+
+5)  D:                                      D:                                                                                      D:                                  D:                                       D:
+    M:                                      M:                                                                                      M: same                             M: outer                                 M: IRET_TO_V86
+    R:                                      R:                                                                                      R:                                  R: read ss temp_esp+16/8                 R: read esp temp_esp+12
+    E:                                      E:                                                                                      E: check eip limit                  E: check ss_rpl != cs_rpl                E:
+    W: write eip,eflags                     W: write eip,eflags(v86 mask)                                                           W: touch cs; save cs, esp           W:                                       W:
+    
+6)                                                                                                                                  D:                                  D:                                       D:
+                                                                                                                                    M: same                             M: outer, LOAD_SEG 1,2 SS                M:
+                                                                                                                                    R:                                  R:      (with null check, NP not SS!)    R: read ss temp_esp+16
+                                                                                                                                    E:                                  E:                                       E:
+                                                                                                                                    W: save eip, eflags                 W:                                       W:
+
+7)                                                                                                                                                                      D:                                       D:
+                                                                                                                                                                        M: outer                                 M:
+                                                                                                                                                                        R: read esp temp_esp+12/6                R: read es temp_esp+20
+                                                                                                                                                                        E:                                       E:
+                                                                                                                                                                        W:                                       W:
+                                                                                                                                                                        
+8)                                                                                                                                                                      D:                                       D:
+                                                                                                                                                                        M: outer                                 M:
+                                                                                                                                                                        R: read eflags temp_esp+8/4              R: read ds temp_esp+24
+                                                                                                                                                                        E:                                       E:
+                                                                                                                                                                        W:                                       W:
+                                                                                                                                                                        
+9)                                                                                                                                                                      D:                                       D:
+                                                                                                                                                                        M: outer                                 M:
+                                                                                                                                                                        R: read eip temp_esp+0/0                 R: read fs temp_esp+28
+                                                                                                                                                                        E: check eip --> #GP(0)                  E:
+                                                                                                                                                                        W: touch cs; save cs; save eflags        W:
+                                                                                                                                                                        
+10)                                                                                                                                                                     D:                                       D:
+                                                                                                                                                                        M: outer                                 M:
+                                                                                                                                                                        R:                                       R: read gs temp_esp+20
+                                                                                                                                                                        E:                                       E:
+                                                                                                                                                                        W: touch ss; save esp; validate seg      W: write eflags, eip, esp, cs,ds,es,fs,gs,ss with v86 init
+    
+TASK_SWITCH
+param:  tss_desc
+param:  tss
+param:  source
+
+1)  D:
+    M:
+    R:
+    E: check new_tss_desc limit; check old_tss_desc limit --> #TS(val)
+    W:
+    
+    D:
+    M:
+    R:
+    E: validate page(nbase, nbase+max; READ); validate if from CALL,INT page(nbase, nbase+1; WRITE)
+    W:
+    
+    D:
+    M:
+    R: if from JUMP,IRET: read system dword old tr_desc
+    E:
+    W: if from JUMP,IRET: write system dword old tr_desc with not busy
+    
+    D:
+    M:
+    R:
+    E: validate if to 286 page(obase+14, obase+41, WRITE); if to 386 page(obase+0x20, obase+0x5d, WRITE)
+    W: write system eip 16/32; +14/+0x20; 
+    
+    D:
+    M:
+    R:
+    E:
+    W: write system old_eflags 16/32; +16/+0x24; if moving to busy tss; clear old NT
+    
+    D:
+    M:
+    R:
+    E:
+    W: write system eax 16/32; +20/+0x28; ecx,edx,ebx,esp,ebp,esi,edi; +32/+0x44
+    
+    D:
+    M:
+    R:
+    E:
+    W: write system es 16; +32/+0x48; cs,ss,ds; +40/+0x54
+    
+    D:
+    M:
+    R:
+    E:
+    W: write system fs 16; +0x58; gs; +0x5c
+    
+    D:
+    M:
+    R:
+    E:
+    W: if from CALL,INT: write system link tr nbase+0 
+
+    D:
+    M:
+    R: if PG and 386: read system dword nbase+0x1c --newCR3
+    E:
+    W:
+    
+    D:
+    M: step 6
+    R: read system word/dword +14/+0x20 --tmp values: eip,eflags,eax,ecx,edx,ebx,esp,ebp,esi,edi,es,cs,ss,ds +40/+0x54 (ldt/fs,gs,ldt,trap) +42/+0x64
+    E:
+    W:
+    
+    D:
+    M: step 7
+    R: if not from IRET: read system dword for busy
+    E:
+    W: if not from IRET: write system dword for busy
+    
+    D:
+    M:
+    R:
+    E:
+    W: save tr,cr0_ts,dr,eflags,eax,ecx,edx,ebx,esp,ebp,esi,edi,eip,speculative esp,selectors,cache not valid; if 386 and PG and cr3 change --> save cr3
+
+todo: cpl=3, ldtr ...
+    D:
+    M:
+    R: 
+    E: check ldtr.ti,check index in tables(not null)
+    W:
+    
+    D:
+    M:
+    R: read ldtr.desc
+    E: verify desc
+    W: save desc
+    
+    D:
+    M: 
+    R: if protected: read system desc; if null --> GP(0)
+    E: if protected: check ss desc (with CPL=3); if v8086: prepare ss from selector
+    W: if protected: touch; 
+    
+    D:
+    M: load ds
+    R:
+    E:
+    W:
+    
+    D:
+    M: load es
+    R:
+    E:
+    W:
+    
+    D:
+    M: load fs
+    R:
+    E:
+    W:
+    
+    D:
+    M; load gs
+    R:
+    E:
+    W:
+    
+    D:
+    M; load cs
+    R:
+    E:
+    W:
+    
+    D:
+    M;
+    R:
+    E:
+    W: push error; esp speculative
+    
+    D:
+    M;
+    R:
+    E: verify eip;
+    W: esp commit
+    
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+
+CALL Ev, Jv
+
+    D:
+    M:
+    R: if(Ev) read mem/reg word/dword from ea/reg; else read imm
+    E: if(Ev) save src to mc_param_2; else save src+eip
+    W: esp speculative; push ip/eip
+    
+    D:
+    M:
+    R: 
+    E: check new_eip > cs_limit
+    W: esp commit; set eip
+    
+CALL Ep, Ap
+
+    D:
+    M:
+    R: if(Ep) read offset dword/word from ea; else from Imm; to mc_param_2
+    E:
+    W:
+
+    D:
+    M:
+    R: if(Ep) read cs word from (ea+2/4)&a_mask; else from Imm; to mc_param_1
+    E:
+    W: esp speculative
+
+    --> real/v8086 or protected
+    
+    real/v8086:
+    
+    D:
+    M:
+    R:
+    E: if(op32) check if eip > cs_limit -->  #GP(0)
+    W: push word/dword: cs
+    
+    D:
+    M:
+    R:
+    E:
+    W: push word/dword: eip
+    
+    D:
+    M:
+    R: 
+    E: if(op16) check if eip > cs_limit -->  #GP(0)
+    W:
+    
+    --< load_seg
+    
+    D:
+    M:
+    R:
+    E:
+    W: esp commit; set eip
+    
+    call_protected:
+
+    D:
+    M:
+    
+        mc_param_1: new_cs
+        mc_param_2: new_eip
+    
+    R: if(not null new_cs) fetch new_cs descriptor
+        
+        mc_descriptor: new_cs_descriptor
+        
+        mc_param_3: clear
+    
+    E: if(null new_cs || unknown type || (segment && check_cs) ) #GP(new_cs)
+       if(gate.dpl < CPL || gate.dpl < gate.rpl) #GP(new_cs)
+       if(tss) #GP, #NP
+       if(call_gate) #NP
+       if(other_type) #GP
+    W:
+    
+CMDEX_CALL_protected_STEP_1: [idle, wait for mc_descriptor save]
+    D:
+    M:
+    R:
+    E:
+    W:
+    
+CMDEX_CALL_protected_seg_STEP_0:
+    
+    D:
+    M: 
+    R:
+    E: move mc_descriptor to mc_descriptor_2;
+       move ss_cache to mc_descriptor
+    W: write_new_stack(temp_ESP-4/-2, old_cs.dpl, new_cs.dpl) old_cs
+
+CMDEX_CALL_protected_seg_STEP_1:
+    D:
+    M: 
+    R:
+    E:
+    W: write_new_stack(temp_ESP-8/-4, old_cs.dpl, new_cs.dpl) old_eip
+    
+CMDEX_CALL_protected_seg_STEP_2:
+    D:
+    M:
+    R:
+    E: move mc_descriptor_2 to mc_descriptor_1
+    W:
+    
+[CMD_CALL_2] CMDEX_CALL_2_protected_seg_STEP_3:
+    D:
+    M:
+    R:
+    E: 
+    W: save new_cs, esp, esp commit
+    
+CMDEX_CALL_2_protected_seg_STEP_4:
+    D:
+    M:
+    R:
+    E:
+    W: save eip; reset pipeline
+
+    --> task_switch
+    
+CMDEX_CALL_2_task_switch_STEP_0:
+    D:
+    M:
+    R:
+    E: prepare parameters for task switch
+    W:
+    
+    --> task_gate
+    
+    task_gate:
+source: selector,descriptor,source
+
+    D:
+    M:
+    R: if(present && global) read descriptor
+    E: if(not present || local) #NP, #GP
+       if(segment or not tss or not present) #GP, #NP
+    W:
+    
+    --> call_protected call_gate:
+    
+    D:
+    M: 
+    R: if(selector not null) read descriptor
+    E: if(selector null || not segment || not code || priv || not present) #GP, #NP
+    W:
+    
+    --> same priv/more priv (if conforming || new_cs.dpl >= CPL)
+    
+    call_protected call_gate same_priv:
+    
+    D:
+    M: 
+    R:
+    E:
+    W: push 32/16(descriptor type, old_cs) 
+    
+    D:
+    M:
+    R:
+    E:
+    W: push 32/16(descriptor type, eip)
+    
+    D:
+    M:
+    R:
+    E: check new eip
+    W: set cs; touch cs; set esp
+    
+    D:
+    M:
+    R:
+    E:
+    W: set eip; reset pipeline
+    
+    call_protected call_gate more_priv:
+    
+    get_SS_ESP_from_TSS:
+    
+    D:
+    M:
+    R: if(in limits) system_read_word ss (tr_base + tss_offset + 4/2)
+    E:
+    W:
+    
+    D:
+    M:
+    R: system_read_word/dword  (tr_base + tss_offset)
+    E: 
+    W:
+    
+    continue:
+    
+    D:
+    M:
+    R: if(not null new_ss) read descriptor
+    E: check new_ss --> #TS, #SS
+    W:
+    
+    D:
+    M:
+    R:
+    E:
+    W: write_new_stack return_SS
+    
+    D:
+    M:
+    R:
+    E:
+    W: write_new_stack return_ESP
+    
+    loop:
+    
+    D:
+    M:
+    R: if(loop) stack_read_dword (return_ESP + (n-1)*4/2)
+    E:
+    W: if(loop) write_new_stack 
+    
+    D:
+    M:
+    R:
+    E:
+    W: write_new_stack return_CS
+    
+    D:
+    M:
+    R:
+    E:
+    W: write_new_stack return_EIP
+    
+    D:
+    M:
+    R:
+    E: check return_EIP
+    W: set ss
+    
+    D:
+    M:
+    R:
+    E:
+    W: set cs
+    
+    D:
+    M:
+    R:
+    E:
+    W: set eip; esp commit; reset pipeline
+    

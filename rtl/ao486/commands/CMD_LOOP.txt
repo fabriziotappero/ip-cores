@@ -1,0 +1,75 @@
+
+<defines>
+`define CMD_LOOP        #AUTOGEN_NEXT_CMD
+
+`define CMDEX_LOOP_NE               4'd0
+`define CMDEX_LOOP_E                4'd1
+`define CMDEX_LOOP                  4'd2
+</defines>
+
+<decode>
+dec_ready_one_one && (decoder[7:0] == 8'hE0 || decoder[7:0] == 8'hE1 || decoder[7:0] == 8'hE2)
+`CMD_LOOP
+SET(dec_cmdex,
+    (decoder[1:0] == 2'b00)? `CMDEX_LOOP_NE :
+    (decoder[1:0] == 2'b01)? `CMDEX_LOOP_E :
+                             `CMDEX_LOOP);
+SET(dec_is_8bit);
+SET(consume_one_one);
+</decode>
+
+<execute_local>
+wire exe_cmd_loop_ecx;
+wire exe_cmd_loop_condition;
+
+assign exe_cmd_loop_ecx = (exe_address_16bit)? ecx[15:0] != 16'd1 : ecx != 32'd1;
+    
+assign exe_cmd_loop_condition =
+    (exe_cmdex == `CMDEX_LOOP_NE)?  exe_cmd_loop_ecx && zflag == `FALSE :
+    (exe_cmdex == `CMDEX_LOOP_E)?   exe_cmd_loop_ecx && zflag == `TRUE :
+                                    exe_cmd_loop_ecx;
+</execute_local>
+
+<read>
+IF(rd_cmd == `CMD_LOOP);
+    SET(rd_req_ecx);
+ENDIF();
+</read>
+
+<execute>
+IF(exe_cmd == `CMD_LOOP);
+    IF(exe_mutex_current[`MUTEX_ECX_BIT] || (exe_mutex_current[`MUTEX_EFLAGS_BIT] && (exe_cmdex == `CMDEX_LOOP_NE || exe_cmdex == `CMDEX_LOOP_E))); SET(exe_waiting);
+    ELSE();
+        IF(exe_cmd_loop_condition && exe_branch_eip > cs_limit);
+            SET(exe_waiting);
+            SET(exe_trigger_gp_fault); //exception GP(0)
+        ENDIF();
+        
+        SET(exe_branch,         exe_cmd_loop_condition);
+        SET(exe_result_signals, { 4'd0, exe_cmd_loop_condition });
+    ENDIF();
+ENDIF();
+</execute>
+
+<write_local>
+wire [31:0] wr_ecx_minus_1;
+
+assign wr_ecx_minus_1 = ecx - 32'd1;
+</write_local>
+
+<write>
+IF(wr_cmd == `CMD_LOOP);
+    IF(wr_address_16bit);   SAVE(ecx, { ecx[31:16], wr_ecx_minus_1[15:0] });
+    ELSE();                 SAVE(ecx, wr_ecx_minus_1);
+    ENDIF();
+    
+    IF(result_signals[0]);
+        // clear pipeline
+        SET(wr_req_reset_pr);
+        SET(wr_req_reset_dec);
+        SET(wr_req_reset_micro);
+        SET(wr_req_reset_rd);
+        SET(wr_req_reset_exe);
+    ENDIF();
+ENDIF();
+</write>

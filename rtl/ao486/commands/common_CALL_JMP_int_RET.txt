@@ -1,0 +1,561 @@
+
+
+//------------------------------------------------------------------------------
+
+<read_local>
+//----------------------------------- get SS, ESP from TSS
+
+wire [31:0] rd_offset_for_esp_from_tss;
+wire [31:0] rd_offset_for_ss_from_tss;
+
+wire [31:0] r_limit_for_ss_esp_from_tss;
+
+wire        rd_ss_esp_from_tss_386;
+
+assign rd_ss_esp_from_tss_386 = tr_cache[`DESC_BITS_TYPE] == `DESC_TSS_AVAIL_386 || tr_cache[`DESC_BITS_TYPE] == `DESC_TSS_BUSY_386;
+
+assign r_limit_for_ss_esp_from_tss =
+    (rd_ss_esp_from_tss_386)?   { 27'd0, glob_descriptor[`DESC_BITS_DPL], 3'd0 } + 32'd11 :
+                                { 28'd0, glob_descriptor[`DESC_BITS_DPL], 2'd0 } + 32'd5;
+
+assign rd_offset_for_ss_from_tss =
+    (rd_ss_esp_from_tss_386)?   { 27'd0, glob_descriptor[`DESC_BITS_DPL], 3'd0 } + 32'd8 :
+                                { 28'd0, glob_descriptor[`DESC_BITS_DPL], 2'd0 } + 32'd4;
+                                                                                                            
+assign rd_offset_for_esp_from_tss =
+    (rd_ss_esp_from_tss_386)?   { 27'd0, glob_descriptor[`DESC_BITS_DPL], 3'd0 } + 32'd4 :
+                                { 28'd0, glob_descriptor[`DESC_BITS_DPL], 2'd0 } + 32'd2;
+                                                                                                            
+assign rd_ss_esp_from_tss_fault =
+    (   (rd_cmd == `CMD_CALL_2 && rd_cmdex == `CMDEX_CALL_2_call_gate_more_STEP_0) ||
+        (rd_cmd == `CMD_int_2  && rd_cmdex == `CMDEX_int_2_int_trap_gate_more_STEP_0) ) &&
+     r_limit_for_ss_esp_from_tss > tr_limit;
+</read_local>
+
+
+<read>
+IF( (rd_cmd == `CMD_int_2  && rd_cmdex == `CMDEX_int_2_int_trap_gate_more_STEP_0) ||
+    (rd_cmd == `CMD_CALL_2 && rd_cmdex == `CMDEX_CALL_2_call_gate_more_STEP_0) );
+
+    SET(rd_error_code, `SELECTOR_FOR_CODE(tr));
+    
+    SET(rd_system_linear, tr_base + rd_offset_for_ss_from_tss);
+    
+    IF(rd_ss_esp_from_tss_fault); SET(rd_waiting);
+    ELSE();
+    
+        SET(read_system_word);
+        
+        SET(rd_glob_param_3_set);
+        SET(rd_glob_param_3_value, { 16'd0, read_4[15:0] });
+        
+        IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+    ENDIF();
+ENDIF();
+</read>
+
+<read>
+IF( (rd_cmd == `CMD_int_2 && rd_cmdex == `CMDEX_int_2_int_trap_gate_more_STEP_1) ||
+    (rd_cmd == `CMD_CALL_2 && rd_cmdex == `CMDEX_CALL_2_call_gate_more_STEP_1) );
+    
+    SET(rd_system_linear, tr_base + rd_offset_for_esp_from_tss);
+
+    SET(read_system_word,  ~(rd_ss_esp_from_tss_386));
+    SET(read_system_dword, rd_ss_esp_from_tss_386);
+    
+    SET(rd_glob_param_4_set);
+    SET(rd_glob_param_4_value, (rd_ss_esp_from_tss_386)? read_4 : { 16'd0, read_4[15:0] });
+        
+    IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+ENDIF();
+</read>
+
+<read>
+IF( (rd_cmd == `CMD_int_2 && rd_cmdex == `CMDEX_int_2_int_trap_gate_more_STEP_2) ||
+    (rd_cmd == `CMD_CALL_2 && rd_cmdex == `CMDEX_CALL_2_call_gate_more_STEP_2) );
+    
+    IF(rd_mutex_busy_active); SET(rd_waiting); // wait for previous step -- exception possible, move glob_param_1
+    ELSE();
+        
+        IF(~(rd_descriptor_not_in_limits));
+            
+            SET(rd_glob_descriptor_set);
+            SET(rd_glob_descriptor_value, read_8);
+            
+            SET(rd_glob_param_5_set);
+            SET(rd_glob_param_5_value, 32'd0);
+            
+            SET(read_system_descriptor);
+
+            IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();  
+        ELSE();
+            SET(rd_glob_param_5_set);
+            SET(rd_glob_param_5_value, { 31'd0, rd_descriptor_not_in_limits });
+        ENDIF();
+    ENDIF();
+ENDIF();
+</read>
+
+<execute>
+IF((exe_cmd == `CMD_CALL && exe_cmdex == `CMDEX_CALL_protected_STEP_0) ||
+   (exe_cmd == `CMD_JMP  && exe_cmdex == `CMDEX_JMP_protected_STEP_0));
+    
+    IF(glob_param_1[15:2] == 14'd0 ||
+        (exe_descriptor[`DESC_BIT_SEG] == `FALSE && (
+            exe_descriptor[`DESC_BITS_DPL] < cpl ||
+            exe_descriptor[`DESC_BITS_DPL] < exe_selector[`SELECTOR_BITS_RPL] ||
+            
+            ((exe_descriptor[`DESC_BITS_TYPE] == 4'd1 || exe_descriptor[`DESC_BITS_TYPE] == 4'd9) && exe_selector[`SELECTOR_BIT_TI]) || //AVAIL_286_TSS, AVAIL_386_TSS
+        
+            exe_descriptor[`DESC_BITS_TYPE] == 4'd0  || exe_descriptor[`DESC_BITS_TYPE] == 4'd8  ||
+            exe_descriptor[`DESC_BITS_TYPE] == 4'd10 || exe_descriptor[`DESC_BITS_TYPE] == 4'd13 || 
+            exe_descriptor[`DESC_BITS_TYPE] == 4'd2  || exe_descriptor[`DESC_BITS_TYPE] == 4'd3  ||
+            exe_descriptor[`DESC_BITS_TYPE] == 4'd6  || exe_descriptor[`DESC_BITS_TYPE] == 4'd7  ||
+            exe_descriptor[`DESC_BITS_TYPE] == 4'd11 || exe_descriptor[`DESC_BITS_TYPE] == 4'd14 ||
+            exe_descriptor[`DESC_BITS_TYPE] == 4'd15) //new_cs_descriptor.valid == 0, system not valid
+        )
+        ||
+        (exe_descriptor[`DESC_BIT_SEG] && (
+            `DESC_IS_DATA(exe_descriptor) ||
+            (`DESC_IS_CODE_NON_CONFORMING(exe_descriptor) && (exe_descriptor[`DESC_BITS_DPL] != cpl || exe_selector[`SELECTOR_BITS_RPL] > cpl)) ||
+            (`DESC_IS_CODE_CONFORMING(exe_descriptor)     &&  exe_descriptor[`DESC_BITS_DPL] > cpl)) //check_cs()
+        )
+    );
+        SET(exe_waiting);
+        SET(exe_trigger_gp_fault); //exception GP(val)
+        SET(exe_error_code, `SELECTOR_FOR_CODE(glob_param_1));
+    ENDIF();
+    
+    IF(~(exe_trigger_gp_fault) && exe_descriptor[`DESC_BIT_P] == `FALSE && //check_cs()
+            (exe_descriptor[`DESC_BIT_SEG] || exe_descriptor[`DESC_BITS_TYPE] == 4'd1 || exe_descriptor[`DESC_BITS_TYPE] == 4'd9 || //AVAIL_286_TSS, AVAIL_386_TSS
+             exe_descriptor[`DESC_BITS_TYPE] == 4'd4 || exe_descriptor[`DESC_BITS_TYPE] == 4'd12 || //286_CALL_GATE, 386_CALL_GATE
+             exe_descriptor[`DESC_BITS_TYPE] == 4'd5) //TASK_GATE
+    ); 
+        SET(exe_waiting);
+        SET(exe_trigger_np_fault); //exception GP(val)
+        SET(exe_error_code, `SELECTOR_FOR_CODE(glob_param_1));
+    ENDIF();
+ENDIF();
+</execute>
+
+<execute>
+IF((exe_cmd == `CMD_CALL_2 && exe_cmdex == `CMDEX_CALL_2_task_switch_STEP_0) ||
+   (exe_cmd == `CMD_JMP    && exe_cmdex == `CMDEX_JMP_task_switch_STEP_0));
+    
+// task switch:
+// glob_param_1[15:0]  --> new_tr
+// glob_param_1[17:16] --> source
+// glob_param_2        --> [used internal]
+// glob_param_3[15:0]  --> error_code
+// glob_param_3[16]    --> push code flag
+// glob_param_3[17]    --> [internal] is push 32 bit (TSS386)
+// glob_param_3[21:18] --> cmd_len
+// glob_descriptor     --> new_tr_cache
+
+    IF(exe_cmd == `CMD_CALL_2);
+        SET(exe_glob_param_1_set);
+        SET(exe_glob_param_1_value, { 14'd0, `TASK_SWITCH_FROM_CALL, glob_param_1[15:0] });
+    ENDIF();
+    
+    IF(exe_cmd == `CMD_JMP);
+        SET(exe_glob_param_1_set);
+        SET(exe_glob_param_1_value, { 14'd0, `TASK_SWITCH_FROM_JUMP, glob_param_1[15:0] });
+    ENDIF();
+    
+    SET(exe_glob_param_3_set);
+    SET(exe_glob_param_3_value, { 10'd0, exe_consumed, 1'd0, 1'd0, 16'd0 });
+ENDIF();
+</execute>
+
+<execute>
+IF((exe_cmd == `CMD_CALL_2 && exe_cmdex == `CMDEX_CALL_2_task_gate_STEP_1) ||
+   (exe_cmd == `CMD_JMP    && exe_cmdex == `CMDEX_JMP_task_gate_STEP_1) ||
+   (exe_cmd == `CMD_int    && exe_cmdex == `CMDEX_int_task_gate_STEP_1));
+    
+    IF(glob_param_1[`SELECTOR_BIT_TI] || glob_descriptor[`DESC_BIT_SEG] || (glob_descriptor[`DESC_BITS_TYPE] != `DESC_TSS_AVAIL_386 && glob_descriptor[`DESC_BITS_TYPE] != `DESC_TSS_AVAIL_286));
+        
+        SET(exe_waiting);
+        SET(exe_trigger_gp_fault); //exception GP(val)
+        SET(exe_error_code, `SELECTOR_FOR_CODE(glob_param_1));
+    ENDIF();
+    
+    IF(~(exe_trigger_gp_fault) && exe_descriptor[`DESC_BIT_P] == `FALSE);
+        SET(exe_waiting);
+        SET(exe_trigger_np_fault); //exception GP(val)
+        SET(exe_error_code, `SELECTOR_FOR_CODE(glob_param_1));
+    ENDIF();
+
+// task switch:
+// glob_param_1[15:0]  --> new_tr
+// glob_param_1[17:16] --> source
+// glob_param_2        --> [used internal]
+// glob_param_3[15:0]  --> error_code
+// glob_param_3[16]    --> push code flag
+// glob_param_3[17]    --> [internal] is push 32 bit (TSS386)
+// glob_param_3[21:18] --> cmd_len
+// glob_descriptor     --> new_tr_cache
+    
+    IF(exe_cmd == `CMD_CALL_2);
+        SET(exe_glob_param_1_set);
+        SET(exe_glob_param_1_value, { 14'd0, `TASK_SWITCH_FROM_CALL, glob_param_1[15:0] });
+    ENDIF();
+    
+    IF(exe_cmd == `CMD_JMP);
+        SET(exe_glob_param_1_set);
+        SET(exe_glob_param_1_value, { 14'd0, `TASK_SWITCH_FROM_JUMP, glob_param_1[15:0] });
+    ENDIF();
+    
+    IF(exe_cmd == `CMD_int);
+        SET(exe_glob_param_1_set);
+        SET(exe_glob_param_1_value, { 14'd0, `TASK_SWITCH_FROM_INT,  glob_param_1[15:0] });
+    ENDIF();
+    
+    IF(exe_cmd != `CMD_int);
+        SET(exe_glob_param_3_set);
+        SET(exe_glob_param_3_value, { 10'd0, exe_consumed, 1'd0, 1'd0, 16'd0 });
+    ENDIF();
+    
+    IF(exe_cmd == `CMD_int);
+        SET(exe_glob_param_3_set);
+        SET(exe_glob_param_3_value, { 10'd0, exe_consumed, 1'd0, exc_push_error, exc_error_code[15:0] });
+    ENDIF();
+ENDIF();
+</execute>
+
+<execute>
+IF((exe_cmd == `CMD_CALL_2 && exe_cmdex == `CMDEX_CALL_2_call_gate_STEP_1) ||
+   (exe_cmd == `CMD_int    && exe_cmdex == `CMDEX_int_int_trap_gate_STEP_1));
+
+    IF(glob_param_1[15:2] == 14'd0 || glob_descriptor[`DESC_BIT_SEG] == `FALSE || 
+       `DESC_IS_DATA(glob_descriptor) || glob_descriptor[`DESC_BITS_DPL] > cpl);
+        
+        SET(exe_waiting);
+        SET(exe_trigger_gp_fault); //exception GP(val)
+        SET(exe_error_code, `SELECTOR_FOR_CODE(glob_param_1));
+    ENDIF();
+    
+    IF(~(exe_trigger_gp_fault) && exe_descriptor[`DESC_BIT_P] == `FALSE);
+        SET(exe_waiting);
+        SET(exe_trigger_np_fault); //exception GP(val)
+        SET(exe_error_code, `SELECTOR_FOR_CODE(glob_param_1));
+    ENDIF();
+ENDIF();
+</execute>
+
+<execute>
+IF((exe_cmd == `CMD_CALL_2 && exe_cmdex == `CMDEX_CALL_2_call_gate_more_STEP_2) ||
+   (exe_cmd == `CMD_int_2  && exe_cmdex == `CMDEX_int_2_int_trap_gate_more_STEP_2));
+    
+    IF(exe_cmd == `CMD_CALL_2);
+        SET(exe_result_push, { 16'd0, ss[15:0] });
+        SET(offset_new_stack_minus);
+    ENDIF();
+
+    IF(glob_param_5[0] || glob_param_1[`SELECTOR_BITS_RPL] != glob_descriptor_2[`DESC_BITS_DPL] || // selector not in limits, 
+       glob_descriptor[`DESC_BITS_DPL] != glob_descriptor_2[`DESC_BITS_DPL] ||
+       glob_descriptor[`DESC_BIT_SEG] == `FALSE || `DESC_IS_CODE(glob_descriptor) || `DESC_IS_DATA_RO(glob_descriptor));
+        
+        SET(exe_waiting);
+
+        SET(exe_trigger_ts_fault);
+        SET(exe_error_code, `SELECTOR_FOR_CODE(glob_param_1));
+    ENDIF();
+    
+    IF(glob_param_5[0] == 1'b0 && ~(exe_trigger_ts_fault) && ~(glob_descriptor[`DESC_BIT_P]));
+        SET(exe_waiting);
+
+        SET(exe_trigger_ss_fault);
+        SET(exe_error_code, `SELECTOR_FOR_CODE(glob_param_1));
+    ENDIF();
+ENDIF();
+</execute>
+
+<write>
+IF((wr_cmd == `CMD_RET_far && wr_cmdex == `CMDEX_RET_far_same_STEP_3) ||
+   (wr_cmd == `CMD_IRET_2  && wr_cmdex == `CMDEX_IRET_2_protected_same_STEP_0) ||
+   (wr_cmd == `CMD_CALL_2  && wr_cmdex == `CMDEX_CALL_2_protected_seg_STEP_3) ||
+   (wr_cmd == `CMD_CALL_2  && wr_cmdex == `CMDEX_CALL_2_call_gate_same_STEP_2) ||
+   (wr_cmd == `CMD_JMP     && wr_cmdex == `CMDEX_JMP_protected_seg_STEP_0) ||
+   (wr_cmd == `CMD_JMP_2   && wr_cmdex == `CMDEX_JMP_2_call_gate_STEP_2) ||
+   (wr_cmd == `CMD_int_2   && wr_cmdex == `CMDEX_int_2_int_trap_gate_same_STEP_4));
+    
+    SET(wr_not_finished);
+
+    // save esp
+    // touch
+    // save descriptor
+
+    SET(wr_seg_rpl,          (wr_cmd == `CMD_CALL_2 || wr_cmd == `CMD_JMP || wr_cmd == `CMD_JMP_2 || wr_cmd == `CMD_int_2)? cpl : glob_param_1[1:0]);
+    SET(wr_seg_cache_valid,  `TRUE);
+    SET(wr_seg_sel,          (wr_cmd == `CMD_CALL_2 || wr_cmd == `CMD_JMP || wr_cmd == `CMD_JMP_2 || wr_cmd == `CMD_int_2)? { glob_param_1[15:2], cpl } : glob_param_1[15:0]); // CPL = RPL
+
+    IF(`DESC_IS_NOT_ACCESSED(glob_descriptor));
+
+        SET(write_system_touch);
+
+        IF(~(write_for_wr_ready)); SET(wr_waiting);
+        ELSE();
+            SET(write_seg_cache);
+            //wr_seg_cache_mask zero
+
+            SET(write_seg_sel);
+            SET(write_seg_cache_valid);
+            SET(write_seg_rpl);
+            
+            IF(wr_cmd != `CMD_JMP && wr_cmd != `CMD_JMP_2 && wr_cmd != `CMD_int_2); SAVE(esp, wr_stack_esp); ENDIF();
+            SET(wr_make_esp_commit);
+        ENDIF();
+    ELSE();
+        SET(write_seg_cache);
+        //wr_seg_cache_mask zero
+
+        SET(write_seg_sel);
+        SET(write_seg_cache_valid);
+        SET(write_seg_rpl);
+        
+        IF(wr_cmd != `CMD_JMP && wr_cmd != `CMD_JMP_2 && wr_cmd != `CMD_int_2); SAVE(esp, wr_stack_esp); ENDIF();
+        SET(wr_make_esp_commit);
+    ENDIF();
+ENDIF();
+</write>
+
+<write>
+IF((wr_cmd == `CMD_CALL_3 && wr_cmdex == `CMDEX_CALL_3_call_gate_more_STEP_9) ||
+    (wr_cmd == `CMD_int_3  && wr_cmdex == `CMDEX_int_3_int_trap_gate_more_STEP_4));
+    
+    SET(wr_not_finished);
+
+    // touch
+    // save descriptor
+
+    SET(wr_seg_rpl,          glob_descriptor[`DESC_BITS_DPL]);
+    SET(wr_seg_cache_valid,  `TRUE);
+    SET(wr_seg_sel,          { glob_param_1[15:2], glob_descriptor[`DESC_BITS_DPL] });
+
+    IF(`DESC_IS_NOT_ACCESSED(glob_descriptor));
+
+        SET(write_system_touch);
+
+        IF(~(write_for_wr_ready)); SET(wr_waiting);
+        ELSE();
+            SET(write_seg_cache);
+            //wr_seg_cache_mask zero
+
+            SET(write_seg_sel);
+            SET(write_seg_cache_valid);
+            SET(write_seg_rpl);
+        ENDIF();
+    ELSE();
+        SET(write_seg_cache);
+        //wr_seg_cache_mask zero
+
+        SET(write_seg_sel);
+        SET(write_seg_cache_valid);
+        SET(write_seg_rpl);
+    ENDIF();
+ENDIF();
+</write>
+
+<write>
+IF((wr_cmd == `CMD_RET_far && wr_cmdex == `CMDEX_RET_far_same_STEP_4) ||
+   (wr_cmd == `CMD_CALL_2  && wr_cmdex == `CMDEX_CALL_2_protected_seg_STEP_4) ||
+   (wr_cmd == `CMD_CALL_2  && wr_cmdex == `CMDEX_CALL_2_call_gate_same_STEP_3) ||
+   (wr_cmd == `CMD_CALL_3  && wr_cmdex == `CMDEX_CALL_3_call_gate_more_STEP_10) ||
+   (wr_cmd == `CMD_JMP     && wr_cmdex == `CMDEX_JMP_protected_seg_STEP_1) ||
+   (wr_cmd == `CMD_JMP_2   && wr_cmdex == `CMDEX_JMP_2_call_gate_STEP_3));
+    
+    // clear pipeline
+    SET(wr_req_reset_pr);
+    SET(wr_req_reset_dec);
+    SET(wr_req_reset_micro);
+    SET(wr_req_reset_rd);
+    SET(wr_req_reset_exe);
+ENDIF();
+</write>
+
+<write>
+IF((wr_cmd == `CMD_RET_far && wr_cmdex == `CMDEX_RET_far_outer_STEP_5) ||
+   (wr_cmd == `CMD_IRET_2  && wr_cmdex == `CMDEX_IRET_2_protected_outer_STEP_3));
+    
+    SET(wr_not_finished);
+    
+    SAVE(wr_task_rpl, cpl);
+    
+    // touch
+    // save descriptor
+
+    SET(wr_seg_rpl,          glob_param_1[1:0]);
+    SET(wr_seg_cache_valid,  `TRUE);
+    SET(wr_seg_sel,          glob_param_1[15:0]); // CPL = RPL
+
+    IF(`DESC_IS_NOT_ACCESSED(glob_descriptor));
+
+        SET(write_system_touch);
+
+        IF(~(write_for_wr_ready)); SET(wr_waiting);
+        ELSE();
+            SET(write_seg_cache);
+            //wr_seg_cache_mask zero
+
+            SET(write_seg_sel);
+            SET(write_seg_cache_valid);
+            SET(write_seg_rpl);
+        ENDIF();
+    ELSE();
+        SET(write_seg_cache);
+        //wr_seg_cache_mask zero
+
+        SET(write_seg_sel);
+        SET(write_seg_cache_valid);
+        SET(write_seg_rpl);
+    ENDIF();
+ENDIF();
+</write>
+
+<write>
+IF((wr_cmd == `CMD_RET_far && wr_cmdex == `CMDEX_RET_far_outer_STEP_6) ||
+   (wr_cmd == `CMD_IRET_2  && wr_cmdex == `CMDEX_IRET_2_protected_outer_STEP_5) ||
+   (wr_cmd == `CMD_CALL_3  && wr_cmdex == `CMDEX_CALL_3_call_gate_more_STEP_8) ||
+   (wr_cmd == `CMD_int_3   && wr_cmdex == `CMDEX_int_3_int_trap_gate_more_STEP_5));
+    
+    SET(wr_not_finished);
+
+    // touch
+    // save descriptor
+
+    SET(wr_seg_rpl,          glob_param_1[1:0]);
+    SET(wr_seg_cache_valid,  `TRUE);
+    SET(wr_seg_sel,          glob_param_1[15:0]); // ss.rpl == cs.rpl (checked before)
+
+    IF(`DESC_IS_NOT_ACCESSED(glob_descriptor) && glob_param_1[15:2] != 14'd0);
+
+        SET(write_system_touch);
+
+        IF(~(write_for_wr_ready)); SET(wr_waiting);
+        ELSE();
+            SET(write_seg_cache);
+            //wr_seg_cache_mask zero
+
+            SET(write_seg_sel);
+            SET(write_seg_cache_valid);
+            SET(write_seg_rpl);
+        ENDIF();
+    ELSE();
+        SET(write_seg_cache);
+        //wr_seg_cache_mask zero
+
+        SET(write_seg_sel);
+        SET(write_seg_cache_valid);
+        SET(write_seg_rpl);
+    ENDIF();
+ENDIF();
+</write>
+
+<write>
+IF((wr_cmd == `CMD_RET_far && wr_cmdex == `CMDEX_RET_far_outer_STEP_7) ||  +
+    (wr_cmd == `CMD_IRET_2 && wr_cmdex == `CMDEX_IRET_2_protected_outer_STEP_6));
+    // save esp
+    
+    SAVE(esp, wr_stack_esp);
+    SET(wr_make_esp_commit);
+    
+    // validate seg regs
+    SET(wr_validate_seg_regs);
+    
+    // clear pipeline
+    SET(wr_req_reset_pr);
+    SET(wr_req_reset_dec);
+    SET(wr_req_reset_micro);
+    SET(wr_req_reset_rd);
+    SET(wr_req_reset_exe);
+ENDIF();
+</write>
+
+<write>
+IF((wr_cmd == `CMD_CALL && (wr_cmdex == `CMDEX_CALL_protected_STEP_0 || wr_cmdex == `CMDEX_CALL_protected_STEP_1)) ||
+    (wr_cmd == `CMD_JMP  && (wr_cmdex == `CMDEX_JMP_protected_STEP_0  || wr_cmdex == `CMDEX_JMP_protected_STEP_1)));
+
+    SET(wr_not_finished);
+ENDIF();
+</write>
+
+<write>
+IF((wr_cmd == `CMD_CALL_2 && wr_cmdex == `CMDEX_CALL_2_task_gate_STEP_0) ||
+   (wr_cmd == `CMD_JMP    && wr_cmdex == `CMDEX_JMP_task_gate_STEP_0) ||
+   (wr_cmd == `CMD_int    && wr_cmdex == `CMDEX_int_task_gate_STEP_0));
+
+    SET(wr_not_finished);
+ENDIF();
+</write>
+
+<write>
+IF((wr_cmd == `CMD_CALL_2 && wr_cmdex == `CMDEX_CALL_2_task_gate_STEP_1) ||
+    (wr_cmd == `CMD_JMP    && wr_cmdex == `CMDEX_JMP_task_gate_STEP_1) ||
+    (wr_cmd == `CMD_int    && wr_cmdex == `CMDEX_int_task_gate_STEP_1));
+
+    SET(wr_not_finished);
+ENDIF();
+</write>
+
+<write>
+IF((wr_cmd == `CMD_CALL_2 && wr_cmdex == `CMDEX_CALL_2_call_gate_STEP_0) ||
+    (wr_cmd == `CMD_int    && wr_cmdex == `CMDEX_int_int_trap_gate_STEP_0));
+
+    SET(wr_not_finished);
+ENDIF();
+</write>
+
+<write>
+IF((wr_cmd == `CMD_CALL_2 && wr_cmdex == `CMDEX_CALL_2_call_gate_STEP_1) ||
+    (wr_cmd == `CMD_int    && wr_cmdex == `CMDEX_int_int_trap_gate_STEP_1));
+
+    SET(wr_not_finished);
+ENDIF();
+</write>
+
+<write>
+IF((wr_cmd == `CMD_CALL_2 && wr_cmdex == `CMDEX_CALL_2_call_gate_STEP_2) ||
+    (wr_cmd == `CMD_int    && wr_cmdex == `CMDEX_int_int_trap_gate_STEP_2));
+
+    SET(wr_not_finished);
+ENDIF();
+</write>
+
+<write>
+IF((wr_cmd == `CMD_CALL_2 && (wr_cmdex == `CMDEX_CALL_2_call_gate_same_STEP_0 || wr_cmdex == `CMDEX_CALL_2_call_gate_same_STEP_1)) ||
+    (wr_cmd == `CMD_int_2 && (wr_cmdex == `CMDEX_int_2_int_trap_gate_same_STEP_0 || wr_cmdex == `CMDEX_int_2_int_trap_gate_same_STEP_1 ||
+                              wr_cmdex == `CMDEX_int_2_int_trap_gate_same_STEP_2 || wr_cmdex == `CMDEX_int_2_int_trap_gate_same_STEP_3)));
+
+    SET(wr_not_finished);
+    
+    SET(wr_push_ss_fault_check);
+    SET(wr_one_cycle_wait);
+    
+    SET(wr_push_length_word,  ~(glob_param_1[19]));
+    SET(wr_push_length_dword, glob_param_1[19]);
+    
+    IF(~(write_for_wr_ready)); SET(wr_waiting); ENDIF();
+    
+    IF(~(wr_push_ss_fault));
+        SET(write_stack_virtual);
+        
+        SAVE(esp, wr_stack_esp); //speculative set before
+    ENDIF();
+ENDIF();
+</write>
+
+<write>
+IF((wr_cmd == `CMD_CALL_2 && wr_cmdex == `CMDEX_CALL_2_call_gate_more_STEP_0) ||
+    (wr_cmd == `CMD_int_2  && wr_cmdex == `CMDEX_int_2_int_trap_gate_more_STEP_0));
+    
+    SET(wr_not_finished);
+ENDIF();
+</write>
+
+<write>
+IF((wr_cmd == `CMD_CALL_2 && wr_cmdex == `CMDEX_CALL_2_call_gate_more_STEP_1) ||
+    (wr_cmd == `CMD_int_2  && wr_cmdex == `CMDEX_int_2_int_trap_gate_more_STEP_1));
+
+    SET(wr_not_finished);
+ENDIF();
+</write>

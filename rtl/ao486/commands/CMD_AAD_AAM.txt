@@ -1,0 +1,72 @@
+
+<defines>
+`define CMD_AAD     #AUTOGEN_NEXT_CMD
+`define CMD_AAM     #AUTOGEN_NEXT_CMD
+</defines>
+
+<decode>
+dec_ready_one_one && decoder[7:0] == 8'hD5
+`CMD_AAD
+SET(dec_is_8bit);
+SET(consume_one_one);
+</decode>
+
+<decode>
+dec_ready_one_one && decoder[7:0] == 8'hD4
+`CMD_AAM
+SET(dec_is_8bit);
+SET(consume_one_one);
+</decode>
+
+<read>
+IF(rd_cmd == `CMD_AAM || rd_cmd == `CMD_AAD);
+    
+    SET(rd_src_is_imm);
+    SET(rd_dst_is_eax);
+       
+    SET(rd_req_eflags);
+    SET(rd_req_eax);
+        
+    IF(rd_mutex_busy_eax); SET(rd_waiting); ENDIF();
+ENDIF();
+</read>
+
+<execute_local>
+wire [7:0] e_aad_result;
+
+assign e_aad_result = mult_result[7:0] + dst[7:0];
+</execute_local>
+
+<execute>
+IF(exe_cmd == `CMD_AAD);
+    
+    SET(exe_result,  { 24'd0, e_aad_result });
+    SET(exe_result2, mult_result[63:32]);
+    
+    IF(mult_busy); SET(exe_waiting); ENDIF();
+ENDIF();
+</execute>
+
+<execute>
+IF(exe_cmd == `CMD_AAM);
+    
+    SET(exe_result,  { 16'd0, div_result_quotient[7:0], div_result_remainder[7:0] });
+    SET(exe_result2, div_result_remainder);
+    
+    IF(exe_div_exception || div_busy); SET(exe_waiting); ENDIF();
+ENDIF();
+</execute>
+
+<write>
+IF(wr_cmd == `CMD_AAM || wr_cmd == `CMD_AAD);
+    SAVE(eax, { eax[31:16], result[15:0] });
+    
+    SAVE(zflag, zflag_result);
+    SAVE(sflag, sflag_result);
+    SAVE(pflag, pflag_result);
+
+    SAVE(aflag, aflag_arith);
+    SAVE(cflag, cflag_arith);
+    SAVE(oflag, oflag_arith);
+ENDIF();
+</write>

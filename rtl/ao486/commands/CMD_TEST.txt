@@ -1,0 +1,126 @@
+
+<defines>
+`define CMD_TEST        #AUTOGEN_NEXT_CMD
+
+`define CMDEX_TEST_immediate        4'd0
+`define CMDEX_TEST_modregrm         4'd1
+`define CMDEX_TEST_modregrm_imm     4'd2
+</defines>
+
+<decode>
+dec_ready_one_imm && { decoder[7:1], 1'b0 } == 8'hA8
+`CMD_TEST
+SET(dec_cmdex, `CMDEX_TEST_immediate);
+IF(decoder[0] == 1'b0); SET(dec_is_8bit); ENDIF();
+SET(consume_one_imm);
+</decode>
+
+<decode>
+dec_ready_modregrm_one && { decoder[7:1], 1'b0 } == 8'h84
+`CMD_TEST
+SET(dec_cmdex, `CMDEX_TEST_modregrm);
+IF(decoder[0] == 1'b0); SET(dec_is_8bit); ENDIF();
+SET(consume_modregrm_one);
+</decode>
+
+<decode>
+dec_ready_modregrm_imm && { decoder[7:1], 1'b0 } == 8'hF6 && { decoder[13:12], 1'b0 } == 3'd0
+`CMD_TEST
+SET(dec_cmdex, `CMDEX_TEST_modregrm_imm);
+IF(decoder[0] == 1'b0); SET(dec_is_8bit); ENDIF();
+SET(consume_modregrm_imm);
+</decode>
+
+<read>
+IF(rd_cmd == `CMD_TEST && rd_cmdex == `CMDEX_TEST_modregrm);
+    
+    SET(rd_src_is_reg);
+    SET(rd_req_eflags);
+    
+    // dst: reg, src: reg
+    IF(rd_modregrm_mod == 2'b11);
+        
+        // reg, reg
+        SET(rd_dst_is_rm);
+    
+        IF(rd_mutex_busy_modregrm_reg || rd_mutex_busy_modregrm_rm); SET(rd_waiting); ENDIF();
+    ENDIF();
+
+    // dst: memory, src: reg
+    IF(rd_modregrm_mod != 2'b11);
+        
+        SET(rd_dst_is_memory);
+    
+        IF(rd_mutex_busy_memory || rd_mutex_busy_modregrm_reg); SET(rd_waiting);
+        ELSE();
+            SET(read_virtual);
+
+            IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+        ENDIF();
+    ENDIF();
+ENDIF();
+</read>
+
+<read>
+IF(rd_cmd == `CMD_TEST && rd_cmdex == `CMDEX_TEST_modregrm_imm);
+    
+    SET(rd_src_is_modregrm_imm);
+    
+    SET(rd_req_eflags);
+    
+    // dst: reg, src: imm
+    IF(rd_modregrm_mod == 2'b11);
+        
+        // reg, reg
+        SET(rd_dst_is_rm);
+    
+        IF(rd_mutex_busy_modregrm_rm); SET(rd_waiting); ENDIF();
+    ENDIF();
+
+    // dst: memory, src: imm
+    IF(rd_modregrm_mod != 2'b11);
+        
+        SET(rd_dst_is_memory);
+    
+        IF(rd_mutex_busy_memory); SET(rd_waiting);
+        ELSE();
+            SET(read_virtual);
+
+            IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+        ENDIF();
+    ENDIF();
+ENDIF();
+</read>
+
+<read>
+IF(rd_cmd == `CMD_TEST && rd_cmdex == `CMDEX_TEST_immediate);
+                
+    SET(rd_src_is_imm);
+    SET(rd_dst_is_eax);
+            
+    SET(rd_req_eflags);
+
+    // dst: eAX, src: imm
+    IF(rd_mutex_busy_eax); SET(rd_waiting); ENDIF();
+ENDIF();
+</read>
+
+<execute>
+IF(exe_cmd == `CMD_TEST);
+    
+    SET(exe_result, exe_arith_and);
+    SET(exe_arith_index, (`ARITH_VALID | `ARITH_AND));
+ENDIF();
+</execute>
+
+<write>
+IF(wr_cmd == `CMD_TEST);
+    SAVE(zflag, zflag_result);
+    SAVE(sflag, sflag_result);
+    SAVE(pflag, pflag_result);
+
+    SAVE(aflag, aflag_arith);
+    SAVE(cflag, cflag_arith);
+    SAVE(oflag, oflag_arith);
+ENDIF();  
+</write>

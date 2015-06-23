@@ -1,0 +1,73 @@
+
+<defines>
+`define CMD_ARPL        #AUTOGEN_NEXT_CMD
+</defines>
+
+<decode>
+dec_ready_modregrm_one && decoder[7:0] == 8'h63
+prefix_group_1_lock || ~(protected_mode)
+`CMD_ARPL
+SET(consume_modregrm_one);
+</decode>
+
+<read>
+IF(rd_cmd == `CMD_ARPL);
+    // dst: rm, src: reg
+    IF(rd_modregrm_mod == 2'b11);
+        
+        SET(rd_src_is_reg);
+        SET(rd_dst_is_rm);
+            
+        SET(rd_req_rm);
+        SET(rd_req_eflags);
+    
+        IF(rd_mutex_busy_modregrm_rm || rd_mutex_busy_modregrm_reg); SET(rd_waiting); ENDIF();
+    ENDIF();
+
+    // dst: memory, src: reg
+    IF(rd_modregrm_mod != 2'b11);
+        
+        SET(read_length_word);
+    
+        SET(rd_dst_is_memory);
+        
+        SET(rd_req_memory);
+    
+        IF(rd_mutex_busy_memory || rd_mutex_busy_modregrm_reg); SET(rd_waiting);
+        ELSE();
+            SET(read_rmw_virtual);
+
+            IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+        ENDIF();
+    ENDIF();
+ENDIF();
+</read>
+
+<execute>
+IF(exe_cmd == `CMD_ARPL);
+    
+    SET(exe_result, { 16'd0, dst[15:2], src[1:0] });
+    SET(exe_result_signals, { 4'd0, dst[1:0] < src[1:0] });
+ENDIF();
+</execute>
+
+<write>
+IF(wr_cmd == `CMD_ARPL);
+    
+    SET(write_length_word);
+    SET(wr_regrm_word);
+    
+    IF(result_signals[0]);
+    
+        SET(write_rmw_virtual,   wr_dst_is_memory);
+        SET(write_regrm,         wr_dst_is_rm);  
+        
+        IF(wr_dst_is_memory && ~(write_for_wr_ready)); SET(wr_waiting); ENDIF();
+        
+        SAVE(zflag, `TRUE);
+    ELSE();
+        SAVE(zflag, `FALSE);
+    ENDIF();
+ENDIF();
+</write>
+

@@ -1,0 +1,189 @@
+
+<defines>
+`define CMD_BTx     #AUTOGEN_NEXT_CMD_MOD4
+`define CMD_BT      #AUTOGEN_NEXT_CMD_LIKE_PREV
+`define CMD_BTS     #AUTOGEN_NEXT_CMD
+`define CMD_BTR     #AUTOGEN_NEXT_CMD
+`define CMD_BTC     #AUTOGEN_NEXT_CMD
+
+`define CMDEX_BTx_modregrm_imm  4'd0
+`define CMDEX_BTx_modregrm      4'd1
+</defines>
+
+<decode>
+(dec_ready_2byte_modregrm && decoder[7:0] == 8'hA3) || (dec_ready_2byte_modregrm_imm && decoder[7:0] == 8'hBA && decoder[13:11] == 3'd4)
+`CMD_BT
+IF(decoder[0] == 1'b0); SET(dec_cmdex, `CMDEX_BTx_modregrm_imm); ELSE(); SET(dec_cmdex, `CMDEX_BTx_modregrm); ENDIF();
+IF(decoder[0] == 1'b0); SET(consume_modregrm_imm); ELSE(); SET(consume_modregrm_one); ENDIF();
+</decode>
+
+<decode>
+(dec_ready_2byte_modregrm && decoder[7:0] == 8'hB3) || (dec_ready_2byte_modregrm_imm && decoder[7:0] == 8'hBA && decoder[13:11] == 3'd6)
+prefix_group_1_lock && `DEC_MODREGRM_IS_MOD_11
+`CMD_BTR
+IF(decoder[0] == 1'b0); SET(dec_cmdex, `CMDEX_BTx_modregrm_imm); ELSE(); SET(dec_cmdex, `CMDEX_BTx_modregrm); ENDIF();
+IF(decoder[0] == 1'b0); SET(consume_modregrm_imm); ELSE(); SET(consume_modregrm_one); ENDIF();
+</decode>
+
+<decode>
+(dec_ready_2byte_modregrm && decoder[7:0] == 8'hAB) || (dec_ready_2byte_modregrm_imm && decoder[7:0] == 8'hBA && decoder[13:11] == 3'd5)
+prefix_group_1_lock && `DEC_MODREGRM_IS_MOD_11
+`CMD_BTS
+IF(decoder[0] == 1'b0); SET(dec_cmdex, `CMDEX_BTx_modregrm_imm); ELSE(); SET(dec_cmdex, `CMDEX_BTx_modregrm); ENDIF();
+IF(decoder[0] == 1'b0); SET(consume_modregrm_imm); ELSE(); SET(consume_modregrm_one); ENDIF();
+</decode>
+
+<decode>
+(dec_ready_2byte_modregrm && decoder[7:0] == 8'hBB) || (dec_ready_2byte_modregrm_imm && decoder[7:0] == 8'hBA && decoder[13:11] == 3'd7)
+prefix_group_1_lock && `DEC_MODREGRM_IS_MOD_11
+`CMD_BTC
+IF(decoder[0] == 1'b0); SET(dec_cmdex, `CMDEX_BTx_modregrm_imm); ELSE(); SET(dec_cmdex, `CMDEX_BTx_modregrm); ENDIF();
+IF(decoder[0] == 1'b0); SET(consume_modregrm_imm); ELSE(); SET(consume_modregrm_one); ENDIF();
+</decode>
+
+<read>
+IF({ rd_cmd[6:2], 2'd0 } == `CMD_BTx); // `CMDEX_BTx_modregrm || `CMDEX_BTx_modregrm_imm
+            
+    SET(address_bits_transform, rd_cmdex == `CMDEX_BTx_modregrm);
+    
+    SET(rd_src_is_reg,           rd_cmdex == `CMDEX_BTx_modregrm);
+    SET(rd_src_is_modregrm_imm,  rd_cmdex == `CMDEX_BTx_modregrm_imm);
+    
+    SET(rd_req_eflags);
+        
+    // dst: reg, src: reg
+    IF(rd_modregrm_mod == 2'b11);
+        
+        SET(rd_dst_is_rm);
+            
+        SET(rd_req_rm, rd_cmd[1:0] != 2'd0); // not BT
+    
+        IF(rd_mutex_busy_modregrm_rm || (rd_cmdex == `CMDEX_BTx_modregrm && rd_mutex_busy_modregrm_reg)); SET(rd_waiting); ENDIF();
+    ENDIF();
+    
+    // dst: memory, src: reg
+    IF(rd_modregrm_mod != 2'b11);
+        
+        SET(rd_dst_is_memory);
+            
+        SET(rd_req_memory, rd_cmd[1:0] != 2'd0); // not BT
+    
+        IF(rd_mutex_busy_memory || (rd_cmdex == `CMDEX_BTx_modregrm && rd_mutex_busy_modregrm_reg)); SET(rd_waiting);
+        ELSE();
+            SET(read_rmw_virtual,    rd_cmd[1:0] != 2'd0); // not BT
+            SET(read_virtual,        rd_cmd[1:0] == 2'd0); // BT
+            
+            IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+        ENDIF();
+    ENDIF();
+ENDIF();
+</read>
+
+<execute_local>
+//----------------------- BT, BTC, BTR, BTS
+
+wire [4:0]  e_bit_selector;
+wire        e_bit_selected;
+wire        e_bit_value;
+wire [31:0] e_bit_result;
+
+
+assign e_bit_selector = (exe_operand_16bit)? { 1'b0, src[3:0] } : src[4:0];
+
+assign e_bit_selected = 
+    (e_bit_selector == 5'd0)?     dst[0] :
+    (e_bit_selector == 5'd1)?     dst[1] :
+    (e_bit_selector == 5'd2)?     dst[2] :
+    (e_bit_selector == 5'd3)?     dst[3] :
+    (e_bit_selector == 5'd4)?     dst[4] :
+    (e_bit_selector == 5'd5)?     dst[5] :
+    (e_bit_selector == 5'd6)?     dst[6] :
+    (e_bit_selector == 5'd7)?     dst[7] :
+    (e_bit_selector == 5'd8)?     dst[8] :
+    (e_bit_selector == 5'd9)?     dst[9] :
+    (e_bit_selector == 5'd10)?    dst[10] :
+    (e_bit_selector == 5'd11)?    dst[11] :
+    (e_bit_selector == 5'd12)?    dst[12] :
+    (e_bit_selector == 5'd13)?    dst[13] :
+    (e_bit_selector == 5'd14)?    dst[14] :
+    (e_bit_selector == 5'd15)?    dst[15] :
+    (e_bit_selector == 5'd16)?    dst[16] :
+    (e_bit_selector == 5'd17)?    dst[17] :
+    (e_bit_selector == 5'd18)?    dst[18] :
+    (e_bit_selector == 5'd19)?    dst[19] :
+    (e_bit_selector == 5'd20)?    dst[20] :
+    (e_bit_selector == 5'd21)?    dst[21] :
+    (e_bit_selector == 5'd22)?    dst[22] :
+    (e_bit_selector == 5'd23)?    dst[23] :
+    (e_bit_selector == 5'd24)?    dst[24] :
+    (e_bit_selector == 5'd25)?    dst[25] :
+    (e_bit_selector == 5'd26)?    dst[26] :
+    (e_bit_selector == 5'd27)?    dst[27] :
+    (e_bit_selector == 5'd28)?    dst[28] :
+    (e_bit_selector == 5'd29)?    dst[29] :
+    (e_bit_selector == 5'd30)?    dst[30] :
+                                  dst[31];
+
+assign e_bit_value = (exe_cmd == `CMD_BTC)?     ~e_bit_selected :
+                     (exe_cmd == `CMD_BTR)?     1'b0 :
+                                                1'b1;
+
+assign e_bit_result =
+    (e_bit_selector == 5'd0)?     { dst[31:1],  e_bit_value } :
+    (e_bit_selector == 5'd1)?     { dst[31:2],  e_bit_value, dst[0] } :
+    (e_bit_selector == 5'd2)?     { dst[31:3],  e_bit_value, dst[1:0] } :
+    (e_bit_selector == 5'd3)?     { dst[31:4],  e_bit_value, dst[2:0] } :
+    (e_bit_selector == 5'd4)?     { dst[31:5],  e_bit_value, dst[3:0] } :
+    (e_bit_selector == 5'd5)?     { dst[31:6],  e_bit_value, dst[4:0] } :
+    (e_bit_selector == 5'd6)?     { dst[31:7],  e_bit_value, dst[5:0] } :
+    (e_bit_selector == 5'd7)?     { dst[31:8],  e_bit_value, dst[6:0] } :
+    (e_bit_selector == 5'd8)?     { dst[31:9],  e_bit_value, dst[7:0] } :
+    (e_bit_selector == 5'd9)?     { dst[31:10], e_bit_value, dst[8:0] } :
+    (e_bit_selector == 5'd10)?    { dst[31:11], e_bit_value, dst[9:0] } :
+    (e_bit_selector == 5'd11)?    { dst[31:12], e_bit_value, dst[10:0] } :
+    (e_bit_selector == 5'd12)?    { dst[31:13], e_bit_value, dst[11:0] } :
+    (e_bit_selector == 5'd13)?    { dst[31:14], e_bit_value, dst[12:0] } :
+    (e_bit_selector == 5'd14)?    { dst[31:15], e_bit_value, dst[13:0] } :
+    (e_bit_selector == 5'd15)?    { dst[31:16], e_bit_value, dst[14:0] } :
+    (e_bit_selector == 5'd16)?    { dst[31:17], e_bit_value, dst[15:0] } :
+    (e_bit_selector == 5'd17)?    { dst[31:18], e_bit_value, dst[16:0] } :
+    (e_bit_selector == 5'd18)?    { dst[31:19], e_bit_value, dst[17:0] } :
+    (e_bit_selector == 5'd19)?    { dst[31:20], e_bit_value, dst[18:0] } :
+    (e_bit_selector == 5'd20)?    { dst[31:21], e_bit_value, dst[19:0] } :
+    (e_bit_selector == 5'd21)?    { dst[31:22], e_bit_value, dst[20:0] } :
+    (e_bit_selector == 5'd22)?    { dst[31:23], e_bit_value, dst[21:0] } :
+    (e_bit_selector == 5'd23)?    { dst[31:24], e_bit_value, dst[22:0] } :
+    (e_bit_selector == 5'd24)?    { dst[31:25], e_bit_value, dst[23:0] } :
+    (e_bit_selector == 5'd25)?    { dst[31:26], e_bit_value, dst[24:0] } :
+    (e_bit_selector == 5'd26)?    { dst[31:27], e_bit_value, dst[25:0] } :
+    (e_bit_selector == 5'd27)?    { dst[31:28], e_bit_value, dst[26:0] } :
+    (e_bit_selector == 5'd28)?    { dst[31:29], e_bit_value, dst[27:0] } :
+    (e_bit_selector == 5'd29)?    { dst[31:30], e_bit_value, dst[28:0] } :
+    (e_bit_selector == 5'd30)?    { dst[31],    e_bit_value, dst[29:0] } :
+                                              { e_bit_value, dst[30:0] };
+</execute_local>
+
+
+<execute>
+IF({ exe_cmd[6:2], 2'd0 } == `CMD_BTx); // `CMDEX_MODREGRM || `CMDEX_MODREGRM_IMM
+    
+    SET(exe_result, e_bit_result);
+
+    SET(exe_result_signals, { 4'd0, e_bit_selected });
+
+ENDIF();
+</execute>
+
+<write>
+IF({ wr_cmd[6:2], 2'd0 } == `CMD_BTx); // `CMDEX_MODREGRM || `CMDEX_MODREGRM_IMM
+    
+    IF(wr_cmd[1:0] != 2'd0); // not BT
+        IF(wr_dst_is_memory && ~(write_for_wr_ready)); SET(wr_waiting); ENDIF(); // not BT
+    
+        SET(write_regrm,         wr_dst_is_rm);
+        SET(write_rmw_virtual,   wr_dst_is_memory);
+    ENDIF();
+    
+    SAVE(cflag, result_signals[0]);
+ENDIF();
+</write>

@@ -1,0 +1,75 @@
+
+<defines>
+`define CMD_NEG         #AUTOGEN_NEXT_CMD
+</defines>
+
+<decode>
+dec_ready_modregrm_one && { decoder[7:1], 1'b0 } == 8'hF6 && decoder[13:11] == 3'd3
+prefix_group_1_lock && `DEC_MODREGRM_IS_MOD_11
+`CMD_NEG
+IF(decoder[0] == 1'b0); SET(dec_is_8bit); ENDIF();
+SET(consume_modregrm_one);
+</decode>
+
+<read>
+IF(rd_cmd == `CMD_NEG);
+        
+    SET(rd_req_eflags);
+    SET(rd_dst_is_0);
+    
+    // dst: reg, src: reg
+    IF(rd_modregrm_mod == 2'b11);
+        
+        // reg, reg
+        SET(rd_dst_is_rm);
+        SET(rd_src_is_rm);
+        
+        SET(rd_req_rm);
+    
+        IF(rd_mutex_busy_modregrm_rm); SET(rd_waiting); ENDIF();
+    ENDIF();
+
+    // dst: memory, src: reg
+    IF(rd_modregrm_mod != 2'b11);
+
+        IF(rd_mutex_busy_memory); SET(rd_waiting);
+        ELSE();
+            SET(rd_dst_is_memory);
+            SET(rd_src_is_memory);
+            
+            SET(rd_req_memory);
+            
+            SET(read_rmw_virtual);
+
+            IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+        ENDIF();
+    ENDIF();
+ENDIF();
+</read>
+
+<execute>
+IF(exe_cmd == `CMD_NEG);
+    
+    SET(exe_arith_index, (`ARITH_VALID | `ARITH_SUB));
+    SET(exe_result, exe_arith_sub[31:0]);
+
+ENDIF();
+</execute>
+
+<write>
+IF(wr_cmd == `CMD_NEG);
+    
+    IF(wr_dst_is_memory && ~(write_for_wr_ready)); SET(wr_waiting); ENDIF();
+
+    SET(write_rmw_virtual,   wr_dst_is_memory);
+    SET(write_regrm,         wr_dst_is_rm);  
+
+    SAVE(zflag, zflag_result);
+    SAVE(sflag, sflag_result);
+    SAVE(pflag, pflag_result);
+
+    SAVE(aflag, aflag_arith);
+    SAVE(cflag, cflag_arith);
+    SAVE(oflag, oflag_arith);
+ENDIF();  
+</write>

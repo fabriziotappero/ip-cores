@@ -1,0 +1,75 @@
+
+<defines>
+`define CMD_LODS        #AUTOGEN_NEXT_CMD
+
+`define CMDEX_LODS_STEP_0   4'd0
+</defines>
+
+<decode>
+dec_ready_one && { decoder[7:1], 1'b0 } == 8'hAC
+`CMD_LODS
+SET(dec_cmdex, `CMDEX_LODS_STEP_0);
+IF(decoder[0] == 1'b0); SET(dec_is_8bit); ENDIF();
+SET(consume_one);
+IF(dec_prefix_group_1_rep != 2'd0); SET(dec_is_complex); ENDIF();
+</decode>
+
+<microcode>
+//complex instruction only if: dec_prefix_group_1_rep != 2'd0
+LOOP(`CMDEX_LODS_STEP_0);
+</microcode>
+
+<read>
+IF(rd_cmd == `CMD_LODS);
+            
+    SET(address_esi); // 5 cycle delay
+
+    //waiting for esi in 'address_waiting'
+
+    IF(rd_mutex_busy_memory || (rd_mutex_busy_ecx && rd_prefix_group_1_rep != 2'd0)); SET(rd_waiting); //waiting for ecx for rd_string_ignore
+    ELSE();
+        
+        IF(~(rd_string_ignore)); 
+            SET(rd_src_is_memory);
+            
+            SET(rd_req_eax);
+            SET(rd_req_esi);
+            //not needed -- reset after finish //IF(rd_prefix_group_1_rep != 2'd0); SET(rd_req_ecx); ENDIF();
+            
+            SET(read_virtual);
+
+            IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+        ENDIF();
+    ENDIF();
+ENDIF();
+</read>
+
+<execute>
+IF(exe_cmd == `CMD_LODS);
+    SET(exe_result2, src);
+ENDIF();
+</execute>
+
+<write>
+IF(wr_cmd == `CMD_LODS);
+    
+    IF(~(wr_string_ignore));
+        SAVE(esi, wr_esi_final);
+        IF(wr_prefix_group_1_rep != 2'd0); SAVE(ecx, wr_ecx_final); ENDIF();
+
+        SAVE(eax, (wr_is_8bit)? { eax[31:8], result2[7:0] } : (wr_operand_16bit)? { eax[31:16], result2[15:0] } : result2);
+    ENDIF();
+    
+    IF(wr_string_ignore || wr_string_finish);
+        SET(wr_req_reset_micro);
+        SET(wr_req_reset_rd);
+        SET(wr_req_reset_exe);
+    ENDIF();
+    
+    IF(~(wr_string_ignore) && ~(wr_string_finish) && wr_prefix_group_1_rep != 2'd0);
+        SET(wr_not_finished);
+        
+        SET(wr_string_in_progress);
+    ENDIF();
+ENDIF();  
+</write>

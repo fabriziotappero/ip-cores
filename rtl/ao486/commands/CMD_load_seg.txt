@@ -1,0 +1,219 @@
+
+<defines>
+`define CMD_load_seg    #AUTOGEN_NEXT_CMD
+// glob_param_1[15:0]  --> new selector
+// glob_param_1[18:16] --> segment to load (0-5, ES,CS,SS,DS,FS,GS, 6-LDT, 7-TR)
+// glob_param_1[19]    --> flag: no write bit
+// glob_param_1[20]    --> flag: cpl from mc_param_3[1:0]
+
+`define CMDEX_load_seg_STEP_1    4'd0
+`define CMDEX_load_seg_STEP_2    4'd1
+</defines>
+
+
+<microcode>
+IF(mc_cmd == `CMD_load_seg && (~(protected_mode) || (protected_mode && mc_cmdex_last == `CMDEX_load_seg_STEP_2)));
+    RETURN();
+ENDIF();
+
+IF(mc_cmd == `CMD_load_seg && protected_mode && mc_cmdex_last == `CMDEX_load_seg_STEP_1);
+    `CMDEX_load_seg_STEP_2
+ENDIF();
+</microcode>
+
+<read>
+IF(rd_cmd == `CMD_load_seg && rd_cmdex == `CMDEX_load_seg_STEP_1);
+    IF(v8086_mode);
+        SET(rd_glob_descriptor_set);
+        SET(rd_glob_descriptor_value, `DESC_MASK_P | `DESC_MASK_DPL | `DESC_MASK_SEG | `DESC_MASK_DATA_RWA | { 24'd0, 4'd0, glob_param_1[15:12], glob_param_1[11:0], 4'd0, 16'hFFFF });
+    ENDIF();
+    
+    IF(real_mode);
+        SET(rd_glob_descriptor_set);
+        SET(rd_glob_descriptor_value, `DESC_MASK_P | `DESC_MASK_SEG | { 24'd0, 4'd0, glob_param_1[15:12], glob_param_1[11:0], 4'd0, 16'd0 });
+    ENDIF();
+    
+    IF(protected_mode);
+        SET(rd_glob_descriptor_set);
+        SET(rd_glob_descriptor_value, `DESC_MASK_SEG | { 24'd0, 24'd0, 16'd0 });
+    ENDIF();
+ENDIF();
+</read>
+
+<read>
+IF(rd_cmd == `CMD_load_seg && rd_cmdex == `CMDEX_load_seg_STEP_2);
+    
+    IF(~(protected_mode && glob_param_1[15:2] == 14'd0)); // load null
+        
+        SET(rd_error_code, { glob_param_1[15:2], 2'd0 });
+        
+        SET(rd_glob_descriptor_set);
+        SET(rd_glob_descriptor_value, read_8);
+        
+        IF(rd_mutex_busy_active); SET(rd_waiting); // wait for previous step -- exception possible
+        ELSE();
+            SET(read_system_descriptor);
+
+            IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+        ENDIF();
+    ENDIF();
+ENDIF();
+</read>
+
+<execute_local>
+wire [1:0] e_cpl_current;
+
+assign e_cpl_current = (glob_param_1[`MC_PARAM_1_FLAG_CPL_FROM_PARAM_3_BIT])? glob_param_3[`SELECTOR_BITS_RPL] : cpl;
+
+assign exe_load_seg_gp_fault =
+    exe_cmd == `CMD_load_seg && exe_cmdex == `CMDEX_load_seg_STEP_2 && (
+        (exe_segment < `SEGMENT_LDT && exe_segment != `SEGMENT_CS) && (
+            exe_descriptor[`DESC_BIT_SEG] == `FALSE ||
+            (exe_segment == `SEGMENT_SS && (
+                exe_selector[`SELECTOR_BITS_RPL] != e_cpl_current ||
+                `DESC_IS_CODE(exe_descriptor) ||
+                `DESC_IS_DATA_RO(exe_descriptor) ||
+                exe_descriptor[`DESC_BITS_DPL] != e_cpl_current
+            )) ||
+            (exe_segment != `SEGMENT_SS && (
+                `DESC_IS_CODE_EO(exe_descriptor) ||
+                ((`DESC_IS_DATA(exe_descriptor) || `DESC_IS_CODE_NON_CONFORMING(exe_descriptor)) && exe_privilege_not_accepted)
+            ))
+        ) ||
+        (exe_segment == `SEGMENT_LDT && (exe_descriptor[`DESC_BIT_SEG] || exe_descriptor[`DESC_BITS_TYPE] != `DESC_LDT)
+        ) ||
+        (exe_segment == `SEGMENT_TR && (exe_descriptor[`DESC_BIT_SEG] || 
+            (exe_descriptor[`DESC_BITS_TYPE] != `DESC_TSS_AVAIL_386 && exe_descriptor[`DESC_BITS_TYPE] != `DESC_TSS_AVAIL_286))
+        ) ||
+        (exe_segment == `SEGMENT_CS && (
+            exe_selector[`SELECTOR_BITS_RPL] < cpl ||
+            exe_descriptor[`DESC_BIT_SEG] == `FALSE ||
+            `DESC_IS_DATA(exe_descriptor) ||
+            (`DESC_IS_CODE_NON_CONFORMING(exe_descriptor) && exe_descriptor[`DESC_BITS_DPL] != exe_selector[`SELECTOR_BITS_RPL]) ||
+            // check_rpl > check_cpl : ignored
+            (`DESC_IS_CODE_CONFORMING(exe_descriptor) && exe_descriptor[`DESC_BITS_DPL] > exe_selector[`SELECTOR_BITS_RPL])
+        ))
+    );
+//exception, cmd_load_seg
+assign exe_load_seg_ss_fault =
+    exe_cmd == `CMD_load_seg && exe_cmdex == `CMDEX_load_seg_STEP_2 &&
+    ~(glob_param_1[`MC_PARAM_1_FLAG_NP_NOT_SS_BIT]) && exe_segment == `SEGMENT_SS && exe_descriptor[`DESC_BIT_P] == `FALSE;
+
+//exception, cmd_load_seg
+assign exe_load_seg_np_fault =
+    exe_cmd == `CMD_load_seg && exe_cmdex == `CMDEX_load_seg_STEP_2 &&
+    (glob_param_1[`MC_PARAM_1_FLAG_NP_NOT_SS_BIT] || exe_segment != `SEGMENT_SS) && exe_descriptor[`DESC_BIT_P] == `FALSE; // with cs
+</execute_local>
+
+
+<execute>
+IF(exe_cmd == `CMD_load_seg && exe_cmdex == `CMDEX_load_seg_STEP_1);
+            
+    IF(protected_mode);
+        IF(((glob_param_1[18:16] == `SEGMENT_SS || glob_param_1[18:16] == `SEGMENT_TR || glob_param_1[18:16] == `SEGMENT_CS) && glob_param_1[15:2] == 14'd0) || // CS, SS or TR can not be null
+           ((glob_param_1[18:16] == `SEGMENT_LDT || glob_param_1[18:16] == `SEGMENT_TR) && glob_param_1[`SELECTOR_BIT_TI] == 1'b1));
+        
+            SET(exe_waiting);
+            SET(exe_trigger_gp_fault); //exception GP(val)
+            SET(exe_error_code, { glob_param_1[15:2], 2'd0 });
+        ENDIF();
+    ENDIF();
+ENDIF();
+</execute>
+
+<execute>    
+IF(exe_cmd == `CMD_load_seg && exe_cmdex == `CMDEX_load_seg_STEP_2);
+            
+    IF(~(protected_mode && glob_param_1[15:2] == 14'd0)); // load null
+        SET(exe_error_code, { glob_param_1[15:2], 2'd0 });
+
+        IF(exe_load_seg_gp_fault || exe_load_seg_ss_fault || exe_load_seg_np_fault); SET(exe_waiting); ENDIF();
+    ENDIF();
+ENDIF();
+</execute>
+
+<write>
+IF(wr_cmd == `CMD_load_seg && wr_cmdex == `CMDEX_load_seg_STEP_1);
+    
+    SET(wr_not_finished);
+
+    SET(wr_seg_sel, glob_param_1[15:0]);
+    
+    IF(v8086_mode);
+        SET(wr_seg_cache_valid,  `TRUE);
+        
+        SET(write_seg_cache);
+        
+        SET(write_seg_sel);
+        SET(write_seg_cache_valid);
+        
+        SET(wr_seg_rpl,      2'd3);
+        SET(write_seg_rpl);
+    ENDIF();
+    
+    IF(real_mode);
+        SET(wr_seg_cache_valid,  `TRUE);
+        
+        SET(write_seg_cache);
+        SET(wr_seg_cache_mask, `DESC_MASK_G | `DESC_MASK_D_B | `DESC_MASK_AVL | `DESC_MASK_LIMIT | `DESC_MASK_DPL | `DESC_MASK_TYPE);
+        
+        SET(write_seg_sel);
+        SET(write_seg_cache_valid);
+        
+        SET(wr_seg_rpl,      2'd0);
+        SET(write_seg_rpl);
+    ENDIF();
+    
+    IF(protected_mode && glob_param_1[15:2] == 14'd0); // load null
+        //wr_seg_cache_valid -- default false
+        SET(write_seg_cache);
+        
+        SET(write_seg_sel);
+        SET(write_seg_cache_valid);
+        
+        SET(wr_seg_rpl, glob_param_1[1:0]);
+        SET(write_seg_rpl);
+    ENDIF();
+ENDIF();
+</write>
+
+<write>
+IF(wr_cmd == `CMD_load_seg && wr_cmdex == `CMDEX_load_seg_STEP_2);
+    
+    SET(wr_not_finished);
+
+    IF(~(protected_mode && (glob_param_1[15:2] == 14'd0 || glob_param_1[`MC_PARAM_1_FLAG_NO_WRITE_BIT]))); // load null or cs
+
+        SET(wr_seg_rpl,          glob_param_1[1:0]);
+        SET(wr_seg_cache_valid,  `TRUE);
+        SET(wr_seg_sel,          glob_param_1[15:0]);
+
+        IF(glob_param_1[18:16] == `SEGMENT_TR || (glob_param_1[18:16] < `SEGMENT_LDT && `DESC_IS_NOT_ACCESSED(glob_descriptor)));
+
+            IF(glob_param_1[18:16] == `SEGMENT_TR); SET(write_system_busy_tss);
+            ELSE();                                 SET(write_system_touch);
+            ENDIF();
+            
+            IF(~(write_for_wr_ready)); SET(wr_waiting);
+            ELSE();
+                SET(write_seg_cache);
+                //wr_seg_cache_mask zero
+
+                SET(write_seg_sel);
+                SET(write_seg_cache_valid);
+                SET(write_seg_rpl);
+            ENDIF();
+        ENDIF();
+        
+        IF(glob_param_1[18:16] == `SEGMENT_LDT || (glob_param_1[18:16] < `SEGMENT_LDT && `DESC_IS_ACCESSED(glob_descriptor)));
+            SET(write_seg_cache);
+            //wr_seg_cache_mask zero
+
+            SET(write_seg_sel);
+            SET(write_seg_cache_valid);
+            SET(write_seg_rpl);
+        ENDIF();
+    ENDIF();
+ENDIF();
+</write>
+

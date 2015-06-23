@@ -1,0 +1,112 @@
+
+<defines>
+`define CMD_PUSH        #AUTOGEN_NEXT_CMD
+
+`define CMDEX_PUSH_implicit     4'd0
+`define CMDEX_PUSH_immediate_se 4'd1
+`define CMDEX_PUSH_immediate    4'd2
+`define CMDEX_PUSH_modregrm     4'd3
+</defines>
+
+<decode>
+dec_ready_one && { decoder[7:3], 3'b0 } == 8'h50
+`CMD_PUSH
+SET(dec_cmdex, `CMDEX_PUSH_implicit);
+SET(consume_one);
+</decode>
+
+<decode>
+dec_ready_one_imm && (decoder[7:0] == 8'h6A || decoder[7:0] == 8'h68)
+`CMD_PUSH
+IF(decoder[1]); SET(dec_cmdex, `CMDEX_PUSH_immediate_se); ELSE(); SET(dec_cmdex, `CMDEX_PUSH_immediate); ENDIF();
+SET(consume_one_imm);
+</decode>
+
+<decode>
+dec_ready_modregrm_one && decoder[7:0] == 8'hFF && decoder[13:11] == 3'd6
+`CMD_PUSH
+SET(dec_cmdex, `CMDEX_PUSH_modregrm);
+SET(consume_modregrm_one);
+</decode>
+
+<read>
+IF(rd_cmd == `CMD_PUSH && (rd_cmdex == `CMDEX_PUSH_immediate || rd_cmdex == `CMDEX_PUSH_immediate_se));
+    SET(rd_src_is_imm);
+
+    SET(rd_req_memory);
+    SET(rd_req_esp);
+ENDIF();
+</read>
+
+<read>
+IF(rd_cmd == `CMD_PUSH && rd_cmdex == `CMDEX_PUSH_implicit);
+
+    SET(rd_src_is_implicit_reg);
+
+    SET(rd_req_memory);
+    SET(rd_req_esp);
+
+    IF(rd_mutex_busy_implicit_reg); SET(rd_waiting); ENDIF();
+ENDIF();
+</read>
+
+<read>
+IF(rd_cmd == `CMD_PUSH && rd_cmdex == `CMDEX_PUSH_modregrm);
+    
+    SET(rd_req_memory);
+    SET(rd_req_esp);
+
+    // dst: reg
+    IF(rd_modregrm_mod == 2'b11);
+        
+        SET(rd_src_is_rm);
+        
+        IF(rd_mutex_busy_modregrm_rm); SET(rd_waiting); ENDIF();
+    ENDIF();
+
+    // dst: memory
+    IF(rd_modregrm_mod != 2'b11);
+        
+        SET(rd_src_is_memory);
+    
+        IF(rd_mutex_busy_memory); SET(rd_waiting);
+        ELSE();
+            SET(read_virtual);
+
+            IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+        ENDIF();
+    ENDIF();
+ENDIF();
+</read>
+
+<execute>
+IF(exe_cmd == `CMD_PUSH);
+    
+    IF(exe_cmdex == `CMDEX_PUSH_immediate_se);
+        SET(exe_result_push, { {24{src[7]}}, src[7:0] });
+    ELSE();
+        SET(exe_result_push, src);
+    ENDIF();
+
+    IF(exe_mutex_current[`MUTEX_ESP_BIT]); SET(exe_waiting); ENDIF();
+ENDIF();
+</execute>
+
+<write>
+IF(wr_cmd == `CMD_PUSH);
+
+    SET(wr_push_ss_fault_check);
+    SET(wr_one_cycle_wait);
+    
+    IF(~(write_for_wr_ready)); SET(wr_waiting); ENDIF();
+    
+    IF(~(wr_push_ss_fault));
+        SET(write_stack_virtual);
+    ENDIF();
+    
+    IF(write_for_wr_ready && ~(wr_push_ss_fault));
+        SAVE(esp, wr_stack_esp);
+    ENDIF();
+ENDIF();
+</write>
+

@@ -1,0 +1,263 @@
+
+<defines>
+`define CMD_control_reg         #AUTOGEN_NEXT_CMD
+
+`define CMDEX_control_reg_SMSW_STEP_0       4'd0
+
+`define CMDEX_control_reg_LMSW_STEP_0       4'd1
+`define CMDEX_control_reg_LMSW_STEP_1       4'd2
+
+`define CMDEX_control_reg_MOV_store_STEP_0  4'd3
+
+`define CMDEX_control_reg_MOV_load_STEP_0   4'd4
+`define CMDEX_control_reg_MOV_load_STEP_1   4'd5
+</defines>
+
+<decode>
+dec_ready_2byte_modregrm && decoder[7:0] == 8'h01 && decoder[13:11] == 3'd4
+`CMD_control_reg
+SET(dec_cmdex, `CMDEX_control_reg_SMSW_STEP_0);
+SET(consume_modregrm_one);
+</decode>
+
+<decode>
+dec_ready_2byte_modregrm && decoder[7:0] == 8'h01 && decoder[13:11] == 3'd6
+`CMD_control_reg
+SET(dec_cmdex, `CMDEX_control_reg_LMSW_STEP_0);
+SET(consume_modregrm_one);
+SET(dec_is_complex);
+</decode>
+
+<decode>
+dec_ready_2byte_modregrm && { decoder[7:2], 1'b0, decoder[0] } == 8'h20
+prefix_group_1_lock || (decoder[13:11] != 3'd0 && decoder[13:11] != 3'd2 && decoder[13:11] != 3'd3)
+`CMD_control_reg
+IF(decoder[1]); SET(dec_cmdex, `CMDEX_control_reg_MOV_load_STEP_0); ELSE(); SET(dec_cmdex, `CMDEX_control_reg_MOV_store_STEP_0); ENDIF();
+SET(consume_modregrm_one);
+IF(decoder[1]); SET(dec_is_complex); ENDIF();
+</decode>
+
+<microcode>
+IF(`CMDEX_control_reg_LMSW_STEP_0);
+    LOOP(`CMDEX_control_reg_LMSW_STEP_1);
+ENDIF();
+
+IF(`CMDEX_control_reg_MOV_load_STEP_0);
+    LOOP(`CMDEX_control_reg_MOV_load_STEP_1);
+ENDIF();
+</microcode>
+
+<read>
+IF(rd_cmd == `CMD_control_reg && rd_cmdex == `CMDEX_control_reg_SMSW_STEP_0);
+        
+    IF(rd_modregrm_mod == 2'b11);
+
+        SET(rd_dst_is_rm);
+        
+        SET(rd_req_rm);
+    ENDIF();
+
+    IF(rd_modregrm_mod != 2'b11);
+        
+        SET(rd_dst_is_memory);
+        
+        SET(rd_req_memory);
+        
+        SET(write_virtual_check);
+
+        IF(~(write_virtual_check_ready)); SET(rd_waiting); ENDIF();
+    ENDIF();
+ENDIF();
+</read>
+
+<read>
+IF(rd_cmd == `CMD_control_reg && rd_cmdex == `CMDEX_control_reg_LMSW_STEP_0);
+            
+    IF(cpl == 2'd0);
+        // dst: reg, src: reg
+        IF(rd_modregrm_mod == 2'b11);
+            
+            SET(rd_src_is_rm);
+            
+            // no req required
+            IF(rd_mutex_busy_modregrm_rm); SET(rd_waiting); ENDIF();
+        ENDIF();
+
+        IF(rd_modregrm_mod != 2'b11);
+            
+            SET(rd_src_is_memory);
+        
+            IF(rd_mutex_busy_memory); SET(rd_waiting);
+            ELSE();
+                SET(read_length_word);
+                SET(read_virtual);
+
+                // no req required
+                IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+            ENDIF();
+        ENDIF();
+    ENDIF();
+ENDIF();
+</read>
+
+<read>
+IF(rd_cmd == `CMD_control_reg && rd_cmdex == `CMDEX_control_reg_MOV_load_STEP_0);
+    
+    SET(rd_src_is_rm);
+    
+    // no req required
+    IF(rd_mutex_busy_modregrm_rm); SET(rd_waiting); ENDIF();
+ENDIF();
+</read>
+
+<read>
+IF(rd_cmd == `CMD_control_reg && rd_cmdex == `CMDEX_control_reg_MOV_store_STEP_0);
+        
+    SET(rd_dst_is_rm);
+    
+    SET(rd_req_rm);    
+ENDIF();
+</read>
+
+<execute>
+IF(exe_cmd == `CMD_control_reg && exe_cmdex == `CMDEX_control_reg_LMSW_STEP_0);
+    
+    SET(exe_result2, src);
+
+    IF(cpl > 2'd0);
+        SET(exe_waiting);
+        SET(exe_trigger_gp_fault); //exception GP(0)
+    ENDIF(); 
+ENDIF();
+</execute>
+
+<execute_local>
+wire [31:0] e_cr0_reg;
+
+assign e_cr0_reg = { cr0_pg, cr0_cd, cr0_nw, 10'b0, cr0_am, 1'b0, cr0_wp, 10'b0, cr0_ne, 1'b1, cr0_ts, cr0_em, cr0_mp, cr0_pe };
+</execute_local>
+
+<execute>
+IF(exe_cmd == `CMD_control_reg && exe_cmdex == `CMDEX_control_reg_MOV_store_STEP_0);
+
+    IF(exe_modregrm_reg == 3'd0);
+        SET(exe_result, e_cr0_reg);
+    ENDIF();
+    
+    IF(exe_modregrm_reg == 3'd2);
+        SET(exe_result, cr2);
+    ENDIF();
+    
+    IF(exe_modregrm_reg == 3'd3);
+        SET(exe_result, cr3);
+    ENDIF();
+    
+    IF(cpl > 2'd0);
+        SET(exe_waiting);
+        SET(exe_trigger_gp_fault); //exception GP(0)
+    ENDIF(); 
+ENDIF();
+</execute>
+
+<execute>
+IF(exe_cmd == `CMD_control_reg && exe_cmdex == `CMDEX_control_reg_MOV_load_STEP_0);
+
+    SET(exe_result2, src);
+
+    IF(cpl > 2'd0 || (exe_modregrm_reg == 3'd0 && ((src[31] && ~(src[0])) || (src[29] && ~(src[30]))))); // CR0: (PG && ~PE) || (NW && ~CD)
+        SET(exe_waiting);
+        SET(exe_trigger_gp_fault); //exception GP(0)
+    ENDIF(); 
+ENDIF();
+</execute>
+
+<execute>
+IF(exe_cmd == `CMD_control_reg && exe_cmdex == `CMDEX_control_reg_SMSW_STEP_0);
+    SET(exe_result, e_cr0_reg);
+ENDIF();
+</execute>
+
+<write>
+IF(wr_cmd == `CMD_control_reg && wr_cmdex == `CMDEX_control_reg_SMSW_STEP_0);
+
+    SET(write_length_word);
+
+    IF(wr_dst_is_memory && ~(write_for_wr_ready)); SET(wr_waiting); ENDIF();
+    
+    SET(write_regrm,     wr_dst_is_rm);
+    SET(write_virtual,   wr_dst_is_memory);
+ENDIF();  
+</write>
+
+<write>
+IF(wr_cmd == `CMD_control_reg && wr_cmdex == `CMDEX_control_reg_LMSW_STEP_0);
+    
+    SAVE(cr0_pe, cr0_pe | result2[0]);
+    SAVE(cr0_mp, result2[1]);
+    SAVE(cr0_em, result2[2]);
+    SAVE(cr0_ts, result2[3]);
+    
+    IF(cr0_pe ^ result2[0]);
+        SET(tlbflushall_do); //can not enable paging this way, so no need to wait for flush
+    ENDIF();
+    
+    // reset all pipeline
+    SET(wr_req_reset_pr);
+    SET(wr_req_reset_dec);
+    SET(wr_req_reset_micro);
+    SET(wr_req_reset_rd);
+    SET(wr_req_reset_exe);
+ENDIF();
+</write>
+
+<write>
+IF(wr_cmd == `CMD_control_reg && wr_cmdex == `CMDEX_control_reg_MOV_store_STEP_0);
+    SET(wr_regrm_dword);
+    SET(write_regrm);
+ENDIF();  
+</write>
+
+<write>
+IF(wr_cmd == `CMD_control_reg && wr_cmdex == `CMDEX_control_reg_MOV_load_STEP_0);
+    
+    IF(wr_decoder[13:11] == 3'd0);
+        SAVE(cr0_pe, result2[0]);
+        SAVE(cr0_mp, result2[1]);
+        SAVE(cr0_em, result2[2]);
+        SAVE(cr0_ts, result2[3]);
+        SAVE(cr0_ne, result2[5]);
+        SAVE(cr0_wp, result2[16]);
+        SAVE(cr0_am, result2[18]);
+        SAVE(cr0_nw, result2[29]);
+        SAVE(cr0_cd, result2[30]);
+        SAVE(cr0_pg, result2[31]);
+
+        IF((cr0_pe ^ result2[0]) || (cr0_wp ^ result2[16]) || (cr0_pg ^ result[31]));
+            SET(tlbflushall_do);
+        ENDIF();
+        
+        //entering real mode
+        IF(cr0_pe && result2[0] == 1'b0);
+            SAVE(cs_cache, { cs_cache[63:48], 1'b1, cs_cache[46:45], 1'b1, 4'b0011, cs_cache[39:0] }); //present, segment=1, data r/w/a
+        ENDIF();
+    ENDIF();
+    
+    IF(wr_decoder[13:11] == 3'd2);
+        SAVE(cr2, result2);
+    ENDIF();
+    
+    IF(wr_decoder[13:11] == 3'd3);
+        SET(tlbflushall_do);
+        
+        SAVE(cr3, result2);
+    ENDIF();
+    
+    // clear pipeline -- paging may be enabled
+    SET(wr_req_reset_pr);
+    SET(wr_req_reset_dec);
+    SET(wr_req_reset_micro);
+    SET(wr_req_reset_rd);
+    SET(wr_req_reset_exe);
+ENDIF();
+</write>
+

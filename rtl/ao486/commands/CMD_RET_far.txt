@@ -1,0 +1,292 @@
+
+<defines>
+`define CMD_RET_far     #AUTOGEN_NEXT_CMD
+
+// glob_param_1[15:0]  --> new cs selector
+// glob_param_1[18:16] --> cs segment: 1
+// glob_param_2[31:0]  --> eip
+// glob_param_3 --> backup mc_param_1
+// glob_param_4 --> esp
+
+`define CMDEX_RET_far_STEP_1        4'd1
+`define CMDEX_RET_far_STEP_2        4'd2
+`define CMDEX_RET_far_real_STEP_3   4'd3
+`define CMDEX_RET_far_same_STEP_3   4'd4
+`define CMDEX_RET_far_same_STEP_4   4'd5
+`define CMDEX_RET_far_outer_STEP_3  4'd6
+`define CMDEX_RET_far_outer_STEP_4  4'd7
+`define CMDEX_RET_far_outer_STEP_5  4'd8
+`define CMDEX_RET_far_outer_STEP_6  4'd9
+`define CMDEX_RET_far_outer_STEP_7  4'd10
+</defines>
+
+<decode>
+(dec_ready_one && decoder[7:0] == 8'hCB) || (dec_ready_one_two && decoder[7:0] == 8'hCA)
+`CMD_RET_far
+SET(dec_cmdex, `CMDEX_RET_far_STEP_1);
+IF(decoder[0] == 1'b0); SET(consume_one_two); ELSE(); SET(consume_one); ENDIF();
+SET(dec_is_complex);
+</decode>
+
+<microcode>
+`CMDEX_RET_far_STEP_1
+`CMDEX_RET_far_STEP_2
+CALL(`CMDEX_load_seg_STEP_1);
+DIRECT(`CMD_RET_far, (real_mode || v8086_mode)? `CMDEX_RET_far_real_STEP_3 : (glob_param_1[`SELECTOR_BITS_RPL] == cpl)? `CMDEX_RET_far_same_STEP_3 : `CMDEX_RET_far_outer_STEP_3);
+
+IF(`CMDEX_RET_far_real_STEP_3);
+    LOOP(`CMDEX_RET_far_real_STEP_3);
+ENDIF();
+
+IF(`CMDEX_RET_far_same_STEP_3);
+    LOOP(`CMDEX_RET_far_same_STEP_4);
+ENDIF();
+
+IF(`CMDEX_RET_far_outer_STEP_3);
+    `CMDEX_RET_far_outer_STEP_4
+    CALL(`CMDEX_load_seg_STEP_1);
+    `CMDEX_RET_far_outer_STEP_5
+    `CMDEX_RET_far_outer_STEP_6
+    LOOP(`CMDEX_RET_far_outer_STEP_7);
+ENDIF();
+</microcode>
+
+<read>
+IF(rd_cmd == `CMD_RET_far && rd_cmdex == `CMDEX_RET_far_outer_STEP_3);
+
+    SET(address_stack_pop_next);
+    SET(address_stack_pop_esp_prev);
+    
+    SET(rd_glob_param_1_set, rd_ready);
+    SET(rd_glob_param_1_value, { `MC_PARAM_1_FLAG_CPL_FROM_PARAM_3, `SEGMENT_SS, read_4[15:0] }); // read ss
+    
+    SET(rd_glob_param_3_set);
+    SET(rd_glob_param_3_value, glob_param_1);
+    
+    SET(rd_glob_descriptor_2_set);
+    SET(rd_glob_descriptor_2_value, glob_descriptor); 
+    
+    SET(read_length_word);
+    SET(read_virtual);
+
+    IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+ENDIF();
+</read>
+
+<read>
+IF(rd_cmd == `CMD_RET_far && rd_cmdex == `CMDEX_RET_far_STEP_1);
+            
+    SET(address_stack_pop,       real_mode || v8086_mode);
+    SET(address_stack_pop_next,  protected_mode);
+    SET(address_stack_save);
+    SET(address_stack_for_ret_first);
+    
+    IF(rd_mutex_busy_memory); SET(rd_waiting); // waiting for esp in 'address_waiting'
+    ELSE();
+        
+        IF(real_mode || v8086_mode);
+            SET(rd_glob_param_2_set);
+            SET(rd_glob_param_2_value, (rd_operand_16bit)? { 16'd0, read_4[15:0] } : read_4); // read eip
+        ENDIF(); 
+        
+        IF(protected_mode);
+            SET(rd_glob_param_1_set);
+            SET(rd_glob_param_1_value, { `MC_PARAM_1_FLAG_NO_WRITE, `SEGMENT_CS, read_4[15:0] }); // read cs
+        ENDIF(); 
+        
+        SET(read_virtual);
+
+        IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+    ENDIF();
+ENDIF();
+</read>
+
+<read>
+IF(rd_cmd == `CMD_RET_far && rd_cmdex == `CMDEX_RET_far_STEP_2);
+            
+    SET(address_stack_pop_speedup,  real_mode || v8086_mode);
+    SET(address_stack_pop,          real_mode || v8086_mode);
+        
+    SET(address_stack_pop_next,     protected_mode);
+
+    IF(rd_mutex_busy_memory); SET(rd_waiting); // waiting for esp in 'address_waiting'
+    ELSE();
+        
+        IF(real_mode || v8086_mode);
+            SET(rd_glob_param_1_set);
+            SET(rd_glob_param_1_value, { `MC_PARAM_1_FLAG_NO_WRITE, `SEGMENT_CS, read_4[15:0] }); // read cs
+        ENDIF();
+        
+        IF(protected_mode);
+            SET(rd_glob_param_2_set);
+            SET(rd_glob_param_2_value, (rd_operand_16bit)? { 16'd0, read_4[15:0] } : read_4); // read eip
+        ENDIF();
+        
+        SET(read_virtual);
+
+        IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+    ENDIF();
+ENDIF();
+</read>
+
+<read>
+IF(rd_cmd == `CMD_RET_far && rd_cmdex == `CMDEX_RET_far_outer_STEP_3);
+    SET(address_stack_save);
+    SET(address_stack_for_ret_second);
+ENDIF();
+</read>
+
+
+<read>
+IF(rd_cmd == `CMD_RET_far && rd_cmdex == `CMDEX_RET_far_outer_STEP_4);
+            
+    SET(address_stack_pop_next);
+
+    SET(rd_glob_param_4_set);
+    SET(rd_glob_param_4_value, (rd_operand_16bit)? { 16'd0, read_4[15:0] } : read_4); // read esp
+    
+    SET(read_virtual);
+    
+    IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+ENDIF();
+</read>
+
+<execute>
+IF(exe_cmd == `CMD_RET_far  && exe_cmdex == `CMDEX_RET_far_STEP_1);
+    SET(offset_pop);
+ENDIF();
+</execute>
+
+<execute>
+IF(exe_cmd == `CMD_RET_far && exe_cmdex == `CMDEX_RET_far_STEP_2);
+            
+    IF((v8086_mode || real_mode) && glob_param_2 > cs_limit); // protected cs null check in load_seg
+        SET(exe_waiting);
+        SET(exe_trigger_gp_fault); //exception GP(val)
+    ENDIF();
+ENDIF();
+</execute>
+
+
+<execute>
+IF(exe_cmd == `CMD_RET_far && exe_cmdex == `CMDEX_RET_far_same_STEP_3);
+    
+    SET(offset_pop, exe_decoder[0] == 1'b1);
+    SET(offset_ret, exe_decoder[0] == 1'b0);
+    
+    IF(glob_param_2 > glob_desc_limit);
+        SET(exe_waiting);
+        SET(exe_trigger_gp_fault); //exception GP(0)
+    ENDIF();
+
+ENDIF();
+</execute>
+
+<execute>
+IF(exe_cmd == `CMD_RET_far && exe_cmdex == `CMDEX_RET_far_outer_STEP_5);
+
+    IF(glob_param_2 > glob_desc_2_limit);
+    
+        SET(exe_waiting);
+        SET(exe_trigger_gp_fault); //exception GP(0)
+    ELSE();
+        SET(exe_glob_descriptor_set);
+        SET(exe_glob_descriptor_value, glob_descriptor_2);
+        
+        SET(exe_glob_descriptor_2_set);
+        SET(exe_glob_descriptor_2_value, glob_descriptor);
+        
+        SET(exe_glob_param_1_set);
+        SET(exe_glob_param_1_value, glob_param_3);
+        
+        SET(exe_glob_param_3_set);
+        SET(exe_glob_param_3_value, glob_param_1);
+    ENDIF();
+ENDIF();
+</execute>
+
+<execute>
+IF(exe_cmd == `CMD_RET_far && exe_cmdex == `CMDEX_RET_far_outer_STEP_6);
+    
+    SET(exe_glob_descriptor_set, exe_ready);
+    SET(exe_glob_descriptor_value, glob_descriptor_2);
+    
+    SET(exe_glob_descriptor_2_set, exe_ready);
+    SET(exe_glob_descriptor_2_value, glob_descriptor);
+
+    SET(exe_glob_param_1_set, exe_ready);
+    SET(exe_glob_param_1_value, glob_param_3);
+    
+    SET(exe_glob_param_3_set, exe_ready);
+    SET(exe_glob_param_3_value, glob_param_1);
+ENDIF();
+</execute>
+    
+<execute>
+IF(exe_cmd == `CMD_RET_far && exe_cmdex == `CMDEX_RET_far_outer_STEP_7);
+    
+    SET(offset_iret_glob_param_4,   exe_decoder[0] == 1'b1);
+    SET(offset_ret_imm,             exe_decoder[0] == 1'b0);
+    
+    SET(exe_eip_from_glob_param_2);
+
+    IF(exe_mutex_current[`MUTEX_ACTIVE_BIT]); SET(exe_waiting); ENDIF(); // wait for ss write
+ENDIF();
+</execute>
+
+<execute>
+IF(exe_cmd == `CMD_RET_far && (exe_cmdex == `CMDEX_RET_far_real_STEP_3 || exe_cmdex == `CMDEX_RET_far_same_STEP_4));
+
+    IF(exe_cmdex == `CMDEX_RET_far_real_STEP_3);
+        SET(offset_pop, exe_decoder[0] == 1'b1); // RET far without imm
+        SET(offset_ret, exe_decoder[0] == 1'b0); // RET far with imm
+        
+        SET(offset_ret_far_se);
+    ENDIF();
+
+    SET(exe_eip_from_glob_param_2);
+ENDIF();
+</execute>
+
+<write>
+IF(wr_cmd == `CMD_RET_far && wr_cmdex == `CMDEX_RET_far_STEP_1);
+    
+    SET(wr_make_esp_speculative);
+    SAVE(esp, wr_stack_esp);
+    
+    SET(wr_not_finished);
+ENDIF();
+</write>
+
+<write>
+IF(wr_cmd == `CMD_RET_far && wr_cmdex == `CMDEX_RET_far_STEP_2);
+    SET(wr_not_finished);
+ENDIF();
+</write>
+
+<write>
+IF(wr_cmd == `CMD_RET_far && wr_cmdex == `CMDEX_RET_far_real_STEP_3);
+    
+    SAVE(esp, wr_stack_esp);
+    SET(wr_make_esp_commit);
+    
+    // clear pipeline
+    SET(wr_req_reset_pr);
+    SET(wr_req_reset_dec);
+    SET(wr_req_reset_micro);
+    SET(wr_req_reset_rd);
+    SET(wr_req_reset_exe);
+ENDIF();
+</write>
+
+<write>
+IF(wr_cmd == `CMD_RET_far && wr_cmdex == `CMDEX_RET_far_outer_STEP_3);
+    SET(wr_not_finished);
+ENDIF();
+</write>
+
+<write>
+IF(wr_cmd == `CMD_RET_far && wr_cmdex == `CMDEX_RET_far_outer_STEP_4);
+    SET(wr_not_finished);
+ENDIF();
+</write>

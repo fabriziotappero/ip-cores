@@ -1,0 +1,836 @@
+To add an Ethernet real-time dump of io accesses make the following changes to the source code:
+
+soc.v ports:
+[
+    //debug - ethernet
+    output          ENET0_GTX_CLK,
+    output          ENET0_RST_N,
+    input           ENET0_RX_CLK,
+    input   [3:0]   ENET0_RX_DATA,
+    input           ENET0_RX_DV,
+    output  [3:0]   ENET0_TX_DATA,
+    output          ENET0_TX_EN
+]
+
+soc.v u0 instantiation :
+[
+    .ao486_conduit_dbg_tb_finish_instr   (dbg_tb_finish_instr),
+    
+    .ao486_conduit_dbg_dbg_io_address    (dbg_io_address),
+    .ao486_conduit_dbg_dbg_io_byteenable (dbg_io_byteenable),
+    .ao486_conduit_dbg_dbg_io_write      (dbg_io_write),
+    .ao486_conduit_dbg_dbg_io_read       (dbg_io_read),
+    .ao486_conduit_dbg_dbg_io_data       (dbg_io_data),
+     
+    .ao486_conduit_dbg_dbg_int_vector    (dbg_int_vector),
+    .ao486_conduit_dbg_dbg_int           (dbg_int),
+    
+    .ao486_conduit_dbg_dbg_exc_vector    (dbg_exc_vector),
+    .ao486_conduit_dbg_dbg_exc           (dbg_exc),
+          
+    .ao486_conduit_dbg_dbg_mem_address   (dbg_mem_address),
+    .ao486_conduit_dbg_dbg_mem_byteenable(dbg_mem_byteenable),
+    .ao486_conduit_dbg_dbg_mem_write     (dbg_mem_write),
+    .ao486_conduit_dbg_dbg_mem_read      (dbg_mem_read),
+    .ao486_conduit_dbg_dbg_mem_data      (dbg_mem_data)
+]
+
+ao486.v ports:
+[
+//-------------------------------------------------------------------------- debug
+    input   [17:0]      SW,
+    output              tb_finish_instr,
+    
+    output  [15:0]      dbg_io_address,
+    output  [3:0]       dbg_io_byteenable,
+    output              dbg_io_write,
+    output              dbg_io_read,
+    output  [31:0]      dbg_io_data,
+    
+    output  [7:0]       dbg_int_vector,
+    output              dbg_int,
+    
+    output  [7:0]       dbg_exc_vector,
+    output              dbg_exc,
+    
+    output  [31:0]      dbg_mem_address,
+    output  [3:0]       dbg_mem_byteenable,
+    output              dbg_mem_write,
+    output              dbg_mem_read,
+    output  [31:0]      dbg_mem_data
+]
+
+pipeline.v ports:
+[
+    //debug
+    input   [17:0] SW,
+    output         tb_finish_instr
+]
+
+pipeline.v:
+[
+//---------------- debug
+
+wire dbg_hold = dec_cmd != 7'd0 && dec_cmd > SW[6:0];
+
+reg dbg_holding;
+always @(posedge clk or negedge rst_n) begin
+    if(rst_n == 1'b0)                                                               dbg_holding <= 1'b0;
+    else if(dbg_eip_cnt == 32'hFFFFFFFF && SW[17])                                  dbg_holding <= 1'b1; //dummy
+    else if(dbg_hold)                                                               dbg_holding <= 1'b1;
+    else if(dbg_holding && rd_cmd == 7'd0 && ~(exe_mutex[10]) && ~(wr_mutex[10]))   dbg_holding <= 1'b0;
+end
+
+reg [31:0] dbg_eip_cnt;
+always @(posedge clk or negedge rst_n) begin
+    if(rst_n == 1'b0)                           dbg_eip_cnt <= 32'd0;
+    else if(dbg_eip_cnt == 32'd0 && eip[31])    dbg_eip_cnt <= 32'd1;
+    else if(dbg_eip_cnt != 32'd0)               dbg_eip_cnt <= dbg_eip_cnt + 32'd1;
+end
+
+//---------------- debug
+]
+
+pipeline.v decode instantiation:
+[
+//TODO: delete: micro_busy || rd_cmd != 7'd0 || exe_mutex[10] || wr_mutex[10]
+    .micro_busy                 (micro_busy || ((dbg_hold || dbg_holding) && (rd_cmd != 7'd0 || exe_mutex[10] || wr_mutex[10]))),               //input
+]
+
+ao486.v:
+[
+//--------------------------------------------------------------------------
+
+assign dbg_io_address    = (avalon_io_readdatavalid)? dbg_io_address_reg : avalon_io_address;
+assign dbg_io_byteenable = (avalon_io_readdatavalid)? dbg_io_byteenable_reg : avalon_io_byteenable;
+assign dbg_io_write      = avalon_io_write && avalon_io_waitrequest == 1'b0;
+assign dbg_io_read       = avalon_io_readdatavalid;
+assign dbg_io_data       = (avalon_io_readdatavalid)? avalon_io_readdata : avalon_io_writedata;
+
+reg [15:0] dbg_io_address_reg;
+always @(posedge clk or negedge rst_n) begin
+    if(rst_n == 1'b0)           dbg_io_address_reg <= 16'd0;
+    else if(avalon_io_read)     dbg_io_address_reg <= avalon_io_address;
+end
+
+reg [3:0] dbg_io_byteenable_reg;
+always @(posedge clk or negedge rst_n) begin
+    if(rst_n == 1'b0)           dbg_io_byteenable_reg <= 4'd0;
+    else if(avalon_io_read)     dbg_io_byteenable_reg <= avalon_io_byteenable;
+end
+
+assign dbg_int_vector = interrupt_vector;
+assign dbg_int = interrupt_done; 
+
+assign dbg_exc_vector = exc_vector;
+assign dbg_exc = exc_init && (wr_interrupt_possible == 1'b0 || interrupt_do == 1'b0) && interrupt_done == 1'b0;
+
+//-----
+reg [31:0] dbg_mem_address_reg;
+always @(posedge clk or negedge rst_n) begin
+    if(rst_n == 1'b0)                                                               dbg_mem_address_reg <= 32'd0;
+    else if(avm_read && dbg_mem_vga && avm_waitrequest == 1'b0)                     dbg_mem_address_reg <= avm_address;
+    else if(dbg_mem_is_read_reg && avm_readdatavalid)                               dbg_mem_address_reg <= dbg_mem_address_reg + 32'd4;
+    
+    else if(avm_write && dbg_mem_is_write_reg == 1'b0 && avm_waitrequest == 1'b0)   dbg_mem_address_reg <= avm_address + 32'd4;
+    else if(avm_write && dbg_mem_is_write_reg && avm_waitrequest == 1'b0)           dbg_mem_address_reg <= dbg_mem_address_reg + 32'd4;
+end
+
+reg [3:0] dbg_mem_byteenable_reg;
+always @(posedge clk or negedge rst_n) begin
+    if(rst_n == 1'b0)                                           dbg_mem_byteenable_reg <= 4'd0;
+    else if(avm_read && dbg_mem_vga && avm_waitrequest == 1'b0) dbg_mem_byteenable_reg <= avm_byteenable;
+end
+
+reg [2:0] dbg_mem_burstcount_reg;
+always @(posedge clk or negedge rst_n) begin
+    if(rst_n == 1'b0)                                                                                       dbg_mem_burstcount_reg <= 3'd0;
+    else if(avm_read && dbg_mem_vga && avm_waitrequest == 1'b0 && avm_burstcount > 3'd1)                    dbg_mem_burstcount_reg <= avm_burstcount - 3'd1;
+    else if(dbg_mem_is_read_reg && avm_readdatavalid && dbg_mem_burstcount_reg > 3'd0)                      dbg_mem_burstcount_reg <= dbg_mem_burstcount_reg - 3'd1;
+    
+    else if(avm_write && dbg_mem_is_write_reg == 1'b0 && avm_waitrequest == 1'b0 && avm_burstcount > 3'd1)  dbg_mem_burstcount_reg <= avm_burstcount - 3'd1;
+    else if(avm_write && dbg_mem_is_write_reg && avm_waitrequest == 1'b0 && dbg_mem_burstcount_reg > 3'd0)  dbg_mem_burstcount_reg <= dbg_mem_burstcount_reg - 3'd1;
+end
+
+wire dbg_mem_vga = avm_address >= 32'h000A0000 && avm_address < 32'h000C0000;
+
+reg dbg_mem_is_read_reg;
+always @(posedge clk or negedge rst_n) begin
+    if(rst_n == 1'b0)                                                                   dbg_mem_is_read_reg <= 1'b0;
+    else if(avm_read && dbg_mem_vga && avm_waitrequest == 1'b0)                         dbg_mem_is_read_reg <= 1'b1;
+    else if(dbg_mem_is_read_reg && avm_readdatavalid && dbg_mem_burstcount_reg <= 3'd1) dbg_mem_is_read_reg <= 1'b0;
+end
+
+reg dbg_mem_is_write_reg;
+always @(posedge clk or negedge rst_n) begin
+    if(rst_n == 1'b0)                                                                                       dbg_mem_is_write_reg <= 1'b0;
+    else if(avm_write && dbg_mem_is_write_reg == 1'b0 && avm_waitrequest == 1'b0 && avm_burstcount > 3'd1)  dbg_mem_is_write_reg <= 1'b1;
+    else if(avm_write && dbg_mem_is_write_reg && avm_waitrequest == 1'b0 && dbg_mem_burstcount_reg <= 3'd1) dbg_mem_is_write_reg <= 1'b0;
+end
+
+assign dbg_mem_address    = (dbg_mem_is_read_reg || dbg_mem_is_write_reg)? dbg_mem_address_reg : avm_address;
+assign dbg_mem_byteenable = (dbg_mem_is_read_reg)? dbg_mem_byteenable_reg : avm_byteenable;
+assign dbg_mem_read       = dbg_mem_is_read_reg && avm_readdatavalid;
+assign dbg_mem_write      = avm_write && avm_waitrequest == 1'b0;
+assign dbg_mem_data       = (dbg_mem_is_read_reg)? avm_readdata : avm_writedata;
+]
+
+ao486.v pipeline instantiation:
+[
+    //debug
+    .SW     (SW),    //input [17:0]
+    .tb_finish_instr (tb_finish_instr) //output
+]
+
+soc.v:
+[
+
+//------------------------------------------------------------------------------
+
+wire        dbg_tb_finish_instr;
+
+wire [15:0] dbg_io_address;
+wire [3:0]  dbg_io_byteenable;
+wire        dbg_io_write;
+wire        dbg_io_read;
+wire [31:0] dbg_io_data;
+
+wire [7:0]  dbg_int_vector;
+wire        dbg_int;
+wire [7:0]  dbg_exc_vector;
+wire        dbg_exc;
+
+wire [31:0] dbg_mem_address;
+wire [3:0]  dbg_mem_byteenable;
+wire        dbg_mem_write;
+wire        dbg_mem_read;
+wire [31:0] dbg_mem_data;
+
+//------------------------------------------------------------------------------ ethernet debug
+
+wire       enet_rst_n;
+wire [5:0] enet_clk;
+
+altpll   pll_eth_inst (
+    .inclk  ( {1'b0, CLOCK_50} ),
+    .clk    (enet_clk),
+    .locked (enet_rst_n)
+);
+defparam
+    pll_eth_inst.clk0_divide_by         = 2,
+    pll_eth_inst.clk0_duty_cycle        = 50,
+    pll_eth_inst.clk0_multiply_by       = 5,
+    pll_eth_inst.clk0_phase_shift       = "0",
+    pll_eth_inst.clk1_divide_by         = 2,
+    pll_eth_inst.clk1_duty_cycle        = 50,
+    pll_eth_inst.clk1_multiply_by       = 5,
+    pll_eth_inst.clk1_phase_shift       = "2000",
+    pll_eth_inst.compensate_clock       = "CLK0",
+    pll_eth_inst.inclk0_input_frequency = 20000,
+    pll_eth_inst.operation_mode         = "NO_COMPENSATION";
+
+wire enet_clk_data  = enet_clk[0];
+wire enet_clk_clock = enet_clk[1];
+   
+assign ENET0_RST_N  = enet_rst_cnt == 20'hFFFFF;
+
+reg [19:0] enet_rst_cnt;
+always @(posedge enet_clk_data or negedge enet_rst_n) begin
+    if(enet_rst_n == 1'b0)              enet_rst_cnt <= 20'd0;
+    else if(enet_rst_cnt < 20'hFFFFF)   enet_rst_cnt <= enet_rst_cnt + 20'd1;
+end
+
+//------------------------------------------------------------------------------
+
+reg [39:0] dbg_tb_finish_instr_reg;
+always @(posedge clk_sys or negedge rst_n) begin
+    if(rst_n == 1'b0)               dbg_tb_finish_instr_reg <= 40'd0;
+    else if(dbg_tb_finish_instr)    dbg_tb_finish_instr_reg <= dbg_tb_finish_instr_reg + 40'd1;
+end
+
+//------------------------------------------------------------------------------
+
+reg [7:0] dbg_int_vector_reg;
+reg       dbg_int_reg;
+always @(posedge clk_sys or negedge rst_n) begin
+    if(rst_n == 1'b0)               dbg_int_vector_reg <= 8'd0;
+    else if(dbg_int_reg == 1'b0)    dbg_int_vector_reg <= dbg_int_vector;
+end
+wire dbg_int_reg_lower = dbg_int_reg && dbg_mem_read_reg == 1'b0 && dbg_mem_write_reg == 1'b0 && dbg_io_read_reg == 1'b0 && dbg_io_write_reg == 1'b0;
+always @(posedge clk_sys or negedge rst_n) begin
+    if(rst_n == 1'b0)               dbg_int_reg <= 1'd0;
+    else if(dbg_int_reg == 1'b0)    dbg_int_reg <= dbg_int;
+    else if(dbg_int_reg_lower)      dbg_int_reg <= 1'b0;
+end
+
+reg [7:0] dbg_exc_vector_reg;
+reg       dbg_exc_reg;
+always @(posedge clk_sys or negedge rst_n) begin
+    if(rst_n == 1'b0)               dbg_exc_vector_reg <= 8'd0;
+    else if(dbg_exc_reg == 1'b0)    dbg_exc_vector_reg <= dbg_exc_vector;
+end
+wire dbg_exc_reg_lower = dbg_exc_reg && dbg_mem_read_reg == 1'b0 && dbg_mem_write_reg == 1'b0 && dbg_io_read_reg == 1'b0 && dbg_io_write_reg == 1'b0 && dbg_int_reg == 1'b0; 
+always @(posedge clk_sys or negedge rst_n) begin
+    if(rst_n == 1'b0)               dbg_exc_reg <= 1'd0;
+    else if(dbg_exc_reg == 1'b0)    dbg_exc_reg <= dbg_exc;
+    else if(dbg_exc_reg_lower)      dbg_exc_reg <= 1'b0;
+end
+
+reg [15:0] dbg_io_address_reg;
+reg [3:0]  dbg_io_byteenable_reg;
+reg        dbg_io_write_reg;
+reg        dbg_io_read_reg;
+reg [31:0] dbg_io_data_reg;
+always @(posedge clk_sys or negedge rst_n) begin if(rst_n == 1'b0) dbg_io_address_reg    <= 16'd0; else dbg_io_address_reg    <= dbg_io_address;    end
+always @(posedge clk_sys or negedge rst_n) begin if(rst_n == 1'b0) dbg_io_byteenable_reg <= 4'd0;  else dbg_io_byteenable_reg <= dbg_io_byteenable; end
+always @(posedge clk_sys or negedge rst_n) begin if(rst_n == 1'b0) dbg_io_write_reg      <= 1'd0;  else dbg_io_write_reg      <= dbg_io_write;      end
+always @(posedge clk_sys or negedge rst_n) begin if(rst_n == 1'b0) dbg_io_read_reg       <= 1'd0;  else dbg_io_read_reg       <= dbg_io_read;       end
+always @(posedge clk_sys or negedge rst_n) begin if(rst_n == 1'b0) dbg_io_data_reg       <= 32'd0; else dbg_io_data_reg       <= dbg_io_data;       end
+
+reg [31:0] dbg_mem_address_reg;
+reg [3:0]  dbg_mem_byteenable_reg;
+reg        dbg_mem_write_reg;
+reg        dbg_mem_read_reg;
+reg [31:0] dbg_mem_data_reg;
+always @(posedge clk_sys or negedge rst_n) begin if(rst_n == 1'b0) dbg_mem_address_reg    <= 32'd0; else dbg_mem_address_reg    <= dbg_mem_address;    end
+always @(posedge clk_sys or negedge rst_n) begin if(rst_n == 1'b0) dbg_mem_byteenable_reg <= 4'd0;  else dbg_mem_byteenable_reg <= dbg_mem_byteenable; end
+always @(posedge clk_sys or negedge rst_n) begin if(rst_n == 1'b0) dbg_mem_write_reg      <= 1'd0;  else dbg_mem_write_reg      <= dbg_mem_write;      end
+always @(posedge clk_sys or negedge rst_n) begin if(rst_n == 1'b0) dbg_mem_read_reg       <= 1'd0;  else dbg_mem_read_reg       <= dbg_mem_read;       end
+always @(posedge clk_sys or negedge rst_n) begin if(rst_n == 1'b0) dbg_mem_data_reg       <= 32'd0; else dbg_mem_data_reg       <= dbg_mem_data;       end
+
+//------------------------------------------------------------------------------
+
+wire [71:0] dbg_step1_q;
+wire        dbg_step1_empty;
+wire [9:0]  dbg_step1_usedw;
+
+wire [71:0] dbg_a_next =
+    (dbg_mem_read_reg || dbg_mem_write_reg)?    { 2'd1, dbg_mem_address_reg,       dbg_mem_data_reg, dbg_mem_byteenable_reg, dbg_mem_write_reg, dbg_mem_read_reg } :
+    (dbg_io_read_reg  || dbg_io_write_reg)?     { 2'd2, 16'd0, dbg_io_address_reg, dbg_io_data_reg,  dbg_io_byteenable_reg,  dbg_io_write_reg,  dbg_io_read_reg } :
+    (dbg_int_reg_lower)?                        { 2'd3, 22'd0, dbg_tb_finish_instr_reg, dbg_int_vector_reg } :
+                                                { 2'd3, 1'd1, 21'd0, dbg_tb_finish_instr_reg, dbg_exc_vector_reg };
+
+scfifo scfifo_a_inst(
+    .clock          (clk_sys),
+    
+    .wrreq          (dbg_mem_read_reg || dbg_mem_write_reg || dbg_io_read_reg || dbg_io_write_reg || dbg_int_reg_lower || dbg_exc_reg_lower),
+    .data           (dbg_a_next),
+    
+    .rdreq          (dbg_a_state_enable && dbg_a_state == 2'd2),
+    .q              (dbg_step1_q),
+    .empty          (dbg_step1_empty),
+    .usedw          (dbg_step1_usedw)
+);
+defparam
+    scfifo_a_inst.lpm_width       = 72,
+    scfifo_a_inst.lpm_widthu      = 10,
+    scfifo_a_inst.lpm_numwords    = 1024,
+    scfifo_a_inst.lpm_showahead   = "ON";
+
+wire dbg_a_state_start = dbg_step1_step >= 9'd12 && dbg_step1_step <= 9'd376 && dbg_a_state == 2'd0 && dbg_step1_empty == 1'b0;
+wire dbg_a_state_enable= dbg_step1_step >= 9'd12 && dbg_step1_step <= 9'd376 && (dbg_a_state == 2'd1 || dbg_a_state == 2'd2);
+
+reg [1:0] dbg_a_state;
+always @(posedge clk_sys or negedge rst_n) begin
+    if(rst_n == 1'b0)                                   dbg_a_state <= 2'd0;
+    else if(dbg_a_state_start)                          dbg_a_state <= 2'd1;
+    else if(dbg_a_state_enable && dbg_a_state == 2'd1)  dbg_a_state <= 2'd2;
+    else if(dbg_a_state_enable && dbg_a_state == 2'd2)  dbg_a_state <= 2'd0;
+end
+
+//------------------------------------------------------------------------------
+
+// d4 3d 7e 00 e9 c4 - 00 11 22 33 44 55 - 08 00 -
+// 45 00 05 d2 00 00 40 00 40 11 - 1e 51 - 0a 01 01 65 0a 01 01 64 //1490 = 365*4+ 20 + 8 + 2
+// cc dd cc de 05 be 00 00
+
+wire [31:0] dbg_step1_part =
+    (dbg_a_state == 2'd0)?  dbg_step1_q[71:40] :
+    (dbg_a_state == 2'd1)?  dbg_step1_q[39:8] :
+                            { dbg_step1_q[7:0], 24'd0 };
+
+reg [19:0] dbg_step1_counter;
+always @(posedge clk_sys or negedge rst_n) begin
+    if(rst_n == 1'b0)               dbg_step1_counter <= 20'd0;
+    else if(dbg_step1_step_last)    dbg_step1_counter <= 20'd0;
+    else if(dbg_step1_empty)        dbg_step1_counter <= 20'd0;
+    else if(dbg_step1_step == 9'd0) dbg_step1_counter <= dbg_step1_counter + 20'd1;
+end
+    
+wire dbg_step1_start =
+    dbg_step1_empty == 1'b0 && (dbg_step1_usedw == 10'd0 || dbg_step1_usedw > 10'd121 || dbg_step1_counter == 20'hFFFFF);
+
+reg [8:0] dbg_step1_step;
+always @(posedge clk_sys or negedge rst_n) begin
+    if(rst_n == 1'b0)                                   dbg_step1_step <= 9'd0;
+    else if(dbg_step1_step == 9'd0 && dbg_step1_start)  dbg_step1_step <= 9'd1;
+    else if(dbg_step1_step_last)                        dbg_step1_step <= 9'd0;
+    else if(dbg_step1_step > 9'd0)                      dbg_step1_step <= dbg_step1_step + 9'd1;
+end
+
+wire dbg_step1_step_last = dbg_step1_step == 9'd376;
+
+reg [15:0] dbg_io_counter;
+always @(posedge clk_sys or negedge rst_n) begin
+    if(rst_n == 1'b0)                   dbg_io_counter <= 16'd0;
+    else if(dbg_step1_step == 9'd11)    dbg_io_counter <= dbg_io_counter + 16'd1;
+end
+    
+wire [31:0] dbg_step1_next =
+    (dbg_step1_step == 9'd1)?   32'hD43D7E00 :
+    (dbg_step1_step == 9'd2)?   32'hE9C40011 :
+    (dbg_step1_step == 9'd3)?   32'h22334455 :
+    (dbg_step1_step == 9'd4)?   32'h08004500 :
+    (dbg_step1_step == 9'd5)?   32'h05D20000 :
+    (dbg_step1_step == 9'd6)?   32'h40004011 :
+    (dbg_step1_step == 9'd7)?   32'h1E510A01 :
+    (dbg_step1_step == 9'd8)?   32'h01650A01 :
+    (dbg_step1_step == 9'd9)?   32'h0164CCDD :
+    (dbg_step1_step == 9'd10)?  32'hCCDE05BE :
+    (dbg_step1_step == 9'd11)?  { 16'h0000, dbg_io_counter } :
+    (dbg_step1_empty)?          32'h00000000 :
+                                dbg_step1_part;
+    
+//------------------------------------------------------------------------------
+
+wire [34:0] out_dc_q;
+wire        out_dc_empty;
+wire [9:0]  out_dc_rdusedw;
+
+dcfifo dcfifo_inst(
+    .wrclk          (clk_sys),
+    .wrreq          (dbg_step1_step != 9'd0),
+    .data           ({ dbg_step1_step_last, 2'b0, dbg_step1_next }),
+    
+    .rdclk          (enet_clk_data),
+    .rdreq          (out_dc_rdreq),
+    .q              (out_dc_q),
+    .rdempty        (out_dc_empty),
+    .rdusedw        (out_dc_rdusedw)
+);
+defparam
+    dcfifo_inst.lpm_width       = 35,
+    dcfifo_inst.lpm_widthu      = 10,
+    dcfifo_inst.lpm_numwords    = 1024;
+
+wire out_dc_rdreq;
+mac_output mac_output_inst(
+    .clk_data       (enet_clk_data),
+    .clk_clock      (enet_clk_clock),
+    .rst_n          (enet_rst_n),
+
+    .fifo_empty     (out_dc_empty || out_dc_rdusedw < 10'd375),
+    .fifo_rdreq     (out_dc_rdreq),
+    // 34: end, 33,32: not valid
+    .fifo_q         (out_dc_q),
+
+    .phy_txc        (ENET0_GTX_CLK),
+    .phy_ddio_td    (ENET0_TX_DATA),
+    .phy_ddio_tx_ctl(ENET0_TX_EN),
+
+    .slow           (1'b0)
+);
+
+//------------------------------------------------------------------------------
+
+endmodule
+
+//------------------------------------------------------------------------------ ethernet output mac
+
+module mac_output(
+    input           clk_data,
+    input           clk_clock,
+    input           rst_n,
+
+    input           fifo_empty,
+    output          fifo_rdreq,
+    // 34: end, 33,32: not valid
+    input   [34:0]  fifo_q,
+
+    output          phy_txc,
+    output  [3:0]   phy_ddio_td,
+    output          phy_ddio_tx_ctl,
+
+    input           slow
+);
+
+// *************************************************** TXC clock
+
+altddio_out ddio_clk_inst(
+    .outclock       (clk_clock),
+
+    .datain_h       (1'b1),
+    .datain_l       (1'b0),
+
+    .dataout        (phy_txc)
+);
+defparam ddio_clk_inst.width = 1;
+
+
+// *************************************************** DDIO
+
+wire [7:0] phy_data_final;
+reg phy_valid;
+
+altddio_out ddio_td_inst(
+    .outclock       (clk_data),
+
+    .datain_h       (phy_data_final[3:0]),
+    .datain_l       (phy_data_final[7:4]),
+
+    .dataout        (phy_ddio_td)
+);
+defparam ddio_td_inst.width = 4;
+
+altddio_out ddio_tx_ctl_inst(
+    .outclock       (clk_data),
+
+    .datain_h       (phy_valid),
+    .datain_l       (phy_valid),
+
+    .dataout        (phy_ddio_tx_ctl)
+);
+defparam ddio_tx_ctl_inst.width = 1;
+
+wire idle;
+
+// *************************************************** speed
+reg slow_reg_1;
+always @(posedge clk_data or negedge rst_n) begin
+    if(rst_n == 1'b0)   slow_reg_1 <= 1'b0;
+    else                slow_reg_1 <= slow;
+end
+
+reg slow_reg_2;
+always @(posedge clk_data or negedge rst_n) begin
+    if(rst_n == 1'b0)   slow_reg_2 <= 1'b0;
+    else                slow_reg_2 <= slow_reg_1;
+end
+
+reg slow_reg;
+always @(posedge clk_data or negedge rst_n) begin
+    if(rst_n == 1'b0)                           slow_reg <= 1'b0;
+    else if(slow_reg_1 == slow_reg_2 && idle)   slow_reg <= slow_reg_2;
+end
+
+reg toggle;
+always @(posedge clk_data or negedge rst_n) begin
+    if(rst_n == 1'b0)   toggle <= 1'b0;
+    else if(slow_reg)   toggle <= ~toggle;
+    else                toggle <= 1'b0;
+end
+
+wire enabled = slow_reg == 1'b0 || toggle;
+
+// *************************************************** data path
+
+wire [31:0] crc_output;
+wire        crc_load;
+
+wire start_preamble;
+reg [2:0] preamble_cnt;
+wire phy_valid_value;
+
+
+reg fifo_rdreq_reg;
+always @(posedge clk_data or negedge rst_n) begin
+    if(rst_n == 1'b0)   fifo_rdreq_reg <= 1'b0;
+    else                fifo_rdreq_reg <= fifo_rdreq;
+end
+
+reg [7:0] phy_data_1;
+always @(posedge clk_data or negedge rst_n) begin
+    if(rst_n == 1'b0)       phy_data_1 <= 8'd0;
+    else if(enabled) begin
+        if(fifo_rdreq_reg)  phy_data_1 <= fifo_q[7:0];
+    end
+end
+
+reg [7:0] phy_data_2;
+always @(posedge clk_data or negedge rst_n) begin
+    if(rst_n == 1'b0)           phy_data_2 <= 8'd0;
+    else if(enabled) begin
+        if(crc_load)            phy_data_2 <= crc_output[7:0];
+        else if(fifo_rdreq_reg) phy_data_2 <= fifo_q[15:8];
+        else                    phy_data_2 <= phy_data_1;
+    end
+end
+
+reg [7:0] phy_data_3;
+always @(posedge clk_data or negedge rst_n) begin
+    if(rst_n == 1'b0)           phy_data_3 <= 8'd0;
+    else if(enabled) begin
+        if(crc_load)            phy_data_3 <= crc_output[15:8];
+        else if(fifo_rdreq_reg) phy_data_3 <= fifo_q[23:16];
+        else                    phy_data_3 <= phy_data_2;
+    end
+end
+
+reg [7:0] phy_data_4;
+always @(posedge clk_data or negedge rst_n) begin
+    if(rst_n == 1'b0)           phy_data_4 <= 8'd0;
+    else if(enabled) begin
+        if(crc_load)            phy_data_4 <= crc_output[23:16];
+        else if(fifo_rdreq_reg) phy_data_4 <= fifo_q[31:24];
+        else                    phy_data_4 <= phy_data_3;
+    end
+end
+
+reg [7:0] phy_data_5;
+always @(posedge clk_data or negedge rst_n) begin
+    if(rst_n == 1'b0)                                   phy_data_5 <= 8'd0;
+    else if(enabled) begin
+        if(crc_load)                                    phy_data_5 <= crc_output[31:24];
+        else if(preamble_cnt == 3'd7)                   phy_data_5 <= 8'hD5;
+        else if(start_preamble || preamble_cnt != 3'd0) phy_data_5 <= 8'h55;
+        else if(phy_valid_value == 1'b0)                phy_data_5 <= 8'h00;
+        else                                            phy_data_5 <= phy_data_4;
+    end
+end
+
+//-
+assign phy_data_final = (slow == 1'b0)? phy_data_5 : (enabled)? { phy_data_5[7:4], phy_data_5[7:4] } : { phy_data_5[3:0], phy_data_5[3:0] };
+
+always @(posedge clk_data or negedge rst_n) begin
+    if(rst_n == 1'b0)   phy_valid <= 1'b0;
+    else if(enabled) begin
+        phy_valid <= phy_valid_value;
+    end
+end
+
+// *************************************************** counters
+
+reg [2:0] left_cnt;
+reg [4:0] gap_cnt;
+reg [31:0] crc;
+
+assign idle             = preamble_cnt == 4'd0 && left_cnt == 3'd0 && gap_cnt == 5'd0;
+assign start_preamble     = idle && fifo_empty == 1'b0;
+
+assign phy_valid_value    = start_preamble || preamble_cnt != 4'd0 || left_cnt != 3'd0 || gap_cnt >= 5'd13;
+wire crc_count          = left_cnt != 3'd0 || gap_cnt >= 5'd17;
+assign crc_load         = gap_cnt == 5'd16;
+
+assign fifo_rdreq       = (slow_reg == 1'b0 && (preamble_cnt == 4'd6 || left_cnt == 3'd2)) || (slow_reg && enabled == 1'b0 && (preamble_cnt == 4'd7 || left_cnt == 3'd1));
+
+
+always @(posedge clk_data or negedge rst_n) begin
+    if(rst_n == 1'b0)                               preamble_cnt <= 3'd0;
+    else if(enabled) begin
+        if(start_preamble || preamble_cnt != 3'd0)  preamble_cnt <= preamble_cnt + 3'd1;
+    end
+end
+
+always @(posedge clk_data or negedge rst_n) begin
+    if(rst_n == 1'b0)                               left_cnt <= 3'd0;
+    else if(enabled) begin
+        if(fifo_rdreq_reg && fifo_q[34] == 1'b0)    left_cnt <= 3'd4;
+        else if(fifo_rdreq_reg)                     left_cnt <= 3'd0;
+        else if(left_cnt > 3'd0)                    left_cnt <= left_cnt - 3'd1;
+    end
+end
+
+
+always @(posedge clk_data or negedge rst_n) begin
+    if(rst_n == 1'b0)                               gap_cnt <= 5'd0;
+    else if(enabled) begin
+        if(fifo_rdreq_reg && fifo_q[34] == 1'b1)    gap_cnt <= 5'd20 - { 3'b0, fifo_q[33:32] };
+        else if(gap_cnt > 5'd0)                     gap_cnt <= gap_cnt - 5'd1;
+    end
+end
+
+
+// *************************************************** crc
+
+wire [31:0] crc_rev = {
+    crc[24],crc[25],crc[26],crc[27],crc[28],crc[29],crc[30],crc[31],
+    crc[16],crc[17],crc[18],crc[19],crc[20],crc[21],crc[22],crc[23],
+    crc[8], crc[9], crc[10],crc[11],crc[12],crc[13],crc[14],crc[15],
+    crc[0], crc[1], crc[2], crc[3], crc[4], crc[5], crc[6], crc[7]
+};
+
+assign crc_output  = ~crc_rev;
+
+wire [31:0] crc_next = {
+    phy_data_4[2] ^ crc[23] ^ crc[29],
+    phy_data_4[0] ^ phy_data_4[3] ^ crc[22] ^ crc[28] ^ crc[31],
+    phy_data_4[0] ^ phy_data_4[1] ^ phy_data_4[4] ^ crc[21] ^ crc[27] ^ crc[30] ^ crc[31],
+    phy_data_4[1] ^ phy_data_4[2] ^ phy_data_4[5] ^ crc[20] ^ crc[26] ^ crc[29] ^ crc[30],
+    phy_data_4[0] ^ phy_data_4[2] ^ phy_data_4[3] ^ phy_data_4[6] ^ crc[19] ^ crc[25] ^ crc[28] ^ crc[29] ^ crc[31],
+    phy_data_4[1] ^ phy_data_4[3] ^ phy_data_4[4] ^ phy_data_4[7] ^ crc[18] ^ crc[24] ^ crc[27] ^ crc[28] ^ crc[30],
+    phy_data_4[4] ^ phy_data_4[5] ^ crc[17] ^ crc[26] ^ crc[27],
+    phy_data_4[0] ^ phy_data_4[5] ^ phy_data_4[6] ^ crc[16] ^ crc[25] ^ crc[26] ^ crc[31],
+    phy_data_4[1] ^ phy_data_4[6] ^ phy_data_4[7] ^ crc[15] ^ crc[24] ^ crc[25] ^ crc[30],
+    phy_data_4[7] ^ crc[14] ^ crc[24],
+    phy_data_4[2] ^ crc[13] ^ crc[29],
+    phy_data_4[3] ^ crc[12] ^ crc[28],
+    phy_data_4[0] ^ phy_data_4[4] ^ crc[11] ^ crc[27] ^ crc[31],
+    phy_data_4[0] ^ phy_data_4[1] ^ phy_data_4[5] ^ crc[10] ^ crc[26] ^ crc[30] ^ crc[31],
+    phy_data_4[1] ^ phy_data_4[2] ^ phy_data_4[6] ^ crc[9] ^ crc[25] ^ crc[29] ^ crc[30],
+    phy_data_4[2] ^ phy_data_4[3] ^ phy_data_4[7] ^ crc[8] ^ crc[24] ^ crc[28] ^ crc[29],
+    phy_data_4[0] ^ phy_data_4[2] ^ phy_data_4[3] ^ phy_data_4[4] ^ crc[7] ^ crc[27] ^ crc[28] ^ crc[29] ^ crc[31],
+    phy_data_4[0] ^ phy_data_4[1] ^ phy_data_4[3] ^ phy_data_4[4] ^ phy_data_4[5] ^ crc[6] ^ crc[26] ^ crc[27] ^ crc[28] ^ crc[30] ^ crc[31],
+    phy_data_4[0] ^ phy_data_4[1] ^ phy_data_4[2] ^ phy_data_4[4] ^ phy_data_4[5] ^ phy_data_4[6] ^ crc[5] ^ crc[25] ^ crc[26] ^ crc[27] ^ crc[29] ^ crc[30] ^ crc[31],
+    phy_data_4[1] ^ phy_data_4[2] ^ phy_data_4[3] ^ phy_data_4[5] ^ phy_data_4[6] ^ phy_data_4[7] ^ crc[4] ^ crc[24] ^ crc[25] ^ crc[26] ^ crc[28] ^ crc[29] ^ crc[30],
+    phy_data_4[3] ^ phy_data_4[4] ^ phy_data_4[6] ^ phy_data_4[7] ^ crc[3] ^ crc[24] ^ crc[25] ^ crc[27] ^ crc[28],
+    phy_data_4[2] ^ phy_data_4[4] ^ phy_data_4[5] ^ phy_data_4[7] ^ crc[2] ^ crc[24] ^ crc[26] ^ crc[27] ^ crc[29],
+    phy_data_4[2] ^ phy_data_4[3] ^ phy_data_4[5] ^ phy_data_4[6] ^ crc[1] ^ crc[25] ^ crc[26] ^ crc[28] ^ crc[29],
+    phy_data_4[3] ^ phy_data_4[4] ^ phy_data_4[6] ^ phy_data_4[7] ^ crc[0] ^ crc[24] ^ crc[25] ^ crc[27] ^ crc[28],
+    phy_data_4[0] ^ phy_data_4[2] ^ phy_data_4[4] ^ phy_data_4[5] ^ phy_data_4[7] ^ crc[24] ^ crc[26] ^ crc[27] ^ crc[29] ^ crc[31],
+    phy_data_4[0] ^ phy_data_4[1] ^ phy_data_4[2] ^ phy_data_4[3] ^ phy_data_4[5] ^ phy_data_4[6] ^ crc[25] ^ crc[26] ^ crc[28] ^ crc[29] ^ crc[30] ^ crc[31],
+    phy_data_4[0] ^ phy_data_4[1] ^ phy_data_4[2] ^ phy_data_4[3] ^ phy_data_4[4] ^ phy_data_4[6] ^ phy_data_4[7] ^ crc[24] ^ crc[25] ^ crc[27] ^ crc[28] ^ crc[29] ^ crc[30] ^ crc[31],
+    phy_data_4[1] ^ phy_data_4[3] ^ phy_data_4[4] ^ phy_data_4[5] ^ phy_data_4[7] ^ crc[24] ^ crc[26] ^ crc[27] ^ crc[28] ^ crc[30],
+    phy_data_4[0] ^ phy_data_4[4] ^ phy_data_4[5] ^ phy_data_4[6] ^ crc[25] ^ crc[26] ^ crc[27] ^ crc[31],
+    phy_data_4[0] ^ phy_data_4[1] ^ phy_data_4[5] ^ phy_data_4[6] ^ phy_data_4[7] ^ crc[24] ^ crc[25] ^ crc[26] ^ crc[30] ^ crc[31],
+    phy_data_4[0] ^ phy_data_4[1] ^ phy_data_4[6] ^ phy_data_4[7] ^ crc[24] ^ crc[25] ^ crc[30] ^ crc[31],
+    phy_data_4[1] ^ phy_data_4[7] ^ crc[24] ^ crc[30]
+};
+
+always @(posedge clk_data or negedge rst_n) begin
+    if(rst_n == 1'b0)       crc <= 32'hFFFFFFFF;
+    else if(enabled) begin
+        if(crc_count)       crc <= crc_next;
+        else if(crc_load)   crc <= 32'hFFFFFFFF;
+    end
+end
+
+endmodule
+]
+
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+For disabling the pipeline (serial insruction execution):
+
+pipeline.v write instantiation:
+[
+    .tb_finish_instr (tb_finish_instr)
+]
+
+write.v ports:
+[
+    //debug
+    output       tb_finish_instr
+]
+
+write.v:
+[
+    assign tb_finish_instr = wr_finished || (wr_ready && wr_hlt_in_progress);
+]
+
+soc.v ports:
+[
+    //debug
+    input   [17:0]  SW,
+]
+
+soc.v u0 instantiation:
+[
+    //debug
+    .ao486_debug_sw_export (SW),
+]
+
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+
+pit.v:
+[
+/*
+reg counter_1_out_last;
+always @(posedge clk or negedge rst_n) begin
+    if(rst_n == 1'b0)   counter_1_out_last <= 1'b0;
+    else                counter_1_out_last <= counter_1_out;
+end
+
+reg counter_1_toggle;
+always @(posedge clk or negedge rst_n) begin
+    if(rst_n == 1'b0)                                               counter_1_toggle <= 1'b0;
+    else if(counter_1_out_last == 1'b0 && counter_1_out == 1'b1)    counter_1_toggle <= ~(counter_1_toggle);
+end
+*/
+]
+
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+
+TODO list:
+
+floppy.v:
+[
+//TODO: in execute_ndma -- send irq after every byte
+]
+
+ao486:
+[
+//TODO: if repeat and interrupt --> eip = eip_prev;
+//TODO: IN,INS, OUT,OUTS --> wait for prev. instr. -- exception possible
+
+//TODO: task switch --> disable inhibits and debug traps
+//TODO: interrupt   --> disable inhibits and debug traps
+//TODO: task switch --> IRET -- test with PG active
+
+//TODO: read io only once in rd (if pipeline blocked, many reads can start)
+
+//TODO: tlbflushall in memory
+
+//TODO: wait in mult/div with busy=0 (wr can be busy)
+
+//TODO: tflag_to_reg -- check if wr stage does not block
+
+//TODO: JCXZ,LOOP .... reset pr,micro,dec; exe,wr can reset again
+
+//TODO: tlb 2.6.2: if(pg disabled) access bits not set
+
+//TODO: 2.6.2: EXT, change in table (?)
+
+//TODO: 2.6.2: single-step after task switch
+
+//TODO: interrupt_do -- in write checked and in exception -- must keep stable unit one cycle after interrupt_done -- changed:
+// cycle 1: interrupt_do active
+// cycle 2: interrupt_do don't care
+// cycle 3: interrupt_done active for one cycle; interrupt_vector is sampled
+
+//TODO: error code push test in exception
+
+//TODO: soc: dma transfer and caching
+
+//TODO: write to code already prefetched
+//assign wr_req_reset_write_over_prefetch = wr_finished && write_for_wr_ready && write_over_prefetch && ~(wr_eip_has_next_eip);
+//assign wr_eip_from_wr_eip = wr_exe_eip_from_wr_eip || wr_req_reset_write_over_prefetch;
+
+/*
+-T in TSS
+-TF (inhibit; with RF in string instructions)
+-instruction breakpoint
+-data breakpoint
+-debug registers (MOV; updates; exceptions)
+AC flag
+INVD,WBINVD,INVLPG
+MOV Dx
+
+-debug
+-paging
+*/
+
+// From bochs arith32.cc version 2.4
+// Some info on the opcodes at {0F,A6} and {0F,A7}
+// On 386 steps A0-B0:
+//   {OF,A6} = XBTS
+//   {OF,A7} = IBTS
+// On 486 steps A0-B0:
+//   {OF,A6} = CMPXCHG 8
+//   {OF,A7} = CMPXCHG 16|32
+//
+// On 486 >= B steps, and further processors, the
+// CMPXCHG instructions were moved to opcodes:
+//   {OF,B0} = CMPXCHG 8
+//   {OF,B1} = CMPXCHG 16|32
+]
+
+defines.v mutex:
+[
+//`include "startup_from_sim.v"
+//TODO: check that exe_waiting is active, if e*x is used in exe and busy_full[] is used
+]

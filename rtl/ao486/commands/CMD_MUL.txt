@@ -1,0 +1,75 @@
+
+<defines>
+`define CMD_MUL         #AUTOGEN_NEXT_CMD
+</defines>
+
+<decode>
+dec_ready_modregrm_one && { decoder[7:1], 1'b0 } == 8'hF6 && decoder[13:11] == 3'd4
+`CMD_MUL
+IF(decoder[0] == 1'b0); SET(dec_is_8bit); ENDIF();
+SET(consume_modregrm_one);
+</decode>
+
+<read>
+IF(rd_cmd == `CMD_MUL);
+    
+    SET(rd_dst_is_edx_eax);
+    
+    SET(rd_req_eflags);
+    SET(rd_req_edx_eax, rd_decoder[0]);
+    SET(rd_req_eax);
+
+    // dst: implicit, src: rm
+    IF(rd_modregrm_mod == 2'b11);
+        
+        SET(rd_src_is_rm);
+        
+        IF(rd_mutex_busy_eax || rd_mutex_busy_modregrm_rm); SET(rd_waiting); ENDIF();
+    ENDIF();
+
+    // dst: implicit, src: memory
+    IF(rd_modregrm_mod != 2'b11);
+        
+        SET(rd_src_is_memory);
+        
+        IF(rd_mutex_busy_eax || rd_mutex_busy_memory); SET(rd_waiting);
+        ELSE();
+            SET(read_virtual);
+
+            IF(~(read_for_rd_ready)); SET(rd_waiting); ENDIF();
+        ENDIF();
+    ENDIF();
+ENDIF();
+</read>
+
+<execute>
+IF(exe_cmd == `CMD_MUL);
+    
+    SET(exe_result,  mult_result[31:0]);
+    SET(exe_result2, mult_result[63:32]);
+    
+    IF(mult_busy); SET(exe_waiting); ENDIF();
+ENDIF();
+</execute>
+
+<write>
+IF(wr_cmd == `CMD_MUL);
+    SET(write_regrm, wr_dst_is_reg);
+    
+    IF(wr_dst_is_edx_eax);
+        SAVE(eax, (wr_is_8bit || wr_operand_16bit)? { eax[31:16], result[15:0] } : result);
+        
+        IF(~(wr_is_8bit));
+            SAVE(edx, (wr_operand_16bit)? { edx[31:16], result[31:16] } : result2);
+        ENDIF();
+    ENDIF();
+    
+    SAVE(zflag, zflag_result);
+    SAVE(sflag, sflag_result);
+    SAVE(pflag, pflag_result);
+
+    SAVE(aflag, 1'b0);
+    SAVE(cflag, wr_mult_overflow);
+    SAVE(oflag, wr_mult_overflow);
+ENDIF();
+</write>

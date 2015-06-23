@@ -1,0 +1,49 @@
+
+<defines>
+`define CMD_CLI     #AUTOGEN_NEXT_CMD
+`define CMD_STI     #AUTOGEN_NEXT_CMD
+</defines>
+
+<decode>
+dec_ready_one && decoder[7:0] == 8'hFA
+`CMD_CLI
+SET(consume_one);
+</decode>
+
+<decode>
+dec_ready_one && decoder[7:0] == 8'hFB
+`CMD_STI
+SET(consume_one);
+</decode>
+
+<read>
+IF(rd_cmd == `CMD_CLI || rd_cmd == `CMD_STI);
+    SET(rd_req_eflags);
+ENDIF();
+</read>
+
+<execute>
+IF(exe_cmd == `CMD_CLI || exe_cmd == `CMD_STI);
+    IF(exe_mutex_current[`MUTEX_EFLAGS_BIT]); SET(exe_waiting);
+    ELSE();
+        IF((protected_mode && iopl < cpl) || (v8086_mode && iopl != 2'd3));
+            SET(exe_waiting);
+            SET(exe_trigger_gp_fault); //exception GP(0)
+        ENDIF();
+    ENDIF();
+ENDIF();
+</execute>
+
+<write>
+IF(wr_cmd == `CMD_CLI);
+    SAVE(iflag, `FALSE);
+ENDIF();
+</write>
+
+<write>
+IF(wr_cmd == `CMD_STI);
+    SAVE(iflag, `TRUE);
+    
+    IF(iflag == `FALSE); SET(wr_inhibit_interrupts); ENDIF();
+ENDIF();
+</write>
