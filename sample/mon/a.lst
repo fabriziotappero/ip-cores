@@ -1,0 +1,220 @@
+Microsoft (R) Macro Assembler Version 6.14.8444		    03/12/12 12:53:08
+a.asm							     Page 1 - 1
+
+
+				.186
+				.model tiny
+ 0000				.code
+ 0000				zero: 
+				        org 24h
+ 0024				srecv label near  
+				        org 100h
+ 0100				start:   
+ 0100  33 C0			        xor ax,ax
+ 0102  8E C0			        mov es,ax
+ 0104  26: C7 06 0040		        mov word ptr es:[10h*4], offset int10
+       0189 R
+ 010B  26: 8C 0E 0042		        mov es:[10h*4+2], cs
+ 0110  26: C7 06 0044		        mov word ptr es:[11h*4], offset int11
+       018F R
+ 0117  26: 8C 0E 0046		        mov es:[11h*4+2], cs
+ 011C  B8 0001			        mov ax,1
+ 011F  8C C8			        mov ax,cs
+ 0121  8E C0			        mov es,ax
+
+ 0123				newline:
+ 0123  BF 0179 R		        mov di, offset buf 
+ 0126  B9 000F			        mov cx, 15              
+ 0129				newchar:
+ 0129  CD 10			        int 10h
+ 012B  8A C4			        mov al,ah
+ 012D  AA			        stosb
+ 012E  CD 11			        int 11h
+ 0130  3C 08			        cmp al,8
+ 0132  75 0C			        jne nobs
+ 0134  83 EF 02			        sub di,2
+ 0137  81 FF 0179 R		        cmp di,offset buf
+ 013B  73 03			        jae nobs
+ 013D  BF 0179 R		        mov di,offset buf
+ 0140				nobs:
+ 0140  3C 0D			        cmp al,13
+ 0142  74 07			        jz nc1
+ 0144  E2 E3			        loop newchar
+ 0146  B0 0D			        mov al,13
+ 0148  AA			        stosb
+ 0149  CD 11			        int 11h
+ 014B				nc1:        
+ 014B  C6 45 FF 00		        mov byte ptr [di-1], 0
+ 014F  BE 0179 R		        mov si,offset buf
+ 0152  80 3C 64			        cmp byte ptr [si],'d'
+ 0155  75 15			        jne nodump
+
+ 0157  B9 0008			        mov cx,8
+ 015A  33 F6			        xor si,si
+ 015C				 dl1:       
+ 015C  BA 0010			        mov dx,16
+ 015F  51			        push cx
+ 0160  E8 0074			        call dumpline
+ 0163  B0 0D			        mov al,13
+ 0165  CD 11			        int 11h
+ 0167  59			        pop cx
+ 0168  E2 F2			        loop dl1
+				   
+ 016A  EB 07			        jmp cr    
+ 016C				nodump:        
+ 016C  E8 0036			        call prtstr
+ 016F  B0 3F			        mov al, '?'
+ 0171  CD 11			        int 11h
+ 0173				cr:        
+ 0173  B0 0D			        mov al,13
+ 0175  CD 11			        int 11h
+ 0177  EB AA			        jmp newline
+
+ 0179  0010 [			buf     db 16 dup(0)
+        00
+       ]
+
+				;--------------------------------- receive char INT10 -----------------------------------
+ 0189				int10:  ; get RS232 char in ah
+ 0189  51			        push cx
+ 018A  E8 FE97			        call srecv
+ 018D  59			        pop cx
+ 018E  CF			        iret
+
+				;--------------------------------- send char INT11 -----------------------------------
+ 018F				int11:  ; write RS232 char from al
+ 018F  50			        push ax
+ 0190  51			        push cx
+ 0191  E6 00			        out 0,al
+ 0193  B4 01			        mov ah,1
+ 0195  03 C0			        add ax,ax
+ 0197				int111:
+ 0197  E6 01			        out 1,al
+ 0199  B9 00AD			        mov cx,0adh;8bh;90h
+ 019C				even         
+ 019C  E2 FE			        loop $
+ 019E  D1 E8			        shr ax,1
+ 01A0  75 F5			        jnz int111
+ 01A2  59			        pop cx
+ 01A3  58			        pop ax
+ 01A4  CF			        iret
+
+				;--------------------------------- print string at SI -----------------------------------
+ 01A5				prtstr:
+ 01A5  AC			        lodsb
+ 01A6  84 C0			        test al,al
+ 01A8  74 04			        jz prtstr1
+ 01AA  CD 11			        int 11h
+ 01AC  EB F7			        jmp prtstr
+ 01AE				prtstr1:
+ 01AE  C3			        ret     
+
+				;--------------------------------- print 4 digit hex number in ax -------------------------------
+ 01AF				prthex4: 
+ 01AF  86 E0			        xchg ah,al
+ 01B1  E8 0002			        call prthex2
+ 01B4  8A C4			        mov al,ah
+				;--------------------------------- print 2 digit hex number in al -------------------------------
+ 01B6				prthex2: 
+ 01B6  BB 01C7 R		        mov bx, offset hexdigit
+ 01B9  50			        push ax
+ 01BA  C0 E8 04			        shr al,4
+ 01BD  D7			        xlat
+ 01BE  CD 11			        int 11h
+ 01C0  58			        pop ax
+ 01C1  24 0F			        and al,15
+ 01C3  D7			        xlat
+ 01C4  CD 11			        int 11h
+ 01C6  C3			        ret
+ 01C7 30 31 32 33 34 35		hexdigit db "0123456789ABCDEF"
+       36 37 38 39 41 42
+       43 44 45 46
+
+				;-------------------------------- dump DX bytes memory at DS:SI -------------------------------
+ 01D7				dumpline:
+ 01D7  8C D8			        mov ax,ds
+ 01D9  E8 FFD3			        call prthex4
+ 01DC  B0 3A			        mov al, ':'
+ 01DE  CD 11			        int 11h
+ 01E0  8B C6			        mov ax,si
+ 01E2  E8 FFCA			        call prthex4
+ 01E5  8B CA			        mov cx,dx
+ 01E7  B0 20			        mov al,' '
+ 01E9  CD 11			        int 11h
+ 01EB				dump1:
+ 01EB  B0 20			        mov al, ' '
+ 01ED  CD 11			        int 11h
+ 01EF  AC			        lodsb
+ 01F0  E8 FFC3			        call prthex2
+ 01F3  E2 F6			        loop dump1
+ 01F5  8B CA			        mov cx,dx
+ 01F7  2B F2			        sub si,dx 
+ 01F9  B0 20			        mov al,' '
+ 01FB  CD 11			        int 11h
+ 01FD  CD 11			        int 11h       
+ 01FF				dump2:
+ 01FF  AC			        lodsb
+ 0200  2C 20			        sub al,32
+ 0202  3C 60			        cmp al,128-32
+ 0204  72 02			        jb dump3
+ 0206  B0 0E			        mov al,'.'-32
+ 0208  04 20			dump3:  add al,32      
+ 020A  CD 11			        int 11h
+ 020C  E2 F1			        loop dump2
+ 020E  C3			        ret
+
+				end start
+Microsoft (R) Macro Assembler Version 6.14.8444		    03/12/12 12:53:08
+a.asm							     Symbols 2 - 1
+
+
+
+
+Segments and Groups:
+
+                N a m e                 Size     Length   Align   Combine Class
+
+DGROUP . . . . . . . . . . . . .	GROUP
+_TEXT  . . . . . . . . . . . . .	16 Bit	 020F	  Word	  Public  'CODE'	
+_DATA  . . . . . . . . . . . . .	16 Bit	 0000	  Word	  Public  'DATA'	
+
+
+Symbols:
+
+                N a m e                 Type     Value    Attr
+
+@CodeSize  . . . . . . . . . . .	Number	 0000h	 
+@DataSize  . . . . . . . . . . .	Number	 0000h	 
+@Interface . . . . . . . . . . .	Number	 0000h	 
+@Model . . . . . . . . . . . . .	Number	 0001h	 
+@code  . . . . . . . . . . . . .	Text   	 DGROUP
+@data  . . . . . . . . . . . . .	Text   	 DGROUP
+@fardata?  . . . . . . . . . . .	Text   	 FAR_BSS
+@fardata . . . . . . . . . . . .	Text   	 FAR_DATA
+@stack . . . . . . . . . . . . .	Text   	 DGROUP
+buf  . . . . . . . . . . . . . .	Byte	 0179	  _TEXT	
+cr . . . . . . . . . . . . . . .	L Near	 0173	  _TEXT	
+dl1  . . . . . . . . . . . . . .	L Near	 015C	  _TEXT	
+dump1  . . . . . . . . . . . . .	L Near	 01EB	  _TEXT	
+dump2  . . . . . . . . . . . . .	L Near	 01FF	  _TEXT	
+dump3  . . . . . . . . . . . . .	L Near	 0208	  _TEXT	
+dumpline . . . . . . . . . . . .	L Near	 01D7	  _TEXT	
+hexdigit . . . . . . . . . . . .	Byte	 01C7	  _TEXT	
+int10  . . . . . . . . . . . . .	L Near	 0189	  _TEXT	
+int111 . . . . . . . . . . . . .	L Near	 0197	  _TEXT	
+int11  . . . . . . . . . . . . .	L Near	 018F	  _TEXT	
+nc1  . . . . . . . . . . . . . .	L Near	 014B	  _TEXT	
+newchar  . . . . . . . . . . . .	L Near	 0129	  _TEXT	
+newline  . . . . . . . . . . . .	L Near	 0123	  _TEXT	
+nobs . . . . . . . . . . . . . .	L Near	 0140	  _TEXT	
+nodump . . . . . . . . . . . . .	L Near	 016C	  _TEXT	
+prthex2  . . . . . . . . . . . .	L Near	 01B6	  _TEXT	
+prthex4  . . . . . . . . . . . .	L Near	 01AF	  _TEXT	
+prtstr1  . . . . . . . . . . . .	L Near	 01AE	  _TEXT	
+prtstr . . . . . . . . . . . . .	L Near	 01A5	  _TEXT	
+srecv  . . . . . . . . . . . . .	L Near	 0024	  _TEXT	
+start  . . . . . . . . . . . . .	L Near	 0100	  _TEXT	
+zero . . . . . . . . . . . . . .	L Near	 0000	  _TEXT	
+
+	   0 Warnings
+	   0 Errors
