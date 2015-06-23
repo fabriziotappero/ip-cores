@@ -1,0 +1,634 @@
+\documentclass[a4paper,11pt]{article}
+
+\begin{document}
+\title{1664}
+\author{public domain}
+\date{\today}
+\maketitle
+\tableofcontents
+\pagebreak
+
+\part{Architecture}
+This document briefly outlines the working of the '1664' processor, the assembler and the simulator/debugger.
+
+\section{Instruction set}
+
+\subsection{Opcode encoding}
+All instructions are conditional with the exception of \bf ajusta \rm.\\
+All instructions are encoded with 16 bits. With the exception of \bf ajusta \rm the least significant 8 bits determine the operation and the condition. The most significant 8 bits, the parameter(s). \\
+
+[0..4] opcode bits \\
+
+[5..7] condition bits \\
+
+[8..15] parameter bits (the specific decoding depends on the instruction). \\
+
+(*) \bf ajusta \rm opcode: \\
+
+[0..4] opcode bits. \\
+
+[5..8] destination opcode (+ 0x10).\\
+
+[9..15] opcode to be mapped from complete instruction set. \\
+
+\subsection{Condition bits}
+There are 8 condition bits, 'condition 7' is always read as 1, the others are modifiable using the condition manipulation instructions: ldb, stb, cmp, dep. \\
+The \bf rev opera\_rev\_depende\_influe \rm instruction allows other instructions to affect the condition bits. In this mode, the first four bits have a determined meaning. \\
+Condition 0 indicates a zero result. \\
+Condition 1 is the inverse of bit condition 0. \\
+Condition 2 indicates a carry. \\
+Condition 3 indicates an underflow. \\
+
+\subsection{Fixed instructions}
+
+\subsubsection{ajusta : configure opcode} 
+ Parameter range : $<$0x10..0x1f$>$ $<$0x00..0x7f$>$
+ 
+ After execution of \bf ajusta \rm the opcode specified by the second parameter is mapped to the opcode specified by the first parameter. \\
+ The 16 configurable opcodes allow access to all 128 instructions.\\
+ The first 16 non-configurable instructions can be duplicated in the 16 configurable slots providing a means of code obfuscation on a system where the translation table is not visible.\\
+ The ajusta instruction is optionally a protected instruction. Protect via \bf rev \rm instruction.\\
+ See assembler directives \sl .opera \rm and \sl .ajusta \rm
+ 
+\begin{verbatim}
+ajusta 0x10 and ; opcode '0x10' interpreted 
+                ; as 'and' instruction
+
+;equivalent of '7 and 1 3'
+.d1 {0x10 7 5 <<} {1 3 2 <<} 
+
+;fictional instruction 'new <0..3> <0..63>'
+.opera new 2r6r  ; declare instruction name and parameter interpretation as '2r6r'
+ajusta 0x11 new  ; opcode '0x11' interpreted as 'new' instruction
+.ajusta 0x11 new ; inform assembler of change to opcode value.
+0 new 0 0        ; assembled as '0x0011'
+\end{verbatim}
+
+\subsubsection{ldi : load 8b constant} 
+ Parameter format: $<$0..255$>$
+ Least significant 8 bits of register 0 is replaced with parameter. Remaining bits are unaffected.
+ 
+\begin{verbatim}
+eor 0 0   ; 0 == '0x0000'
+ldi 0x12  ; 0 == '0x0012'
+ldi 0x34  ; 0 == '0x0034'
+\end{verbatim}
+
+\subsubsection{ldis : load 8b constant with post 8b shift} 
+ Parameter format : $<$0..255$>$\\
+ Least significant 8 bits of register 0 is replaced with parameter and register is shifted left 8 bits.\\
+ Together with \bf ldi \rm instruction, a 64 bit value can be loaded using 128 bits of code.\\
+ See memory load instruction \bf ldm \rm for an alternative to loading register 0 with a constant.\\
+
+\begin{verbatim}
+eor 0 0   ; 0 == '0x0000'
+ldis 0x12 ; 0 == '0x1200'
+ldi 0x34  ; 0 == '0x1234'
+\end{verbatim}
+
+\subsubsection{ldm : memory load} 
+ Parameter format : $<$[(+-)0..7(+-)]$>$ ($<$size$>$)\\
+ $<$size$>$ 1, 2 or an even multiple of 2 to size of register. (optional) Defaults to size of register.\\
+ + increment (optional)\\
+ - decrement (optional)\\
+ (+-) before the register modifies the register by $<$size$>$ before.\\
+ (+-) after the register modifies the register by $<$size$>$ after.\\
+ 
+ Register 0 is loaded register with $<$size$>$ element from memory pointed to by A.\\
+ 
+ If the specified register is 7 (\sl sIP\rm) then the offset is calculated adding (unsigned) register 0.\\
+ 
+\begin{verbatim}
+ldm [sIP+] 4
+.d4 0x12345678
+;execution continues here. 0 == '0x12345678'
+
+ldm [6+] ;register 0 is loaded from stack. 
+         ;The size of the element loaded is
+         ;the size of the register 
+         ;(the default when the <size> is omitted).
+\end{verbatim}
+  
+\subsubsection{stm : memory store}
+ store complement to \bf ldm \rm instruction.
+
+\begin{verbatim}
+ldi 0x12
+stm [-6] 1 ;stack register is pre decremented by '1' 
+           ;and 0x12 is stored to 
+           ;location pointed by register 6.
+\end{verbatim}
+
+\subsubsection{ldr : register load} 
+ Parameter format: $<$A0..3$>$ $<$B0..63$>$\\
+ Load register A with B
+
+\subsubsection{str : register store} 
+ Parameter format: $<$A0..3$>$ $<$B0..63$>$\\
+ Store register A to B 
+
+\subsubsection{cam : register swap} 
+ Parameter format: $<$A0..3$>$ $<$B0..63$>$\\
+ Swap registers A, B
+ 
+\subsubsection{yli : relative branch by signed 8b constant} 
+ Parameter format: $<$-127..128$>$\\
+ return register (\sl sREVENI \rm) is loaded with address after \bf yli\rm\\
+ branch instruction pointer + 8b constant shifted left by 1.\\
+ Assembler parameter format: $<$label$>$\\
+ The assembler will calculate the relative offset from the instruction, which must be a multiple of 2.\\
+
+\subsubsection{ylr : absolute branch via register or relative via sIP} 
+ Return register (\sl sREVENI \rm) is loaded with address after \bf ylr\rm
+ A any register\\
+ 
+ Parameter format: $<$[A0..63]$>$\\
+  Branch to address pointed to by address in register A\\
+ 
+ Parameter format: $<$[+A0..63]$>$\\
+  Branch to (address pointed to by address in register A) relative to \sl sIP \rm\\
+ 
+ Parameter format: $<$A0..63$>$\\
+  Branch to address in register A\\
+ 
+ Parameter format: $<$+A0..63$>$\\
+  Branch to (address in register A) relative to \sl sIP \rm\\
+ 
+
+\subsubsection{ldb : bit load} 
+ Parameter format: $<$A0..3$>$ $<$B0..63$>$\\
+ Copy bit B of register A to z (condition bit 0)
+
+\subsubsection{stb : bit store} 
+ Parameter format: $<$A0..3$>$ $<$B0..63$>$\\
+ Copy bit z (condition bit 0) to bit B of register A
+
+\subsubsection{cmp : register compare} 
+ Parameter format: $<$A0..3$>$ $<$B0..63$>$ ; set condition bits\\
+ condition bit 0 (alias z) = $A==B$\\
+ condition bit 1 (alias n) = $A\neg B$
+ condition bit 2 (alias c) = $A>B$
+ condition bit 3 (alias o) = $A<B$
+ 
+\subsubsection{dep : condition bit logic} 
+ Parameter format: $<$A0..7$>$ $<$B0..7$>$ $<$C0..3$>$\\
+ 
+ The function performed on condition bits A, B are determined by the value of C:\\
+ 0: $A = A \oplus B$\\
+ 1: $A = A \wedge B$\\
+ 2: $A = A \vee B$\\
+ 3: A swapped with B\\
+
+Macro alias: \sl dep\_eor,dep\_and,dep\_or,dep\_cam \rm\\
+ clear bit : beor c c\\
+ set bit : bor c 7
+
+\subsubsection{bit : register bit statistics} 
+ Parameter format: $<$A0..63$>$ $<$CODE0..3$>$\\
+ Result is stored in register 0.\\
+ CODE 0: count of clear bits in register A before first set bit counting from most significant bit\\
+      1: count of clear bits in register A before first set bit counting from least significant bit\\
+      2: count of set bits in register A\\
+      3: count of clear bits in register A\\
+ 
+ Macro aliases: \sl msb, lsb, ones, zeros \rm\\
+
+\subsubsection{rev : multiple functions specified by 8b constant} 
+ Parameter format: $<$0..255$>$\\
+ The function performed by rev is determined by the parameter.
+ 
+\paragraph{opera\_rev\_reveni}
+  \sl sIP=sREVENI \rm
+ 
+\paragraph{opera\_rev\_eseta}
+  If executed while in protected mode, execution returns to user mode and the user instruction pointer is loaded from \sl sREVENI\_ESETA\rm.\\
+  From user mode, protected \sl sREVENI\_ESETA \rm is loaded with user instruction pointer and a user exception is executed. Register 0 contains the exception offset. See example source code.
+ 
+\paragraph{opera\_rev\_ajusta\_reinisia}
+  Operation translations set by \bf ajusta \rm are set to defaults: 16,17,..,31\\
+  
+\paragraph{opera\_rev\_ajusta\_protejeda}
+  Protected mode instruction. Prevents user code from configuring opcodes.
+ 
+\paragraph{opera\_rev\_ajusta\_permete}
+  Protected mode instruction. Allows user code to configure opcodes.
+  
+\paragraph{opera\_rev\_depende\_influe}
+  Allows instructions to influence condition bits.
+  
+\paragraph{opera\_rev\_depende\_inoria}
+  Prevents instructions (apart from bit instruction) from changing condition bits
+ 
+\paragraph{opera\_rev\_sicle\_intercambia}
+  Protected mode instruction. Register 0 and CPU cycle counter are swapped
+  
+\paragraph{opera\_rev\_sicle\_usor\_limite\_intercambia}
+  Protected mode instruction. Register 0 and user cycle limit are swapped\\
+  The user cycle limit, limits user code cycle usage before an exception returns control to protected mode code.
+  
+\paragraph{opera\_rev\_sicle\_usor\_intercambia}
+  From protected mode, register 0 and user cycle counter are swapped.\\
+  From user code, register 0 is loaded with user cycle counter.
+ 
+\paragraph{opera\_rev\_state\_reteni\_usor}
+  Protected mode instruction. Save user state to memory pointed by register 0.\\
+  64 registers; 128 opcode translation (presently, stored as 8 bit per opcode), 4 byte CPU flags and conditions, a register size for user cycle counter and cycle limit, each.
+ 
+\paragraph{opera\_rev\_state\_restora\_usor}
+  Protected mode instruction. Load user state to memory pointed by register 0.
+   
+\paragraph{opera\_rev\_bp}
+  Break point exception. Protected and user mode are distinguished
+
+\paragraph{opera\_rev\_entra}
+  Save \sl RETENI \rm (\sl sR0..31 \rm) registers to (decrease before write) stack
+
+\paragraph{opera\_rev\_departi}
+  Load \sl RETENI \rm (\sl sR0..31 \rm) registers from (increase after read) stack
+
+\subsection{Configurable instructions}
+Logic and arithmetic functions that operate on registers only.
+
+\subsubsection{and : register logical and} 
+ Parameter format : $<$A0..3$>$ $<$B0..63$>$\\
+ condition bits : z,n
+\subsubsection{or : register logical or}  
+ Parameter format : $<$A0..3$>$ $<$B0..63$>$\\
+ condition bits: z,n
+\subsubsection{eor : register logical exclusive or} 
+ Parameter format : $<$A0..3$>$ $<$B0..63$>$\\
+ condition bits : z,n
+\subsubsection{shl : register logical shift left} 
+ Parameter format : $<$A0..3$>$ $<$B0..63$>$\\
+ condition bits : z,n, c=last bit shifted
+\subsubsection{shr : register logical shift right} 
+ Parameter format : $<$A0..3$>$ $<$B0..63$>$\\
+ condition bits : z,n, c=last bit shifted
+\subsubsection{sar : register arithmetic shift right} 
+ Parameter format : $<$A0..3$>$ $<$B0..63$>$\\
+ condition bits : z,n, c=last bit shifted
+
+\subsubsection{plu : register addition} 
+ Parameter format : $<$A0..3$>$ $<$B0..63$>$\\ 
+ $A = A + B$
+
+\subsubsection{sut : register subtraction} 
+ Parameter format : $<$A0..3$>$ $<$B0..63$>$ \\
+ $A = A - B$
+
+\subsubsection{sutr : register reverse subtraction} 
+ Parameter format : $<$A0..3$>$ $<$B0..63$>$ \\
+ $A = B - A$
+
+\subsubsection{mul : register multiply (integer/floating point)} 
+ Parameter format: $<$A0..3$>$ $<$B0..63$>$\\
+ Register 0 contains the most significant bits of product with adjustment. \\
+  Adjusted so the most significant bit of product (\sl sMASIMA \rm) occupies the most significant bit of register 0.\\
+  Least significant bits shift from \sl sMINIMA \rm.\\
+ \sl sDESLOCA \rm contains the number of bits register 0 need to be shifted to produce correct result\\
+  if value is unsigned, ($A*B$) = (register\_0)$<<$\sl sDESLOCA \rm\\
+  if value is signed (two's complement), ($A*B$) = (register\_0)$>>$\sl sDESLOCA \rm\\
+ \sl sMASIMA \rm contains most significant bits of product\\
+ \sl sMINIMA \rm contains least significant bits of product\\
+ 
+ \bf mul \rm and \bf div \rm operations are cumulative on \sl sDESLOCA \rm. See software FPU implementation (f2) for an example.
+ 
+\subsubsection{div : register divide (integer/floating point)} 
+ Parameter format: $<$A0..3$>$ $<$B0..63$>$\\
+ Register 0 contains the most significant bits of division with adjustment.\\
+  Adjusted so the most significant bit of product (\sl sMASIMA \rm) occupies the most significant bit of register 0.\\
+ \sl sDESLOCA \rm contains the number of bits register 0 need to be shifted to produce correct result\\
+  if value is unsigned, ($A*B$) = (register\_0)$<<$\sl sDESLOCA \rm\\
+  if value is signed (two's complement), ($A*B$) = (register\_0)$>>$\sl sDESLOCA \rm\\
+ \sl sMINIMA \rm = $A/B$\\
+ 
+ \bf mul \rm and \bf div \rm operations are cumulative on \sl sDESLOCA\rm. See software FPU implementation (f2) for an example.\\
+ 
+\subsection{Registers}
+The processor may be configured with up to 64 registers.
+
+\subsubsection{6 stack pointer}
+Register 6 \sl sPILA \rm is used as the the stack pointer by the example code.
+
+\subsubsection{7 instruction pointer}
+Register 7 \sl sIP \rm the instruction pointer. When read it points to the instruction's address+2.
+
+\subsubsection{59 }
+Register 59 \sl sDESLOCA \rm See arithmetic instructions \bf mul\rm, \bf div\rm.
+
+\subsubsection{60}
+Register 60 \sl sMINIMA \rm See arithmetic instructions \bf mul\rm, \bf div\rm.
+
+\subsubsection{61}
+Register 61 \sl sMASIMA \rm See arithmetic instructions \bf mul\rm, \bf div\rm.
+
+\subsubsection{62 exception return pointer}
+Register 62 \sl sREVENI\_ESETA \rm contains the address, following the instruction, that caused and exception.\\
+It is used as the return address for the instruction \bf rev opera\_rev\_eseta \rm when executed as a 'privileged' instruction. See instruction \bf rev\rm.
+
+\subsubsection{63 branch return pointer}
+Register 63 \sl sREVENI \rm contains the link address. See branch instructions \bf yli, ylr\rm. \\
+The instruction \bf rev opera\_rev\_reveni \rm assigns the value of \sl sREVENI \rm to the instruction pointer.
+
+\pagebreak
+\section{Memory mapped peripherals (simulator)}
+Peripheral configuration registers are mapped to a reserved memory block that are accessible from system code or user code provided the register address are mapped to the user code memory space. See memory management unit.
+
+\subsection{Memory management unit}
+A simple MMU is included in the simulator that provides configurable access rights per mapped area of memory. The MMU translates the requested address via a translation table with the following format (1664 assembler syntax):\\
+
+\begin{verbatim}
+.ds {SIZE PERMISSION |} ;least significant bits determine access.
+.ds VIRTUAL_OFFSET
+.ds REAL_OFFSET
+
+;... further entries
+
+.ds 0 ;end
+\end{verbatim}
+
+Permission bits are as follows:\\
+0 : read operation allowed when set to 1\\
+1 : write operation allowed when set to 1\\
+2 : execute operation allowed when set to 1\\
+
+The first word contains the size of the mapped area (most significant bits) and 3 access permission bits (least significant bits). As a consequence \sl SIZE \rm is 8 bytes aligned.\\
+
+\pagebreak
+\part{Assembler}
+The assembler requires, at the minimum, a file with an instruction declaration. (See directive \sl .opera \rm). \\
+
+\section{Syntax}
+
+\subsection{Instructions} 
+(condition) instruction\_name (parameter\_1) (parameter\_2) (..)
+The condition does not need to be specified as it is assumed to be 7 (always true) if left out.\\
+All instructions are conditional, with the exception of the instruction \bf ajusta\rm.
+Example of using conditional instructions:\\
+\begin{verbatim}
+eor 1 1
+eor 0 0
+ldi 1 ;register 0 == 1
+cmp 0 1
+z ldi 2 ;register 0 == 1
+n ldi 3 ;register 0 == 3
+c ldi 4 ;register 0 == 4
+o ldi 5 ;register 0 == 4
+\end{verbatim}
+
+\subsection{Labels}
+Labels are declared simply by placing the name on a new line.\\
+To create a local label, the label declaration must begin with a \sl : \rm. The local label is then preceded with an \sl @ \rm. And is referenced by the name of the \sl :\rm label concatinated with the local label.\\
+Example of a loop and local label:\\
+\begin{verbatim}
+rev 5 ;instructions afect condition bits.
+label0
+eor 0 0
+ldi 2
+eor 1 1
+ldi 1
+:label1
+label2 
+@local
+sut 0 1
+n yli label1@local
+yli label2
+\end{verbatim}
+
+\pagebreak
+\section{Directives}
+
+\subsection{.inclui $<$file name$>$}
+ Include \sl filename\rm and assemble immediately.
+
+\subsection{.opera $<$instruction name$>$ $<$parameter function name$>$} 
+ Before an instruction can be identified and assembled the name must be declared and the parameter format specified from hard-coded functions. The opcode is inferred from the order which the instructions are declared.\\
+ See \sl base.opera.1664 \rm.
+
+\begin{verbatim}
+.opera instruction_name parameter_function
+;instruction_name is given opcode 0x01 (ajusta is always 0x00)
+;subsequent .opera .. are given + 1 from the previous
+\end{verbatim}
+
+\subsection{.ajusta $<$instruction opcode 0x10..0x1f$>$ $<$instruction name$>$}
+ Interpret \bf instruction name \rm as having the specified opcode.\\
+ Used to inform assembler that the \bf ajusta \rm instruction has changed the decoding.\\
+ See the instruction \bf ajusta \rm.
+ 
+\subsection{.defina $<$tag$>$ $<$value$>$} 
+ Assign a value to a tag. Undefined tags evaluate as 0.
+
+\subsection{.nodefina $<$tag$>$} 
+ Undefine a tag. Undefined tags evaluate as 0.
+
+\subsection{.d1 $<$value0$>$ ($<$value1$>$) (...)}
+ Interpret values as 8 bit and output directly to image.
+
+\subsection{.d2 $<$value0$>$ ($<$value1$>$) (...)} 
+Interpret values as 16 bit and output directly to image.\\
+ \sl .do, .d2 \rm are equivalent in current implementation
+
+\subsection{.do $<$value0$>$ ($<$value1$>$) (...)} 
+Interpret values as instruction word (16 bit) values\\
+ \sl .do, .d2 \rm are equivalent in current implementation.
+
+\subsection{.d4 $<$value0$>$ ($<$value1$>$) (...)}
+Interpret values as 32 bit and output directly to image\\
+ (\sl .ds, .d4 \rm are equivalent when the CPU is configured with 32 bit registers)
+
+\subsection{.ds $<$value0$>$ ($<$value1$>$) (...)}
+Interpret values as register (up to 64bit) size and output directly to image. 
+ 
+\pagebreak
+\section{Arithmetic}
+Equations (including directives) are evaluated using reverse polish notation (RPN) method enclosed between \{\}.Nested \{\}\ evaluated.\\
+Values are treated as 64 bit unsigned integer. Each value is added to a 'last in first out' stack.
+
+example
+\begin{verbatim}
+.defina a {100 1 +} ;tag 'a' defined as 101
+.defina b {a 2 -} ;tag 'b' defined as 99.
+\end{verbatim}
+
+\subsection{RPN Directives}
+
+\subsubsection{.x} 
+ Exchange last two values on stack
+
+\subsubsection{.d} 
+ Duplicate value on RPN stack indexed by last value (not included in count)
+
+\subsubsection{.$<$} 
+ Drop n values from stack, n is determined by last value and is dropped additionally.
+
+\subsubsection{.-} 
+ Unary function: twos compliment
+
+\subsubsection{.+} 
+ Unary function: absolute value
+
+\subsubsection{./} 
+ Unary function: $1/x$\\
+ Arithmetic performed as 64 bit integers.\\
+
+\subsection{RPN functions}
+$-$ ;subtract\\
+$+$ ;add\\
+$*$ ;multiply\\
+$/$ ;divide\\
+$>>$ ;shift right second last value by last value\\
+$<<$ ;shift left second last value by last value\\
+\& ;logic: and\\
+$|$ ;logic: or\\
+\^  ;logic: exclusive or\\
+
+Boolean functions evaluate 1 if true otherwise 0. Last two values are replaced with result.\\
+$>$ ;boolean: compare last two values: greater than\\
+$<$ ;boolean: compare last two values: less than\\
+$>=$ ;boolean: compare last two values: greater than or equal\\
+$<=$ ;boolean: compare last two values: less than or equal\\
+$=$ ;boolean: compare last two values: equal\\
+!= ;boolean: compare last two values: not equal\\
+$||$ ;boolean: (or) values and compare with 0\\
+\&\& ;boolean: (and) values and compare with 0\\
+^^ ;boolean: (exclusive or) values and compare with 0\\
+
+\pagebreak
+\section{Examples}
+
+\subsection{Loading constants}
+
+\begin{verbatim}
+;24bits 0xaabbcc to register sT0
+
+;using ldis and ldi 8 bytes
+eor 0 0 ;0x0000000000000000
+ldis 0xaa ;0x000000000000aa00
+ldis 0xbb ;0x0000000000aabb00
+ldi 0xcc  ;0x0000000000aabbcc
+
+;using ldm 6 bytes
+ldm [sIP+] 4
+.d4 0x00aabbcc
+;execution continues
+\end{verbatim}
+
+\subsection{Configuring instruction}
+
+\begin{verbatim}
+ajusta 0x1f and ;configure 'and' in to last slot
+.ajusta 0x1f and ;inform assembler to interpret 'and' as 0x1f
+0 and 0 0 ;encoded as 0x001f
+rev opera\_rev\_ajusta\_reinisia ;return to default configuration
+.implicada ;inform assembler operations has default encoding
+0 and 0 0 ;0x0010
+\end{verbatim}
+
+\pagebreak
+\section{Macros}
+
+\subsection{Macro definition}
+.model $<$tag$>$ \{\} parameter0 parameter1 ... ;Named macro. Output when invoked by name.\\
+\{\} ;Single line macros are evaluated in place.
+
+\subsection{Macro functions}
+Use within a macro definition \{\}.
+
+\subsubsection{\%0..9} 
+ Substituted with corresponding macro parameter.
+
+\subsubsection{\%\{\}} 
+ Substituted with corresponding macro parameter indexed as evaluated between \{\}.
+
+\subsubsection{\%I"$<$text$>$"} 
+ Macro information $<$text$>$ printed to console.
+
+\subsubsection{\%!\{\}"$<$text$>$"} 
+ Assembler error flagged and $<$text$>$ printed to console if \{\} evaluates !=0.
+
+\subsubsection{\%.\{\}} 
+ Macro expansion will stop at this evaluation if \{\} evaluates !=0.
+
+\subsubsection{\%+\{\} $<$line$>$} 
+ Include $<$line$>$ (the remaining text) if \{\} evaluates !=0
+
+\subsubsection{\%-\{\} $<$line$>$} 
+ Remove $<$line$>$ (the remaining text) line if \{\} evaluates !=0
+
+\subsubsection{\%$>$\{\} $<$c$>$} 
+ Skip character $<$c$>$ (advance one character) if \{\} evaluates !=0
+
+\subsubsection{\%@} 
+ Replace with current instruction pointer
+
+\subsubsection{\%c} 
+ Replace with parameter count
+
+\subsection{Macro examples}
+\begin{verbatim}
+;Single line macro. Output 0 
+;(size of register) if instruction pointer
+; evaluates greater or equal to 1001
+{%+{%@ %0 >=}.ds 0} 1001
+\end{verbatim}
+
+\subsubsection{Named macro}
+\begin{verbatim}
+.model named {
+%+{%@ %0 >=}.ds 0
+}
+;code
+named 1001 ;Output 0 (size of register) if instruction pointer
+           ;evaluates greater or equal to 1001
+\end{verbatim}
+
+\subsubsection{Recursive macro}
+'something' repeated \%0 (10) times.\\
+ Each evaluation the parameter is decreased by 1 and passed to the named macro \sl reveni \rm after executing 'something'.\\
+ After 10 passes \%+ evaluates false and the next iteration is skipped.\\
+
+\begin{verbatim}
+.model revinente {
+.defina contador {%0 1 -}
+something
+%+{contador 0 !=} revinente contador
+}
+;code
+reveni 10
+
+\end{verbatim}
+
+\pagebreak
+\part{Simulator}
+Parameters intended for the simulated 1664 (See the instruction \bf imita\rm) are distinguished by starting with a \bf + \rm character (convention).\\
+
+\section{Command line}
+\subsection{-v : verbose}
+\subsection{-d : start in debugger (execute)}
+\subsection{-e : execute after assemble}
+\subsection{-f : assemble file}
+\subsection{-I : search path}
+\subsection{-m : memory allocate in MB to CPU}
+\subsection{-b : write binary image}
+\subsection{-B : read binary image}
+
+\pagebreak
+\section{Debugger}
+Fo the debugger to display the correct instruction names and decode the parameters correctly, the instruction delcarations that where used to assemble the file need to be supplied. (See assembler directive \sl .opera\rm).\\
+\subsection{Key commands}
+\subsubsection{c : run}
+\subsubsection{n : step in}
+\subsubsection{N : step over}
+\subsubsection{m : break after}
+
+\pagebreak
+\section{Additional instruction}
+To provide a way for the simulator to be used as an interpreter for 1664 code/binaries an additional instruction is included that provides an interface with some system calls (presently limited to GNU/Linux).\\
+The example code uses \bf imita \rm at the 'operating system' level. The user code invokes the function by using the native user exception mechanism \bf rev opera\_rev\_eseta \rm.\\
+
+\subsection{imita : simulate operating system call}
+ Parameter format: $<$0..255$>$\\
+ See \sl imita.inclui.1664 \rm for specific definition\\
+ See \sl imita.0.1664 \rm for code example.\\
+\end{document}
