@@ -1,0 +1,2015 @@
+diff --exclude=.git --exclude=.gitignore -Naur ../x264/common/common.c x264/common/common.c
+--- ../x264/common/common.c	2009-10-25 17:41:22.000000000 +0100
++++ x264/common/common.c	2009-10-27 16:45:55.000000000 +0100
+@@ -764,8 +764,10 @@
+     align_buf = malloc( i_size );
+ #elif defined( HAVE_MALLOC_H )
+     align_buf = memalign( 16, i_size );
++    //fprintf(stderr, "memalign, result addr: 0x%.8x\n", (unsigned int) align_buf);
+ #else
+     uint8_t *buf = malloc( i_size + 15 + sizeof(void **) + sizeof(int) );
++    //fprintf(stderr, "malloc, result addr: 0x%.8x\n", (unsigned int) buf);
+     if( buf )
+     {
+         align_buf = buf + 15 + sizeof(void **) + sizeof(int);
+diff --exclude=.git --exclude=.gitignore -Naur ../x264/common/common.h x264/common/common.h
+--- ../x264/common/common.h	2009-10-25 17:41:22.000000000 +0100
++++ x264/common/common.h	2009-10-27 16:45:55.000000000 +0100
+@@ -51,7 +51,8 @@
+ #define X264_BFRAME_MAX 16
+ #define X264_THREAD_MAX 128
+ #define X264_PCM_COST (386*8)
+-#define X264_LOOKAHEAD_MAX 250
++//#define X264_LOOKAHEAD_MAX 250
++#define X264_LOOKAHEAD_MAX 140
+ // arbitrary, but low because SATD scores are 1/4 normal
+ #define X264_LOOKAHEAD_QP 12
+ 
+diff --exclude=.git --exclude=.gitignore -Naur ../x264/common/frame.c x264/common/frame.c
+--- ../x264/common/frame.c	2009-10-25 17:41:10.000000000 +0100
++++ x264/common/frame.c	2009-10-27 16:45:55.000000000 +0100
+@@ -31,6 +31,8 @@
+     x264_frame_t *frame;
+     int i, j;
+ 
++    //V(fprintf(stderr, "x264_frame_new\n"));
++
+     int i_mb_count = h->mb.i_mb_count;
+     int i_stride, i_width, i_lines;
+     int i_padv = PADV << h->param.b_interlaced;
+@@ -981,11 +983,14 @@
+ 
+ x264_frame_t *x264_frame_pop_unused( x264_t *h, int b_fdec )
+ {
++  //V(fprintf(stderr, "x264_frame_pop_unused\n"));
+     x264_frame_t *frame;
+     if( h->frames.unused[b_fdec][0] )
+         frame = x264_frame_pop( h->frames.unused[b_fdec] );
+     else
+         frame = x264_frame_new( h, b_fdec );
++
++    //V(fprintf(stderr, "x264_frame_pop_unused: frame ptr = 0x%.8x\n", (unsigned long) frame));
+     if( !frame )
+         return NULL;
+     frame->b_last_minigop_bframe = 0;
+diff --exclude=.git --exclude=.gitignore -Naur ../x264/common/mdate.c x264/common/mdate.c
+--- ../x264/common/mdate.c	2009-10-25 17:41:10.000000000 +0100
++++ x264/common/mdate.c	2009-10-27 16:45:55.000000000 +0100
+@@ -32,9 +32,12 @@
+ int64_t x264_mdate( void )
+ {
+ #ifndef __MINGW32__
++  /* --jb
+     struct timeval tv_date;
+     gettimeofday( &tv_date, NULL );
+     return( (int64_t) tv_date.tv_sec * 1000000 + (int64_t) tv_date.tv_usec );
++  */
++  return 0;
+ #else
+     struct _timeb tb;
+     _ftime(&tb);
+diff --exclude=.git --exclude=.gitignore -Naur ../x264/common/pixel.c x264/common/pixel.c
+--- ../x264/common/pixel.c	2009-10-25 17:41:10.000000000 +0100
++++ x264/common/pixel.c	2009-10-27 16:45:55.000000000 +0100
+@@ -22,6 +22,7 @@
+  *****************************************************************************/
+ 
+ #include "common.h"
++#include "x264.h"
+ 
+ #ifdef HAVE_MMX
+ #   include "x86/pixel.h"
+@@ -40,6 +41,7 @@
+ /****************************************************************************
+  * pixel_sad_WxH
+  ****************************************************************************/
++/*  V(fprintf(stderr, "pixel_sad %d x %d, *pix1: 0x%.8x *pix2: 0x%.8x i_stride_pix1: %d i_stride_pix2: %d\n", lx, ly, (unsigned long) pix1, (unsigned long) pix2, i_stride_pix1, i_stride_pix2)); \*/
+ #define PIXEL_SAD_C( name, lx, ly ) \
+ static int name( uint8_t *pix1, int i_stride_pix1,  \
+                  uint8_t *pix2, int i_stride_pix2 ) \
+@@ -387,6 +389,7 @@
+ 
+ /****************************************************************************
+  * pixel_sad_x4
++ * Debug printf :   V(fprintf(stderr, "x264_pixel_sadx4 size : *fenc: 0x%.8x *pix0: 0x%.8x *pix1: 0x%.8x *pix2: 0x%.8x *pix3: 0x%.8x i_stride: %d  *scores: 0x%.8x\n", (unsigned long) fenc, (unsigned long) pix0, (unsigned long) pix1, (unsigned long)pix2, (unsigned long)pix3, i_stride, (unsigned long) scores)); \
+  ****************************************************************************/
+ #define SAD_X( size ) \
+ static void x264_pixel_sad_x3_##size( uint8_t *fenc, uint8_t *pix0, uint8_t *pix1, uint8_t *pix2, int i_stride, int scores[3] )\
+diff --exclude=.git --exclude=.gitignore -Naur ../x264/configure x264/configure
+--- ../x264/configure	2009-10-25 17:41:10.000000000 +0100
++++ x264/configure	2009-10-27 16:45:55.000000000 +0100
+@@ -29,7 +29,7 @@
+     rm -f conftest.c
+     [ -n "$1" ] && echo "#include <$1>" > conftest.c
+     echo "int main () { $3 return 0; }" >> conftest.c
+-    $CC conftest.c $CFLAGS $LDFLAGS $2 -o conftest 2>$DEVNULL
++    $CC conftest.c $CFLAGS $LDFLAGS $2 -o conftest #2>$DEVNULL
+ }
+ 
+ as_check() {
+diff --exclude=.git --exclude=.gitignore -Naur ../x264/encoder/analyse.c x264/encoder/analyse.c
+--- ../x264/encoder/analyse.c	2009-10-25 17:41:10.000000000 +0100
++++ x264/encoder/analyse.c	2009-10-27 16:45:55.000000000 +0100
+@@ -27,6 +27,7 @@
+ #include <unistd.h>
+ 
+ #include "common/common.h"
++#include "x264.h"
+ #include "common/cpu.h"
+ #include "macroblock.h"
+ #include "me.h"
+@@ -34,6 +35,7 @@
+ #include "analyse.h"
+ #include "rdo.c"
+ 
++
+ typedef struct
+ {
+     /* 16x16 */
+@@ -233,40 +235,76 @@
+     5, 3, 3, 1
+ };
+ 
++extern const float x264_analyse_init_log2_array[]; //jb
++
+ static void x264_analyse_update_cache( x264_t *h, x264_mb_analysis_t *a );
+ 
+ static uint16_t x264_cost_ref[92][3][33];
+ static x264_pthread_mutex_t cost_ref_mutex = X264_PTHREAD_MUTEX_INITIALIZER;
+ 
++/*
++float log2f( float n )
++{
++// log(n)/log(2) is log2.
++//return log10( n ) / log10( 2 );
++  return (float) (log( n ) / _M_LOG2_E);
++} 
++*/
+ int x264_analyse_init_costs( x264_t *h, int qp )
+ {
+     int i, j;
+     int lambda = x264_lambda_tab[qp];
++    float tmp_f,lambda_f = lambda;
++
+     if( h->cost_mv[lambda] )
+         return 0;
++
++    fprintf( stderr, 
++	     "x264_analyse_init_costs: lambda (= x264_lambda_tab[%d])  = %d\n",
++	     qp, lambda);
++
+     /* factor of 4 from qpel, 2 from sign, and 2 because mv can be opposite from mvp */
+     CHECKED_MALLOC( h->cost_mv[lambda], (4*4*2048 + 1) * sizeof(uint16_t) );
++    
+     h->cost_mv[lambda] += 2*4*2048;
++
++    /* Computationally expensive thing: logs, floating point math, much of -- jb*/
++    //fprintf(stderr, "x264_analyse_init_costs: beginning loop of 2*4*2048");
++
+     for( i = 0; i <= 2*4*2048; i++ )
+-    {
+-        h->cost_mv[lambda][-i] =
+-        h->cost_mv[lambda][i]  = lambda * (log2f(i+1)*2 + 0.718f + !!i) + .5f;
+-    }
++      {
++	
++	  //h->cost_mv[lambda][i]  = lambda * (log2f(i+1)*2 + 0.718f + !!i) + .5f;
++	  //h->cost_mv[lambda][i]  = lambda * (log2(i+1)*2 + 0.718f + !!i) + .5f;
++
++	// precalulated array, doing the above few calculations for us
++	tmp_f = lambda_f * x264_analyse_init_log2_array[i];
++	tmp_f += .5f;
++	h->cost_mv[lambda][-i] =
++	  h->cost_mv[lambda][i]  = tmp_f;
++	
++	
++      }
+     x264_pthread_mutex_lock( &cost_ref_mutex );
++    //fprintf(stderr, "\tfinished\n");
++    /* -- for now jb
+     for( i = 0; i < 3; i++ )
+-        for( j = 0; j < 33; j++ )
+-            x264_cost_ref[lambda][i][j] = i ? lambda * bs_size_te( i, j ) : 0;
++      for( j = 0; j < 33; j++ )
++	x264_cost_ref[lambda][i][j] = i ? lambda * bs_size_te( i, j ) : 0;
++    
+     x264_pthread_mutex_unlock( &cost_ref_mutex );
+     if( h->param.analyse.i_me_method >= X264_ME_ESA && !h->cost_mv_fpel[lambda][0] )
+-    {
++      {
++	printf("analyse_init_costs: h->param.analyse.i_me_method >= X264_ME_ESA && !h->cost_mv_fpel[lambda][0]\n");
+         for( j=0; j<4; j++ )
+-        {
++	  {
+             CHECKED_MALLOC( h->cost_mv_fpel[lambda][j], (4*2048 + 1) * sizeof(uint16_t) );
+             h->cost_mv_fpel[lambda][j] += 2*2048;
+             for( i = -2*2048; i < 2*2048; i++ )
+-                h->cost_mv_fpel[lambda][j][i] = h->cost_mv[lambda][i*4+j];
++	      h->cost_mv_fpel[lambda][j][i] = h->cost_mv[lambda][i*4+j];
+         }
+     }
++    */
+     return 0;
+ fail:
+     return -1;
+@@ -288,6 +326,7 @@
+ /* initialize an array of lambda*nbits for all possible mvs */
+ static void x264_mb_analyse_load_costs( x264_t *h, x264_mb_analysis_t *a )
+ {
++  //V(fprintf(stderr, "x264_mb_analyse_load_costs() called\n"));
+     a->p_cost_mv = h->cost_mv[a->i_lambda];
+     a->p_cost_ref0 = x264_cost_ref[a->i_lambda][x264_clip3(h->sh.i_num_ref_idx_l0_active-1,0,2)];
+     a->p_cost_ref1 = x264_cost_ref[a->i_lambda][x264_clip3(h->sh.i_num_ref_idx_l1_active-1,0,2)];
+diff --exclude=.git --exclude=.gitignore -Naur ../x264/encoder/analyse_gen_init_array.sh x264/encoder/analyse_gen_init_array.sh
+--- ../x264/encoder/analyse_gen_init_array.sh	1970-01-01 01:00:00.000000000 +0100
++++ x264/encoder/analyse_gen_init_array.sh	2009-10-27 16:45:55.000000000 +0100
+@@ -0,0 +1,32 @@
++#!/bin/bash
++# Pre-generate an array of numbers according to the algorithm from analyse_init_costs()
++# to speedup calculation. Here we calculate the stuff in brackets:
++# lambda * (log2f(i+1)*2 + 0.718f + !!i) + .5f; 
++outfile=analyse_init_log2.c
++
++echo; echo "Generating analyse_init_log2_array[] to $outfile" 
++echo "This may take a minute or two..."
++
++#Size of the array: 4*2*2048
++numvals=16384
++
++rm  -f $outfile
++
++echo "const float x264_analyse_init_log2_array[] = {" >> $outfile
++
++n=0
++
++    for num in `seq 1 $numvals`; 
++    do 
++# Use bc to do the calculation, scale down to the output to one decimal place
++	newnum=`echo "a=((l($num)/l(2))*2)+1.718; scale=1; a=(a*2)/2; a" | bc -l`
++	echo -n $newnum >> $outfile
++	if [ $num -lt $numvals ]; then echo -n ", " >> $outfile; fi;
++	# Newline every 16 values
++	let "n = $num % 16"
++	if [ $n -eq 0 ]; then echo >> $outfile; fi;
++    done
++echo "};" >> $outfile
++
++echo "finished"
++echo
+diff --exclude=.git --exclude=.gitignore -Naur ../x264/encoder/encoder.c x264/encoder/encoder.c
+--- ../x264/encoder/encoder.c	2009-10-25 17:41:22.000000000 +0100
++++ x264/encoder/encoder.c	2009-10-27 16:45:55.000000000 +0100
+@@ -62,6 +62,9 @@
+ 
+ static void x264_frame_dump( x264_t *h )
+ {
++  //printf("frame_dump()\n");
++  return;
++  
+     FILE *f = fopen( h->param.psz_dump_yuv, "r+b" );
+     int i, y;
+     if( !f )
+@@ -301,6 +304,7 @@
+     if( ( h->param.b_cabac && (h->cabac.p_end - h->cabac.p < 2500) )
+      || ( h->out.bs.p_end - h->out.bs.p < 2500 ) )
+     {
++      //V(fprintf(stderr, "x264_bitstream_check_buffer: h->out.bs.p = 0x%.8x, h->out.bs.p_end = 0x%.8x\n",h->out.bs.p_end, h->out.bs.p ));
+         intptr_t delta;
+         int i;
+ 
+@@ -695,6 +699,8 @@
+ static void mbcmp_init( x264_t *h )
+ {
+     int satd = !h->mb.b_lossless && h->param.analyse.i_subpel_refine > 1;
++    //V(if (satd)fprintf(stderr, "macroblock compare functions. satd enabled\n"));
++    //V(if (!satd)fprintf(stderr, "macroblock compare functions. satd not enabled\n"));
+     memcpy( h->pixf.mbcmp, satd ? h->pixf.satd : h->pixf.sad_aligned, sizeof(h->pixf.mbcmp) );
+     memcpy( h->pixf.mbcmp_unaligned, satd ? h->pixf.satd : h->pixf.sad, sizeof(h->pixf.mbcmp_unaligned) );
+     h->pixf.intra_mbcmp_x3_16x16 = satd ? h->pixf.intra_satd_x3_16x16 : h->pixf.intra_sad_x3_16x16;
+@@ -750,15 +756,14 @@
+     x264_t *h;
+     char buf[1000], *p;
+     int i, qp, i_slicetype_length;
+-
++    
+     CHECKED_MALLOCZERO( h, sizeof(x264_t) );
+-
++    
+     /* Create a copy of param */
+     memcpy( &h->param, param, sizeof(x264_param_t) );
+-
+     if( param->param_free )
+         param->param_free( param );
+-
++    
+     if( x264_validate_parameters( h ) < 0 )
+         goto fail;
+ 
+@@ -772,7 +777,7 @@
+         h->param.rc.psz_stat_in = strdup( h->param.rc.psz_stat_in );
+ 
+     x264_set_aspect_ratio( h, param, 1 );
+-
++    
+     x264_reduce_fraction( &h->param.i_fps_num, &h->param.i_fps_den );
+ 
+     /* Init x264_t */
+@@ -831,8 +836,8 @@
+     h->i_ref0 = 0;
+     h->i_ref1 = 0;
+ 
+-    x264_rdo_init();
+-
++    x264_rdo_init(); 
++    
+     /* init CPU functions */
+     x264_predict_16x16_init( h->param.cpu, h->predict_16x16 );
+     x264_predict_8x8c_init( h->param.cpu, h->predict_8x8c );
+@@ -870,17 +875,25 @@
+         p += sprintf( p, " none!" );
+     x264_log( h, X264_LOG_INFO, "%s\n", buf );
+ 
++    /* // should skip during cycle accurate -- jb    */
++    // Check the different quantisation points and their costs
+     for( qp = h->param.rc.i_qp_min; qp <= h->param.rc.i_qp_max; qp++ )
++      {
++	//printf("%d\n", qp);
+         if( x264_analyse_init_costs( h, qp ) )
+-            goto fail;
++	  goto fail;
++      }
+     if( x264_analyse_init_costs( h, X264_LOOKAHEAD_QP ) )
+         goto fail;
+     if( h->cost_mv[1][2013] != 24 )
+-    {
++      {
++	//fprintf(stderr, "h->cost_mv[1][2013] = %d\n",h->cost_mv[1][2013]);
+         x264_log( h, X264_LOG_ERROR, "MV cost test failed: x264 has been miscompiled!\n" );
+         goto fail;
+     }
+ 
++    //exit(0); // jb
++    
+     h->out.i_nal = 0;
+     h->out.i_bitstream = X264_MAX( 1000000, h->param.i_width * h->param.i_height * 4
+         * ( h->param.rc.i_rc_method == X264_RC_ABR ? pow( 0.95, h->param.rc.i_qp_min )
+@@ -908,16 +921,17 @@
+         if( x264_macroblock_cache_init( h->thread[i] ) < 0 )
+             goto fail;
+     }
+-
++    
+     if( x264_lookahead_init( h, i_slicetype_length ) )
+         goto fail;
+ 
+     if( x264_ratecontrol_new( h ) < 0 )
+         goto fail;
+-
++    
++    /* // skip this for now, it's a fopen() call we won't really do, plus it's an option we'll never need --jb
+     if( h->param.psz_dump_yuv )
+     {
+-        /* create or truncate the reconstructed video file */
++    //create or truncate the reconstructed video file
+         FILE *f = fopen( h->param.psz_dump_yuv, "w" );
+         if( f )
+             fclose( f );
+@@ -927,6 +941,8 @@
+             goto fail;
+         }
+     }
++    */
++
+ 
+     x264_log( h, X264_LOG_INFO, "profile %s, level %d.%d\n",
+         h->sps->i_profile_idc == PROFILE_BASELINE ? "Baseline" :
+@@ -1307,6 +1323,8 @@
+     int slice_max_size = h->param.i_slice_max_size > 0 ? (h->param.i_slice_max_size-3-NALU_OVERHEAD)*8 : INT_MAX;
+     int starting_bits = bs_pos(&h->out.bs);
+ 
++    //V(fprintf(stderr, "x264_slice_write\n"));
++    
+     /* Slice */
+     x264_nal_start( h, h->i_nal_type, h->i_nal_ref_idc );
+ 
+@@ -1320,6 +1338,7 @@
+         /* init cabac */
+         x264_cabac_context_init( &h->cabac, h->sh.i_type, h->sh.i_qp, h->sh.i_cabac_init_idc );
+         x264_cabac_encode_init ( &h->cabac, h->out.bs.p, h->out.bs.p_end );
++	//V(fprintf(stderr, "\tcabac inited\n"));
+     }
+     h->mb.i_last_qp = h->sh.i_qp;
+     h->mb.i_last_dqp = 0;
+@@ -1362,7 +1381,10 @@
+         x264_macroblock_encode( h );
+ 
+         if( x264_bitstream_check_buffer( h ) )
++	  {
++	    //V(fprintf(stderr, "\tx264_bitstream_check_buffer failed\n"));
+             return -1;
++	  }
+ 
+         if( h->param.b_cabac )
+         {
+@@ -1522,6 +1544,8 @@
+         x264_fdec_filter_row( h, h->sps->i_mb_height );
+     }
+ 
++    //V(fprintf(stderr, "x264_slice_write ok\n"));
++
+     return 0;
+ }
+ 
+@@ -1625,8 +1649,8 @@
+     int     i_nal_type, i;
+     int     i_nal_ref_idc;
+ 
+-    int   i_global_qp;
+ 
++    int   i_global_qp;
+     if( h->param.i_threads > 1)
+     {
+         int i = ++h->i_thread_phase;
+@@ -1653,6 +1677,7 @@
+     /* no data out */
+     *pi_nal = 0;
+     *pp_nal = NULL;
++    
+ 
+     /* ------------------- Setup new frame from picture -------------------- */
+     if( pic_in != NULL )
+@@ -1663,7 +1688,10 @@
+             return -1;
+ 
+         if( x264_frame_copy_picture( h, fenc, pic_in ) < 0 )
++	  {
++	    //V(fprintf(stderr, "x264_frame_copy_picture returned >0\n"));
+             return -1;
++	  }
+ 
+         if( h->param.i_width != 16 * h->sps->i_mb_width ||
+             h->param.i_height != 16 * h->sps->i_mb_height )
+@@ -1684,13 +1712,15 @@
+ 
+         /* 2: Place the frame into the queue for its slice type decision */
+         x264_lookahead_put_frame( h, fenc );
+-
++	
++	//V(fprintf(stderr, "x264_encoder_encode setup new frame from picture\n"));
++	
+         if( h->frames.i_input <= h->frames.i_delay + 1 - h->param.i_threads )
+         {
+             /* Nothing yet to encode, waiting for filling of buffers */
+             pic_out->i_type = X264_TYPE_AUTO;
+             return 0;
+-        }
++        }	
+     }
+     else
+     {
+@@ -1873,7 +1903,10 @@
+     }
+     else
+         if( (intptr_t)x264_slices_write( h ) )
++	  {
++	    //V(fprintf(stderr, "x264_encoder_encode(): x264_slices_write() failed\n"));
+             return -1;
++	  }
+ 
+     return x264_encoder_frame_end( thread_oldest, thread_current, pp_nal, pi_nal, pic_out );
+ }
+diff --exclude=.git --exclude=.gitignore -Naur ../x264/encoder/me.c x264/encoder/me.c
+--- ../x264/encoder/me.c	2009-10-25 17:41:10.000000000 +0100
++++ x264/encoder/me.c	2009-10-27 16:45:55.000000000 +0100
+@@ -182,6 +182,7 @@
+     int omx, omy, pmx, pmy;
+     uint8_t *p_fenc = m->p_fenc[0];
+     uint8_t *p_fref = m->p_fref[0];
++    //V(fprintf(stderr, "s264_me_search_ref *p_fenc = 0x%.8x *p_fref = 0x%.8x\n", (unsigned long) p_fenc, (unsigned long) p_fref));
+     ALIGNED_ARRAY_16( uint8_t, pix,[16*16] );
+ 
+     int i, j;
+@@ -197,7 +198,7 @@
+ 
+     const uint16_t *p_cost_mvx = m->p_cost_mv - m->mvp[0];
+     const uint16_t *p_cost_mvy = m->p_cost_mv - m->mvp[1];
+-
++    //V(fprintf(stderr, "p_cost_mvx: 0x%.8x, ( m->p_cost_mv: 0x%.8x m->mvp[0]: 0x%.8x )p_cost_mvy: 0x%.8x (m->p_cost_mv: 0x%.8x  m->mvp[1]: 0x%.8x)\n", (unsigned long) p_cost_mvx, (unsigned long) m->p_cost_mv, (unsigned long) m->mvp[0], (unsigned long) p_cost_mvy, (unsigned long) m->p_cost_mv, (unsigned long) m->mvp[1]));
+     bmx = x264_clip3( m->mvp[0], mv_x_min*4, mv_x_max*4 );
+     bmy = x264_clip3( m->mvp[1], mv_y_min*4, mv_y_max*4 );
+     pmx = ( bmx + 2 ) >> 2;
+@@ -251,6 +252,7 @@
+     {
+     case X264_ME_DIA:
+         /* diamond search, radius 1 */
++      //V(fprintf(stderr, "x264_me_search_ref; diamond search. *p_fenc = 0x%.8x *p_fref = 0x%.8x\n", (unsigned long) p_fenc, (unsigned long) p_fref));
+         i = 0;
+         bcost <<= 4;
+         do
+diff --exclude=.git --exclude=.gitignore -Naur ../x264/encoder/slicetype.c x264/encoder/slicetype.c
+--- ../x264/encoder/slicetype.c	2009-10-25 17:41:22.000000000 +0100
++++ x264/encoder/slicetype.c	2009-10-27 16:45:55.000000000 +0100
+@@ -909,7 +909,9 @@
+ 
+     /* Restore frametypes for all frames that haven't actually been decided yet. */
+     for( j = reset_start; j <= num_frames; j++ )
+-        frames[j]->i_type = X264_TYPE_AUTO;
++      frames[j]->i_type = X264_TYPE_AUTO;
++    
++    return;
+ }
+ 
+ void x264_slicetype_decide( x264_t *h )
+diff --exclude=.git --exclude=.gitignore -Naur ../x264/link.ld x264/link.ld
+--- ../x264/link.ld	1970-01-01 01:00:00.000000000 +0100
++++ x264/link.ld	2009-10-27 16:45:55.000000000 +0100
+@@ -0,0 +1,100 @@
++/*
++MEMORY
++        {
++        vectors : ORIGIN = 0x00000000, LENGTH = 0x00002000
++        flash   : ORIGIN = 0x04000000, LENGTH = 0x00200000
++        ram     : ORIGIN = 0x00002000, LENGTH = 0x001fe000
++        icm     : ORIGIN = 0x00800000, LENGTH = 0x00004000
++        }
++ */
++
++MEMORY
++	{
++/*
++	reset	 : ORIGIN = 0x00000000, LENGTH = 0x00000200
++	vectors  : ORIGIN = 0x00000200, LENGTH = 0x00001E00
++        text     : ORIGIN = 0x00002000, LENGTH = 0x000fe000
++	data     : ORIGIN = 0x00100000, LENGTH = 0x00fe0000
++	stack    : ORIGIN = 0x001fe000, LENGTH = 0x00010000
++*/
++	yuv_data : ORIGIN = 25M, LENGTH = 7M
++	}
++
++/*
++MEMORY
++        {
++        reset   : ORIGIN = 0xc0000000, LENGTH = 0x00000200
++        vectors : ORIGIN = 0xc0000200, LENGTH = 0x00001000
++        ram     : ORIGIN = 0xc0001200, LENGTH = 0x00FFED00
++        }
++*/
++SECTIONS
++{
++/*
++	.reset :
++        {
++        *(.reset)
++        } > reset
++
++
++ 
++	.vectors :
++        {
++        _vec_start = .;
++        *(.vectors)
++        _vec_end = .;
++        } > vectors
++
++        .text :
++        {
++        *(.text)
++        } > text
++
++      .rodata :
++        {
++        *(.rodata)
++        *(.rodata.*)
++        } > text
++ 
++     .icm :
++        {
++        _icm_start = .;
++        *(.icm)
++        _icm_end = .;
++        } > data
++
++     .data :
++        {
++        _dst_beg = .;
++        *(.data)
++        _dst_end = .;
++        } > data
++ 
++      .bss :
++        {
++        *(.bss)
++        } > data
++	
++       .heap :
++	{
++	_heap_start = .;
++	*(.heap)
++ 	_heap_end = .;
++	} > data
++
++      .stack (NOLOAD) :
++        {
++        *(.stack)
++        _src_addr = .;
++        } > data
++*/
++	.yuv_data :
++	{
++	_yuv_data_start = .;
++	__yuv_data_start = .;
++	*(.yuv_data)	
++	_yuv_data_end = .;
++	__yuv_data_end = .;
++	} > yuv_data
++
++}
+diff --exclude=.git --exclude=.gitignore -Naur ../x264/Makefile x264/Makefile
+--- ../x264/Makefile	2009-10-25 17:41:22.000000000 +0100
++++ x264/Makefile	2009-10-27 17:30:09.000000000 +0100
+@@ -91,7 +91,54 @@
+ $(SONAME): .depend $(OBJS) $(OBJASM)
+ 	$(CC) -shared -o $@ $(OBJS) $(OBJASM) $(SOFLAGS) $(LDFLAGS)
+ 
+-x264$(EXE): $(OBJCLI) libx264.a 
++
++## OR32-specific build rules
++##
++## Essentially we create some sample YUV video data
++## and embed it in an ELF file, in a section called yuv_data.
++## In the linker script we then link this section to a place
++## in ram and tell x264 to look here when it wants data.
++## 
++## You can download sample h264 encoded CIF sequences
++## here: http://www.tkn.tu-berlin.de/research/evalvid/cif.html
++## 
++##
++GEN_FILES=encoder/analyse_init_log2.c
++VIDEO_DATA_FILE=yuv_data.elf
++H264_VIDEO_FILE ?= ../test-sequences/football_cif.264
++YUV_VIDEO_FILE ?= video_data.yuv
++# We will use a limit of about 5MB of video data to encode
++# For CIF resultion of 4:2:0 this is about 30 frames. It's
++# possible to convert a set amount of data with ffmpeg but
++# it's probably not wise to attempt to encode partial frames
++NUM_FRAMES=30
++
++$(H264_VIDEO_FILE):
++	@echo; echo;
++	@echo "\tNo sample video file to embed! Please edit the Makefile"
++	@echo "\tand set the variable H264_VIDEO_FILE to the location of "
++	@echo "\ta raw h264 bitstream file, or set this variable on the"
++	@echo "\tcommand line when calling make, eg.:"
++	@echo "\t\tH264_VIDEO_FILE=../football_cif.264 make"; echo
++	exit 1
++$(YUV_VIDEO_FILE): $(H264_VIDEO_FILE)
++# First convert it to raw YUV, only about 5MB large, so for cif take 30 frames
++	ffmpeg -i $(H264_VIDEO_FILE) -vframes $(NUM_FRAMES) $(YUV_VIDEO_FILE)
++$(VIDEO_DATA_FILE): $(YUV_VIDEO_FILE)
++	or32-elf-ld -r -b binary -o yuv_data.o $(YUV_VIDEO_FILE)
++	or32-elf-objcopy --rename-section .data=.yuv_data yuv_data.o
++	mv yuv_data.o $(VIDEO_DATA_FILE)
++encoder/analyse_init_log2.c: encoder/analyse_gen_init_array.sh
++	cd encoder && chmod a+x analyse_gen_init_array.sh && ./analyse_gen_init_array.sh
++#OR32_DEPS= reset.o except.o uart.o syscalls.o $(VIDEO_DATA_FILE)
++
++OR32_DEPS= $(VIDEO_DATA_FILE) $(GEN_FILES)
++
++sim: x264$(EXE)
++	or32-elf-sim -f or1ksim_x264.cfg $<
++
++
++x264$(EXE): $(OR32_DEPS) $(OBJCLI) libx264.a
+ 	$(CC) -o $@ $+ $(LDFLAGS)
+ 
+ checkasm: tools/checkasm.o libx264.a
+@@ -147,12 +194,13 @@
+ endif
+ 
+ clean:
+-	rm -f $(OBJS) $(OBJASM) $(OBJCLI) $(SONAME) *.a x264 x264.exe .depend TAGS
++	rm -f $(OBJS) $(OBJASM) $(OBJCLI) $(SONAME) *.a x264 x264.exe .depend TAGS $(YUV_VIDEO_FILE)
+ 	rm -f checkasm checkasm.exe tools/checkasm.o tools/checkasm-a.o
+ 	rm -f $(SRC2:%.c=%.gcda) $(SRC2:%.c=%.gcno)
+ 	- sed -e 's/ *-fprofile-\(generate\|use\)//g' config.mak > config.mak2 && mv config.mak2 config.mak
+ 
+ distclean: clean
++	rm -f $(OR32_DEPS) uart0* $(GEN_FILES)
+ 	rm -f config.mak config.h x264.pc
+ 	rm -rf test/
+ 
+diff --exclude=.git --exclude=.gitignore -Naur ../x264/muxers.c x264/muxers.c
+--- ../x264/muxers.c	2009-10-25 17:41:22.000000000 +0100
++++ x264/muxers.c	2009-10-27 16:45:55.000000000 +0100
+@@ -52,15 +52,32 @@
+ 
+ typedef struct
+ {
+-    FILE *fh;
+-    int width, height;
+-    int next_frame;
++  //FILE *fh;
++  char *fh;
++  
++  int width, height;
++  int next_frame;
++  
+ } yuv_input_t;
+ 
++void init_yuv_dataspace(char* yuv_dat_addr, hnd_t *p_handle, x264_param_t *p_param)
++{
++  yuv_input_t *h = malloc( sizeof(yuv_input_t) );
++  V(fprintf( stderr, "init_yuv_dataspace: h addr = 0x%.8x\n", h));
++  h->fh = yuv_dat_addr;
++  V(fprintf( stderr, "init_yuv_dataspace: h->fh 0x%.8x\n",h->fh));
++  h->width = p_param->i_width;
++  V(fprintf( stderr, "init_yuv_dataspace: h->width %d\n",h->width));
++  h->height = p_param->i_height;
++  V(fprintf( stderr, "init_yuv_dataspace: h->height %d\n",h->height));
++  h->next_frame = 0;
++  *p_handle = (hnd_t *)h;
++}
++
+ /* raw 420 yuv file operation */
+ int open_file_yuv( char *psz_filename, hnd_t *p_handle, x264_param_t *p_param )
+ {
+-    yuv_input_t *h = malloc( sizeof(yuv_input_t) );
++  yuv_input_t *h = malloc( sizeof(yuv_input_t) );
+     if( !h )
+         return -1;
+     h->width = p_param->i_width;
+@@ -80,7 +97,10 @@
+ 
+ int get_frame_total_yuv( hnd_t handle )
+ {
+-    yuv_input_t *h = handle;
++      yuv_input_t *h = handle;
++
++      V(fprintf(stderr, "get_frame_total_yuv args: handle: 0x%.8x, h: 0x%.8x\n", handle, h));
++      /*
+     int i_frame_total = 0;
+ 
+     if( !fseek( h->fh, 0, SEEK_END ) )
+@@ -88,24 +108,45 @@
+         uint64_t i_size = ftell( h->fh );
+         fseek( h->fh, 0, SEEK_SET );
+         i_frame_total = (int)(i_size / ( h->width * h->height * 3 / 2 ));
+-    }
++	}*/
++  
++#ifdef      USE_HARDCODED_FRAME_NUM
++      return (int)HARDCODED_FRAME_NUM;
++#else
++      fprintf( stderr, "get_frame_total_yuv: %d %d %d %d\n",
++		 h->width, h->height,
++		 YUV_DATA_SIZE,
++		 (int)(YUV_DATA_SIZE / ( h->width * h->height * 3 / 2 )));
++      return (int)(YUV_DATA_SIZE / ( h->width * h->height * 3 / 2 ));//i_frame_total;
++
++#endif
+ 
+-    return i_frame_total;
+ }
+ 
+ int read_frame_yuv( x264_picture_t *p_pic, hnd_t handle, int i_frame )
+ {
+     yuv_input_t *h = handle;
+-
++    int i;
++    
+     if( i_frame != h->next_frame )
+-        if( fseek( h->fh, (uint64_t)i_frame * h->width * h->height * 3 / 2, SEEK_SET ) )
+-            return -1;
+-
+-    if( fread( p_pic->img.plane[0], 1, h->width * h->height, h->fh ) <= 0
+-     || fread( p_pic->img.plane[1], 1, h->width * h->height / 4, h->fh ) <= 0
+-     || fread( p_pic->img.plane[2], 1, h->width * h->height / 4, h->fh ) <= 0 )
+-        return -1;
++      //if( fseek( h->fh, (uint64_t)i_frame * h->width * h->height * 3 / 2, SEEK_SET ) )
++      // Progress pointer to beginning of this frame
++      h->fh = (void*) YUV_DATA_ADDR + i_frame * h->width * h->height * 3 / 2;
++      //return -1;
++
++    //if( fread( p_pic->img.plane[0], 1, h->width * h->height, h->fh ) <= 0
++    for (i=0;i<h->width * h->height;i++) p_pic->img.plane[0][i] = h->fh[i];
++    h->fh += h->width * h->height;
++    //|| fread( p_pic->img.plane[1], 1, h->width * h->height / 4, h->fh ) <= 0
++    for (i=0;i<(h->width * h->height) / 4;i++) p_pic->img.plane[1][i] = h->fh[i];
++    h->fh += (h->width * h->height) / 4;
++    
++    //|| fread( p_pic->img.plane[2], 1, h->width * h->height / 4, h->fh ) <= 0 )
++    for (i=0;i<(h->width * h->height) / 4;i++) p_pic->img.plane[2][i] = h->fh[i];
++    h->fh += (h->width * h->height) / 4;
+ 
++    //return -1;
++    
+     h->next_frame = i_frame+1;
+ 
+     return 0;
+@@ -113,12 +154,15 @@
+ 
+ int close_file_yuv(hnd_t handle)
+ {
++  return 0;
++  /* // -- jb
+     yuv_input_t *h = handle;
+     if( !h || !h->fh )
+         return 0;
+     fclose( h->fh );
+     free( h );
+     return 0;
++  */
+ }
+ 
+ /* YUV4MPEG2 raw 420 yuv file operation */
+@@ -530,11 +574,21 @@
+ }
+ #endif
+ 
++#ifdef ENC_OUT_ADDR
++char * enc_out_pos;
++#endif
+ 
+ int open_file_bsf( char *psz_filename, hnd_t *p_handle )
+ {
++#ifdef ENC_OUT_ADDR
++  V(fprintf(stderr, "open_file_bsf\n"));
++  // Use a hardcoded memory location for outputting encoded data to
++  p_handle = (void *) ENC_OUT_ADDR;
++  enc_out_pos = (char *) ENC_OUT_ADDR;
++#else
+     if( !(*p_handle = fopen(psz_filename, "w+b")) )
+         return -1;
++#endif
+ 
+     return 0;
+ }
+@@ -546,9 +600,16 @@
+ 
+ int write_nalu_bsf( hnd_t handle, uint8_t *p_nalu, int i_size )
+ {
++#ifdef ENC_OUT_ADDR
++  V(fprintf(stderr, "write_nalu_bsf: writing %d bytes from 0x%.8x\n", i_size, (unsigned long) enc_out_pos));
++  // Just write to the spot in memory and increment the pointer
++  int i; for (i=0;i<i_size;i++) *enc_out_pos++ = p_nalu[i];
++  return i_size;
++#else
+     if( fwrite( p_nalu, i_size, 1, (FILE*)handle ) > 0 )
+         return i_size;
+     return -1;
++#endif
+ }
+ 
+ int set_eop_bsf( hnd_t handle,  x264_picture_t *p_picture )
+@@ -558,6 +619,9 @@
+ 
+ int close_file_bsf( hnd_t handle )
+ {
++#ifdef ENC_OUT_ADDR
++  return 0;
++#endif
+     if( !handle || handle == stdout )
+         return 0;
+ 
+diff --exclude=.git --exclude=.gitignore -Naur ../x264/muxers.h x264/muxers.h
+--- ../x264/muxers.h	2009-10-25 17:41:22.000000000 +0100
++++ x264/muxers.h	2009-10-27 16:45:55.000000000 +0100
+@@ -27,6 +27,7 @@
+ typedef void *hnd_t;
+ 
+ int open_file_yuv( char *psz_filename, hnd_t *p_handle, x264_param_t *p_param );
++void init_yuv_dataspace(char* yuv_dat_addr, hnd_t *p_handle, x264_param_t *p_param);
+ int get_frame_total_yuv( hnd_t handle );
+ int read_frame_yuv( x264_picture_t *p_pic, hnd_t handle, int i_frame );
+ int close_file_yuv( hnd_t handle );
+diff --exclude=.git --exclude=.gitignore -Naur ../x264/or1ksim_x264.cfg x264/or1ksim_x264.cfg
+--- ../x264/or1ksim_x264.cfg	1970-01-01 01:00:00.000000000 +0100
++++ x264/or1ksim_x264.cfg	2009-10-27 16:45:55.000000000 +0100
+@@ -0,0 +1,886 @@
++/* sim.cfg -- Simulator configuration script file
++   Copyright (C) 2001-2002, Marko Mlinar, markom@opencores.org
++
++This file is part of OpenRISC 1000 Architectural Simulator.
++It contains the default configuration and help about configuring
++the simulator.
++
++This program is free software; you can redistribute it and/or modify
++it under the terms of the GNU General Public License as published by
++the Free Software Foundation; either version 2 of the License, or
++(at your option) any later version.
++
++This program is distributed in the hope that it will be useful,
++but WITHOUT ANY WARRANTY; without even the implied warranty of
++MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++GNU General Public License for more details.
++
++You should have received a copy of the GNU General Public License
++along with this program; if not, write to the Free Software
++Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA. */
++
++
++/* INTRODUCTION
++
++   The ork1sim has various parameters, that are set in configuration files
++   like this one. The user can switch between configurations at startup by
++   specifying the required configuration file with the -f <filename.cfg> option.
++   If no configuration file is specified or1ksim searches for the default
++   configuration file sim.cfg. First it searches for './sim.cfg'. If this
++   file is not found, it searches for '~/or1k/sim.cfg'. If this file is
++   not found too, it reverts to the built-in default configuration.
++   
++   NOTE: Users should not rely on the built-in configuration, since the
++         default configuration may differ between version.
++         Rather create a configuration file that sets all critical values.
++
++   This file may contain (standard C) comments only - no // support.
++   
++   Configure files may be be included, using:
++   include "file_name_to_include"
++
++   Like normal configuration files, the included file is divided into
++   sections. Each section is described in detail also.
++
++   Some section have subsections. One example of such a subsection is:
++
++   device <index>
++     instance specific parameters...
++   enddevice
++
++   which creates a device instance.
++*/
++
++
++/* MEMORY SECTION
++
++   This section specifies how the memory is generated and the blocks
++   it consists of.
++
++   type = random/unknown/pattern
++      Specifies the initial memory values.
++      'random' generates random memory using seed 'random_seed'.
++      'pattern' fills memory with 'pattern'.
++      'unknown' does not specify how memory should be generated,
++      leaving the memory in a undefined state. This is the fastest
++      option.
++
++   random_seed = <value>
++      random seed for randomizer, used if type = 'random'.
++
++   pattern = <value>
++      pattern to fill memory, used if type = 'pattern'.
++
++   nmemories = <value>
++      number of memory instances connected
++
++   baseaddr = <hex_value>
++      memory start address
++
++   size = <hex_value>
++      memory size
++
++   name = "<string>"
++      memory block name
++
++   ce = <value>
++      chip enable index of the memory instance
++
++   mc = <value>
++      memory controller this memory is connected to
++
++   delayr = <value>
++      cycles, required for read access, -1 if instance does not support reading
++
++   delayw = <value>
++      cycles, required for write access, -1 if instance does not support writing
++
++   log = "<filename>"
++      filename, where to log memory accesses to, no log, if log command is not specified
++*/
++
++
++section memory
++  /*random_seed = 12345
++  type = random*/
++  pattern = 0x00
++  type = unknown /* Fastest */
++
++  name = "FLASH"
++  ce = 0
++  mc = 0
++  baseaddr = 0xf0000000
++  size = 0x01000000
++  delayr = 10
++  delayw = -1
++end
++
++section memory
++  /*random_seed = 12345
++  type = random*/
++  pattern = 0x00
++  type = unknown /* Fastest */
++
++  name = "RAM"
++  ce = 1
++  mc = 0
++  baseaddr = 0x00000000
++  size = 0x02000000
++  delayr = 20
++  delayw = 25
++end
++
++section memory
++  /*random_seed = 12345
++  type = random*/
++  pattern = 0x00
++  type = unknown /* Fastest */
++
++  name = "SRAM"
++  mc = 0
++  ce = 2
++  baseaddr = 0xa4000000
++  size = 0x00100000
++  delayr = 1
++  delayw = 2
++end
++
++
++/* IMMU SECTION
++
++    This section configures the Instruction Memory Manangement Unit
++
++    enabled = 0/1
++       '0': disabled
++       '1': enabled
++       (NOTE: UPR bit is set)
++
++    nsets = <value>
++       number of ITLB sets; must be power of two
++
++    nways = <value>
++       number of ITLB ways
++
++    pagesize = <value>
++       instruction page size; must be power of two
++
++    entrysize = <value>
++       instruction entry size in bytes
++
++    ustates = <value>
++       number of ITLB usage states (2, 3, 4 etc., max is 4)
++       
++    hitdelay = <value>
++       number of cycles immu hit costs
++    
++    missdelay = <value>
++       number of cycles immu miss costs
++*/
++
++section immu
++  enabled = 1
++  nsets = 64
++  nways = 1
++  pagesize = 8192
++  hitdelay = 0
++  missdelay = 0
++end
++
++
++/* DMMU SECTION
++
++    This section configures the Data Memory Manangement Unit
++
++    enabled = 0/1
++       '0': disabled
++       '1': enabled
++       (NOTE: UPR bit is set)
++
++    nsets = <value>
++       number of DTLB sets; must be power of two
++
++    nways = <value>
++       number of DTLB ways
++
++    pagesize = <value>
++       data page size; must be power of two
++
++    entrysize = <value>
++       data entry size in bytes
++
++    ustates = <value>
++       number of DTLB usage states (2, 3, 4 etc., max is 4)
++
++    hitdelay = <value>
++       number of cycles dmmu hit costs
++
++    missdelay = <value>
++       number of cycles dmmu miss costs
++*/
++
++section dmmu
++  enabled = 1
++  nsets = 64
++  nways = 1
++  pagesize = 8192
++  hitdelay = 0
++  missdelay = 0
++end
++
++
++/* IC SECTION
++
++   This section configures the Instruction Cache
++
++   enabled = 0/1
++       '0': disabled
++       '1': enabled
++      (NOTE: UPR bit is set)
++
++   nsets = <value>
++      number of IC sets; must be power of two
++
++   nways = <value>
++      number of IC ways
++
++   blocksize = <value>
++      IC block size in bytes; must be power of two
++
++   ustates = <value>
++      number of IC usage states (2, 3, 4 etc., max is 4)
++
++   hitdelay = <value>
++      number of cycles ic hit costs
++    
++    missdelay = <value>
++      number of cycles ic miss costs
++*/
++
++section ic
++  enabled = 0
++  nsets = 512
++  nways = 1
++  blocksize = 16
++  hitdelay = 20
++  missdelay = 20
++end
++
++
++/* DC SECTION
++
++   This section configures the Data Cache
++
++   enabled = 0/1
++       '0': disabled
++       '1': enabled
++      (NOTE: UPR bit is set)
++
++   nsets = <value>
++      number of DC sets; must be power of two
++
++   nways = <value>
++      number of DC ways
++
++   blocksize = <value>
++      DC block size in bytes; must be power of two
++
++   ustates = <value>
++      number of DC usage states (2, 3, 4 etc., max is 4)
++
++   load_hitdelay = <value>
++      number of cycles dc load hit costs
++   
++   load_missdelay = <value>
++      number of cycles dc load miss costs
++       
++   store_hitdelay = <value>
++      number of cycles dc load hit costs
++    
++   store_missdelay = <value>
++      number of cycles dc load miss costs
++*/
++
++section dc
++  enabled = 0
++  nsets = 512
++  nways = 1
++  blocksize = 16
++  load_hitdelay = 20
++  load_missdelay = 20
++  store_hitdelay = 20
++  store_missdelay = 20
++end
++
++
++/* SIM SECTION
++
++  This section specifies how or1ksim should behave.
++
++  verbose = 0/1
++       '0': don't print extra messages
++       '1': print extra messages
++
++  debug = 0-9
++      0  : no debug messages
++      1-9: debug message level.
++           higher numbers produce more messages
++
++  profile = 0/1
++      '0': don't generate profiling file 'sim.profile'
++      '1': don't generate profiling file 'sim.profile'
++
++  prof_fn = "<filename>"
++      optional filename for the profiling file.
++      valid only if 'profile' is set
++      
++  mprofile = 0/1
++      '0': don't generate memory profiling file 'sim.mprofile'
++      '1': generate memory profiling file 'sim.mprofile'
++
++  mprof_fn = "<filename>"
++      optional filename for the memory profiling file.
++      valid only if 'mprofile' is set
++
++  history = 0/1
++      '0': don't track execution flow
++      '1': track execution flow
++      Execution flow can be tracked for the simulator's
++      'hist' command. Useful for back-trace debugging.
++
++  iprompt = 0/1
++     '0': start in <not interactive prompt> (so what do we start in ???)
++     '1': start in interactive prompt.
++
++  exe_log = 0/1
++      '0': don't generate execution log.
++      '1': generate execution log.
++      
++  exe_log = default/hardware/simple/software
++      type of execution log, default is used when not specified
++      
++  exe_log_start = <value>
++      index of first instruction to start logging, default = 0
++        
++  exe_log_end = <value>
++      index of last instruction to end logging; not limited, if omitted
++  
++  exe_log_marker = <value>
++      <value> specifies number of instructions before horizontal marker is
++      printed; if zero, markers are disabled (default)
++
++  exe_log_fn = "<filename>"
++      filename for the exection log file.
++      valid only if 'exe_log' is set
++
++  clkcycle = <value>[ps|ns|us|ms]
++      specifies time measurement for one cycle
++*/
++
++section sim
++  verbose = 1
++  debug = 0
++  profile = 0
++  history = 0
++
++  clkcycle = 10ns
++end
++
++
++/* SECTION VAPI
++
++    This section configures the Verification API, used for Advanced
++    Core Verification.
++
++    enabled = 0/1
++        '0': disbable VAPI server
++        '1': enable/start VAPI server
++
++    server_port = <value>
++        TCP/IP port to start VAPI server on
++
++    log_enabled = 0/1
++       '0': disable VAPI requests logging
++       '1': enable VAPI requests logging
++
++    hide_device_id = 0/1
++       '0': don't log device id (for compatability with old version)
++       '1': log device id
++       
++
++    vapi_fn = <filename>
++       filename for the log file.
++       valid only if log_enabled is set
++*/
++
++section VAPI
++  enabled = 0
++  server_port = 9998
++  log_enabled = 0
++  vapi_log_fn = "vapi.log"
++end
++
++
++/* CPU SECTION
++
++   This section specifies various CPU parameters.
++
++   ver = <value>
++   rev = <value>
++      specifies version and revision of the CPU used
++
++   upr = <value>
++      changes the upr register
++      
++   sr = <value>
++      sets the initial Supervision Register value
++
++   superscalar = 0/1
++      '0': CPU is scalar
++      '1': CPU is superscalar
++      (modify cpu/or32/execute.c to tune superscalar model)
++
++   hazards = 0/1
++      '0': don't track data hazards in superscalar CPU
++      '1': track data hazards in superscalar CPU
++      If tracked, data hazards can be displayed using the
++      simulator's 'r' command.
++
++   dependstats = 0/1
++      '0': don't calculate inter-instruction dependencies.
++      '1': calculate inter-instruction dependencies.
++      If calculated, inter-instruction dependencies can be
++      displayed using the simulator's 'stat' command.
++
++   sbuf_len = <value>
++      length of store buffer (<= 256), 0 = disabled
++*/
++
++section cpu
++  ver = 0x12
++  cfg = 0x00
++  rev = 0x01
++  /* upr = */
++  superscalar = 0
++  hazards = 0
++  dependstats = 0
++  sbuf_len = 0
++  hardfloat = 1
++end
++
++
++/* PM SECTION
++
++   This section specifies Power Management parameters
++
++   enabled = 0/1
++      '0': disable power management
++      '1': enable power management
++*/
++
++section pm
++  enabled = 0
++end
++
++
++/* BPB SECTION
++
++   This section specifies how branch prediction should behave.
++   
++   enabled = 0/1
++     '0': disable branch prediction
++     '1': enable branch prediction
++      
++   btic = 0/1
++     '0': disable branch target instruction cache model
++     '1': enable branch target instruction cache model
++
++   sbp_bf_fwd = 0/1
++     Static branch prediction for 'l.bf'
++     '0': don't use forward prediction
++     '1': use forward prediction 
++   
++   sbp_bnf_fwd = 0/1
++     Static branch prediction for 'l.bnf'
++     '0': don't use forward prediction
++     '1': use forward prediction 
++
++   hitdelay = <value>
++       number of cycles bpb hit costs
++    
++   missdelay = <value>
++       number of cycles bpb miss costs
++*/
++
++section bpb
++  enabled = 0
++  btic = 0
++  sbp_bf_fwd = 0
++  sbp_bnf_fwd = 0
++  hitdelay = 0
++  missdelay = 0
++end
++
++
++/* DEBUG SECTION
++
++   This sections specifies how the debug unit should behave.
++
++   enabled = 0/1
++      '0': disable debug unit
++      '1': enable debug unit
++
++   gdb_enabled = 0/1
++      '0': don't start gdb server
++      '1': start gdb server at port 'server_port'
++
++   server_port = <value>
++      TCP/IP port to start gdb server on
++      valid only if gdb_enabled is set
++
++   vapi_id = <hex_value>
++      Used to create "fake" vapi log file containing the JTAG proxy messages.
++*/
++section debug
++  enabled = 0
++  rsp_enabled = 0
++  rsp_port = 5554
++  /*server_port = 9999*/
++end
++
++
++/* MC SECTION
++
++   This section configures the memory controller
++
++   enabled = 0/1
++     '0': disable memory controller
++     '1': enable memory controller
++
++   baseaddr = <hex_value>
++      address of first MC register
++
++   POC = <hex_value>
++      Power On Configuration register
++
++   index = <value>
++      Index of this memory controller amongst all the memory controllers
++*/
++
++section mc
++  enabled = 0
++  baseaddr = 0x93000000
++  POC = 0x00000008                 /* Power on configuration register */
++  index = 0
++end
++
++
++/* UART SECTION
++
++   This section configures the UARTs
++
++     enabled = <0|1>
++        Enable/disable the peripheral.  By default if it is enabled.
++
++     baseaddr = <hex_value>
++        address of first UART register for this device
++
++     
++     channel = <channeltype>:<args>
++     
++        The channel parameter indicates the source of received UART characters
++        and the sink for transmitted UART characters.
++
++        The <channeltype> can be either "file", "xterm", "tcp", "fd", or "tty"
++        (without quotes).
++
++          A) To send/receive characters from a pair of files, use a file
++             channel:
++
++               channel=file:<rxfile>,<txfile>
++
++	  B) To create an interactive terminal window, use an xterm channel:
++
++               channel=xterm:[<xterm_arg>]*
++
++	  C) To create a bidirectional tcp socket which one could, for example,
++             access via telnet, use a tcp channel:
++
++               channel=tcp:<port number>
++
++	  D) To cause the UART to read/write from existing numeric file
++             descriptors, use an fd channel:
++
++               channel=fd:<rx file descriptor num>,<tx file descriptor num>
++
++          E) To connect the UART to a physical serial port, create a tty
++             channel:
++
++	       channel=tty:device=/dev/ttyS0,baud=9600
++
++     irq = <value>
++        irq number for this device
++
++     16550 = 0/1
++        '0': this device is a UART16450
++        '1': this device is a UART16550
++
++     jitter = <value>
++        in msecs... time to block, -1 to disable it
++
++     vapi_id = <hex_value>
++        VAPI id of this instance
++*/
++
++section uart
++  enabled = 1
++  baseaddr = 0x90000000
++  irq = 2
++  channel = "file:uart0.rx,uart0.tx"
++  /* channel = "tcp:10084" */
++  /* channel = "xterm:" */
++  jitter = -1                     /* async behaviour */
++  16550 = 1
++end
++
++
++/* DMA SECTION
++
++   This section configures the DMAs
++
++     enabled = <0|1>
++        Enable/disable the peripheral.  By default if it is enabled.
++
++     baseaddr = <hex_value>
++        address of first DMA register for this device
++
++     irq = <value>
++        irq number for this device
++
++     vapi_id = <hex_value>
++        VAPI id of this instance
++*/
++
++section dma
++  enabled = 1
++  baseaddr = 0x9a000000
++  irq = 11
++end
++
++
++/* ETHERNET SECTION
++
++   This section configures the ETHERNETs
++
++     enabled = <0|1>
++        Enable/disable the peripheral.  By default if it is enabled.
++
++     baseaddr = <hex_value>
++        address of first ethernet register for this device
++
++     dma = <value>
++        which controller is this ethernet "connected" to
++
++     irq = <value>
++        ethernet mac IRQ level
++
++     rtx_type = <value>
++        use 0 - file interface, 1 - socket interface
++
++     rx_channel = <value>
++        DMA channel used for RX
++
++     tx_channel = <value>
++        DMA channel used for TX
++
++     rxfile = "<filename>"
++        filename, where to read data from
++
++     txfile = "<filename>"
++        filename, where to write data to
++
++     sockif = "<ifacename>"
++        interface name of ethernet socket
++
++     vapi_id = <hex_value>
++        VAPI id of this instance
++*/
++
++section ethernet
++  enabled = 0
++  baseaddr = 0x92000000
++  /* dma = 0 */
++  irq = 4
++  rtx_type = 0
++  /* tx_channel = 0 */
++  /* rx_channel = 1 */
++  /*rxfile = "eth0.rx"*/
++  txfile = "eth0.tx"
++  sockif = "eth0"
++end
++
++
++/* GPIO SECTION
++
++   This section configures the GPIOs
++
++     enabled = <0|1>
++        Enable/disable the peripheral.  By default if it is enabled.
++
++     baseaddr = <hex_value>
++        address of first GPIO register for this device
++
++     irq = <value>
++        irq number for this device
++
++     base_vapi_id = <hex_value>
++        first VAPI id of this instance
++	GPIO uses 8 consecutive VAPI IDs
++*/
++
++section gpio
++  enabled = 0
++  baseaddr = 0x91000000
++  irq = 3
++  base_vapi_id = 0x0200
++end
++
++/* VGA SECTION
++    
++    This section configures the VGA/LCD controller
++    
++      enabled = <0|1>
++        Enable/disable the peripheral.  By default if it is enabled.
++
++      baseaddr = <hex_value>
++        address of first VGA register
++        
++      irq = <value>
++        irq number for this device
++        
++      refresh_rate = <value>
++        number of cycles between screen dumps
++        
++      filename = "<filename>"
++        template name for generated names (e.g. "primary" produces "primary0023.bmp")
++*/
++
++section vga
++  enabled = 1
++  baseaddr = 0x97100000
++  irq = 8
++  refresh_rate = 100000
++  filename = "primary"
++end
++
++
++/* TICK TIMER SECTION
++
++    This section configures tick timer
++
++    enabled = 0/1
++      whether tick timer is enabled
++*/
++
++section pic
++  enabled = 1
++  edge_trigger = 1
++end
++
++/* FB SECTION
++    
++    This section configures the frame buffer
++    
++    enabled = <0|1>
++      Enable/disable the peripheral.  By default if it is enabled.
++
++    baseaddr = <hex_value>
++      base address of frame buffer
++        
++    paladdr = <hex_value>
++      base address of first palette entry
++        
++    refresh_rate = <value>
++      number of cycles between screen dumps
++        
++    filename = "<filename>"
++      template name for generated names (e.g. "primary" produces "primary0023.bmp")
++*/
++
++section fb
++  enabled = 1
++  baseaddr = 0x97000000
++  refresh_rate = 1000000
++  filename = "primary"
++end
++
++
++/* KBD SECTION
++
++    This section configures the PS/2 compatible keyboard
++    
++    baseaddr = <hex_value>
++      base address of the keyboard device
++      
++    rxfile = "<filename>"
++      filename, where to read data from
++*/
++
++section kbd
++  enabled = 1
++  irq = 5
++  baseaddr = 0x94000000
++  rxfile = "kbd.rx"
++end
++
++
++/* ATA SECTION
++    
++    This section configures the ATA/ATAPI host controller
++    
++      baseaddr = <hex_value>
++        address of first ATA register
++        
++      enabled = <0|1>
++        Enable/disable the peripheral.  By default if it is enabled.
++
++      irq = <value>
++        irq number for this device
++
++      debug = <value>
++        debug level for ata models.
++	0: no debug messages
++	1: verbose messages
++	3: normal messages (more messages than verbose)
++        5: debug messages (normal debug messages)
++	7: flow control messages (debug statemachine flows)
++	9: low priority message (display everything the code does)
++
++      dev_type0/1 = <value>
++        ata device 0 type
++        0: NO_CONNeCT: none (not connected)
++	1: FILE      : simulated harddisk
++	2: LOCAL     : local system harddisk
++
++      dev_file0/1 = "<filename>"
++        filename for simulated ATA device
++	valid only if dev_type0 == 1
++
++      dev_size0/1 = <value>
++        size of simulated hard-disk (in MBytes)
++	valid only if dev_type0 == 1
++
++      dev_packet0/1 = <value>
++        0: simulated ATA device does NOT implement PACKET command feature set
++	1: simulated ATA device does implement PACKET command feature set
++
++   FIXME: irq number
++*/
++
++section ata
++  enabled = 0
++  baseaddr = 0x9e000000
++  irq = 15
++
++end
++
++
+diff --exclude=.git --exclude=.gitignore -Naur ../x264/x264.c x264/x264.c
+--- ../x264/x264.c	2009-10-25 17:41:22.000000000 +0100
++++ x264/x264.c	2009-10-27 16:45:55.000000000 +0100
+@@ -40,6 +40,8 @@
+ #define SetConsoleTitle(t)
+ #endif
+ 
++//#include "uart.h"
++
+ uint8_t *mux_buffer = NULL;
+ int mux_buffer_size = 0;
+ 
+@@ -54,11 +56,11 @@
+ }
+ 
+ typedef struct {
+-    int b_progress;
+-    int i_seek;
+-    hnd_t hin;
+-    hnd_t hout;
+-    FILE *qpfile;
++  int b_progress;
++  int i_seek;
++  hnd_t hin; /* hnd_t is a void* */
++  hnd_t hout;
++  FILE *qpfile;
+ } cli_opt_t;
+ 
+ /* input file operation function pointers */
+@@ -78,15 +80,28 @@
+ static int  Parse( int argc, char **argv, x264_param_t *param, cli_opt_t *opt );
+ static int  Encode( x264_param_t *param, cli_opt_t *opt );
+ 
+-
++int yuv_data_size;
+ /****************************************************************************
+  * main:
+  ****************************************************************************/
+ int main( int argc, char **argv )
+ {
+-    x264_param_t param;
+-    cli_opt_t opt;
+-    int ret;
++  char* new_argv ="./x264 --profile=baseline";
++  argc = 2;
++
++  x264_param_t param;
++  cli_opt_t opt;
++  int ret;
++
++  //uart_init()  ;
++
++  extern int _end;   // start of free memory
++  extern int _stack; // end of free memory
++
++  V(fprintf( stderr, "start of heap at 0x%.8x, size of heap: %d bytes\n",
++	     (unsigned int) &_end, (unsigned int) ((unsigned int) &_stack) - ((unsigned int) &_end)));
++
++  //fprintf(stderr,"start\n");
+ 
+ #ifdef PTW32_STATIC_LIB
+     pthread_win32_process_attach_np();
+@@ -100,14 +115,74 @@
+ 
+     x264_param_default( &param );
+ 
+-    /* Parse command line */
+-    if( Parse( argc, argv, &param, &opt ) < 0 )
+-        return -1;
++    // Baseline parameters
++     param.analyse.b_transform_8x8 = 0;
++     param.b_cabac = 0;
++     param.i_cqm_preset = X264_CQM_FLAT;
++     param.i_bframe = 0;
++
++     // Ultrafast preset
++     param.i_frame_reference = 1;
++     param.i_scenecut_threshold = 0;
++     param.b_deblocking_filter = 0;
++     param.b_cabac = 0;
++     param.i_bframe = 0;
++     param.analyse.intra = 0;
++     param.analyse.inter = 0;
++     param.analyse.b_transform_8x8 = 0;
++     param.analyse.i_me_method = X264_ME_DIA;
++     param.analyse.i_subpel_refine = 0;
++     param.rc.i_aq_mode = 0;
++     param.analyse.b_mixed_references = 0;
++     param.analyse.i_trellis = 0;
++     param.i_bframe_adaptive = X264_B_ADAPT_NONE;
++     param.rc.b_mb_tree = 0;
++
++     // Verbose (info per frame encoded)
++     param.i_log_level = X264_LOG_DEBUG;
++
++     // Set a bitrate
++     param.rc.i_bitrate = 1000; // kbps
++     param.rc.i_rc_method = X264_RC_ABR;
++
++     // A smaller range of QP (qp_max - qp_min) means less startup time for computing motion vectors costs (not sure exactly how this is done) --jb
++     // Defaults here were i_qp_min = 10, i_qp_max = 51
++     param.rc.i_qp_min = 10;
++     param.rc.i_qp_max = 51;
++     param.rc.i_qp_step = 4;
++
++    
++     // Picture height and width
++     // CIF = 352x288
++     param.i_width = 352;
++     param.i_height = 288;
++     V(fprintf( stderr, "x264 [info]: %dx%d @ %.2f fps\n", 
++		param.i_width, param.i_height, 
++		(float)param.i_fps_num / (float)param.i_fps_den));
++     
++     V(printf("video file in memory from 0x%.8x, size %d bytes\n", YUV_DATA_ADDR, YUV_DATA_SIZE));
++     /* Must define a few things for use of static CIF data
++	YUV_DATA_ADDR - address where the data starts
++	YUV_DATA_SIZE - size of data in bytes
++	ENC_OUT_ADDR  - where we'll store the encoded data
++     */
++
++     /* Parse command line */
++     Parse( argc, &new_argv, &param, &opt );
++     //if( Parse( argc, &new_argv, &param, &opt ) < 0 )
++     //return -1;
++
++     // We specify a place in memory of some YUV CIF data instad of opening a file
++     init_yuv_dataspace((char *)YUV_DATA_ADDR, (hnd_t *)&opt.hin, &param);
++#ifdef ENC_OUT_ADDR
++     p_open_outfile( 0, &opt.hout ); // Setup the out "file" which is really just a spot in memory
++#endif
++     //opt.hout = (void*) ENC_OUT_ADDR; // We specify a place in memory of where we'll dump the encoded data
+ 
+-    /* Control-C handler */
+-    signal( SIGINT, SigIntHandler );
++     /* Control-C handler */
++     //signal( SIGINT, SigIntHandler );
+ 
+-    ret = Encode( &param, &opt );
++   ret = Encode( &param, &opt );
+ 
+ #ifdef PTW32_STATIC_LIB
+     pthread_win32_thread_detach_np();
+@@ -555,10 +630,12 @@
+     /* Default output file driver */
+     p_open_outfile = open_file_bsf;
+     p_set_outfile_param = set_param_bsf;
+-    p_write_nalu = write_nalu_bsf;
++    p_write_nalu = write_nalu_bsf; //--jb
+     p_set_eop = set_eop_bsf;
+     p_close_outfile = close_file_bsf;
+ 
++    return 0; // -- added jb
++
+     /* Presets are applied before all other options. */
+     for( optind = 0;; )
+     {
+@@ -978,9 +1055,11 @@
+         }
+         else
+         {
+-            sscanf( argv[optind++], "%ux%u", &param->i_width, &param->i_height );
+-            if( param->i_log_level >= X264_LOG_INFO )
+-                fprintf( stderr, "x264 [info]: %dx%d @ %.2f fps\n", param->i_width, param->i_height, (double)param->i_fps_num / (double)param->i_fps_den);
++	  sscanf( argv[optind++], "%ux%u", &param->i_width, &param->i_height );
++	  if( param->i_log_level >= X264_LOG_INFO )
++	    fprintf( stderr, "x264 [info]: %dx%d @ %.2f fps\n", 
++		     param->i_width, param->i_height, 
++		     (double)param->i_fps_num / (double)param->i_fps_den);
+         }
+     }
+ 
+@@ -1127,7 +1206,10 @@
+     {
+         i_nalu_size = p_write_nalu( hout, nal[i].p_payload, nal[i].i_payload );
+         if( i_nalu_size < 0 )
++	  {
++	    fprintf(stderr, "Encode_frame: p_write_nalu() returned i_nalu_size < 0: %d\n", i_nalu_size);
+             return -1;
++	  }
+         i_file += i_nalu_size;
+     }
+     if (i_nal)
+@@ -1172,12 +1254,15 @@
+     opt->b_progress &= param->i_log_level < X264_LOG_DEBUG;
+     i_frame_total = p_get_frame_total( opt->hin );
+     i_frame_total -= opt->i_seek;
++    
+     if( ( i_frame_total == 0 || param->i_frame_total < i_frame_total )
+         && param->i_frame_total > 0 )
+         i_frame_total = param->i_frame_total;
++    
+     param->i_frame_total = i_frame_total;
++    V(fprintf(stderr, "Encode: i_frame_total:%d\n", param->i_frame_total));
+     i_update_interval = i_frame_total ? x264_clip3( i_frame_total / 1000, 1, 10 ) : 10;
+-
++    V(fprintf(stderr, "Encode: i_update_interval:%d\n", i_update_interval));
+     if( ( h = x264_encoder_open( param ) ) == NULL )
+     {
+         fprintf( stderr, "x264 [error]: x264_encoder_open failed\n" );
+@@ -1202,6 +1287,7 @@
+ 
+     i_start = x264_mdate();
+ 
++    V(fprintf(stderr, "Starting Encoder loop: i_frame_total %d\n", i_frame_total));
+     /* Encode frames */
+     for( i_frame = 0, i_file = 0, i_frame_output = 0; b_ctrl_c == 0 && (i_frame < i_frame_total || i_frame_total == 0); )
+     {
+diff --exclude=.git --exclude=.gitignore -Naur ../x264/x264.h x264/x264.h
+--- ../x264/x264.h	2009-10-25 17:41:22.000000000 +0100
++++ x264/x264.h	2009-10-27 16:45:55.000000000 +0100
+@@ -24,6 +24,29 @@
+ #ifndef X264_X264_H
+ #define X264_X264_H
+ 
++extern int yuv_data_start;
++extern int yuv_data_end;
++//#define YUV_DATA_ADDR 0x01000000
++#define YUV_DATA_ADDR &yuv_data_start
++#define YUV_DATA_SIZE ((int)(&yuv_data_end) - (int)(YUV_DATA_ADDR))
++#define ENC_OUT_ADDR &yuv_data_end
++
++//#define USE_HARDCODED_FRAME_NUM
++#define HARDCODED_FRAME_NUM 10
++
++
++
++/* Enable for verbose output during runtime */
++//#define X264_VERBOSE
++#ifdef X264_VERBOSE
++#define V(x) x
++#else
++#define V(x)
++#endif
++
++
++extern int yuv_data_size;
++
+ #if !defined(_STDINT_H) && !defined(_STDINT_H_) && \
+     !defined(_INTTYPES_H) && !defined(_INTTYPES_H_)
+ # ifdef _MSC_VER
