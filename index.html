@@ -1,0 +1,613 @@
+<head>
+<link rel="stylesheet" href="../../style.css" type="text/css">
+</head>
+<a href="javascript:history.go(-1)" onMouseOver="self.status=document.referrer;return true">Go Back</a>
+<p align='right'><a href='uart_fiber.tar.gz'>Source code</a></p>
+<body>
+<div class="main">
+ <div class="mid" id="dm">
+  <div class="content" id="dmc">
+   <h2>
+    Details
+   </h2>
+   <p>
+    Name: uart_fiber
+    <br/>
+    Created: Nov 13, 2013
+    <br/>
+    Updated: Dec 24, 2013
+    <br/>
+    SVN Updated: Nov 26, 2013
+    
+    
+    
+    
+    
+    
+   </p>
+   <h2>
+    Other project properties
+   </h2>
+   <p>
+    Category:
+    
+     Communication controller
+    
+    <br/>
+    Language:
+    
+     VHDL
+    
+    <br/>
+    Development status:
+    
+     Mature
+    
+    <br/>
+    Additional info:
+    <br/>
+    WishBone Compliant: Yes
+    <br/>
+    License: LGPL
+   </p>
+   <div id="d_Introduction">
+    <h2>
+     
+     
+     Introduction
+    </h2>
+    <p id="p_Introduction">
+     Transmitter and receiver in FPGA for converting UART to/from audio fiber optics.
+
+
+
+Photo of an assembled board with annotation
+     <br/>
+     <img src="usercontent,img,1387894739" alt="board_assembled"/>
+     <br/>
+     It is wishbone compliant because using an UART , it can be added to a Wishbone UART and be of interest for a Wishbone implementer. This core is well tested.
+
+They is two versions:
+-Fixed baudrate (0 to 2.5Mbit/s) - a full set of 2 transmitter and 2 receiver fit in a single XC9572XL CPLD
+-variable baudrate 50Mhz/n*p where n between 20 to 100 fiber optic baudrate and p&gt;=1  baudrate divider. Fit 1x transmiter + receiver in a single XC9572XL CPLD. The baudrate is adjustable from external pins DIP SWITCH or jumper.
+
+
+The fiber represent signal as follow :
+0 : 1 period of low frequency F signal
+1 : 2 periods of high frequency 2xF signal
+
+
+why en encoder/decoder and why not connect directly the UART to a fiber optic transmiter and receiver :
+Because it would not work. The optical receiver for audio  fiber optic is designed for AC signal (0.1 to 16Mhz).
+
+A duplex communication use 2 fiber optics .
+
+the prototype use a XC9572XL CPLD from Xilinx 
+
+
+The test work with several MByte transmitted and received at 1.25Mbaud (packets of 64byte data checked by CRC).
+
+the UART used are PIC32 procesors exchanging data on fiber optic (the UART is driven by DMA, requiring less effort for the CPU)
+    </p>
+   </div>
+   <div id="d_Prototype">
+    <h2>
+     
+     
+     Prototype
+    </h2>
+    <p id="p_Prototype">
+     <img src="usercontent,img,1384548011" alt="prototype"/>
+     <br/>
+     The prototype use two Microchip processors communicating over fiber optic
+PIC32MX220 and PIC32MX440
+
+4x optical transceiver for audio :
+
+Everlight PLR137 / PLT137
+
+2 x fiber optic cables 
+
+1x CPLD board with Xilinx XC9572XL CPLD (which fit the two receiver and two transmitter).
+    </p>
+   </div>
+   <div id="d_The receiver">
+    <h2>
+     
+     
+     The receiver
+    </h2>
+    <p id="p_The receiver">
+     The receiver sample the fiber optic signal and measure duration of periods of the input (optic_in)
+The receiver output 
+-0 for long period of input signa
+-1 for short period of input signal
+
+The sampling frequency is 50Mhz (clock available in the  CPLD)
+The receiver integrate a low pass filter and the decoder itself that measure the frequency  of the input signal (from the fiber).
+the receiver then produce a signal suitable for the UART RX pin.
+     <img src="usercontent,img,1384544791" alt="Receiver"/>
+     <br/>
+     The low pass is probably not required but very easy to implement.
+
+The receiver integrate also a "learn" bit that say if the peiods should be measured at low-to-high of high-to-low transitions on the input. This is an important phase information that the receiver automatically detect during reception.
+
+The receiver synchronize itself with the received signal, that is a multiple of the UART bitrate.
+    </p>
+   </div>
+   <div id="d_Receiver VHDL code">
+    <h2>
+     
+     
+     Receiver VHDL code
+    </h2>
+    <p id="p_Receiver VHDL code">
+     --fixed bitrate version (1.25Mbit/s 8N1)
+     <br/>
+     library IEEE;
+     <br/>
+     use IEEE.STD_LOGIC_1164.ALL;
+     <br/>
+     <br/>
+     entity spdif_to_RX is
+     <br/>
+     Port ( iCLK : in  STD_LOGIC;
+     <br/>
+     optic_in : in  STD_LOGIC;
+     <br/>
+     RX : out  STD_LOGIC;
+     <br/>
+     learn_out : out  STD_LOGIC
+     <br/>
+     );
+     <br/>
+     end spdif_to_RX;
+     <br/>
+     architecture Behavioral of spdif_to_RX is
+     <br/>
+     <br/>
+     --low pass
+     <br/>
+     signal q1 : STD_LOGIC;
+     <br/>
+     signal q2 : STD_LOGIC;
+     <br/>
+     signal samp : STD_LOGIC;
+     <br/>
+     --RX generator
+     <br/>
+     signal samp2 : STD_LOGIC;
+     <br/>
+     signal cnt : natural range 0 to 63;
+     <br/>
+     signal learn : STD_LOGIC;
+     <br/>
+     --constant periode_1_max : natural := (20+7);
+     <br/>
+     --constant periode_0_min : natural := (40-7);
+     <br/>
+     --signal RX1 : STD_LOGIC;
+     <br/>
+     signal RX2 : STD_LOGIC;
+     <br/>
+     begin
+     <br/>
+     learn_out
+     <br/>
+     input_low_pass:process (iCLK)
+     <br/>
+     begin
+     <br/>
+     if (iCLK'event and iCLK= '1') then
+     <br/>
+     q1	q2	if(q1=q2)then
+     <br/>
+     samp	end if;
+     <br/>
+     end if;
+     <br/>
+     end process;
+     <br/>
+     fiber_decoder:process (iCLK)
+     <br/>
+     begin
+     <br/>
+     if (iCLK'event and iCLK= '1') then
+     <br/>
+     samp2	if(samp2/=samp and samp=learn) then
+     <br/>
+     if(cnt&gt;33) then
+     <br/>
+     RX			RX2		elsif (cnt			RX			RX2		elsif(cnt			RX2		else
+     <br/>
+     learn		end if;
+     <br/>
+     cnt	else
+     <br/>
+     if(cnt=20) then
+     <br/>
+     RX		end if;
+     <br/>
+     if(cnt			cnt		end if;
+     <br/>
+     end if;
+     <br/>
+     end if;
+     <br/>
+     end process;
+     <br/>
+     end Behavioral;
+     <br/>
+    </p>
+   </div>
+   <div id="d_The transmiter">
+    <h2>
+     
+     
+     The transmiter
+    </h2>
+    <p id="p_The transmiter">
+     The transmitter receive UART signal TX and produce the fiber optic signal.
+
+The transmitter core must synchronise the bits from TX with the local clock and at the same time synchronize itself with the START bits from the UART.
+
+The transmittter first synchronize itself with the input START bits, then output a synchronized version (tx_bit).
+
+The optic_stage process then transform tx_bit to optic_out, the signal suitable for the fiber optic.
+
+The transmitter use the blank formed by the STOP bits to re-synchronize with the next START bit. When the input in uninterrupted data (ie each STOP bit is immediately followed by a START bit) and when bit_div is equal to 1 (ie the UART bitrate and fiber optic bitrate are equal) , then the transmitter relie only on the exact match of the local ocillator with the incoming data.
+Any difference is corrected at the end of incoming packet data (STOP bit not followed by START bit).
+when bit_div&gt;1, re-synchronization occur at each byte and the incoming data can have a bit clock slightly different than the expected one.
+
+As described, the transmitter core have many advantage.
+     <img src="usercontent,img,1384545712" alt="Title"/>
+    </p>
+   </div>
+   <div id="d_Transmitter VHDL">
+    <h2>
+     
+     
+     Transmitter VHDL
+    </h2>
+    <p id="p_Transmitter VHDL">
+     --fixed bitrate version (1.25Mbit/s 8N1)
+     <br/>
+     library IEEE;
+     <br/>
+     use IEEE.STD_LOGIC_1164.ALL;
+     <br/>
+     use IEEE.STD_LOGIC_ARITH.ALL;
+     <br/>
+     use IEEE.std_logic_unsigned.all;
+     <br/>
+     --use IEEE.NUMERIC_STD.ALL;
+     <br/>
+     <br/>
+     entity TX_to_spdif_full is
+     <br/>
+     Port ( iCLK : in  STD_LOGIC;
+     <br/>
+     TX : in  STD_LOGIC;
+     <br/>
+     optic_out : out  STD_LOGIC
+     <br/>
+     );
+     <br/>
+     end TX_to_spdif_full;
+     <br/>
+     architecture Behavioral of TX_to_spdif_full is
+     <br/>
+     <br/>
+     --output flip-flop
+     <br/>
+     signal optic_flop:STD_LOGIC:='0';
+     <br/>
+     --optic stage
+     <br/>
+     signal optic_cnt : STD_LOGIC_VECTOR(3 downto 0);	--value 0 to 9 (divide 50Mhz/10=5Mhz)
+     <br/>
+     signal half0 : STD_LOGIC;
+     <br/>
+     signal half1 : STD_LOGIC;
+     <br/>
+     signal optic_bit:STD_LOGIC;
+     <br/>
+     --input stage
+     <br/>
+     signal tx_cnt : STD_LOGIC_VECTOR(4 downto 0);		--value 0-19 (divide 50Mhz/20=2.5Mhz)
+     <br/>
+     signal tx_bit:STD_LOGIC:='1';
+     <br/>
+     signal start_detected : STD_LOGIC:='0';
+     <br/>
+     signal tx_half : STD_LOGIC;								--1/2 bit
+     <br/>
+     signal bit_position : STD_LOGIC_VECTOR(3 downto 0);--value 0-9 (bit position from start to stop)
+     <br/>
+     <br/>
+     <br/>
+     <br/>
+     begin
+     <br/>
+     <br/>
+     optic_out
+     <br/>
+     --generate signal on fiber optic
+     <br/>
+     optic_stage:process (iCLK)
+     <br/>
+     begin
+     <br/>
+     if (iCLK'event and iCLK = '1') then
+     <br/>
+     if(optic_cnt=9) then			--divide 50Mhz / 10 = 5 Mhz
+     <br/>
+     half0		if(half0='1') then
+     <br/>
+     half1		end if;
+     <br/>
+     if(optic_bit='1' or half0='0') then
+     <br/>
+     optic_flop		end if;
+     <br/>
+     if((half0='1') and (half1='1'))then
+     <br/>
+     optic_bit--			optic_flop
+     <br/>
+     end if;
+     <br/>
+     optic_cnt'0');
+     <br/>
+     else
+     <br/>
+     optic_cnt	end if;
+     <br/>
+     end if;
+     <br/>
+     end process;
+     <br/>
+     --Synchronize input (TX pin) with local clock
+     <br/>
+     input_stage: process (iCLK,TX)
+     <br/>
+     begin
+     <br/>
+     if (iCLK'event and iCLK = '1') then
+     <br/>
+     <br/>
+     if(start_detected='0') then
+     <br/>
+     if(TX='0') then
+     <br/>
+     start_detected			tx_cnt'0');
+     <br/>
+     bit_position'0');
+     <br/>
+     tx_half		end if;
+     <br/>
+     else											--start detected=1
+     <br/>
+     if(tx_cnt=19) then					--0.5 bit time
+     <br/>
+     if(tx_half='0')then
+     <br/>
+     tx_bit			elsif(tx_half='1')then
+     <br/>
+     if(bit_position/=9)then
+     <br/>
+     bit_position				end if;
+     <br/>
+     if(bit_position=9 and tx_bit='1') then --stop bit
+     <br/>
+     bit_position'0');
+     <br/>
+     if(TX='1')then
+     <br/>
+     start_detected					end if;
+     <br/>
+     end if;
+     <br/>
+     end if;
+     <br/>
+     tx_half			tx_cnt'0');
+     <br/>
+     else
+     <br/>
+     tx_cnt		end if;
+     <br/>
+     end if;--start detected
+     <br/>
+     end if;--clk event
+     <br/>
+     end process;
+     <br/>
+     end Behavioral;
+     <br/>
+    </p>
+   </div>
+   <div id="d_Application">
+    <h2>
+     
+     
+     Application
+    </h2>
+    <p id="p_Application">
+     This is my application and it is also used for intensive testing.
+     <br/>
+     <img src="usercontent,img,1384549032" alt="Title"/>
+     <br/>
+     This is a machine (Robot) controller . The application communicate  with  USB-to-fiberoptic.
+On the other side, the fiberoptic-to-machine receive the commands and provide ACK (aknowledge) . All communication are segmented as packets and CRC controlled .
+
+The image show a real testing (with two PIC32 cards , and the CPLD ).
+
+The 3 number on the top are machine position
+The 3 number on the bottom are total CRC error received by both parts (which is always 0 in normal use). The errors where numerous during developpement . It took 24hour to discover that my CPLD evaluation board did not have a 25Mhz clock as documented but a 50Mhz.
+    </p>
+   </div>
+   <div id="d_SPDIF audio fiber optics">
+    <h2>
+     
+     
+     SPDIF audio fiber optics
+    </h2>
+    <p id="p_SPDIF audio fiber optics">
+     <img src="usercontent,img,1384554981" alt="SPDIF"/>
+     <br/>
+     Audio SPDIF  fiber optic (TOSLINK)
+     <br/>
+     with Everlight PLR137 SPDIF transceiver.
+    </p>
+   </div>
+   <div id="d_PCI to fiber">
+    <h2>
+     
+     
+     PCI to fiber
+    </h2>
+    <p id="p_PCI to fiber">
+     A PCI card with fiber optic transceiver.
+     <br/>
+     <img src="usercontent,img,1384555574" alt="pci_to_fiber"/>
+    </p>
+   </div>
+   <div id="d_Variable baudrate">
+    <h2>
+     
+     
+     Variable baudrate
+    </h2>
+    <p id="p_Variable baudrate">
+     The variable baudrate version use two values :
+     <br/>
+     <br/>
+     period STD_LOGIC_VECTOR (6 downto 0)
+     <br/>
+     this is the number of 50Mhz clock period for each bit on the fiber optic.
+     <br/>
+     It must be not too small otherwise the signal would be difficult to sample . a value not smaller than 20 (5Mhz high freq) to 100 (500Khz low freq) would be ok.
+     <br/>
+     bit_div STD_LOGIC_VECTOR (6 downto 0)
+     <br/>
+     this is the ratio between baudrate on the fiber and baudrate on the TX/RX pin.
+     <br/>
+     it can be any value equal to or greather than 1
+     <br/>
+     for example:
+     <br/>
+     One want to achieve a UART to/from fiber optic  module working at 115200baud
+     <br/>
+     50Mhz/115200=434.02
+     <br/>
+     period=62 (fiber optic signal 806Khz / 1.6Mhz)
+     <br/>
+     bit_div=7
+     <br/>
+     baudrate=50Mhz/(62x7)=115207bit/s which is a good approximation of the target baudrate and is synchrone with the fiber optic baudrate.
+     <br/>
+     The variable bit rate version is named V2 in the download.
+     <br/>
+     other values :
+     <br/>
+     target baudrate    divider    period    bit_div  actual baudrate
+     <br/>
+     1.25Mb/s           40         40        1        1.25Mb/s
+     <br/>
+     1Mb/s              50         50        1        1.0Mb/s
+     <br/>
+     750K               66         33        2        757.5K
+     <br/>
+     500K               100        50        2        500K
+     <br/>
+     250K               200        50        4        250K
+     <br/>
+     125K               400        50        8        125K
+     <br/>
+     115200b/s          434        62        7        115207b/s
+     <br/>
+     19200b/s           2604       40        65       19230b/s
+     <br/>
+    </p>
+   </div>
+   <div id="d_Version 3">
+    <h2>
+     
+     
+     Version 3
+    </h2>
+    <p id="p_Version 3">
+     I have modified the VHDL for version 3 :
+
+-Signal "learn" removed (it is useless because the transmitter now start each bit with a rising edge on the fiber optic
+-Synchronisation of the trannsmitter on START BITS on TX after 3/4 stop bit  when bit_div &gt;= 4 ( because in that case , the fiber optic has a resolution of 1/4 bit).
+
+I have also looked for other Xilinx CPLDs that can support this design :
+XC95xxXL
+Coolrunner 2 (XC2C000)
+Coolrunner XPLA3 (XCR3000XL)
+All of these are very similar( at my sense..).
+
+I have build a more practical prototype with XC9572XL PLCC44, and conducted tests with the following parameters :
+
+50Mhz ocscillator , period 20, bit_div 1,@2.50Mbits/s
+     <br/>
+     50Mhz ocscillator , period 20, bit_div 2,@1.25Mbits/s
+     <br/>
+     50Mhz ocscillator , period 40, bit_div 10,@500Kbit/s
+     <br/>
+     The core work absolutely perfectly on all these cases , with several Mbytes transmitted with check CRC .
+     <br/>
+     <img src="usercontent,img,1384828419" alt="Title"/>
+     <br/>
+     <img src="usercontent,img,1384828439" alt="V3_2"/>
+     <br/>
+     <img src="usercontent,img,1385397230" alt="schematic"/>
+    </p>
+   </div>
+   <div id="d_Version 4">
+    <h2>
+     
+     
+     Version 4
+    </h2>
+    <p id="p_Version 4">
+     Hello again,
+In version 4 , considering the commercial adapter that i will manufacture, i had to propose a module that can handle much more different baudrates , but still using a unexpensive CPLD. 
+I found finally that the VHDL can be extended to include provision for all low bitrates ( up to  300Kbs) while still including the synchronized mode . 
+I have added a signal :
+     <br/>
+     direct_mode : in STD_LOGIC
+     <br/>
+     this signal tell the transmitter to work in direct mode , the transmitter just do direct transmission of the TX signal at high speed
+     <br/>
+     if (iCLK'event and iCLK = '1') then
+     <br/>
+     if(direct_mode='1')then
+     <br/>
+     tx_bit=TX;
+     <br/>
+     else
+     <br/>
+     ..
+     <br/>
+     This mode of transmission will accept any baudrate in fact that is much lower than the transmission rate on the fiber optic (which is still chosen rather high 2.5Mbit/s.
+The VHDL code for version 4 which include this change is available in the download.
+
+
+For example , i have tested my module with a simple PC serial port at 9600baud, with a conversatioon via fiber optic
+     <img src="usercontent,img,1385493293" alt="PC term"/>
+     <br/>
+     An adapter is needed to convert PC serial port to 3.3V
+     <br/>
+     <img src="usercontent,img,1385911263" alt="MAX3232"/>
+     <br/>
+     PC serial to 3.3V MAX3232 adapter
+    </p>
+   </div>
+  </div>
+  <div style="clear:both;margin-left:200px;">
+  </div>
+ </div>
+</div>
+</body>
+<p id='foot'>Database updated on 12 June 2015</p>
