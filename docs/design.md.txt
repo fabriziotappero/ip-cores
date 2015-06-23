@@ -1,0 +1,363 @@
+This is the design of TinyCPU. It's goals are as follows:
+
+1. 8-bit registers and operations (8 bit processor)
+2. 16-bit address bus
+3. fixed 16-bit instruction length
+4. use a small amount of "rich" instructions to do powerful things
+5. 1 instruction per clock cycle
+
+I/O: 
+I/O has been decided to use a memory mapped approach.
+Howto: 
+
+Basically, absolute address 0-32 is reserved for ports. Right now there is only a Port0. This port is 8-bits long. 
+Each even address is the port address. Each odd address is the bitmap for write or read for the port below it.
+
+So to make ports 7 to 4 write and 3 to 0 read, you'd assign 0xF0 to address 0x0001
+
+
+
+BIG CHANGE:
+So, apparently making a single-cycle CPU is extremely hard... so instead, we'll be striving for a 2-cycle CPU.
+Usual cycles:
+1-cycle: mov, jmp, etc general data movement
+2-cycle: ALU operations
+1-cycle with memory wait(so really 2 cycle): all instructions that reference memory
+
+
+Relative moves:
+In order to provide uesfulness to the segment-carryover feature, there are a few options for moving a "relative" amount to a register, including IP and SP
+A relative move differs in most of the opcodes in that the relative factor is treated as a signed value. 
+so for instance, a 
+mov r0,50
+mov_relative r0, -10
+
+in the ned, r0 will end up being 40. Although this feature won't see much use in general registers, IP and SP are special because of the option of using the
+segment-carryover feature. This means that SP and IP, while being 8-bit registers, can function very similar to a 16-bit register, enabling full usage of the available address space.
+
+Register list:
+r0-r5 general purpose registers
+sp stack pointer (represented as r6)
+ip instruction pointer register (represented as r7)
+cs, ds, es, ss segment registers (code segment, data segment, extra segment, stack segment)
+tr truth register for conditionals
+
+general opcode format
+
+first byte:
+first 4 bits: actual instruction
+next 3 bits: (target) register
+last 1 bit: conditional
+
+second byte: 
+first 1 bit: second portion of condition (if not immediate) (1 for only if false)
+next 1 bit: use extra segment
+next 3 bits: other register. If not 3rd register
+last 3 bits: extra opcode information or third register. such as for ADD it could be target=source+third_register
+
+...or second byte is immediate value
+
+For opcodes requiring 3 registers but without room, the target opcode is assume to be the second operation. Such as for AND, target=source AND target
+
+short list of instructions: (not final, still planning)
+immediates:
+1. move reg, immediate
+2. move [reg], immediate
+3. push and move reg, immediate (or call immediate)
+4. move (relative) reg, immediate
+
+mini-group 5. Root opcode is 5, register is to tell which opcode( up to 8). No register room, only immediate
+push immedate
+XX
+XX
+XX
+XX
+XX
+XX
+XX
+
+
+groups: (limited to 2 registers and no immediates. each group has 8 opcodes)
+group 1:
+move(store) [reg],reg
+move(load) reg,[reg]
+out reg1,reg2 (output to port reg1 value reg2)
+in reg1,reg2 (input from port reg2 and store in reg1)
+XX
+XX
+move segmentreg,reg
+move reg,segmentreg
+
+group 2:
+and reg1,reg2 (reg1=reg1 and reg2)
+or reg, reg
+xor reg,reg
+not reg1,reg2 (reg1=not reg2)
+left shift reg,reg
+right shift reg,reg
+rotate right reg,reg
+rotate left reg,reg
+
+group 3: compares
+is greater than reg1,reg2 (TR=reg1>reg2)
+is greater or equal to reg,reg
+is less than reg,reg
+is less than or equal to reg,reg
+is equal to reg,reg
+is not equal to reg,reg
+equals 0 reg
+not equals 0 reg
+
+group 4:
+push segmentreg
+pop segmentreg
+push and move reg, reg (or call reg) 
+exchange reg,reg
+exchange reg,seg
+XX
+XX
+
+group 5:
+XX
+XX
+far jmp reg1, reg2 (CS=reg1 and IP=reg2)
+far call reg1,reg2
+far jmp [reg] (first byte is CS, second byte is IP)
+push extended segmentreg, reg (equivalent to push seg; push reg)
+pop extended segmentreg, reg (equivalent to pop reg; pop seg)
+reset processor (will completely reset the processor to starting state, but not RAM or anything else)
+
+group 6:
+set default register bank to 0 (can be condensed to 1 opcode)
+set default register bank to 1
+push extended reg, reg
+pop extended reg,reg
+enable carryover seg
+disable carryover seg
+mov relative reg, reg
+exchange reg, reg
+
+super group: Super groups only have room for 1 register argument. Each subgroup has 8 opcodes, capable of 8 subgroups.
+subgroup 0: 
+push reg
+pop reg
+set TR
+reset TR
+increment reg
+decrement reg
+set register bank 0
+set register bank 1
+subgroup 1:
+enable carryover seg
+disable carryover seg
+
+
+
+3 register instructions:
+1. add reg1, reg2, reg3 (reg1=reg2+reg3)
+2. sub reg1, reg2, reg3
+
+
+opcodes used: 14 of 16. 2 more opcodes available. Decide what to do with the room later.
+
+Possible canidates for opcode compression include
+* equals 0 and not equals 0 (room for 7 sub-opcodes each) (not doing that because it'd screw with the easy ALU code
+
+
+
+
+conditionals
+0 -- always
+1 -- only if true
+for only if false, there should basically be another compare or if applicable an always afterwards
+
+
+limitations that shouldn't be passed with instructions
+* Doing 2 memory references 
+* pushing a memory reference (equates to 2 memory references)
+
+Note it is possible however to read and write 16bits at one time to the memory to consecutive addresses that are 16-bit aligned.
+
+
+segments:
+DS is used in all "normal" memory references
+SS is used in all push and pop instructions
+ES is used when the ExtraSegment bit is set for either push/pop or normal memory references
+CS is only used for fetching instructions
+
+Segment carryover:
+In order to overcome the limitations of only having a 256 byte segment, there is a workaround option to "pretend" that IP is a 16 bit register.
+When CS carryover is enabled, when IP rollover from 255 to 0 or whatever, CS will be incremented. This makes it so that if you start at address 0:0.
+you can continue as far as needed into the address space without having to do ugly far jumps at each of the borders.
+Carryover can only be done on CS and SS. The required circuitry is not implemented for DS or ES due to an extreme level of complexity required for it, also
+it would only lead to unncessarily complex code 
+
+Also of note is that `move relative` implements a "carryover" component. This component will work on either IP or SP, and uses CS and SS respectively. 
+If used on other registers, there will be no carry over functionality, though it can be used as an easy way to add or subtract an immediate from a register. 
+
+
+
+States needed:
+0. reset
+1. decode current instruction (All without memory capable within 1 clock cycle)
+2. increment IP(and SP if needed) and fetch next instruction
+3. Write 1 register to memory
+4. Read 1 register from memory
+5. Write 2 registers to memory
+6. Read 2 registers from memory
+7. Write 1 register to memory and setup increment of sp
+8. Write 2 registers to memory and setup double increment of sp
+9. Read 1 register from memory and setup decrement of sp
+10. Read 2 registers from memory and setup double decrement of sp
+11. 
+
+
+
+registerfile map:
+0000: general r0
+0001: general r1
+0010: general r2
+0011: general r3
+0100: general r4
+0101: general r5
+0110: SP (r6)
+0111: IP (r7)
+1000: second bank r0
+1001: second bank r1
+1010: second bank r2
+1011: second bank r3
+1100: CS
+1101: DS
+1110: ES
+1111: SS
+
+Banking works like if(regnumber(2) = '0') then regnumber(3)=regbank; end if;
+
+
+ALU operations
+00000 and reg1,reg2 (reg1=reg1 and reg2)
+00001 or reg, reg
+00010 xor reg,reg
+00011 not reg1,reg2 (reg1=not reg2)
+00100 left shift reg,reg (logical)
+00101 right shift reg,reg (logical)
+00110 rotate right reg,reg
+00111 rotate left reg,reg
+
+01000 is greater than reg1,reg2 (TR=reg1>reg2)
+01001 is greater or equal to reg,reg
+01010 is less than reg,reg
+01011 is less than or equal to reg,reg
+01100 is equal to reg,reg
+01101 is not equal to reg,reg
+01110 equals 0 reg
+01111 not equals 0 reg
+
+10000 Set TR
+10001 Reset TR
+10011 Increment 
+10010 Decrement
+10100 Add
+10101 Subtract
+
+
+
+Alignment restrictions:
+In general, their is very few times that a full 16-bit read or 16-bit write is done. These are the times:
+
+* Extended push
+* Extended pop
+* instruction fetch
+
+Because of this, and because I want for 2 clock cycles to be the longest instruction, I must place some alignment restrictions on the CPU
+So, IP must be aligned to a 16-bit address (must be an even number). And SP must also be aligned to a 16-bit address. 
+Though I don't plan on putting any "real" restriction to setting it to an odd address, nothing will actually work right. 
+
+Stack Details:
+Because of the need for 16-bit writes and reads of the stack, even though we're usually only using 8-bit values, we end up pushing 2 bytes at one time always.
+Stack is oppositely done from the 8086. push X will move X to SS:SP and then increment SP by 2. 
+Let's take an example program:
+--SS is 0
+mov sp, 10
+push 0xff
+
+after this, 0x00FF will be moved to SS:SP (0x0010) and then sp will be incremented by 2. If we push an 8-bit value, the value is put in the least-significant byte, and the MSB is 0
+
+
+
+On Reset:
+
+On reset, all general registers are set to 0
+CS is set to 1, IP is set to 0. SS is set to 2 and SP is set to 0. 
+Carryover is set on CS and not set on SS. DS and ES is 0. TR is false.
+Register bank 0 is selected. 
+
+Electrical operation:
+On power-on, RESET should be high for at least 2 clock cycles. HOLD can optionally be high as well after these two clock cycles.
+When HOLD is no longer needed, it should just be turned low and an extra clock cycle should be waited on for it to return to RESET state
+When RESET is held low, the processor will execute. It takes 3 clock cycles for the processor to "catch up" to actually executing instructions
+
+
+
+Register order: 
+The order of registers is read from left to right with left being the most significant bit of the 16-bit opcode.
+So for instance, 
+0101_*000*0_0*111*_0010 is `mov [r0], IP/r7`. The register portions of the opcode are surrounded by astericks  
+
+
+Implemented opcode list:
+legend:
+r = register choice
+R = register choice or opcode choice for sub groups
+C = conditional portion
+s = segment register choice
+i = immediate data
+N = not used
+o = opcode choice (for groups)
+_ = space for readability
+
+0000_rrrC_iiii_iiii
+mov reg, immediate
+
+0001_rrrC_iiii_iiii
+mov [reg], immediate
+
+group 3 comparions
+0011_rrrC_Crrr_Nooo
+opcode choices
+000: is greater than reg1,reg2 (TR=reg1>reg2)
+001: is greater or equal to reg,reg
+010: is less than reg,reg
+011: is less than or equal to reg,reg
+100: is equal to reg,reg
+101: is not equal to reg,reg
+110: equals 0 reg
+111: not equals 0 reg
+
+group 4 bitwise
+0100_rrrC_Crrr_Nooo
+opcode choices
+000: and reg1,reg2 (reg1=reg1 and reg2)
+001: or reg, reg
+010: xor reg,reg
+011: not reg1,reg2 (reg1=not reg2)
+100: left shift reg,reg
+101: right shift reg,reg
+110: rotate right reg,reg
+111: rotate left reg,reg
+
+group 5 misc
+0101_rrrC_CRRR_sooo
+opcode choices:
+000: subgroup 5-0
+  RRR choices:
+  000: push reg
+  001: pop reg
+001: mov reg, reg
+010: mov reg, [reg]
+011: mov [reg], reg
+
+
+
+
+
