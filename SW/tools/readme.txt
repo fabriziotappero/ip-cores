@@ -1,0 +1,1 @@
+This application can be used to send files to Next186 SoC PC on RS232, at 115200bps.
