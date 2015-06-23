@@ -1,0 +1,1 @@
+-intstyle "ise" -incremental -lib "secureip" -o "C:/dropbox/Dropbox/VHDL_training/OpenCores/spi_master_slave/spi_master_slave/trunk/syn/testbench_isim_par.exe" -prj "C:/dropbox/Dropbox/VHDL_training/OpenCores/spi_master_slave/spi_master_slave/trunk/syn/testbench_par.prj" "work.testbench" 
