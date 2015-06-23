@@ -1,0 +1,292 @@
+
+
+reg              rx_parity_enable;               // 0 = no parity bit sent; 1= parity bit sent
+reg              rx_parity    ; 
+reg              rx_force_parity    ; 
+reg              rx_stop_value;                  // value out for stop bit 
+reg              rx_start_detect;
+reg [7:0]        rx_shift_buffer;
+reg              rx_parity_calc;
+reg              rx_parity_samp;
+reg              rx_parity_error;
+reg              rx_frame_err;
+reg              exp_rx_frame_err;
+reg              mask_rx_frame_err;
+   
+   
+reg              rx_frame_rdy;
+                         
+ 
+reg              rx_baud_enable;   
+wire             rx_stop_cnt;
+wire             rx_last_cnt;
+wire [7:0]       next_rx_shift_buffer;   
+wire             next_rx_parity_calc;  
+wire             next_rx_parity_samp;   
+wire             next_rx_frame_err;
+   
+   
+reg              rxd_pad_sig;
+reg [1:0]        rx_rdy_del;   
+reg [SIZE-1:0]   rx_baudgen;
+reg              edge_enable;
+reg  [SIZE-1:0]  divide_cnt;
+
+
+   wire xmit_enable;
+reg         txd_parity_enable; 
+reg         txd_force_parity; 
+reg         txd_parity;
+reg         txd_load;         
+reg         txd_break;                  
+reg  [7:0]  txd_data_in;                        
+wire        txd_buffer_empty;                
+   
+   
+//
+//   watch for start bit
+//  
+
+   
+   
+always@(posedge clk)
+  if(reset)
+  begin
+   rx_parity_enable     <= 1'b0; 
+   rx_parity            <= 1'b0;
+   rx_force_parity      <= 1'b0;
+   rx_stop_value        <= 1'b1;    
+   exp_rx_frame_err     <= 1'b0; 
+   exp_rx_parity_err    <= 1'b0; 
+   exp_rx_shift_buffer  <= 8'h00;
+   mask_rx_frame_err    <= 1'b0; 
+   mask_rx_parity_err   <= 1'b0; 
+   mask_rx_shift_buffer <= 8'h00;     
+   txd_parity_enable    <= 1'b0;
+   txd_force_parity     <= 1'b0;
+   txd_parity           <= 1'b0;
+   txd_load             <= 1'b0;
+   txd_break            <= 1'b0;                 
+   txd_data_in          <= 8'h00;                     
+  end
+
+
+   
+
+
+wire    prb_rx_frame_err; 
+
+assign  prb_rx_shift_buffer =  rx_shift_buffer;  
+assign  prb_rx_frame_err    =  rx_frame_err; 
+assign  prb_rx_parity_err   =  rx_parity_error;    
+assign  drv_rx_shift_buffer =  8'bzzzzzzzz;
+assign  drv_rx_parity_err   =  1'bz;
+
+/*
+io_probe_def 
+#(.MESG   ("uart data receive error"),
+  .WIDTH  (8)
+  )
+rx_shift_buffer_prb   
+(
+  .clk           ( clk ),
+  .drive_value   ( drv_rx_shift_buffer ), 
+  .expected_value( exp_rx_shift_buffer ),
+  .mask          ( mask_rx_shift_buffer),
+  .signal        ( prb_rx_shift_buffer )
+);      
+
+
+io_probe_def 
+#(.MESG   ("uart parity error"))
+rx_parity_err_prb   
+(
+  .clk           ( clk ),
+  .drive_value   ( drv_rx_parity_err ), 
+  .expected_value( exp_rx_parity_err ),
+  .mask          ( mask_rx_parity_err),
+  .signal        ( prb_rx_parity_err )
+);      
+
+*/
+
+
+ 
+
+ 
+   
+
+
+
+   
+always@(posedge clk)
+if(reset)                 rx_baudgen <= CLKCNT;
+else 
+if(rx_baudgen == 4'h0)    rx_baudgen <= CLKCNT;
+else                      rx_baudgen <= rx_baudgen - 1'h1;  
+
+
+   
+always@(posedge clk)
+if(reset)                 edge_enable <= 1'b0;
+else                      edge_enable <= (rx_baudgen == {SIZE{1'b0}});
+  
+
+
+
+
+   
+always@(posedge clk)
+if(reset)                                              rxd_pad_sig <= 1'b1;
+else                                                   rxd_pad_sig <= txd_in;
+   
+
+always@(posedge clk)
+if(reset)                                              rx_start_detect <= 1'b0;
+else
+if(rx_start_detect)  
+  begin
+    if(rx_stop_cnt  && edge_enable )                      rx_start_detect <= !rxd_pad_sig;
+    else
+    if(rx_last_cnt)                                       rx_start_detect <= 1'b0;
+    else                                               rx_start_detect <= 1'b1;
+  end
+else
+if(!rxd_pad_sig )                                      rx_start_detect <= 1'b1;
+else                                                   rx_start_detect <= rx_start_detect;
+
+
+always@(posedge clk)
+  if(reset)
+    begin
+    rx_frame_rdy <= 1'b0;
+    rx_rdy_del   <= 2'b00;
+    end
+  else
+    begin
+    rx_frame_rdy <=  rx_rdy_del[1] ;
+    rx_rdy_del   <=  {rx_rdy_del[0],rx_last_cnt};
+    end
+   
+
+uart_model_serial_rcvr
+#(.WIDTH(8),  .SIZE(4) )  
+serial_rcvr
+ (
+     .clk              ( clk                ), 
+     .reset            ( reset              ),
+     .edge_enable      ( rx_baud_enable        ),                 
+     .parity_enable    ( rx_parity_enable      ),               
+     .parity_type      ( {rx_force_parity, rx_parity }    ),                 
+     .stop_cnt         ( rx_stop_cnt           ),                  
+     .last_cnt         ( rx_last_cnt           ),                  
+     .stop_value       ( rx_stop_value         ),                  
+     .ser_in           ( txd_in             ),                      
+     .shift_buffer     ( next_rx_shift_buffer  ),
+     .parity_calc      ( next_rx_parity_calc   ),
+     .parity_samp      ( next_rx_parity_samp   ),
+     .frame_err        ( next_rx_frame_err     )
+);  
+   
+
+
+   
+
+
+
+
+always@(posedge clk)
+  if( reset || (!rx_start_detect))    rx_baud_enable    <= 1'b0;
+  else
+  if(!edge_enable)                    rx_baud_enable    <= 1'b0;  
+  else                                rx_baud_enable    <=  ( divide_cnt == 4'b1000 );       
+
+
+
+always@(posedge clk)
+  if( reset || (!rx_start_detect))    divide_cnt    <= 4'b1111;
+  else
+  if(!edge_enable)                    divide_cnt    <= divide_cnt;
+  else
+  if(!(|divide_cnt))                  divide_cnt    <= 4'b1111;
+  else                                divide_cnt    <= divide_cnt - 'b1;
+
+
+
+
+
+   
+always@(posedge clk)
+  if(reset)
+     begin
+          rx_shift_buffer   <=  8'h00;  
+          rx_parity_calc    <=  1'b0;
+          rx_parity_samp    <=  1'b0;
+          rx_parity_error   <=  1'b0;
+          rx_frame_err      <=  1'b0;
+     end
+  else
+  if(rx_last_cnt )
+      begin
+          rx_shift_buffer   <=  next_rx_shift_buffer;  
+          rx_parity_calc    <=  next_rx_parity_calc;
+          rx_parity_samp    <=  next_rx_parity_samp;
+	  rx_parity_error   <=  (next_rx_parity_samp ^ next_rx_parity_calc) && rx_parity_enable;
+          rx_frame_err      <=  next_rx_frame_err;
+      end
+  else
+     begin
+          rx_shift_buffer   <=  rx_shift_buffer;  
+          rx_parity_calc    <=  rx_parity_calc;
+          rx_parity_samp    <=  rx_parity_samp;
+          rx_parity_error   <=  rx_parity_error;
+          rx_frame_err      <=  rx_frame_err;
+      end
+  
+
+/////////////////  Xmit
+
+
+
+
+
+   
+
+   
+
+
+
+uart_model_divider
+#(.SIZE(4))  
+x_divider  (
+         .clk             ( clk             ),
+         .reset           ( reset           ),
+	 .divider_in      ( 4'b1111         ),
+         .enable          ( edge_enable     ),
+	 .divider_out     ( xmit_enable     )
+         );
+
+
+
+   
+
+uart_model_serial_xmit
+serial_xmit (
+               .clk              ( clk                              ),
+               .reset            ( reset                            ),
+               .edge_enable      ( xmit_enable                      ),                 
+               .parity_enable    ( txd_parity_enable                ),               
+               .two_stop_enable  ( 1'b0                             ),             
+               .parity_type      ( {txd_force_parity, txd_parity }  ),                 
+               .load             ( txd_load                         ),                        
+               .start_value      ( 1'b0                             ),                 
+               .stop_value       (!txd_break                        ),                  
+               .data             ( txd_data_in                      ),                        
+               .buffer_empty     ( txd_buffer_empty                 ),                
+               .ser_out          ( rxd_out                          )            
+                );
+
+
+
+
+

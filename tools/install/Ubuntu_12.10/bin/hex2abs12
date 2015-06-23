@@ -1,0 +1,211 @@
+eval 'exec `which perl` -S $0 ${1+"$@"}'
+   if 0;
+
+#/**********************************************************************/
+#/*                                                                    */
+#/*             -------                                                */
+#/*            /   SOC  \                                              */
+#/*           /    GEN   \                                             */
+#/*          /    TOOL    \                                            */
+#/*          ==============                                            */
+#/*          |            |                                            */
+#/*          |____________|                                            */
+#/*                                                                    */
+#/*  Converts a intel hex file into a 12 bit verilog readmemh format   */
+#/*                                                                    */
+#/*                                                                    */
+#/*  Author(s):                                                        */
+#/*      - John Eaton, jt_eaton@opencores.org                          */
+#/*                                                                    */
+#/**********************************************************************/
+#/*                                                                    */
+#/*    Copyright (C) <2010>  <Ouabache Design Works>                   */
+#/*                                                                    */
+#/*  This source file may be used and distributed without              */
+#/*  restriction provided that this copyright statement is not         */
+#/*  removed from the file and that any derivative work contains       */
+#/*  the original copyright notice and the associated disclaimer.      */
+#/*                                                                    */
+#/*  This source file is free software; you can redistribute it        */
+#/*  and/or modify it under the terms of the GNU Lesser General        */
+#/*  Public License as published by the Free Software Foundation;      */
+#/*  either version 2.1 of the License, or (at your option) any        */
+#/*  later version.                                                    */
+#/*                                                                    */
+#/*  This source is distributed in the hope that it will be            */
+#/*  useful, but WITHOUT ANY WARRANTY; without even the implied        */
+#/*  warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR           */
+#/*  PURPOSE.  See the GNU Lesser General Public License for more      */
+#/*  details.                                                          */
+#/*                                                                    */
+#/*  You should have received a copy of the GNU Lesser General         */
+#/*  Public License along with this source; if not, download it        */
+#/*  from http://www.opencores.org/lgpl.shtml                          */
+#/*                                                                    */
+#/**********************************************************************/
+
+# ToDO: add handling unaligned words
+
+
+############################################################################
+# General PERL config
+############################################################################
+use Getopt::Long;
+use English;
+use File::Basename;
+
+$OUTPUT_AUTOFLUSH = 1; # set autoflush of stdout to TRUE.
+
+
+############################################################################
+### Process the options
+############################################################################
+
+Getopt::Long::config("require_order", "prefix=-");
+GetOptions("h"
+) || die "(use '$program_name -h' for help)";
+
+
+##############################################################################
+## Help option
+##############################################################################
+if ( ($opt_h eq "1") ) 
+  { print "\n type test filename ( no extension)";
+    print "\n";
+    exit 1;
+  }
+
+
+
+#############################################################################
+## 
+##  open intel hex  file  and read into array
+## 
+#############################################################################
+
+  my $prog_name         = $ARGV[0];
+
+  my $input_file   = ${prog_name}.".hex";
+  my $output_file  = ${prog_name}.".abs12";
+
+
+  print "Reading hex File  $input_file\n";  
+  print "Writing abs File  $output_file\n";  
+
+
+  open  VERILOG , ">  $output_file";
+  open   FILE, $input_file;
+
+  open  DEFINES , ">  ROM_defines.v";
+
+  while(<FILE>){push @intel_hex, $_  ;}
+
+
+#############################################################################
+## 
+##  Clear a storage area for the 12 bit words
+## 
+#############################################################################
+
+
+   my  $x=0;
+      while( $x <= 65535) 
+           {    
+           @Mem[$x] = "000";
+            $x = $x+1;
+           }
+
+
+#############################################################################
+## 
+##  Parse Data  into storage converting from 8 bit bytes to 16 bit words
+## 
+#############################################################################
+ 
+my  $pointer     = 0;
+my $max_pointer = 0;
+my $start_address = 65536;
+
+
+  foreach $line (@intel_hex)
+    {
+    $colon     = substr($line, 0,1);
+    $length    = (cvt(substr($line, 1,1))* 16) +   cvt(substr($line, 2,1));
+    $address   = cvt(substr($line, 3,1));
+    $address   = cvt(substr($line, 4,1))+($address *16)  ;
+    $address   = cvt(substr($line, 5,1))+($address *16)  ;
+    $address   = cvt(substr($line, 6,1))+($address *16)  ;
+    $type      = substr($line, 7,2);
+
+
+
+    if(($type eq  "00")          )
+
+      {
+      if( $address <= $start_address) {$start_address = $address;}
+      $x=9;
+      while( $x <= 7+($length *2)) 
+           {    
+           $value_E = substr($line, $x,2);
+           $value_O = substr($line, $x+3,1);
+           $pointer = (($address/2) +($x-9)/4);
+           if( $pointer > $max_pointer ) {$max_pointer = $pointer}
+           @Mem[$pointer] = $value_O.$value_E;
+           $x= $x+4;
+           }
+
+
+     }
+
+
+
+
+    }
+
+
+#############################################################################
+## 
+##  dump out up to the last word, undefined space is 000
+## 
+#############################################################################
+
+      $x = ($start_address/2);
+      while( $x <= ($max_pointer)) 
+           {    
+           printf VERILOG ("%s\n",@Mem[$x]);
+           $x = $x+1;
+           }
+
+
+        $words =  ($max_pointer) - ($start_address/2)+1;
+       printf DEFINES ("`define PROG_FILE  /${prog_name}.abs12\n"  );
+       printf DEFINES ("`define ROM_WIDTH 12\n"  );
+       printf DEFINES ("`define ROM_WORDS $words \n"  );
+
+
+#############################################################################
+## 
+##  convert 0-9,A-F to decimal or 0 if out of range
+## 
+#############################################################################
+
+
+sub cvt { 
+
+$temp =    ord($_[0]);
+if( $temp <= 48) { return 0 }
+if( $temp <= 58) { return $temp - 48 }
+if( $temp <= 64) { return 0 }
+if( $temp <= 70) { return ($temp - 65)+10 }
+return 0;
+
+
+
+}
+
+
+
+
+1
+
+

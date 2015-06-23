@@ -1,0 +1,222 @@
+
+module `VARIANT`STATE_FSM
+#(parameter STATE_SIZE=3)
+(
+    input  wire                 clk,         
+    input  wire                 reset,        
+    input  wire                 enable,
+    input  wire                 run,          
+
+    input  wire [1:0]           cmd,
+    input  wire [1:0]           length,
+    input  wire                 now_fetch_op,
+    input  wire                 absolute,
+    input  wire                 immediate,
+    input  wire                 implied,    
+    input  wire                 indirectx,
+    input  wire                 indirecty,
+    input  wire                 stack,
+    input  wire                 relative, 
+    input  wire                 brk,
+    input  wire                 rts,
+    input  wire                 jump_indirect,
+    input  wire                 jump,
+    input  wire                 jsr,
+    input  wire                 rti,
+    input  wire                 branch_inst,
+    input  wire [1:0]           ins_type,    
+    input  wire                 invalid,
+
+    output reg  [STATE_SIZE:0] state
+
+);
+
+
+
+reg [STATE_SIZE:0]   next_state;
+   
+    always @ (posedge clk ) 
+        begin 
+        if (reset) 
+              begin
+              state            <=  `RESET;
+              end 
+        else if(!enable)
+              begin
+              state            <= state ;
+              end
+
+        else  state            <= next_state;
+        end 
+
+      
+
+
+
+    always @ (*) 
+        begin 
+        next_state   = `RESET; 
+
+       if (reset) 
+            begin
+            next_state = `RESET;
+            end
+       else	   
+       if (invalid ) 
+            begin
+            next_state = `HALT;
+            end
+        else 
+
+       if ((cmd == `cmd_load_vec) &&  now_fetch_op      ) 
+            begin
+            if(state != `INT_1)            next_state = `INT_1;
+	    else                           next_state = `INT_2;
+            end
+        else 
+
+        case (state)
+
+            `RESET: 
+                   begin
+                   next_state = `INT_1;
+		   end
+
+            `HALT: 
+                   begin
+                   next_state = `HALT;
+                   end
+	  
+            `FETCH_OP: 
+                   begin
+                   next_state = `EXECUTE;
+                   end
+	  
+	  
+            `EXECUTE: 
+              begin
+                  if(rts || rti)
+		    next_state = `FETCH_OP;
+                  else
+                  if(indirectx)
+		    next_state = `IDX_1;
+                  else
+                  if(indirecty)
+		    next_state = `IDY_1;
+                  else
+                  if (absolute || jump || jsr || jump_indirect)
+		    next_state = `AXE_1;
+                  else		    
+		    
+                  if(length == 2'b01)  
+                     begin
+                     next_state = `EXECUTE;
+                     end
+                  else                                   
+                     begin
+                     next_state = `EXE_1;
+	             end
+		 
+                end
+
+            `EXE_1: 
+              begin
+                  if(length == 2'b10)                       
+                    begin
+                    next_state = `EXECUTE;
+                    end
+                  else next_state = `AXE_2;
+                end
+
+            `AXE_1: 
+              begin
+                 next_state = `AXE_2;
+                end
+
+
+	  
+
+            `AXE_2: 
+              begin
+                  if(length == 2'b11)                       
+                    begin
+                    next_state = `EXECUTE;
+                    end
+                  else next_state = `HALT;	       
+                end
+
+            `IDX_1: 
+                    begin
+                    next_state = `IDX_2;          	       
+                    end
+
+            `IDX_2: 
+                    begin
+                    next_state = `IDX_3;
+                    end
+
+            `IDX_3: 
+                    begin
+                    next_state = `EXECUTE;
+                    end
+
+            `IDY_1: 
+                    begin
+                    next_state = `IDY_2;          	       
+                    end
+
+            `IDY_2: 
+                    begin
+                    next_state = `IDY_3;
+                    end
+
+            `IDY_3: 
+                    begin
+                    next_state = `EXECUTE;
+                    end
+
+            `INT_1: 
+                  begin
+                  next_state = `INT_2;
+                  end	  
+	  
+            `INT_2: 
+                  begin
+                  next_state = `FETCH_OP;
+                  end
+
+
+
+       
+	  
+            default: 
+                begin
+                next_state = `HALT; 
+                end
+        endcase
+    end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+endmodule
+
+
+

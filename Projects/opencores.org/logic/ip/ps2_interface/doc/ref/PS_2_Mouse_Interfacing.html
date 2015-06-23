@@ -1,0 +1,1581 @@
+<!DOCTYPE doctype PUBLIC "-//w3c//dtd html 4.0 transitional//en">
+<html><head>
+
+
+
+                        
+  <meta http-equiv="Content-Type" content="text/html; charset=ISO-8859-1">
+                        
+  <meta name="GENERATOR" content="Mozilla/4.7 [en] (Win98; U) [Netscape]">
+                        
+  <meta name="Author" content="Adam Chapweske">
+  <title>PS/2 Mouse Interfacing</title>
+                         <!--This file created 10:20 PM  3/29/01 by Claris Home Page version 3.0-->
+</head><body vlink="#3333ff" alink="#3333ff" bgcolor="#ffffff" link="#3333ff">
+   <small><b><font face="Arial,Helvetica"><font size="+3"><small>The PS/2 
+Mouse  Interface</small></font></font></b></small><br>
+
+            
+<center></center>
+            
+<center>              
+<hr size="1" width="400" align="left" noshade="noshade"></center>
+                 <br>
+    <font face="Arial,Helvetica">Source: <a href="http://www.computer-engineering.org/">http://www.Computer-Engineering.org</a></font><br>
+     <font face="Arial,Helvetica">Author: Adam Chapweske<br>
+    Last Updated: 04/01/03<br>
+
+    <br>
+   <br>
+    </font><b>Legal Information:</b><br>
+    <br>
+    All information within this article is provided "as is" and without any 
+ express or implied warranties, including, without limitation, the implied 
+ warranties of merchantibility and fitness for a particular purpose. &nbsp;<br>
+   <br>
+   This article is protected under copyright law. &nbsp;This document may 
+be  copied only if the source, author, date, and legal information is included.<br>
+
+   <br>
+   <b>Abstract:</b><br>
+   <br>
+   This article attempts to explain every aspect of the PS/2 mouse interface 
+ including the physical and electrical interface, low-level protocol, modes 
+ of operation, commands, and extensions. &nbsp;All code samples involving
+ the mouse  encoder are written in assembly for <a href="http://www.microchip.com/">Microchip's</a>  PIC microcontrollers.&nbsp;
+   All code samples related to the auxiliary device controller (keyboard
+controller)   are written in x86 assembly<br>
+
+   <br>
+   <b>General Description:</b><br>
+   <br>
+   There are many types of pointing devices available for modern PCs, including 
+ mice, trackballs, touchpads, electronic whiteboards, etc. &nbsp;Virtually 
+ all of these pointing devices communicate with a computer using one of two 
+ interfaces: Universal Serial Bus (USB) or the PS/2 Mouse Interface. &nbsp;See 
+ the following table for a comparison:<br>
+     
+<blockquote>         
+  <table width="500" border="1" cellpadding="2" cellspacing="0">
+       <tbody>
+
+         <tr>
+           <td valign="top" width="33%" align="center"><br>
+           </td>
+           <td valign="top" width="33%" align="center"><b>USB (v1.1)</b><br>
+           </td>
+           <td valign="top" align="center"><b>&nbsp;PS/2 Mouse Interface
+        </b><br>
+           </td>
+         </tr>
+
+         <tr>
+           <td valign="top" width="33%" align="center">Number of Devices
+Supported<br>
+           </td>
+           <td valign="top" width="33%" align="center">Up to 127<br>
+           </td>
+           <td valign="top" align="center">One<br>
+           </td>
+
+         </tr>
+         <tr>
+           <td valign="top" width="33%" align="center">Maximum Data Rate<br>
+           </td>
+           <td valign="top" width="33%" align="center">12 Mbps<br>
+           </td>
+           <td valign="top" align="center">40 kbps<br>
+
+           </td>
+         </tr>
+         <tr>
+           <td valign="top" width="33%" align="center">Power (max)<br>
+           </td>
+           <td valign="top" width="33%" align="center">5V @ 500mA<br>
+           </td>
+           <td valign="top" align="center">5V @ 100mA<br>
+
+           </td>
+         </tr>
+         <tr>
+           <td valign="top" width="33%" align="center">Hot-Pluggable?<br>
+           </td>
+           <td valign="top" width="33%" align="center">Yes<br>
+           </td>
+           <td valign="top" align="center">No<br>
+
+           </td>
+         </tr>
+         <tr>
+           <td valign="top" width="33%" align="center">Documentation<br>
+           </td>
+           <td valign="top" width="33%" align="center">Well-documented: <a href="http://www.usb.org/">http://www.usb.org</a><br>
+           </td>
+
+           <td valign="top" align="center">Out-of-print <br>
+   (IBM Tech Reference)<br>
+           </td>
+         </tr>
+                 
+    </tbody>         
+  </table>
+     <br>
+   </blockquote>
+
+   Older pointing device interfaces include the Apple Desktop Bus (ADB),
+RS-232  serial port, and the bus mouse interface. &nbsp;These are obsolete
+and are  not covered in this article.<br>
+  <br>
+  The PS/2 mouse interface originally appeared in IBM's "Personal System/2"
+ computers in the late 80's. &nbsp;It still remains a widely-supported interface
+ for the sake of constantly maintaining backward compatibility. &nbsp;However,
+ USB has quickly caught on these last few years and will eventually replace
+ the PS/2 mouse interface entirely.<br>
+  <br>
+  The PS/2 mouse interface uses a bidirectional serial protocol to transmit
+ movement and button-position data to the computer's auxiliary device controller
+ (keyboard controller). &nbsp;The computer, in turn, may send a number of
+commands to the mouse to set the report rate, resolution, reset the mouse,
+disable the mouse, etc. &nbsp;The computer also provides the mouse with an
+overload-protected 5V power supply.<br>
+
+     
+<p><b>Electrical Interface / Protocol:</b> </p>
+                     
+<p>The PS/2 mouse uses the same protocol as the PS/2 keyboard (aka AT keyboard).&nbsp;
+ Click <a href="http://www.computer-engineering.org/ps2protocol">here</a>  for detailed information on this
+ protocol. </p>
+                     
+<p><b>Inputs, Resolution, and Scaling:</b> </p>
+
+                     
+<p>The standard PS/2 mouse interface supports the following inputs: X (right/left)
+  movement, Y (up/down) movement, left button, middle button, and right button.
+   The mouse reads these inputs at a regular freqency and updates various
+counters  and flags to reflect movement and button states.&nbsp; There are
+many PS/2  pointing devices that have additional inputs and may report data
+differently  than described in this document.&nbsp; One popular extension
+I cover later  in this document is the Microsoft Intellimouse, which includes
+support for  the standard inputs as well as a scrolling wheel and two additional
+buttons.         </p>
+                     
+<p>The standard mouse has two counters that keep track of movement:  the X-movement
+counter and the Y-movement counter.&nbsp; These&nbsp; are 9-bit  2's complement
+values and each has an associated overflow flag.&nbsp; Their  contents, along
+with the state of the three mouse buttons, are sent to the  host in the form
+of a 3-byte movement data packet (as described in  the next  section.)&nbsp;
+The movement counters represent the amount of movement that  has occurred
+since the last movment data packet was sent to the host (ie, they do not
+represent absolute positions.)        </p>
+
+                     
+<p>When the mouse reads its inputs, it records the current state of  its buttons
+and checks for movement. If movement has occurred it increments   (for +X
+or +Y movement) or decrements (for -X or -Y movement) its X and/or Y movement
+counters. If either of the counters has overflowed, it sets the  appropriate
+overflow flag. </p>
+                     
+<p>The parameter that determines the amount by which the movement counters
+   are incremented/decremented is the <i>resolution</i>. The default resolution
+   is 4 counts/mm and the host may change that value using the "Set Resolution"
+   (0xE8) command. </p>
+                     
+<p>There is a parameter that does not effect the movement counters,  but does
+effect the reported<a href="#Footnotes">(1)</a> value of these counters.&nbsp;
+  This parameter is <i>scaling</i>.&nbsp; By default, the mouse uses 1:1
+scaling,   which has no effect on the reported mouse movement.&nbsp; However,
+the host   may select 2:1 scaling by sending the "Set Scaling 2:1" (0xE7)
+command.&nbsp;   If 2:1 scaling is enabled, the mouse will apply the following
+algorithm to  the counters before sending their contents to the host: <br>
+
+  </p>
+   
+<blockquote>      
+  <table width="300" border="1" cellpadding="2" cellspacing="0">
+      <tbody>
+        <tr>
+          <td valign="top" align="center">Movement Counter<br>
+          </td>
+          <td valign="top" align="center">Reported Movement<br>
+
+          </td>
+        </tr>
+        <tr>
+          <td valign="top" align="center">0<br>
+          </td>
+          <td valign="top" align="center">0<br>
+          </td>
+        </tr>
+
+        <tr>
+          <td valign="top" align="center">1<br>
+          </td>
+          <td valign="top" align="center">1<br>
+          </td>
+        </tr>
+        <tr>
+          <td valign="top" align="center">2<br>
+
+          </td>
+          <td valign="top" align="center">1<br>
+          </td>
+        </tr>
+        <tr>
+          <td valign="top" align="center">3<br>
+          </td>
+          <td valign="top" align="center">3<br>
+
+          </td>
+        </tr>
+        <tr>
+          <td valign="top" align="center">4<br>
+          </td>
+          <td valign="top" align="center">6<br>
+          </td>
+        </tr>
+
+        <tr>
+          <td valign="top" align="center">5<br>
+          </td>
+          <td valign="top" align="center">9<br>
+          </td>
+        </tr>
+        <tr>
+          <td valign="top" align="center">N &gt; 5<br>
+
+          </td>
+          <td valign="top" align="center">2 * N<br>
+          </td>
+        </tr>
+           
+    </tbody>      
+  </table>
+  </blockquote>
+                     
+<center>  
+<div align="center">               </div>
+
+  </center>
+   
+<center></center>
+   
+<center>  
+<div align="center">         </div>
+  </center>
+                        
+<p><b><br>
+  Movement Data Packet:</b> </p>
+                     
+
+<p>The standard PS/2 mouse sends movement/button information to the host
+using the following 3-byte packet <a href="#Footnotes">(4)</a>:&nbsp;   
+                  </p>
+                     
+<blockquote>      
+  <table width="650" border="0" cellpadding="0" cellspacing="0">
+      <tbody>
+                 <tr>
+      <td> <br>
+                   <font face="Arial,Helvetica"><font size="-1">Byte 1&nbsp;</font></font></td>
+
+       <td>                                                          
+        <table width="100%" border="0" cellpadding="0" cols="8">
+      <tbody>
+                       <tr>
+      <td>                                                              
+                         
+              <center>Bit 7</center>
+      </td>
+       <td>                                                             
+                          
+              <center>Bit 6</center>
+
+      </td>
+       <td>                                                             
+                          
+              <center>Bit 5</center>
+      </td>
+       <td>                                                             
+                          
+              <center>Bit 4</center>
+      </td>
+       <td>                                                             
+                          
+              <center>Bit 3</center>
+
+      </td>
+       <td>                                                             
+                          
+              <center>Bit 2</center>
+      </td>
+       <td>                                                             
+                          
+              <center>Bit 1</center>
+      </td>
+       <td>                                                             
+                          
+              <center>Bit 0</center>
+
+      </td>
+      </tr>
+                                                                        
+          </tbody>                                                      
+  
+        </table>
+                                                                
+        <table width="100%" border="1" cellpadding="0" cellspacing="0" cols="8">
+      <tbody>
+                       <tr>
+      <td>                                                              
+                         
+              <center><font face="Arial,Helvetica"><font size="-1">Y  overflow</font></font></center>
+
+      </td>
+       <td>                                                             
+                          
+              <center><font face="Arial,Helvetica"><font size="-1">X  overflow</font></font></center>
+      </td>
+       <td>                                                             
+                          
+              <center><font face="Arial,Helvetica"><font size="-1">Y  sign 
+ bit</font></font></center>
+      </td>
+       <td>                                                             
+                          
+              <center><font face="Arial,Helvetica"><font size="-1">X  sign 
+ bit</font></font></center>
+
+      </td>
+       <td>                                                             
+                          
+              <center><font face="Arial,Helvetica"><font size="-1">Always 
+  1</font></font></center>
+      </td>
+       <td>                                                             
+                          
+              <center><font face="Arial,Helvetica"><font size="-1">Middle 
+  Btn</font></font></center>
+      </td>
+       <td>                                                             
+                          
+              <center><font face="Arial,Helvetica"><font size="-1">Right 
+Btn</font></font></center>
+
+      </td>
+       <td>                                                             
+                          
+              <center><font face="Arial,Helvetica"><font size="-1">Left 
+Btn</font></font></center>
+      </td>
+      </tr>
+                                                                        
+          </tbody>                                                      
+  
+        </table>
+      </td>
+      </tr>
+
+       <tr>
+      <td><font face="Arial,Helvetica"><font size="-1">Byte 2</font></font></td>
+       <td>                                                          
+        <table width="100%" border="1" cellpadding="0" cellspacing="0" cols="1">
+      <tbody>
+                       <tr>
+      <td>                                                              
+                         
+              <center><font face="Arial,Helvetica"><font size="-1">X  Movement</font></font></center>
+      </td>
+
+      </tr>
+                                                                        
+          </tbody>                                                      
+  
+        </table>
+      </td>
+      </tr>
+       <tr>
+      <td><font face="Arial,Helvetica"><font size="-1">Byte 3&nbsp;</font></font></td>
+       <td>                                                          
+        <table width="100%" border="1" cellpadding="0" cellspacing="0" cols="1">
+
+      <tbody>
+                       <tr>
+      <td>                                                              
+                         
+              <center><font face="Arial,Helvetica"><font size="-1">Y  Movement</font></font></center>
+      </td>
+      </tr>
+                                                                        
+          </tbody>                                                      
+  
+        </table>
+      </td>
+
+      </tr>
+                                           
+    </tbody>                           
+  </table>
+      </blockquote>
+      The movement counters are 9-bit 2's complement integers, where the
+most   significant bit appears as a sign bit in Byte 1 of the movement data
+packet.   These counters are updated when the mouse reads its input and finds
+movement   has occurred. Their value is the amount of movement that has occurred
+since   the last movement data packet was sent to the host (ie, after a packet
+is   sent to the host, the movement counters are reset.) The range of values
+that  can be expressed by the movement counters is -255 to +255. If this
+range is exceeded, the appropriate overflow bit is set.                  
+<p>As I mentioned earlier, the movement counters are reset whenever  a movement 
+ data packet is successfully sent to the host. They are also reset  after 
+the mouse receives any command from the host other than the "Resend"  (0xFE) 
+command. </p>
+                     
+<p><b>Modes of Operation:</b> </p>
+                     
+<p>Data reporting is handled according to the mode in which the mouse  is 
+ operating.&nbsp; There are four standard modes of operation:&nbsp; </p>
+
+                     
+<ul>
+     <li> <i>Reset</i> - The mouse enters Reset mode at power-up or after 
+receiving   the "Reset" (0xFF) command.&nbsp;</li>
+     <li> <i>Stream</i> - This is the default mode (after Reset finishes
+executing)    and is the mode in which most software uses the mouse.&nbsp;
+If the host   has previously set the mouse to Remote mode, it may re-enter
+Stream mode  by sending the "Set Stream Mode" (0xEA) command to the mouse.&nbsp;</li>
+     <li> <i>Remote</i> - Remote mode is useful in some situations and may
+ be entered by sending the "Set Remote Mode" (0xF0) command to the mouse.&nbsp;</li>
+
+     <li> <i>Wrap</i> - This mode isn't particularly useful except for testing 
+  the connection between the mouse and its host.&nbsp; Wrap mode may be entered
+   by sending the "Set Wrap Mode" (0xEE) command to the mouse.&nbsp; To exit
+   Wrap mode, the host must issue the "Reset" (0xFF) command or "Reset Wrap
+  Mode" (0xEC) command.&nbsp; If the "Reset" (0xFF) command is recieved,
+the   mouse will enter Reset mode.&nbsp; If the "Reset Wrap Mode" (0xEC)
+command   is received, the mouse will enter the mode it was in prior to Wrap
+Mode.</li>
+     
+</ul>
+      (Note: The mouse may also enter "extended" modes of operation, as described
+   later in this document.&nbsp; However, this is not a feature of the standard
+   PS/2 mouse.)                  
+
+<p><b>Reset Mode:</b> </p>
+                     
+<p>The mouse enters reset mode at power-on or in response to the "Reset"
+ (0xFF) command. After entring this mode, the mouse performs a diagnostic
+self-test referred to as BAT (Basic Assurance Test) and sets the following
+default values:        </p>
+                     
+<ul>
+     <li> Sample Rate = 100 samples/sec</li>
+     <li> Resolution = 4 counts/mm</li>
+     <li> Scaling = 1:1</li>
+
+     <li> Data Reporting Disabled</li>
+     
+</ul>
+      It then sends a BAT completion code of either AAh (BAT successful)
+or  FCh (Error). The host's response to a completion code other than AAh
+is undefined.                    
+<p>Following the BAT completion code (AAh or FCh), the mouse sends  its device
+ ID of 00h. This distinguishes it from a keyboard, or a mouse in an extended
+ mode. I have read documents saything the host is not <i>supposed</i>   to
+ transmit any data until it receives a device ID.&nbsp; However I've found 
+  that some BIOS's will send the "Reset" command immediately following  the
+ 0xAA received after a power-on reset. </p>
+                     
+<p>After the mouse has sent its device ID to the host, it will enter  Stream 
+ Mode.&nbsp; Note that one of the default values set by the mouse is  "Data 
+ Reporting Disabled".&nbsp; This means the mouse will not issue any movement
+   data packets until it receives the "Enable Data Reporting" command. </p>
+
+                     
+<p><b>Stream Mode:</b> </p>
+                     
+<p>In stream mode, the mouse sends movement data when it detects movement
+   or a change in state of one or more mouse buttons. The maximum rate at
+which  this data reporting may occur is known as the <i>sample rate</i>.&nbsp; 
+ This  parameter ranges from 10 samples/sec to 200 samples/sec. Its default 
+ value  is 100 samples/sec and the host may change that value by using the 
+ "Set Sample  Rate" command.&nbsp; Stream mode is the default mode of operation
+ following reset.        </p>
+                     
+<p><b>Remote Mode:</b> </p>
+
+                     
+<p>In this mode the mouse reads its inputs and updates its counters/flags
+ at the current sample rate, but it does not automatically issue data packets
+ when movement has occured. &nbsp;Instead, the host must poll the mouse using
+ the "Read Data" command. &nbsp;Upon receiving this command the mouse will
+ send a single movement data packet and reset its movement counters.</p>
+   
+<p> </p>
+                     
+<p><b>Wrap Mode:</b> </p>
+                     
+<p>This is an "echoing" mode in which every byte received by the mouse  is 
+ sent back to the host. Even if the byte represents a valid command, the 
+mouse will not respond to that command--it will only echo that byte back
+ to the host. There are two exceptions to this: the "Reset" command and "Reset 
+ Wrap Mode" command. The mouse treats these as valid commands  and does not
+ echo them back to the host. </p>
+                     
+<p><b>Intellimouse Extensions:</b> </p>
+
+                     
+<p>A popular extension to the standard PS/2 mouse is the Microsoft Intellimouse.&nbsp;
+  This includes support for a total of five mouse buttons and three axises
+ of movement (right-left, up-down, and a scrolling wheel).&nbsp; These additional
+  features require the use of a 4-byte movement data packet rather than the
+  standard 3-byte packet.&nbsp; Since standard PS/2 mouse drivers cannot
+recognize   this packet format, the Microsoft Intellimouse is required to
+operate exactly   like a standard PS/2 mouse unless it knows the drivers
+ support the extended   packet format.&nbsp; This way, if a Microsoft Intellimouse
+ is used on a  computer which only supports the standard PS/2 mouse, the
+Microsoft Intellimouse  will still function, except for its scrolling wheel
+and 4th and 5th buttons.        </p>
+                     
+<p>After power-on or reset the Microsoft Intellimouse operates just like
+a standard PS/2 mouse  (ie, it uses a 3-byte movement data packet, responds
+ to all commands in the same way as a standard PS/2 mouse, and reports a
+device  ID of 00h.)&nbsp;  To enter "scrolling wheel" mode, the host sends
+the following  command sequence:         </p>
+
+                     
+<blockquote>Set sample rate 200 <br>
+     Set sample rate 100 <br>
+     Set sample rate 80</blockquote>
+      The host then issues the "Get device ID" command and waits for a response.&nbsp;
+ If a standard PS/2 mouse (ie, non-Intellimouse) is attached,  it will respond
+ with a device ID of 00h.&nbsp; In this case, the host will  recognize the
+ fact that the mouse does have a scrolling wheel and will continue  to treat
+ it as a standard PS/2 mouse.&nbsp; However, if a Microsoft Intellimouse
+ is attached, it will respond with an ID of 03h.&nbsp; This tells the host 
+ that the attached pointing device has a scrolling wheel and the host will 
+ then expect the mouse to use the following 4-byte movement data packet:&nbsp;
+
+ 
+<blockquote>      
+  <table width="650" border="0" cellpadding="0" cellspacing="0">
+      <tbody>
+                 <tr>
+      <td> <br>
+                   <font face="Arial,Helvetica"><font size="-1">Byte 1&nbsp;</font></font></td>
+       <td>                                                          
+        <table width="100%" border="0" cellpadding="0" cols="8">
+      <tbody>
+
+                       <tr>
+      <td>                                                              
+                         
+              <center>Bit 7</center>
+      </td>
+       <td>                                                             
+                          
+              <center>Bit 6</center>
+      </td>
+       <td>                                                             
+                          
+              <center>Bit 5</center>
+
+      </td>
+       <td>                                                             
+                          
+              <center>Bit 4</center>
+      </td>
+       <td>                                                             
+                          
+              <center>Bit 3</center>
+      </td>
+       <td>                                                             
+                          
+              <center>Bit 2</center>
+
+      </td>
+       <td>                                                             
+                          
+              <center>Bit 1</center>
+      </td>
+       <td>                                                             
+                          
+              <center>Bit 0</center>
+      </td>
+      </tr>
+                                                                        
+          </tbody>                                                      
+  
+        </table>
+
+                                                                
+        <table width="100%" border="1" cellpadding="0" cellspacing="0" cols="8">
+      <tbody>
+                       <tr>
+      <td>                                                              
+                         
+              <center><font face="Arial,Helvetica"><font size="-1">Y  overflow</font></font></center>
+      </td>
+       <td>                                                             
+                          
+              <center><font face="Arial,Helvetica"><font size="-1">X  overflow</font></font></center>
+      </td>
+
+       <td>                                                             
+                          
+              <center><font face="Arial,Helvetica"><font size="-1">Y  sign 
+ bit</font></font></center>
+      </td>
+       <td>                                                             
+                          
+              <center><font face="Arial,Helvetica"><font size="-1">X  sign 
+ bit</font></font></center>
+      </td>
+       <td>                                                             
+                          
+              <center><font face="Arial,Helvetica"><font size="-1">Always 
+  1</font></font></center>
+      </td>
+
+       <td>                                                             
+                          
+              <center><font face="Arial,Helvetica"><font size="-1">Middle 
+  Btn</font></font></center>
+      </td>
+       <td>                                                             
+                          
+              <center><font face="Arial,Helvetica"><font size="-1">Right 
+Btn</font></font></center>
+      </td>
+       <td>                                                             
+                          
+              <center><font face="Arial,Helvetica"><font size="-1">Left 
+Btn</font></font></center>
+      </td>
+
+      </tr>
+                                                                        
+          </tbody>                                                      
+  
+        </table>
+      </td>
+      </tr>
+       <tr>
+      <td><font face="Arial,Helvetica"><font size="-1">Byte 2</font></font></td>
+       <td>                                                          
+        <table width="100%" border="1" cellpadding="0" cellspacing="0" cols="1">
+
+      <tbody>
+                       <tr>
+      <td>                                                              
+                         
+              <center><font face="Arial,Helvetica"><font size="-1">X  Movement</font></font></center>
+      </td>
+      </tr>
+                                                                        
+          </tbody>                                                      
+  
+        </table>
+      </td>
+
+      </tr>
+       <tr>
+      <td><font face="Arial,Helvetica"><font size="-1">Byte 3&nbsp;</font></font></td>
+       <td>                                                          
+        <table width="100%" border="1" cellpadding="0" cellspacing="0" cols="1">
+      <tbody>
+                       <tr>
+      <td>                                                              
+                         
+              <center><font face="Arial,Helvetica"><font size="-1">Y  Movement</font></font></center>
+
+      </td>
+      </tr>
+                                                                        
+          </tbody>                                                      
+  
+        </table>
+      </td>
+      </tr>
+       <tr>
+      <td><font face="Arial,Helvetica"><font size="-1">Byte 4</font></font></td>
+       <td>                                                          
+        <table width="100%" border="1" cellpadding="0" cellspacing="0" cols="1">
+
+      <tbody>
+                       <tr>
+      <td>                                                              
+                         
+              <center><font face="Arial,Helvetica"><font size="-1">Z  Movement</font></font></center>
+      </td>
+      </tr>
+                                                                        
+          </tbody>                                                      
+  
+        </table>
+      </td>
+
+      </tr>
+                                           
+    </tbody>                           
+  </table>
+      Z Movement is a 2's complement number that represents the scrolling 
+wheel's   movement since the last data report.&nbsp; Valid values are in the
+range  of -8 to +7. This means the number is actually represented only by
+the least   significant four bits; the upper four bits act only as sign extension
+bits.</blockquote>
+      To enter "scrolling wheel + 5 button" mode, the host sends the following
+  command sequence:                  
+<blockquote>Set sample rate 200 <br>
+     Set sample rate 200 <br>
+
+     Set sample rate 80</blockquote>
+      The host then issues the "Get device ID" command and waits for a response.&nbsp;
+ A Microsoft Intellimouse will respond with a device ID of 04h, then use
+the  following 4-byte movement data packet:                  
+<blockquote>                            
+  <blockquote>&nbsp;                                      
+    <table width="650" border="0" cellpadding="0" cellspacing="0">
+      <tbody>
+                   <tr>
+      <td> <br>
+
+                     <font face="Arial,Helvetica"><font size="-1">Byte 1&nbsp;</font></font></td>
+       <td>                                                             
+      
+          <table width="100%" border="0" cellpadding="0" cols="8">
+      <tbody>
+                         <tr>
+      <td>                                                              
+                                   
+                <center>Bit 7</center>
+      </td>
+       <td>                                                             
+                                   
+                <center>Bit 6</center>
+
+      </td>
+       <td>                                                             
+                                   
+                <center>Bit 5</center>
+      </td>
+       <td>                                                             
+                                   
+                <center>Bit 4</center>
+      </td>
+       <td>                                                             
+                                   
+                <center>Bit 3</center>
+
+      </td>
+       <td>                                                             
+                                   
+                <center>Bit 2</center>
+      </td>
+       <td>                                                             
+                                   
+                <center>Bit 1</center>
+      </td>
+       <td>                                                             
+                                   
+                <center>Bit 0</center>
+
+      </td>
+      </tr>
+                                                                        
+          
+            </tbody>                                                     
+             
+          </table>
+                                                                        
+ 
+          <table width="100%" border="1" cellpadding="0" cellspacing="0" cols="8">
+      <tbody>
+                         <tr>
+      <td>                                                              
+                                   
+                <center><font face="Arial,Helvetica"><font size="-1">Y overflow</font></font></center>
+
+      </td>
+       <td>                                                             
+                                   
+                <center><font face="Arial,Helvetica"><font size="-1">X overflow</font></font></center>
+      </td>
+       <td>                                                             
+                                   
+                <center><font face="Arial,Helvetica"><font size="-1">Y sign 
+ bit</font></font></center>
+      </td>
+       <td>                                                             
+                                   
+                <center><font face="Arial,Helvetica"><font size="-1">X sign 
+ bit</font></font></center>
+
+      </td>
+       <td>                                                             
+                                   
+                <center><font face="Arial,Helvetica"><font size="-1">Always 
+ 1</font></font></center>
+      </td>
+       <td>                                                             
+                                   
+                <center><font face="Arial,Helvetica"><font size="-1">Middle 
+ Btn</font></font></center>
+      </td>
+       <td>                                                             
+                                   
+                <center><font face="Arial,Helvetica"><font size="-1">Right 
+ Btn</font></font></center>
+
+      </td>
+       <td>                                                             
+                                   
+                <center><font face="Arial,Helvetica"><font size="-1">Left 
+ Btn</font></font></center>
+      </td>
+      </tr>
+                                                                        
+          
+            </tbody>                                                     
+             
+          </table>
+      </td>
+      </tr>
+
+       <tr>
+      <td><font face="Arial,Helvetica"><font size="-1">Byte 2</font></font></td>
+       <td>                                                             
+      
+          <table width="100%" border="1" cellpadding="0" cellspacing="0" cols="1">
+      <tbody>
+                         <tr>
+      <td>                                                              
+                                   
+                <center><font face="Arial,Helvetica"><font size="-1">X Movement</font></font></center>
+      </td>
+
+      </tr>
+                                                                        
+          
+            </tbody>                                                     
+             
+          </table>
+      </td>
+      </tr>
+       <tr>
+      <td><font face="Arial,Helvetica"><font size="-1">Byte 3&nbsp;</font></font></td>
+       <td>                                                             
+      
+          <table width="100%" border="1" cellpadding="0" cellspacing="0" cols="1">
+
+      <tbody>
+                         <tr>
+      <td>                                                              
+                                   
+                <center><font face="Arial,Helvetica"><font size="-1">Y Movement</font></font></center>
+      </td>
+      </tr>
+                                                                        
+          
+            </tbody>                                                     
+             
+          </table>
+      </td>
+
+      </tr>
+       <tr>
+      <td><font face="Arial,Helvetica"><font size="-1">Byte 4</font></font></td>
+       <td>                                                             
+      
+          <table width="100%" border="1" cellpadding="0" cellspacing="0" cols="8">
+      <tbody>
+                         <tr>
+      <td>                                                              
+                                   
+                <center><font face="Arial,Helvetica"><font size="-1">Always 
+ 0</font></font></center>
+
+      </td>
+       <td>                                                             
+                                   
+                <center>Always 0</center>
+      </td>
+       <td>                                                             
+                                   
+                <center>5th Btn</center>
+      </td>
+       <td>                                                             
+                                   
+                <center>4th Btn</center>
+
+      </td>
+       <td>                                                             
+                                   
+                <center>Z3</center>
+      </td>
+       <td>                                                             
+                                   
+                <center>Z2</center>
+      </td>
+       <td>                                                             
+                                   
+                <center>Z1</center>
+
+      </td>
+       <td>                                                             
+                                   
+                <center>Z0</center>
+      </td>
+      </tr>
+                                                                        
+          
+            </tbody>                                                     
+             
+          </table>
+      </td>
+      </tr>
+
+                                                     
+      </tbody>                                     
+    </table>
+      Z0-Z3 is a 2's complement number which represents the amount of movement
+   that has occurred since the last data report.&nbsp; Valid values range
+from  -8 to +7. <br>
+     4th Btn: 1 = 4th mouse button is pressed; 0 = 4th mouse button is not
+ pressed.             <br>
+     5th Btn: 1 = 5th mouse button is pressed; 0 = 5th mouse button is not
+ pressed.</blockquote>
+      </blockquote>
+      You may have seen mice with two scrolling wheels--one vertical and
+the   other horizontal.&nbsp; These mice use the Microsoft Intellimouse data
+packet   format as described above.&nbsp; If the vertical wheel is scrolled
+upward,   the Z-counter is incremented by one and if that wheel is scrolled
+down, the  Z-counter is decremented by one.&nbsp; This is normal operation
+for a scrolling  wheel.&nbsp; However, if the <i>horizontal</i> wheel is
+scrolled right, the  Z-counter is incremented by <i>two</i> and if it is
+scrolled left, the Z-counter  is decremented by <i>two</i>.&nbsp; This seems
+like an odd way to implement  the second scrolling wheel, but it works since
+the placement of the two wheels  make it impossible to use both of them at
+the same time (and if you try to  trick the software and use both at the
+same time, it will ignore the horizontal  wheel.)                  
+
+<p><b>Command Set:</b> </p>
+                     
+<p>The following is the set of command accepted by the standard PS/2 mouse.
+  &nbsp;If the mouse is in Stream mode, the host should disable data reporting
+ (command F5h) before sending any other commands. </p>
+                     
+<ul>
+     <li> FFh (Reset) - The mouse responds to this command with "acknowledge" 
+  (FAh) then enters Reset Mode.</li>
+     <li> FEh (Resend) - The host sends this command whenever it receives 
+invalid   data from the mouse. The mouse responds by resending the last<a href="#Footnotes">(2)</a> packet<a href="#Footnotes">(3)</a> it sent to
+the host.&nbsp;&nbsp; If the mouse responds to the "Resend" command with
+another invalid packet, the host may either issue another "Resend" command,
+ issue an "Error" command, cycle the mouse's power supply to reset the mouse,
+ or it may inhibit communication (by bringing the Clock line low).&nbsp;
+
+The  action taken depends on the host.</li>
+     <li> F6h (Set Defaults) - The mouse responds with "acknowledge" (FAh) 
+ then loads the following values:&nbsp; Sampling rate = 100, Resolution = 
+4 counts/mm, Scaling = 1:1, Disable Data Reporting.&nbsp; The mouse then resets
+its movement counters and enters stream mode.</li>
+     <li> F5h (Disable Data Reporting) - The mouse responds with "acknowledge" 
+  (FAh) then disables data reporting and resets its movement counters.&nbsp; 
+  This only effects data reporting in Stream mode and does not disable sampling.&nbsp;
+   Disabled stream mode funcions the same as remote mode.</li>
+
+     <li> F4h (Enable Data Reporting) - The mouse responds with "acknowledge" 
+  (FAh) then enables data reporting and resets its movement counters.&nbsp; 
+  This command may be issued while the mouse is in Remote Mode (or Stream 
+mode),  but it will only effect data reporting in Stream mode.</li>
+     <li> F3h (Set Sample Rate) - The mouse responds with "acknowledge" (FAh) 
+  then reads one more byte from the host.&nbsp; The mouse saves this byte 
+as  the new sample rate. After receiving the sample rate, the mouse again 
+responds  with "acknowledge" (0xFA) and resets its movement counters.&nbsp; 
+Valid sample rates are 10, 20, 40, 60, 80, 100, and 200 samples/sec.</li>
+     <li> F2h (Get Device ID) - The mouse responds with "acknowledge" (FAh) 
+  followed by its device ID (00h for the standard PS/2 mouse.)&nbsp; The mouse
+ should also reset its movement counters.</li>
+
+     <li> F0h (Set Remote Mode) - The mouse responds with "acknowledge" (FAh) 
+  then resets its movement counters and enters remote mode.</li>
+     <li> EEh (Set Wrap Mode) - The mouse responds with "acknowledge" (FAh) 
+  then resets its movement counters and&nbsp; enters wrap mode.</li>
+     <li> ECh (Reset Wrap Mode) - The mouse responds with "acknowledge" (FAh) 
+  then resets its movement counters and enters the mode it was in prior to 
+ wrap mode (Stream Mode or Remote Mode.)</li>
+     <li> EBh (Read Data) - The mouse responds with acknowledge (FAh) then 
+ sends a movement data packet. This is the only way to read data in Remote 
+  Mode.&nbsp; After the data packets has been successfully sent, it resets 
+ its movement counters.</li>
+
+     <li> EAh (Set Stream Mode) - The mouse responds with "acknowledge" then 
+  resets its movement counters and enters steram mode.</li>
+     <li> E9h (Status Request) - The mouse responds with "acknowledge" then 
+  sends the following 3-byte status packet (then resets its movement counters.):&nbsp;</li>
+           
+  <ul>
+       <li> &nbsp;</li>
+                 
+    <table width="650" border="0" cellpadding="0" cellspacing="0">
+      <tbody>
+
+                   <tr>
+      <td> <br>
+                     <font face="Arial,Helvetica"><font size="-1">Byte 1&nbsp;</font></font></td>
+       <td>                                                             
+      
+          <table width="100%" border="0" cellpadding="0" cols="8">
+      <tbody>
+                         <tr>
+      <td>                                                              
+                                   
+                <center>Bit 7</center>
+
+      </td>
+       <td>                                                             
+                                   
+                <center>Bit 6</center>
+      </td>
+       <td>                                                             
+                                   
+                <center>Bit 5</center>
+      </td>
+       <td>                                                             
+                                   
+                <center>Bit 4</center>
+
+      </td>
+       <td>                                                             
+                                   
+                <center>Bit 3</center>
+      </td>
+       <td>                                                             
+                                   
+                <center>Bit 2</center>
+      </td>
+       <td>                                                             
+                                   
+                <center>Bit 1</center>
+
+      </td>
+       <td>                                                             
+                                   
+                <center>Bit 0</center>
+      </td>
+      </tr>
+                                                                        
+          
+            </tbody>                                                     
+             
+          </table>
+                                                                        
+ 
+          <table width="100%" border="1" cellpadding="0" cellspacing="0" cols="8">
+      <tbody>
+
+                         <tr>
+      <td>                                                              
+                                   
+                <center><font face="Arial,Helvetica"><font size="-1">Always 
+ 0</font></font></center>
+      </td>
+       <td>                                                             
+                                   
+                <center><font face="Arial,Helvetica"><font size="-1">Mode</font></font></center>
+      </td>
+       <td>                                                             
+                                   
+                <center><font face="Arial,Helvetica"><font size="-1">Enable</font></font></center>
+
+      </td>
+       <td>                                                             
+                                   
+                <center><font face="Arial,Helvetica"><font size="-1">Scaling</font></font></center>
+      </td>
+       <td>                                                             
+                                   
+                <center><font face="Arial,Helvetica"><font size="-1">Always 
+ 0</font></font></center>
+      </td>
+       <td>                                                             
+                                   
+                <center><font face="Arial,Helvetica"><font size="-1">Left 
+ Btn</font></font></center>
+
+      </td>
+       <td>                                                             
+                                   
+                <center><font face="Arial,Helvetica"><font size="-1">Middle 
+ Btn</font></font></center>
+      </td>
+       <td>                                                             
+                                   
+                <center><font face="Arial,Helvetica"><font size="-1">Right 
+ Btn</font></font></center>
+      </td>
+      </tr>
+                                                                        
+          
+            </tbody>                                                     
+             
+          </table>
+
+      </td>
+      </tr>
+       <tr>
+      <td><font face="Arial,Helvetica"><font size="-1">Byte 2</font></font></td>
+       <td>                                                             
+      
+          <table width="100%" border="1" cellpadding="0" cellspacing="0" cols="1">
+      <tbody>
+                         <tr>
+      <td>                                                              
+                                   
+                <center><font face="Arial,Helvetica"><font size="-1">Resolution</font></font></center>
+
+      </td>
+      </tr>
+                                                                        
+          
+            </tbody>                                                     
+             
+          </table>
+      </td>
+      </tr>
+       <tr>
+      <td><font face="Arial,Helvetica"><font size="-1">Byte 3&nbsp;</font></font></td>
+       <td>                                                             
+      
+          <table width="100%" border="1" cellpadding="0" cellspacing="0" cols="1">
+
+      <tbody>
+                         <tr>
+      <td>                                                              
+                                   
+                <center><font face="Arial,Helvetica"><font size="-1">Sample 
+ Rate</font></font></center>
+      </td>
+      </tr>
+                                                                        
+          
+            </tbody>                                                     
+             
+          </table>
+      </td>
+
+      </tr>
+                                                     
+      </tbody>                                     
+    </table>
+                 
+    <p><i>Right, Middle, Left Btn</i> = 1 if button pressed; 0 if button 
+is not pressed. <br>
+               <i>Scaling</i> = 1 if scaling is 2:1; 0 if scaling is 1:1. 
+(See   commands E7h and E6h) <br>
+               <i>Enable</i> = 1 if data reporting is enabled; 0 if data
+reporting    is disabled. (See commands F5h and F4h) <br>
+
+               <i>Mode</i> = 1 if Remote Mode is enabled; 0 if Stream mode
+ is  enabled. (See commands F0h and EAh) <br>
+     &nbsp;</p>
+           
+  </ul>
+     <li> E8h (Set Resolution) - The mouse responds with acknowledge (FAh) 
+ then reads one byte from the host and again responds with acknowledge (FAh)
+   then resets its movement counters.&nbsp; The byte read from the host determines
+   the resolution as follows:&nbsp;</li>
+     <br>
+
+     &nbsp;                            
+  <center>                           
+  <table width="300" border="1">
+      <tbody>
+                 <tr>
+      <td>                                                          
+        <center>Byte Read from Host</center>
+      </td>
+       <td>                                                          
+        <center>Resolution</center>
+
+      </td>
+      </tr>
+       <tr>
+      <td>                                                          
+        <center>0x00</center>
+      </td>
+       <td>                                                          
+        <center>1 count/mm</center>
+      </td>
+
+      </tr>
+       <tr>
+      <td>                                                          
+        <center>0x01</center>
+      </td>
+       <td>                                                          
+        <center>2 count/mm</center>
+      </td>
+      </tr>
+
+       <tr>
+      <td>                                                          
+        <center>0x02</center>
+      </td>
+       <td>                                                          
+        <center>4 count/mm</center>
+      </td>
+      </tr>
+       <tr>
+
+      <td>                                                          
+        <center>0x03</center>
+      </td>
+       <td>                                                          
+        <center>8 count/mm</center>
+      </td>
+      </tr>
+                                           
+    </tbody>                           
+  </table>
+
+             </center>
+     
+</ul>
+                        
+<ul>
+     <li> E7h (Set Scaling 2:1) - The mouse responds with acknowledge (FAh) 
+  then enables 2:1 scaling (discussed earlier in this document.)</li>
+     <li> E6h (Set Scaling 1:1) - The mouse responds with acknowledge (FAh) 
+  then enables 1:1 scaling (discussed earlier in this document.)</li>
+     
+</ul>
+      The only commands the standard PS/2 mouse will send to the host are 
+the  "Resend" (FEh) and "Error" (FCh). &nbsp;They both work the same  as they
+do as host-to-device commands.&nbsp;                  
+
+<p><b>Initialization:</b> </p>
+                     
+<p>The PS/2 mouse is normally detected/initialized only when the computer
+   is booting up.&nbsp; That is, the mouse is not hot-pluggable and you must
+   restart your computer whenever you add/remove a PS/2 mouse (furthermore,
+  some motherboards may be damaged if you add/remove a PS/2 mouse while the
+  computer is running.) </p>
+                     
+<p>The initial detection of the PS/2 mouse occurrs during POST.&nbsp;  If 
+ a mouse is detected, the BIOS will allow the operating system to configure/enable
+   the mouse.&nbsp; Otherwise, it will inhibit communication on the mouse's
+  bus.&nbsp; If you boot the computer with a mouse attached, then detach/reattach
+  the mouse while in Windows, the OS <i>may</i> be able to detect the mouse
+  was reattached.&nbsp; Microsoft tried to support this, but it only works
+ about 50% of the time. </p>
+
+                     
+<p>The following is the communication between my computer (running Win98SE)
+  and mouse when it boots up with a standard PS/2 mouse attached.&nbsp; It
+ is fairly typical of how a PS/2 mouse is initialized and if you want to
+ emulate  a PS/2 mouse it must (at minimum) be able to support the following
+ sequence  of commands...&nbsp; </p>
+                     
+<ul>
+     <li> <tt>Power-on Reset:</tt></li>
+     <br>
+     <tt>Mouse: AA&nbsp; Self-test passed</tt><br>
+
+     <tt>Mouse: 00&nbsp; Mouse ID</tt><br>
+     <tt>Host:&nbsp; FF&nbsp; Reset command</tt><br>
+     <tt>Mouse: FA&nbsp; Acknowledge</tt><br>
+
+     <tt>Mouse: AA&nbsp; Self-test passed</tt><br>
+     <tt>Mouse: 00&nbsp; Mouse ID</tt><br>
+     <tt>Host:&nbsp; FF&nbsp; Reset command</tt><br>
+
+     <tt>Mouse: FA&nbsp; Acknowledge</tt><br>
+     <tt>Mouse: AA&nbsp; Self-test passed</tt><br>
+     <tt>Mouse: 00&nbsp; Mouse ID</tt><br>
+     <tt>Host:&nbsp; FF&nbsp; Reset command</tt><br>
+
+     <tt>Mouse: FA&nbsp; Acknowledge</tt><br>
+     <tt>Mouse: AA&nbsp; Self-test passed</tt><br>
+     <tt>Mouse: 00&nbsp; Mouse ID</tt><br>
+     <tt>Host:&nbsp; F3&nbsp; Set Sample Rate&nbsp;&nbsp; : Attempt to  Enter 
+ Microsoft</tt><br>
+
+     <tt>Mouse: FA&nbsp; Acknowledge&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+ :  Scrolling Mouse mode</tt><br>
+     <tt>Host:&nbsp; C8&nbsp; decimal 200&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+   :</tt><br>
+
+     <tt>Mouse: FA&nbsp; Acknowledge&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+ :</tt><br>
+     <tt>Host:&nbsp; F3&nbsp; Set Sample Rate&nbsp;&nbsp; :</tt><br>
+
+     <tt>Mouse: FA&nbsp; Acknowledge&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+ :</tt><br>
+     <tt>Host:&nbsp; 64&nbsp; decimal 100&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+   :</tt><br>
+
+     <tt>Mouse: FA&nbsp; Acknowledge&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+ :</tt><br>
+     <tt>Host:&nbsp; F3&nbsp; Set Sample Rate&nbsp;&nbsp; :</tt><br>
+
+     <tt>Mouse: FA&nbsp; Acknowledge&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+ :</tt><br>
+     <tt>Host:&nbsp; 50&nbsp; decimal 80&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+   :</tt><br>
+
+     <tt>Mouse: FA&nbsp; Acknowledge&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+ :</tt><br>
+     <tt>Host:&nbsp; F2&nbsp; Read Device Type&nbsp; :</tt><br>
+
+     <tt>Mouse: FA&nbsp; Acknowledge&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+ :</tt><br>
+     <tt>Mouse: 00&nbsp; Mouse ID&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+   : Response 03 if microsoft scrolling mouse</tt><br>
+     <tt>Host:&nbsp; F3&nbsp; Set Sample Rate&nbsp;</tt><br>
+
+     <tt>Mouse: FA&nbsp; Acknowledge</tt><br>
+     <tt>Host:&nbsp; 0A&nbsp; decimal 10</tt><br>
+     <tt>Mouse: FA&nbsp; Acknowledge</tt><br>
+
+     <tt>Host:&nbsp; F2&nbsp; Read Device Type</tt><br>
+     <tt>Mouse: FA&nbsp; Acknowledge</tt><br>
+     <tt>Mouse: 00&nbsp; Mouse ID</tt><br>
+
+     <tt>Host:&nbsp; E8&nbsp; Set resolution</tt><br>
+     <tt>Mouse: FA&nbsp; Acknowledge</tt><br>
+     <tt>Host:&nbsp; 03&nbsp; 8 Counts/mm</tt><br>
+
+     <tt>Mouse: FA&nbsp; Acknowledge</tt><br>
+     <tt>Host:&nbsp; E6&nbsp; Set Scaling 1:1</tt><br>
+     <tt>Mouse: FA&nbsp; Acknowledge</tt><br>
+
+     <tt>Host:&nbsp; F3&nbsp; Set Sample Rate</tt><br>
+     <tt>Mouse: FA&nbsp; Acknowledge</tt><br>
+     <tt>Host:&nbsp; 28&nbsp; decimal 40</tt><br>
+
+     <tt>Mouse: FA&nbsp; Acknowledge</tt><br>
+     <tt>Host:&nbsp; F4&nbsp; Enable</tt><br>
+     <tt>Mouse: FA&nbsp; Acknowledge</tt><br>
+
+     <tt>Initialization complete...</tt>         
+  <p><tt>If I then press the Left Button...</tt> <br>
+             <tt>Mouse: 09 1 1 00001001; bit0 = Left button state; bit3 = 
+always   1</tt> <br>
+             <tt>Mouse: 00 1 1 No X-movement</tt> <br>
+             <tt>Mouse: 00 1 1 No Y-movement</tt> <br>
+
+             <tt>... and release the Left Button:</tt> <br>
+             <tt>Mouse: 08 0 1 00001000 bit0 = Left button state; bit3 =
+always    1</tt> <br>
+             <tt>Mouse: 00 1 1 No X-movement</tt> <br>
+             <tt>Mouse: 00 1 1 No Y-movement</tt></p>
+     
+</ul>
+
+      The following is the communication between my computer (running Win98SE)
+   and mouse when it boots up with an (emulated) Intellimouse...&nbsp;  
+               
+<ul>
+     <li> <tt>Power-on Reset:</tt></li>
+     <br>
+     <tt>Mouse: AA&nbsp; Self-test passed</tt><br>
+     <tt>Mouse: 00&nbsp; Mouse ID</tt><br>
+
+     <tt>Host:&nbsp; FF&nbsp; Reset command</tt><br>
+     <tt>Mouse: FA&nbsp; Acknowledge</tt><br>
+     <tt>Mouse: AA&nbsp; Self-test passed</tt><br>
+
+     <tt>Mouse: 00&nbsp; Mouse ID</tt><br>
+     <tt>Host:&nbsp; FF&nbsp; Reset command</tt><br>
+     <tt>Mouse: FA&nbsp; Acknowledge</tt><br>
+
+     <tt>Mouse: AA&nbsp; Self-test passed</tt><br>
+     <tt>Mouse: 00&nbsp; Mouse ID</tt><br>
+     <tt>Host:&nbsp; FF&nbsp; Reset command</tt><br>
+
+     <tt>Mouse: FA&nbsp; Acknowledge</tt><br>
+     <tt>Mouse: AA&nbsp; Self-test passed</tt><br>
+     <tt>Mouse: 00&nbsp; Mouse ID</tt><br>
+     <tt>Host:&nbsp; F3&nbsp; Set Sample Rate&nbsp;&nbsp; : Attempt to  Enter 
+ Microsoft&nbsp;</tt><br>
+
+     <tt>Mouse: FA&nbsp; Acknowledge&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+ :  Scrolling Mouse mode</tt><br>
+     <tt>Host:&nbsp; C8&nbsp; decimal 200&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+   :</tt><br>
+
+     <tt>Mouse: FA&nbsp; Acknowledge&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+ :</tt><br>
+     <tt>Host:&nbsp; F3&nbsp; Set Sample Rate&nbsp;&nbsp; :</tt><br>
+
+     <tt>Mouse: FA&nbsp; Acknowledge&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+ :</tt><br>
+     <tt>Host:&nbsp; 64&nbsp; decimal 100&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+   :</tt><br>
+
+     <tt>Mouse: FA&nbsp; Acknowledge&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+ :</tt><br>
+     <tt>Host:&nbsp; F3&nbsp; Set Sample Rate&nbsp;&nbsp; :</tt><br>
+
+     <tt>Mouse: FA&nbsp; Acknowledge&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+ :</tt><br>
+     <tt>Host:&nbsp; 50&nbsp; decimal 80&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+   :</tt><br>
+
+     <tt>Mouse: FA&nbsp; Acknowledge&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+ :</tt><br>
+     <tt>Host:&nbsp; F2&nbsp; Read Device Type&nbsp; :</tt><br>
+
+     <tt>Mouse: FA&nbsp; Acknowledge&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+ :</tt><br>
+     <tt>Mouse: 03&nbsp; Mouse ID&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+   : Response 03 if microsoft scrolling mouse</tt><br>
+     <tt>Host:&nbsp; E8&nbsp; Set Resolution&nbsp;</tt><br>
+
+     <tt>Mouse: FA&nbsp; Acknowledge&nbsp;</tt><br>
+     <tt>Host:&nbsp; 03&nbsp; 8 counts/mm</tt><br>
+     <tt>Mouse: FA&nbsp; Acknowledge</tt><br>
+
+     <tt>Host:&nbsp; E6&nbsp; Set scaling 1:1</tt><br>
+     <tt>Dev:&nbsp;&nbsp; FA&nbsp; Acknowledge</tt><br>
+     <tt>Host:&nbsp; F3&nbsp; Set Sample Rate&nbsp;</tt><br>
+
+     <tt>Mouse: FA&nbsp; Acknowledge</tt><br>
+     <tt>Host:&nbsp; 28&nbsp; decimal 40</tt><br>
+     <tt>Mouse: FA&nbsp; Acknowledge</tt><br>
+
+     <tt>Host:&nbsp; F4&nbsp; Enable device&nbsp;</tt><br>
+     <tt>Mouse: FA&nbsp; Acknowledge</tt>         
+  <p><tt>If I then press the left mouse button:</tt> <br>
+             <tt>Mouse: 09&nbsp; 00001001 bit0 = Left button state; bit3
+=  always   1</tt> <br>
+
+             <tt>Mouse: 00&nbsp; No X-movement</tt> <br>
+             <tt>Mouse: 00&nbsp; No Y-movement</tt> <br>
+             <tt>Mouse: 00&nbsp; No Z-movement</tt> </p>
+
+           
+  <p><tt>...and then release the left mouse button button:</tt> <br>
+             <tt>Mouse: 08&nbsp; 00001000 bit0 = Left button state; bit3
+=  always   1</tt> <br>
+             <tt>Mouse: 00&nbsp; No X-movement</tt> <br>
+             <tt>Mouse: 00&nbsp; No Y-movement</tt> <br>
+
+             <tt>Mouse: 00&nbsp; No Z-movement</tt></p>
+     
+</ul>
+      <tt>After I downloaded/installed the Microsoft's Intellimouse drivers 
+ with  support for the 4th and 5th buttons, the following sequence was found:</tt>
+                   
+<blockquote><tt>... (starts same as before) ...</tt> <br>
+             <tt>Host:&nbsp; F3&nbsp; Set Sample Rate&nbsp;&nbsp; : Attempt 
+ to  Enter Microsoft&nbsp;</tt> <br>
+
+             <tt>Mouse: FA&nbsp; Acknowledge&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+   : Scrolling Mouse mode.</tt> <br>
+             <tt>Host:&nbsp; C8&nbsp; decimal 200&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+   :</tt> <br>
+
+             <tt>Mouse: FA&nbsp; Acknowledge&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+   :</tt> <br>
+             <tt>Host:&nbsp; F3&nbsp; Set Sample Rate&nbsp;&nbsp; :</tt>
+
+  <br>
+             <tt>Mouse: FA&nbsp; Acknowledge&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+   :</tt> <br>
+             <tt>Host:&nbsp; 64&nbsp; decimal 100&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+
+   :</tt> <br>
+             <tt>Mouse: FA&nbsp; Acknowledge&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+   :</tt> <br>
+             <tt>Host:&nbsp; F3&nbsp; Set Sample Rate&nbsp;&nbsp; :</tt>
+
+  <br>
+             <tt>Mouse: FA&nbsp; Acknowledge&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+   :</tt> <br>
+             <tt>Host:&nbsp; 50&nbsp; decimal 80&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+
+   :</tt> <br>
+             <tt>Mouse: FA&nbsp; Acknowledge&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+   :</tt> <br>
+             <tt>Host:&nbsp; F2&nbsp; Read Device Type&nbsp; :</tt> <br>
+
+             <tt>Mouse: FA&nbsp; Acknowledge&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+   :</tt> <br>
+             <tt>Mouse: 03&nbsp; Mouse ID&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+   : Response 03 if microsoft scrolling mouse.</tt> <br>
+
+             <tt>Host:&nbsp; F3&nbsp; Set Sample Rate&nbsp;&nbsp; : Attempt 
+ to  Enter Microsoft 5-button&nbsp;</tt> <br>
+             <tt>Mouse: FA&nbsp; Acknowledge&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+   : Scrolling Mouse mode.</tt> <br>
+
+             <tt>Host:&nbsp; C8&nbsp; decimal 200&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+   :</tt> <br>
+             <tt>Mouse: FA&nbsp; Acknowledge&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+   :</tt> <br>
+
+             <tt>Host:&nbsp; F3&nbsp; Set Sample Rate&nbsp;&nbsp; :</tt>
+  <br>
+             <tt>Mouse: FA&nbsp; Acknowledge&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+   :</tt> <br>
+
+             <tt>Host:&nbsp; C8&nbsp; decimal 200&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+   :</tt> <br>
+             <tt>Mouse: FA&nbsp; Acknowledge&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+   :</tt> <br>
+
+             <tt>Host:&nbsp; F3&nbsp; Set Sample Rate&nbsp;&nbsp; :</tt>
+  <br>
+             <tt>Mouse: FA&nbsp; Acknowledge&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+   :</tt> <br>
+
+             <tt>Host:&nbsp; 50&nbsp; decimal 80&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+   :</tt> <br>
+             <tt>Mouse: FA&nbsp; Acknowledge&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+   :</tt> <br>
+
+             <tt>Host:&nbsp; F2&nbsp; Read Device Type&nbsp; :</tt> <br>
+             <tt>Mouse: FA&nbsp; Acknowledge&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+   :</tt> <br>
+
+             <tt>Mouse: 04&nbsp; Mouse ID&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+   : Response 04 if 5-button scrolling mouse.</tt> <br>
+             <tt>... rest of initialization same as before ...</tt></blockquote>
+      <b>Emulation/Interfacing:</b>                  
+<ul>
+     <li> Click here  for routines that emulate a PS/2 mouse or keyboard</li>
+
+     <li> Click here  for routines that emulate a PS/2 host (ie, interface
+ a mouse/keyboard)</li>
+     <li> Click <a href="http://panda.cs.ndsu.nodak.edu/%7Eachapwes/PICmicro/code/Projects/mouse/ps2mouse.html">here</a>
+   for a fully-functional PS/2 mouse written for the PIC16F</li>
+     
+</ul>
+   
+<blockquote>      
+  <ul>
+
+           
+  </ul>
+      </blockquote>
+                        
+<p><a name="Footnotes"></a><b>Footnotes:</b> </p>
+                     
+<blockquote>1) 2:1 scaling only applies to the automatic data reporting  in
+Stream mode. It does not effect the reported data sent in response to the
+ "Read Data" command.                            
+  <p>2)&nbsp; The mouse and host do not buffer "Resend" commands.  This means
+ "Resend" will never be sent in response to the "Resend" command.&nbsp; 
+         </p>
+                               
+  <p>3)&nbsp;&nbsp; A "packet" may be a 3-byte movement data packet,  a 4-byte 
+ movement data packet (for the Intellimouse), a 3-byte status packet  (see 
+ "Status Request" command) a 2-byte completion-code-ID packet (AAh,00h  or
+ FCh,00h), or a 1-byte response to a command.<br>
+
+    </p>
+                                  </blockquote>
+  <br>
+ <br>
+</body></html>

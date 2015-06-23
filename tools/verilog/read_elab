@@ -1,0 +1,278 @@
+eval 'exec `which perl` -S $0 ${1+"$@"}'
+   if 0;
+#/**********************************************************************/
+#/*                                                                    */
+#/*             -------                                                */
+#/*            /   SOC  \                                              */
+#/*           /    GEN   \                                             */
+#/*          /    TOOL    \                                            */
+#/*          ==============                                            */
+#/*          |            |                                            */
+#/*          |____________|                                            */
+#/*                                                                    */
+#/*                                                                    */
+#/*                                                                    */
+#/*                                                                    */
+#/*  Author(s):                                                        */
+#/*      - John Eaton, jt_eaton@opencores.org                          */
+#/*                                                                    */
+#/**********************************************************************/
+#/*                                                                    */
+#/*    Copyright (C) <2010-2011>  <Ouabache Design Works>              */
+#/*                                                                    */
+#/*  This source file may be used and distributed without              */
+#/*  restriction provided that this copyright statement is not         */
+#/*  removed from the file and that any derivative work contains       */
+#/*  the original copyright notice and the associated disclaimer.      */
+#/*                                                                    */
+#/*  This source file is free software; you can redistribute it        */
+#/*  and/or modify it under the terms of the GNU Lesser General        */
+#/*  Public License as published by the Free Software Foundation;      */
+#/*  either version 2.1 of the License, or (at your option) any        */
+#/*  later version.                                                    */
+#/*                                                                    */
+#/*  This source is distributed in the hope that it will be            */
+#/*  useful, but WITHOUT ANY WARRANTY; without even the implied        */
+#/*  warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR           */
+#/*  PURPOSE.  See the GNU Lesser General Public License for more      */
+#/*  details.                                                          */
+#/*                                                                    */
+#/*  You should have received a copy of the GNU Lesser General         */
+#/*  Public License along with this source; if not, download it        */
+#/*  from http://www.opencores.org/lgpl.shtml                          */
+#/*                                                                    */
+#/**********************************************************************/
+
+
+############################################################################
+# General PERL config
+############################################################################
+use Getopt::Long;
+use English;
+use File::Basename;
+use Cwd;
+use Scalar::Util qw(looks_like_number);
+use XML::LibXML;
+use lib './tools';
+use sys::lib;
+use yp::lib;
+use BerkeleyDB;
+
+
+$OUTPUT_AUTOFLUSH = 1; # set autoflush of stdout to TRUE.
+
+
+############################################################################
+### Process the options
+############################################################################
+Getopt::Long::config("require_order", "prefix=-");
+GetOptions("h","help",
+           "prefix=s" => \$prefix,
+           "vendor=s" => \$vendor,
+           "library=s" => \$library,
+           "version=s" => \$version,
+           "component=s" => \$component,
+           "verbose"
+) || die "(use '$program_name -h' for help)";
+
+
+##############################################################################
+## Help option
+##############################################################################
+if ( $opt_h  or $opt_help  ) 
+  { print "\n read_elab -prefix prefix   -vendor vendor -library library  -component component  -version version \n";
+    exit 1;
+  }
+
+
+
+
+
+
+#############################################################################
+## 
+## 
+#############################################################################
+
+$home = cwd();
+
+unless ($prefix)
+  {
+  $prefix   = yp::lib::get_workspace();
+  $prefix   = "/${prefix}";
+  }
+my   $variant;
+my   $configuration;
+
+my $dest_dir            = "elab";
+my $destination         = "${component}_${version}";
+
+unless ($env ) {$env = "none";}
+unless ($tool ){$tool = "none";}
+unless ($unit ){$unit = "none";}
+
+if($name)
+  {
+  $destination   = "${destination}_${name}";
+  }
+else
+  {
+  $name          = $version;
+  $destination   = "${destination}";
+  }
+
+
+my $root                =      "root";
+
+if($version)       {$variant   = "${component}_${version}";}
+else               {$variant   = "${component}";}
+
+print "read_elab     -prefix prefix -vendor $vendor -library $library -component $component -version $version -env $env -tool $tool -unit $unit -name $name     \n";
+
+
+my $parser = XML::LibXML->new();
+
+
+my $socgen_file              = $parser->parse_file(yp::lib::find_componentConfiguration($vendor,$library,$component));
+
+unless ($socgen_file)      { print "No socgen ip file   \n";};
+
+
+my $comp_xml_sep    = yp::lib::find_comp_xml_sep($vendor,$library,$component,$version);
+my $lib_comp_sep    = yp::lib::find_lib_comp_sep($vendor,$library,$component);
+
+
+#print "lib_comp_sep   $lib_comp_sep \n";
+#print "comp_xml_sep   $comp_xml_sep \n";
+
+
+
+
+my $path  = "${home}${prefix}/${vendor}__${library}${lib_comp_sep}${component}${comp_xml_sep}/../${dest_dir}/${destination}";
+
+unless( -e $path )
+        {
+        print "$path does not exist \n";
+        return(1);
+        }
+
+
+
+
+$data_db_file  = "${path}/${root}.db";
+
+if(-e  $data_db_file  )
+        {
+        print "$data_db_file  does exist  \n";
+        }
+
+
+my $elab_db  = new BerkeleyDB::Hash( -Filename => "$data_db_file", -Flags => DB_CREATE ) or die "Cannot open ${data_db_file}: $!";
+
+
+
+
+
+   my $key;
+   my $value;
+
+
+
+   my @elab_list;
+
+   my $cursor = $elab_db ->db_cursor() ;
+   while ($cursor->c_get($key, $value, DB_NEXT) == 0) 
+   {
+#   print "ELAB  $key,   $value  \n";
+                 ( ${key_type},@elab_list) = split( /\./ , $key);
+#                 ( ${log_name},${direction},${type},${vector},${left},${right},${phy_name}) = split ':', $value;
+                 if(($key_type eq "component___${root}"))
+                    {
+                    print "Component  $key -- $value @elab_list  \n"; 
+                    build_hierarchy ($value,$path,$root,@elab_list);
+                    }
+                 else
+                    {
+
+                    }
+
+   }
+
+   my $status = $cursor->c_close() ;
+
+
+
+   $elab_db   -> db_close();
+
+#   @bus_list      = sys::lib::trim_sort(@bus_list);
+
+
+#    foreach $list (@bus_list)   { print   "${list}\n";}
+#
+
+
+#my @busses  = yp::lib::get_busses($vendor,$library,$component,$version);
+
+#    foreach $list (@busses) {  print   "${list}\n";  }
+
+
+
+
+#/*********************************************************************************************/
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/*********************************************************************************************/
+
+sub build_hierarchy
+   {
+   my @params     = @_;
+   my $vlnv       = shift(@params);
+   my $path       = shift(@params);
+   my $root       = shift(@params);
+   my $top        = shift(@params);
+   my $new_elab_db ;
+   my $new_elab_db_file_name ;
+
+
+
+#   print "Hier  $path \nHier- $root       $top    --- @params  \n";
+   $path ="${path}/${root}";
+   unless(-e $path)
+     {
+     $cmd ="mkdir ${path} \n";
+     if(system($cmd)){}
+     print "Create Dir  ${path} \n";
+     }
+
+   unless (-e "${path}/${top}")
+     {
+     $cmd ="mkdir ${path}/${top} \n";
+     if(system($cmd)){}
+     }
+
+   $new_elab_db_file_name  = "${path}/${top}/Index.db";
+
+   if(@params)
+     {
+     build_hierarchy ("$vlnv","${path}","${top}",@params);
+     }
+   else
+     {
+     print "CREATE $new_elab_db_file_name  \n";
+     $new_elab_db  = new BerkeleyDB::Hash( -Filename => "$new_elab_db_file_name", -Flags => DB_CREATE ) or die "Cannot open $new_elab_db_file_name    : $!";
+     $new_elab_db->db_put( "VLNV","${vlnv}"  );
+     print "VLNV  $vlnv \nVLNV -> $new_elab_db_file_name  \n";
+     }
+
+   return(0);
+
+   }
+
+
+
+
+1

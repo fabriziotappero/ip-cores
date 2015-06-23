@@ -1,0 +1,201 @@
+   
+
+parameter TIMER_0_START  = 4'h0;
+parameter TIMER_0_COUNT  = 4'h2;
+parameter TIMER_0_END    = 4'h4;
+
+parameter TIMER_1_START  = 4'h8;
+parameter TIMER_1_COUNT  = 4'hA;
+parameter TIMER_1_END    = 4'hC;
+   
+
+   
+
+   
+parameter IDLE         = 3'b001;
+parameter RUNNING      = 3'b010;
+parameter TRIGGERED    = 3'b100;
+
+
+   
+
+reg [7:0] count_0;
+reg [2:0] state_0;
+
+reg [7:0] count_1;
+reg [2:0] state_1;   
+
+
+wire [7:0] timer_0;   
+wire [7:0] timer_1;   
+
+`VARIANT`MB
+io_module_timer_micro_reg
+(
+  .clk             ( clk           ),
+  .reset           ( reset         ),
+  .cs              ( cs            ),
+  .enable          ( enable        ),       
+  .wr              ( wr            ),       
+  .rd              ( rd            ),
+  .byte_lanes      ( 1'b1          ),
+  .addr            ( addr          ),
+  .wdata           ( wdata         ),
+  .rdata           ( rdata         ),
+
+  .timer_0_end       ( timer_0       ),
+  .next_timer_0_end  ( timer_0       ),
+  .timer_0_start_cs  (               ),
+  .timer_0_start_dec (               ),
+  .timer_0_count_cs  (               ),
+  .timer_0_count_dec (               ),
+  .timer_0_end_cs    (               ),
+  .timer_0_end_dec   (               ),
+  .timer_0_end_wr_0  (               ),
+  .timer_0_start_rdata   ({4'h0,irq[0],state_0[2:0]} ),
+  .timer_0_count_rdata   ( count_0                   ),
+
+
+  .timer_1_end       ( timer_1       ),
+  .next_timer_1_end  ( timer_1       ),
+  .timer_1_start_cs  (               ),
+  .timer_1_start_dec (               ),
+  .timer_1_count_cs  (               ),
+  .timer_1_count_dec (               ),
+  .timer_1_end_cs    (               ),
+  .timer_1_end_dec   (               ),
+  .timer_1_end_wr_0  (               ),
+  .timer_1_start_rdata   ({4'h0,irq[1],state_1[2:0]} ),
+  .timer_1_count_rdata   ( count_1                   )   
+);
+
+
+
+
+
+   
+
+always@(posedge clk)
+if(reset)
+  begin
+  irq <= 2'b00; 
+  end
+else
+  begin
+  irq <= {state_1[2],state_0[2]}; 
+  end
+  
+
+
+
+always@(posedge clk)
+if (reset) 
+  begin
+  state_0 <= IDLE;
+  count_0 <= 8'h00;
+  end
+else 
+case (state_0)  
+     (IDLE):        
+        
+     if(wr && enable  && cs && addr[3:0] == TIMER_0_START) 
+         begin
+         state_0 <= RUNNING;
+         count_0 <= wdata;    
+ end
+     else 
+         begin
+         state_0 <= IDLE;
+         count_0 <= 8'h00;
+ end
+  
+     (RUNNING):     
+      if( count_0 == 8'h00)      
+         begin
+         state_0 <= TRIGGERED;
+         count_0 <= 8'h00;   
+         end
+      else     
+         begin
+         state_0 <= RUNNING;
+         count_0 <=  count_0 -8'h01;    
+ end
+
+     (TRIGGERED):   
+     if(wr && enable && cs && addr[3:0] == TIMER_0_END) 
+         begin
+         state_0 <= IDLE;
+         count_0 <= 8'h00;    
+ end
+     else   
+         begin
+         state_0 <= TRIGGERED;
+         count_0 <= 8'h00;    
+ end
+
+     default: 
+          begin
+          state_0 <= IDLE;
+          count_0 <= 8'h00;     
+          end
+endcase // case (state_0)
+
+
+
+
+
+always@(posedge clk)
+if (reset) 
+  begin
+  state_1 <= IDLE;
+  count_1 <= 8'h00;
+  end
+else 
+case (state_1)  
+     (IDLE):        
+        
+     if(wr && enable && cs && addr[3:0] == TIMER_1_START) 
+         begin
+         state_1 <= RUNNING;
+         count_1 <= wdata;    
+ end
+     else 
+         begin
+         state_1 <= IDLE;
+         count_1 <= 8'h00;
+ end
+  
+     (RUNNING):     
+      if( count_1 == 8'h00)      
+         begin
+         state_1 <= TRIGGERED;
+         count_1 <= 8'h00;   
+         end
+      else     
+         begin
+         state_1 <= RUNNING;
+         count_1 <=  count_1 -8'h01;    
+ end
+
+     (TRIGGERED):   
+     if(wr && enable && cs && addr[3:0] == TIMER_1_END) 
+         begin
+         state_1 <= IDLE;
+         count_1 <= 8'h00;    
+ end
+     else   
+         begin
+         state_1 <= TRIGGERED;
+         count_1 <= 8'h00;    
+ end
+
+     default: 
+          begin
+          state_1 <= IDLE;
+          count_1 <= 8'h00;     
+          end
+endcase
+   
+
+
+

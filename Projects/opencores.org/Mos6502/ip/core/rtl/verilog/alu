@@ -1,0 +1,475 @@
+
+module `VARIANT`ALU
+
+(
+
+
+input   wire           clk,
+input   wire           reset,
+input   wire           enable,
+
+input   wire           alu_enable,
+
+input   wire  [7:0]    alu_op_b,
+input   wire  [7:0]    psp_res,
+ 
+input   wire  [7:0]    brn_value,
+input   wire  [7:0]    brn_enable, 
+input   wire  [2:0]    dest,
+input   wire           relative, 
+input   wire  [2:0]    alu_mode,
+input   wire  [4:0]    alu_status_update, 
+input   wire  [2:0]    alu_op_a_sel,
+input   wire 	       alu_op_b_inv,
+input   wire  [1:0]    alu_op_c_sel,
+
+
+output   reg           branch_inst,
+output   reg  [7:0]    alu_result,
+output   reg  [7:0]    alu_status,
+output   reg  [7:0]    alu_x,
+output   reg  [7:0]    alu_y,
+output   reg  [7:0]    alu_a 
+
+);
+
+reg  [7:0]    alu_op_a;
+reg           alu_op_c;   
+
+
+wire          v_result;
+reg           z_result;
+reg           c_result;
+   
+wire          r_result;
+wire          r_result_nc;
+wire [7:0]      result;
+
+wire [7:0]     and_out;
+wire [7:0]     orr_out;
+wire [7:0]     eor_out;
+
+   
+wire [8:0]     a_sh_left;
+wire [8:0]     a_sh_right;
+wire [8:0]     b_sh_left;
+wire [8:0]     b_sh_right;
+   
+   
+always @ (*) begin
+   case( alu_op_a_sel)
+   `alu_op_a_00:   alu_op_a     = 8'h00;
+   `alu_op_a_acc:  alu_op_a     = alu_a;          
+   `alu_op_a_x:    alu_op_a     = alu_x;         
+   `alu_op_a_y:    alu_op_a     = alu_y;          
+   `alu_op_a_ff:   alu_op_a     = 8'hff;
+   `alu_op_a_psr:  alu_op_a     = alu_status;          
+   default:        alu_op_a     = 8'h00;
+   endcase
+   end
+
+always @ (*) begin
+   case( alu_op_c_sel)
+   `alu_op_c_00:     alu_op_c    = 1'b0;
+   `alu_op_c_01:     alu_op_c    = 1'b1;          
+   `alu_op_c_cin:    alu_op_c    = alu_status[`C];         
+   `alu_op_c_xx:     alu_op_c    = 1'b0;          
+   endcase
+   end
+
+   
+`VARIANT`ALU_LOGIC
+alu_logic (
+    .alu_op_b_inv  ( alu_op_b_inv   ),
+    .alu_op_a      ( alu_op_a       ),
+    .alu_op_b      ( alu_op_b       ),
+    .alu_op_c      ( alu_op_c       ),
+    .result        (   result       ),
+    .r_result      ( r_result_nc    ),
+    .c_result      ( r_result       ),     
+    .v_result      ( v_result       ),
+    .and_out       ( and_out        ), 
+    .orr_out       ( orr_out        ),
+    .eor_out       ( eor_out        ),
+    .a_sh_left     ( a_sh_left      ),
+    .a_sh_right    ( a_sh_right     ),
+    .b_sh_left     ( b_sh_left      ),
+    .b_sh_right    ( b_sh_right     )
+
+);
+
+
+
+
+
+
+   
+
+
+
+always @ (posedge clk )
+begin
+     if (reset) 
+          begin
+          alu_status[`N] <= 1'b0;
+          alu_status[`V] <= 1'b0;
+          alu_status[5]  <= 1'b1;
+          alu_status[`B] <= 1'b0;
+          alu_status[`D] <= 1'b0;
+          alu_status[`I] <= 1'b0;
+          alu_status[`Z] <= 1'b1;
+          alu_status[`C] <= 1'b0;
+          end
+     else 
+     if (! (enable && alu_enable    ) )
+        begin       
+        alu_status[7:6]    <= alu_status[7:6];
+        alu_status[5:2]     <= alu_status[5:2];
+        alu_status[1]     <= alu_status[1];
+        alu_status[0]     <= alu_status[0];
+        end
+     else
+     begin
+     case (alu_status_update)
+
+          `alu_status_update_none:
+                     begin 
+                     alu_status[7:6]     <= alu_status[7:6];     
+                     end  
+
+
+           `alu_status_update_wr: 
+                     begin 
+                     alu_status[7]  <=  brn_enable[7]?brn_value[7]: alu_status[7];
+                     alu_status[6]  <=  brn_enable[6]?brn_value[6]: alu_status[6];
+	             end 
+	    
+           `alu_status_update_z67: 
+                     begin 
+                     alu_status[`N] <=  alu_op_b[`N];
+                     alu_status[`V] <=  alu_op_b[`V];
+	             end  
+
+           `alu_status_update_nz: 
+                     begin 
+                     alu_status[`N] <=  alu_result[7];
+                     alu_status[`V] <=  alu_status[`V];
+	             end  
+
+           `alu_status_update_nzc:
+                     begin 
+                     alu_status[`N] <=  alu_result[7];
+                     alu_status[`V] <=  alu_status[`V];
+	             end  
+
+          `alu_status_update_nzcv:
+                     begin 
+                     alu_status[`N] <=  alu_result[7];
+                     alu_status[`V] <=  v_result;
+	             end  
+
+
+
+            `alu_status_update_res: 
+                     begin 
+                     alu_status[7:6]     <=  psp_res[7:6];
+	             end  
+
+           default:                     
+                     begin 
+                     alu_status[`N] <=  alu_status[`N];
+                     alu_status[`V] <=  alu_status[`V];
+	             end  
+         endcase
+
+
+     case (alu_status_update)
+
+          `alu_status_update_none:
+                     begin 
+                     alu_status[5:2]     <= alu_status[5:2];     
+                     end  
+
+
+           `alu_status_update_wr: 
+                     begin 
+                     alu_status[5]  <=  brn_enable[5]?brn_value[5]: alu_status[5];
+                     alu_status[4]  <=  brn_enable[4]?brn_value[4]: alu_status[4];
+                     alu_status[3]  <=  brn_enable[3]?brn_value[3]: alu_status[3];
+                     alu_status[2]  <=  brn_enable[2]?brn_value[2]: alu_status[2];
+	             end 
+	    
+           `alu_status_update_z67: 
+                     begin 
+                     alu_status[5]  <=  alu_status[5];
+                     alu_status[`B] <=  alu_status[`B];
+                     alu_status[`D] <=  alu_status[`D];
+                     alu_status[`I] <=  alu_status[`I];
+	             end  
+
+           `alu_status_update_nz: 
+                     begin 
+                     alu_status[5]  <=  alu_status[5];
+                     alu_status[`B] <=  alu_status[`B];
+                     alu_status[`D] <=  alu_status[`D];
+                     alu_status[`I] <=  alu_status[`I];
+	             end  
+
+           `alu_status_update_nzc:
+                     begin 
+                     alu_status[5]  <=  alu_status[5];
+                     alu_status[`B] <=  alu_status[`B];
+                     alu_status[`D] <=  alu_status[`D];
+                     alu_status[`I] <=  alu_status[`I];
+	             end  
+
+          `alu_status_update_nzcv:
+                     begin 
+                     alu_status[5]  <=  alu_status[5];
+                     alu_status[`B] <=  alu_status[`B];
+                     alu_status[`D] <=  alu_status[`D];
+                     alu_status[`I] <=  alu_status[`I];
+	             end  
+
+
+
+            `alu_status_update_res: 
+                     begin 
+                     alu_status[5:2]     <=  psp_res[5:2];
+	             end  
+
+           default:                     
+                     begin 
+                     alu_status[5]  <=  alu_status[5];
+                     alu_status[`B] <=  alu_status[`B];
+                     alu_status[`D] <=  alu_status[`D];
+                     alu_status[`I] <=  alu_status[`I];
+	             end  
+         endcase
+
+
+     case (alu_status_update)
+
+          `alu_status_update_none:
+                     begin 
+                     alu_status[1]     <= alu_status[1];     
+                     end  
+
+           `alu_status_update_wr: 
+                     begin 
+                     alu_status[1]  <=  brn_enable[1]?brn_value[1]: alu_status[1];
+	             end 
+	    
+           `alu_status_update_z67: 
+                     begin 
+                     alu_status[`Z] <=  z_result;
+	             end  
+
+           `alu_status_update_nz: 
+                     begin 
+                     alu_status[`Z] <=  z_result;
+	             end  
+
+           `alu_status_update_nzc:
+                     begin 
+                     alu_status[`Z] <=  z_result;
+	             end  
+
+          `alu_status_update_nzcv:
+                     begin 
+                     alu_status[`Z] <=  z_result;
+	             end  
+
+            `alu_status_update_res: 
+                     begin 
+                     alu_status[1]     <=  psp_res[1];
+	             end  
+
+           default:                     
+                     begin 
+                     alu_status[`Z] <=  alu_status[`Z];
+	             end  
+     endcase // case (alu_status_update)
+
+     case (alu_status_update)
+
+          `alu_status_update_none:
+                     begin 
+                     alu_status[0]     <= alu_status[0];     
+                     end  
+
+
+           `alu_status_update_wr: 
+                     begin 
+                     alu_status[0]  <=  brn_enable[0]?brn_value[0]: alu_status[0];
+	             end 
+	    
+           `alu_status_update_z67: 
+                     begin 
+                     alu_status[`C] <=  alu_status[`C];
+	             end  
+
+           `alu_status_update_nz: 
+                     begin 
+                     alu_status[`C] <=  alu_status[`C];
+	             end  
+
+           `alu_status_update_nzc:
+                     begin 
+                     alu_status[`C] <=  c_result;
+	             end  
+
+          `alu_status_update_nzcv:
+                     begin 
+                     alu_status[`C] <=  c_result;
+	             end  
+
+
+
+            `alu_status_update_res: 
+                     begin 
+                     alu_status[0]     <=  psp_res[0];
+	             end  
+
+           default:                     
+                     begin 
+                     alu_status[`C] <=  alu_status[`C];
+	             end  
+         endcase
+	
+        end
+
+
+   
+end
+
+
+
+
+   
+
+   
+always @ (posedge clk )
+begin
+     if (reset) 
+          begin
+          alu_a          <= 8'd0;
+          end
+     else 
+     if ( enable &&  alu_enable &&   (dest ==   `dest_alu_a)) 
+          begin
+          alu_a          <= alu_result[7:0];
+          end
+     else 
+          begin
+          alu_a          <= alu_a;
+          end
+
+end
+
+
+      
+always @ (posedge clk )
+begin
+     if (reset) 
+          begin
+          alu_x          <= 8'd0;
+          end
+     else 
+     if (!(enable &&  alu_enable)) 
+          begin
+          alu_x          <= alu_x;
+          end
+     else 
+     case (dest)
+      `dest_alu_x:  alu_x          <= alu_result[7:0];
+    
+       default : 
+                   begin
+                   alu_x          <= alu_x;
+                   end
+     endcase
+
+end
+
+
+
+      
+always @ (posedge clk )
+begin
+     if (reset) 
+          begin
+          alu_y          <= 8'd0;
+          end
+     else 
+     if (!(enable &&  alu_enable)) 
+          begin
+          alu_y          <= alu_y;
+          end
+     else 
+     case (dest)
+      `dest_alu_y:  alu_y          <= alu_result[7:0];
+    
+       default : 
+                   begin
+                   alu_y          <= alu_y;
+                   end
+     endcase
+
+end
+
+
+   
+always @ (*) 
+        begin
+        alu_result      = result[7:0];
+        c_result        = r_result;
+
+     if (dest ==   `dest_alu_a) 
+
+        case (alu_mode)
+          `alu_mode_add:{c_result,alu_result[7:0]} = {r_result,result[7:0]};
+          `alu_mode_and:{c_result,alu_result[7:0]} = {1'b0,and_out[7:0]};
+          `alu_mode_orr:{c_result,alu_result[7:0]} = {1'b0,orr_out[7:0]};
+          `alu_mode_eor:{c_result,alu_result[7:0]} = {1'b0,eor_out[7:0]};
+          `alu_mode_sfl:{c_result,alu_result[7:0]} = a_sh_left;
+          `alu_mode_sfr:{c_result,alu_result[7:0]} = a_sh_right;
+                default:{c_result,alu_result[7:0]} = 9'b111111111;
+
+       endcase
+      else
+        case (alu_mode)
+          `alu_mode_add:{c_result,alu_result[7:0]} = {r_result,result[7:0]};
+          `alu_mode_and:{c_result,alu_result[7:0]} = {1'b0,and_out[7:0]};
+          `alu_mode_orr:{c_result,alu_result[7:0]} = {1'b0,orr_out[7:0]};
+          `alu_mode_eor:{c_result,alu_result[7:0]} = {1'b0,eor_out[7:0]};
+          `alu_mode_sfl:{c_result,alu_result[7:0]} = b_sh_left;
+          `alu_mode_sfr:{c_result,alu_result[7:0]} = b_sh_right;
+                default:{c_result,alu_result[7:0]} = 9'b111111111;   
+       endcase
+	
+       end
+
+
+	   
+always@(*)
+  begin
+  z_result      = ~(|alu_result[7:0]);
+  end 
+   
+
+
+
+
+
+
+
+
+   
+
+always@(*)     branch_inst = relative &&(   | (brn_enable & ( ~ (brn_value ^ alu_status))));
+
+  
+   
+   
+endmodule

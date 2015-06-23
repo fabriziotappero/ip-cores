@@ -1,0 +1,119 @@
+
+// Created by fizzim.pl version 4.41 on 2012:05:11 at 18:29:56 (www.fizzim.com)
+
+module `VARIANT`multibit_dp (
+  output reg [7:0] counter,
+  output wire ds,
+  output reg [6:5] mmout,
+  output reg mout,
+  output wire rd,
+  output wire [15:13] rmout,
+  input wire clk,
+  input wire [7:0] counter_preset,
+  input wire go,
+  input wire [3:0] mbin,
+  input wire rst_n,
+  input wire ws 
+);
+  
+  // state bits
+  parameter 
+  IDLE = 6'b000000, // extra=0 rmout[15:13]=000 rd=0 ds=0 
+  DLY  = 6'b010110, // extra=0 rmout[15:13]=101 rd=1 ds=0 
+  DONE = 6'b001100, // extra=0 rmout[15:13]=011 rd=0 ds=0 
+  READ = 6'b110110; // extra=1 rmout[15:13]=101 rd=1 ds=0 
+  
+  reg [5:0] state;
+  reg [5:0] nextstate;
+  
+  // comb always block
+  always @* begin
+    nextstate = state; // default to hold value because implied_loopback is set
+    mmout[6:5] = 'b00; // default
+    mout = 0; // default
+    case (state)
+      IDLE: begin
+        mmout[6:5] = 'b11;
+        mout = go && (mbin == 'hd);
+        if (go && (mbin == 'hd)) begin
+          nextstate = READ;
+        end
+      end
+      DLY : begin
+        mout = 1;
+        if (ws) begin
+          nextstate = READ;
+        end
+        else begin
+          nextstate = DONE;
+        end
+      end
+      DONE: begin
+        begin
+          nextstate = IDLE;
+        end
+      end
+      READ: begin
+        mout = 1;
+        begin
+          nextstate = DLY;
+        end
+      end
+    endcase
+  end
+  
+  // Assign reg'd outputs to state bits
+  assign ds = state[0];
+  assign rd = state[1];
+  assign rmout[15:13] = state[4:2];
+  
+  // sequential always block
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n)
+      state <= IDLE;
+    else
+      state <= nextstate;
+  end
+  
+  // datapath sequential always block
+  always @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      counter[7:0] <= counter_preset[7:0];
+    end
+    else begin
+      counter[7:0] <= counter[7:0]; // default
+      case (nextstate)
+        IDLE: begin
+          counter[7:0] <= counter_preset[7:0];
+        end
+        DLY : begin
+          counter[7:0] <= counter[7:0] + 1;
+        end
+        DONE: begin
+          counter[7:0] <= 'hff;
+        end
+      endcase
+    end
+  end
+  
+  // This code allows you to see state names in simulation
+  `ifndef SYNTHESIS
+  reg [31:0] statename;
+  always @* begin
+    case (state)
+      IDLE:
+        statename = "IDLE";
+      DLY :
+        statename = "DLY";
+      DONE:
+        statename = "DONE";
+      READ:
+        statename = "READ";
+      default:
+        statename = "XXXX";
+    endcase
+  end
+  `endif
+
+endmodule
+

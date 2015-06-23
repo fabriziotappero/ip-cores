@@ -1,0 +1,166 @@
+SHELL=/bin/sh
+MAKE=make
+
+VPP_NAME=vppreproc
+VERILOG_NAME=iverilog
+
+CUR_DIR=$(shell pwd)
+VAR_DIR=$(CUR_DIR)/variants
+SRC_DIR=$(CUR_DIR)/verilog
+GEN_DIR=$(CUR_DIR)/gen
+
+
+
+
+
+
+################################################################################
+# Run verilator for lint check
+################################################################################
+
+
+
+.PHONY lint:
+lint:  
+	echo "################################################################################"; \
+	echo; \
+	verilator -Wall --cc  -f  ../../testbenches/filelists/$(comp).lint   --exe ../../../../../../../tools/lint/sim_main2.cpp -top-module TB -Wno-PINNOCONNECT -Wno-DECLFILENAME  -Wno-UNDRIVEN   -Wno-UNUSED  -Wno-PINMISSING  -Wno-LITENDIAN  -Wno-PINCONNECTEMPTY   2> lint.log;\
+	echo "################################################################################"; \
+
+
+
+
+.PHONY verilator:
+verilator:  
+	echo "################################################################################"; \
+	echo; \
+	verilator --trace --cc   -f  ../../testbenches/filelists/$(comp).syn  --exe ../../../../../../../tools/lint/sim_main2.cpp -top-module TB -Wno-PINNOCONNECT -Wno-DECLFILENAME   -Wno-UNDRIVEN   -Wno-UNUSED  -Wno-PINMISSING  -Wno-LITENDIAN  -Wno-PINCONNECTEMPTY         2> $(test)_elab.log;\
+	make -j -C obj_dir/ -f VTB.mk VTB;\
+	obj_dir/VTB $(timeout) 2 > $(test)_sim.log;\
+	grep PASSED  ./${test}_sim.log ;\
+	echo "################################################################################"; \
+
+
+
+.PHONY sim:
+sim:
+	(\
+	$(VERILOG_NAME)   -f ../../testbenches/filelists/$(comp).sim -D VCD  2> ./${test}_elab.log  | tee >> ./${test}_elab.log;\
+	./a.out 2>    ./${test}_sim.log     | tee >> ./${test}_sim.log ;\
+	grep PASSED  ./${test}_sim.log ;\
+	 )
+
+
+
+
+
+
+
+
+################################################################################
+# 
+################################################################################
+
+
+
+
+PHONY: xst
+xst:
+	(\
+	xst -ifn ./Yst -ofn $(Design).log;\
+	)
+
+
+
+
+
+PHONY: fpga
+fpga:
+	(\
+	ngdbuild -dd _ngo -nt timestamp -p $(Part)  -uc ./target/Pad_Ring.ucf $(Design)   >>$(Design).log ;\
+	map  -p  $(Part)  -cm area -ir off -pr off  -c 100 -o $(Design)_map.ncd $(Design).ngd $(Design).pcf >>$(Design).log  ;\
+	par -w  -ol std -t 1 $(Design)_map.ncd $(Design).ncd $(Design).pcf  >>$(Design).log   ;\
+	trce -e 3 -s 5 -xml $(Design) $(Design).ncd -o $(Design).twr $(Design).pcf -ucf ../target/Pad_Ring.ucf >>$(Design).log  ;\
+	netgen  -s 5  -pcf  $(Design).pcf  -sdf_anno true -sdf_path "./gate_sims/par" -insert_glbl true -insert_pp_buffers true -w -dir ./gate_sims/par  -ofmt verilog -sim  $(Design).ncd   $(Design).v >>$(Design).log  ;\
+	)
+
+
+PHONY: bitgen
+bitgen:
+	(\
+	bitgen -f ./target/cclk.ut  $(Design).ncd >>$(Design).log  ;\
+	mv $(Design).bit Board_Design_cclk.bit ;\
+	promgen -w -u 0 Board_Design_cclk >>$(Design).log   ; \
+	mv Board_Design_cclk.mcs ./debug ;\
+	bitgen -f ./target/jtag.ut  $(Design).ncd  >>$(Design).log   ;\
+	mv $(Design).bit Board_Design_jtag.bit ;\
+	impact -batch ./debug/impact_bat  >>$(Design).log   ;\
+	mv *.bit ./debug ;\
+	)
+
+
+
+
+
+
+
+
+
+
+
+
+.PHONY group_build_sw:
+group_build_sw: group_start_sw
+	@for COMP in `ls $(CUR_DIR)/../sw`; do \
+	echo "################################################"; \
+	echo; \
+	echo "Linking: $$COMP ###"; echo; \
+	cd   $(CUR_DIR)/../sw/$$COMP;\
+	make all;\
+	done; \
+
+
+.PHONY group_start_sw:
+group_start_sw: 
+	@for CHILD in `ls $(CUR_DIR)/../children`; do \
+	echo "################################################"; \
+	echo; \
+	echo "Linking: $$CHILD ##"; echo; \
+	cd   $(CUR_DIR)/../children/$$CHILD/bin;\
+	${MAKE} group_build_sw;\
+	done; \
+
+
+.PHONY group_build_obj:
+group_build_obj: group_start_obj
+	@for COMP in `ls $(CUR_DIR)/../sw`; do \
+	echo "################################################"; \
+	echo; \
+	echo "Linking: $$COMP ###"; echo; \
+	cd   $(CUR_DIR)/../sw/$$COMP;\
+	make obj;\
+	done; \
+
+
+.PHONY group_start_obj:
+group_start_obj: 
+	@for CHILD in `ls $(CUR_DIR)/../children`; do \
+	echo "################################################"; \
+	echo; \
+	echo "Linking: $$CHILD ##"; echo; \
+	cd   $(CUR_DIR)/../children/$$CHILD/bin;\
+	${MAKE} group_build_obj;\
+	done; \
+
+
+
+
+
+
+
+
+
+
+
+
+

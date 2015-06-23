@@ -1,0 +1,209 @@
+eval 'exec `which perl` -S $0 ${1+"$@"}'
+   if 0;
+#/**********************************************************************/
+#/*                                                                    */
+#/*             -------                                                */
+#/*            /   SOC  \                                              */
+#/*           /    GEN   \                                             */
+#/*          /    TOOL    \                                            */
+#/*          ==============                                            */
+#/*          |            |                                            */
+#/*          |____________|                                            */
+#/*                                                                    */
+#/*                                                                    */
+#/*                                                                    */
+#/*                                                                    */
+#/*  Author(s):                                                        */
+#/*      - John Eaton, jt_eaton@opencores.org                          */
+#/*                                                                    */
+#/**********************************************************************/
+#/*                                                                    */
+#/*    Copyright (C) <2010-2011>  <Ouabache Design Works>              */
+#/*                                                                    */
+#/*  This source file may be used and distributed without              */
+#/*  restriction provided that this copyright statement is not         */
+#/*  removed from the file and that any derivative work contains       */
+#/*  the original copyright notice and the associated disclaimer.      */
+#/*                                                                    */
+#/*  This source file is free software; you can redistribute it        */
+#/*  and/or modify it under the terms of the GNU Lesser General        */
+#/*  Public License as published by the Free Software Foundation;      */
+#/*  either version 2.1 of the License, or (at your option) any        */
+#/*  later version.                                                    */
+#/*                                                                    */
+#/*  This source is distributed in the hope that it will be            */
+#/*  useful, but WITHOUT ANY WARRANTY; without even the implied        */
+#/*  warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR           */
+#/*  PURPOSE.  See the GNU Lesser General Public License for more      */
+#/*  details.                                                          */
+#/*                                                                    */
+#/*  You should have received a copy of the GNU Lesser General         */
+#/*  Public License along with this source; if not, download it        */
+#/*  from http://www.opencores.org/lgpl.shtml                          */
+#/*                                                                    */
+#/**********************************************************************/
+
+
+############################################################################
+# General PERL config
+############################################################################
+use Getopt::Long;
+use English;
+use File::Basename;
+use Cwd;
+use Scalar::Util qw(looks_like_number);
+use XML::LibXML;
+use lib './tools';
+use sys::lib;
+use yp::lib;
+use math::lib;
+use BerkeleyDB;
+
+
+$OUTPUT_AUTOFLUSH = 1; # set autoflush of stdout to TRUE.
+
+
+
+
+
+###############################################################################
+##                                                                            #
+## Read all the parameters from an Index.db file and add its config_XX number #
+##                                                                            #
+###############################################################################
+
+my $file_name         = $ARGV[0];
+
+
+$home = cwd();
+
+$design_db_file  = yp::lib::get_design_db_file;
+my $design_db  = new BerkeleyDB::Hash( -Filename => "$design_db_file", -Flags => DB_CREATE ) or die "Cannot open $design_db_file: $!";
+
+
+my $param_db  = new BerkeleyDB::Hash( -Filename => "$file_name", -Flags => DB_CREATE ) or die "Cannot open ${file_name}: $!";
+
+
+
+
+
+
+$cursor = $param_db ->db_cursor() ;
+
+
+my @out_param = ();
+
+while ($cursor->c_get($key, $value, DB_NEXT) == 0) 
+   {
+   $_ = $key;
+   if(/parameter_(\S+)__(\S+)/) 
+    { 
+    push @out_param , "${2}--${value}";
+    }
+   }
+$status = $cursor->c_close() ;
+
+
+@out_param      = sys::lib::trim_sort(@out_param);
+
+my $param_str;
+
+foreach my $param (@out_param)
+        {
+        $param_str ="${param}:::${param_str}";
+        }
+$param_str = "CONFIG___${param_str}";
+
+
+my $config = "null";
+
+$design_db->db_get($param_str, $config );
+
+unless (defined $config && length $config > 0)         
+         {
+         $config = "config_0";
+         }
+
+
+
+$param_db->db_put("CONFIG", "$config");
+
+
+
+my $vlnv;
+my $ven;
+my $lib;
+my $cmp;
+my $ver;
+my $cfg;
+
+
+$param_db->db_get("VLNV", $vlnv );
+
+
+( $ven,$lib,$cmp,$ver,$cfg) = split( /:/ , $vlnv);
+
+
+my $main_module_name = yp::lib::get_module_name($ven,$lib,$cmp,$ver) ;
+
+$Bus_filename = "./io_ports/${ven}__${lib}/${cmp}/${main_module_name}/BUSSES.dbm";
+my $Busses_db  = new BerkeleyDB::Hash( -Filename => "$Bus_filename", -Flags => DB_CREATE ) or die "Cannot open $Bus_filename: $!";
+
+my $key;
+my $value;
+
+
+
+
+   $B_cursor = $Busses_db ->db_cursor() ;
+   while ($B_cursor->c_get($key, $value, DB_NEXT) == 0) 
+     {
+     $param_db->db_put($key,$value);
+     $_ = $key;
+     if(/BusRef/)
+       {
+       my $v1;
+       my $v2;
+       my $v3;
+       my $v4;
+       my $v5;
+       my $v6;
+       my $v7;
+       my $v5a;
+       ( $v1,$v2,$v3,$v4,$v5,$v6,$v7) = split( /:/ , $value);
+       if($v4 eq "vector")
+            {  # resolve PARAMETERS Here
+         #    print "RESOLVE  $key   $value  \n";
+
+            foreach my $parameter (@out_param)
+               {
+               my $parameter_name;
+               my $parameter_value;
+               ( $parameter_name,$parameter_value) = split( /--/ , $parameter);
+               $v5a   = math::lib::parse($v5,$parameter_name,$parameter_value);
+        #       print "RESOLVE   $v5 to $v5a  from  $parameter_name  $parameter_value  \n";
+               if( $v5 ne $v5a )
+                 {
+                 $param_db->db_put($key,"$v1:$v2:$v3:$v4:$v5a:$v6:$v7");
+                 $v5 = $v5a;
+                 }
+               }
+            }         
+       }
+     }
+     $status = $B_cursor->c_close() ;
+
+
+
+
+
+
+
+
+
+$Busses_db->db_close();
+
+$param_db->db_close();
+$design_db->db_close();
+
+1

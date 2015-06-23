@@ -1,0 +1,17 @@
+assign wb_clk_i   = clk;
+assign wb_rst_i   = reset;
+
+assign wb_jsp_bte_i   = 2'b00;
+assign wb_jsp_cti_i   = 3'b000;
+assign wb_jsp_cab_i   = 1'b0;
+assign tck_i          = jtag_clk;
+assign capture_dr_i   = capture_dr_o;
+assign shift_dr_i     = shift_dr_o;
+assign update_dr_i    = update_dr_o;
+assign debug_select_i = select_o;
+assign rst_i          = test_logic_reset_o;
+assign tdo_i          = tdo_o;
+assign bsr_tdo_i      = 1'b0;
+assign tdi_i          = tdi_o;
+
+

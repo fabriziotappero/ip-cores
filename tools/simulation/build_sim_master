@@ -1,0 +1,268 @@
+eval 'exec `which perl` -S $0 ${1+"$@"}'
+   if 0;
+
+#/**********************************************************************/
+#/*                                                                    */
+#/*             -------                                                */
+#/*            /   SOC  \                                              */
+#/*           /    GEN   \                                             */
+#/*          /    TOOL    \                                            */
+#/*          ==============                                            */
+#/*          |            |                                            */
+#/*          |____________|                                            */
+#/*                                                                    */
+#/*                                                                    */
+#/*                                                                    */
+#/*  Author(s):                                                        */
+#/*      - John Eaton, jt_eaton@opencores.org                          */
+#/*                                                                    */
+#/**********************************************************************/
+#/*                                                                    */
+#/*    Copyright (C) <2010-2013>  <Ouabache Design Works>              */
+#/*                                                                    */
+#/*  This source file may be used and distributed without              */
+#/*  restriction provided that this copyright statement is not         */
+#/*  removed from the file and that any derivative work contains       */
+#/*  the original copyright notice and the associated disclaimer.      */
+#/*                                                                    */
+#/*  This source file is free software; you can redistribute it        */
+#/*  and/or modify it under the terms of the GNU Lesser General        */
+#/*  Public License as published by the Free Software Foundation;      */
+#/*  either version 2.1 of the License, or (at your option) any        */
+#/*  later version.                                                    */
+#/*                                                                    */
+#/*  This source is distributed in the hope that it will be            */
+#/*  useful, but WITHOUT ANY WARRANTY; without even the implied        */
+#/*  warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR           */
+#/*  PURPOSE.  See the GNU Lesser General Public License for more      */
+#/*  details.                                                          */
+#/*                                                                    */
+#/*  You should have received a copy of the GNU Lesser General         */
+#/*  Public License along with this source; if not, download it        */
+#/*  from http://www.opencores.org/lgpl.shtml                          */
+#/*                                                                    */
+#/**********************************************************************/
+
+
+############################################################################
+# General PERL config
+############################################################################
+use Getopt::Long;
+use English;
+use File::Basename;
+use Cwd;
+use XML::LibXML;
+use lib './tools';
+use sys::lib;
+use yp::lib;
+use Parallel::ForkManager;
+
+$OUTPUT_AUTOFLUSH = 1; # set autoflush of stdout to TRUE.
+
+
+############################################################################
+### Process the options
+############################################################################
+Getopt::Long::config("require_order", "prefix=-");
+GetOptions("h","help",
+) || die "(use '$program_name -h' for help)";
+
+
+
+
+##############################################################################
+## Help option
+##############################################################################
+if ( $opt_h or $opt_help  ) 
+  { print "\n build_sim_master";
+    print "\n";
+    exit 1;
+  }
+
+
+my $parser = XML::LibXML->new();
+
+
+my $cmd;
+my @cmds = ();
+my @cov_cmds = ();
+my @rep_cmds = ();
+
+
+
+#/**********************************************************************/
+#/*  Process each library by finding any ip-xact file in any component */
+#/*                                                                    */
+#/*  Each ip-xact file is parsed and it's filename and the names of any*/
+#/*  modules that it uses are saved.                                   */
+#/*                                                                    */
+#/*                                                                    */
+#/**********************************************************************/
+
+my $home = cwd();
+
+my $prefix   = yp::lib::get_workspace();
+   $prefix   = "/${prefix}";
+
+my $number_of_cpus   = yp::lib::get_number_of_cpus();
+
+my @vendors = yp::lib::find_vendors();
+
+foreach my $vendor (@vendors)
+ {
+ my $vendor_status    =  yp::lib::get_vendor_status($vendor);
+ if($vendor_status eq "active") 
+   { 
+   my @libraries = yp::lib::find_libraries($vendor);
+   foreach my $library (@libraries)
+     {
+     my $library_status   =  yp::lib::get_library_status($vendor,$library);
+     if($library_status eq "active") 
+         {
+         print " $vendor $library \n";
+         my @components   = yp::lib::find_components($vendor,$library);
+
+         foreach my $component (@components) 
+            {
+            my $socgen_filename     = yp::lib::find_componentConfiguration($vendor,$library,$component);
+
+            if($socgen_filename)
+               {
+               my $socgen_file     = $parser->parse_file($socgen_filename);
+               my $sim_library_path ;
+               my $lib_comp_sep             = yp::lib::find_lib_comp_sep($vendor,$library,$component);
+               my $sim_comp_path            = $socgen_file->findnodes("//socgen:componentConfiguration/socgen:sim/socgen:comp_path/text()")->to_literal;
+
+               if ($sim_comp_path)
+                  {
+                  $sim_library_path            ="${lib_comp_sep}${sim_comp_path}";
+                  }
+               else
+                  {
+                  $sim_library_path            = $socgen_file->findnodes("//socgen:componentConfiguration/socgen:sim/socgen:library_path/text()")->to_literal;
+                  }
+
+
+               foreach  my   $i_name ($socgen_file->findnodes("//socgen:componentConfiguration/socgen:sim/socgen:icarus/socgen:test/socgen:name"))
+                 {
+                 my($sim_name)     = $i_name ->findnodes('./text()')->to_literal ;
+                 my($sim_configuration)  = $i_name ->findnodes('../socgen:configuration/text()')->to_literal ;
+                 my($sim_variant)  = $i_name ->findnodes('../socgen:variant/text()')->to_literal ;
+                 $cmd ="./tools/simulation/run_icarus  $vendor   $library $sim_library_path $sim_name     $sim_variant \n";
+                 push @cmds,$cmd;
+                 }
+
+               foreach  my   $i_name ($socgen_file->findnodes("//socgen:componentConfiguration/socgen:sim/socgen:verilator/socgen:test/socgen:name"))
+                 {
+                 my($sim_name)     = $i_name ->findnodes('./text()')->to_literal ;
+                 my($sim_configuration)  = $i_name ->findnodes('../socgen:configuration/text()')->to_literal ;
+                 my($sim_variant)  = $i_name ->findnodes('../socgen:variant/text()')->to_literal ;
+                 $cmd ="./tools/simulation/run_verilator  $vendor   $library $sim_library_path $sim_name     $sim_variant \n";
+                 push @cmds,$cmd;
+                 }
+
+
+
+               foreach  my   $i_name ($socgen_file->findnodes("//socgen:componentConfiguration/socgen:sim/socgen:rtl_check/socgen:lint/socgen:name"))
+                 {
+                 my($sim_name)           = $i_name ->findnodes('./text()')->to_literal ;
+                 my($sim_configuration)  = $i_name ->findnodes('../socgen:configuration/text()')->to_literal ;
+                 my($sim_variant)        = $i_name ->findnodes('../socgen:variant/text()')->to_literal ;
+                 print "  lint     $sim_name        $sim_configuration   $sim_variant   "; 
+                 $cmd ="cd .${prefix}/${vendor}__${library}${sim_library_path}/rtl_check/${sim_name};make lint";
+                 push @cmds,$cmd;
+                 }
+
+
+
+
+
+               #/*********************************************************************************************/
+               #/   create coverage database .cdd file                                                       */ 
+               #/                                                                                            */
+               #/*********************************************************************************************/
+
+               foreach  my   $i_name ($socgen_file->findnodes("//socgen:componentConfiguration/socgen:sim/socgen:testbenches/socgen:testbench/socgen:tools/socgen:tool"))
+                  {
+                  my($tb_tool)     = $i_name ->findnodes('./text()')->to_literal ;
+                  my($tb_variant)  = $i_name ->findnodes('../../socgen:variant/text()')->to_literal ;
+                  my($tb_version)  = $i_name ->findnodes('../../socgen:version/text()')->to_literal ;
+                  if($tb_tool eq "coverage")
+                    {
+                    print "  COVERAGEs   $tb_tool          $tb_variant  $tb_version \n"; 
+                    $cmd= "cd ./${prefix}/${vendor}__${library}${sim_library_path}/cov/${tb_variant};make build_cdd \n";
+                    push @cmds,$cmd;
+
+                    foreach  my   $i_name ($socgen_file->findnodes("//socgen:test/socgen:variant"))
+                       {
+                       my($test_variant)     = $i_name ->findnodes('./text()')->to_literal ;
+                       my($test_name)        = $i_name ->findnodes('../socgen:name/text()')->to_literal ;
+
+                       if($tb_variant eq $test_variant  )
+                           {
+                           print "  $tb_variant  $test_variant $test_name \n"; 
+                           $cmd= "cd ./${prefix}/${vendor}__${library}${sim_library_path}/cov/${tb_variant};make score_cov TEST=${test_name} \n";
+                           push @cov_cmds,$cmd;
+                           }
+                       }
+                    $cmd= "cd ./${prefix}/${vendor}__${library}${sim_library_path}/cov/${tb_variant};make report_cov \n";
+                    push @rep_cmds,$cmd;
+                    }
+                  }
+
+
+
+
+   }
+
+}
+         }
+     }
+   }
+ }
+
+
+my $manager = new Parallel::ForkManager( $number_of_cpus );
+
+     foreach $cmd (@cmds)
+      {
+      $manager->start and next;
+      system($cmd);
+      $manager->finish;
+      }
+
+      $manager->wait_all_children;
+      print "run_sims COMPLETE \n";
+
+
+
+
+
+     foreach $cmd (@cov_cmds)
+      {
+      $manager->start and next;
+      system($cmd);
+      $manager->finish;
+      }
+
+      $manager->wait_all_children;
+      print "coverage COMPLETE \n";
+
+
+
+
+     foreach $cmd (@rep_cmds)
+      {
+      $manager->start and next;
+      system($cmd);
+      $manager->finish;
+      }
+
+      $manager->wait_all_children;
+      print "coverage reports COMPLETE \n";
+
+
+
+
+
+

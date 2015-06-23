@@ -1,0 +1,119 @@
+//----------------------------------------------------------------------------
+// user_logic.v - module
+//----------------------------------------------------------------------------
+//
+//  This program is free software: you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License as published by
+//  the Free Software Foundation, either version 3 of the License, or
+//  (at your option) any later version.
+//
+//  This program is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License
+//  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+//
+//----------------------------------------------------------------------------
+
+
+wire pixel_on;
+wire h_synch;
+wire v_synch;
+wire blank;
+   
+// instantiate the character generator
+`VARIANT`CHAR_DISPLAY 
+#(.H_ACTIVE(H_ACTIVE))
+ CHAR_DISPLAY
+  (
+  .clk               ( clk               ),
+  .reset             ( reset             ),
+  .subchar_line      ( subchar_line      ),
+  .subchar_pixel     ( subchar_pixel     ),
+  .pixel_on          ( pixel_on          ),
+  .char_read_addr    ( char_read_addr    ),
+  .char_write_addr   ( address           ),
+  .char_write_data   ( wdata             ),
+  .char_gen_rom_data ( char_gen_rom_data ),
+  .char_write_enable ( ascii_load        ),
+  .ascii_code        ( ascii_code        )
+
+);
+
+// instantiate the video timing generator
+`VARIANT`SVGA_TIMING_GENERATION 
+ #(.CHARACTER_DECODE_DELAY(CHARACTER_DECODE_DELAY),
+   .H_ACTIVE(H_ACTIVE),        
+   .H_FRONT_PORCH(H_FRONT_PORCH),        
+   .H_SYNCH(H_SYNCH),        
+   .H_BACK_PORCH(H_BACK_PORCH),        
+   .H_TOTAL(H_TOTAL),        
+   .V_ACTIVE(V_ACTIVE),        
+   .V_FRONT_PORCH(V_FRONT_PORCH),        
+   .V_SYNCH(V_SYNCH),       
+   .V_BACK_PORCH(V_BACK_PORCH),        
+   .V_TOTAL(V_TOTAL)        
+  )
+ SVGA_TIMING_GENERATION
+(
+  .clk            ( clk          ),
+  .reset          ( reset        ),
+  .h_synch        ( h_synch      ),
+  .v_synch        ( v_synch      ),
+  .blank          ( blank        ),
+  .pixel_count    ( pixel_count  ),
+  .line_count     ( line_count   ),
+  .subchar_pixel  ( subchar_pixel),
+  .subchar_line   ( subchar_line ),
+  .char_column    ( char_column  ),
+  .char_line      ( char_line    )
+);
+
+// instantiate the video output mux
+`VARIANT`VIDEO_OUT 
+ VIDEO_OUT
+(
+  .clk                ( clk             ),
+  .reset              ( reset           ),
+  .h_synch            ( h_synch         ),
+  .v_synch            ( v_synch         ),
+  .blank              ( blank           ),
+  .char_color         ( char_color      ),
+  .back_color         ( back_color      ),
+  .cursor_color       ( cursor_color    ),
+  .pixel_on           ( pixel_on        ),
+  .cursor_on          ( cursor_on       ),
+  .hsync_n_out        ( hsync_n_pad_out ),
+  .vsync_n_out        ( vsync_n_pad_out ),
+  .red_out            ( red_pad_out     ),
+  .green_out          ( green_pad_out   ),
+  .blue_out           ( blue_pad_out    )
+);
+
+
+
+always @ (posedge clk )
+   if (reset)    cursor_on <=  1'b0;
+   else          cursor_on <= (char_read_addr ==  address) ;
+   
+
+
+always@(posedge clk)
+  if(reset)       address <= 14'b00000000000000;
+  else
+  if(add_l_load)  address[7:0] <= wdata;
+  else
+  if(add_h_load)  address[13:8] <= wdata[5:0];   
+  else
+  if(ascii_load)  address  <= address+ 14'b0000000000001;   
+  else            address  <= address;   
+   
+always @ (*) 
+     begin
+     char_read_addr    = (char_line[6:0] * H_ACTIVE / 8 ) + {7'b0000000,char_column[6:0]};
+     end
+
+
+assign   chargen_rom_address = {ascii_code[7:0], subchar_line[2:0]};

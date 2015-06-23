@@ -1,0 +1,2380 @@
+<!DOCTYPE doctype PUBLIC "-//w3c//dtd html 4.0 transitional//en">
+<html><head>
+
+
+
+                                    
+  <meta http-equiv="Content-Type" content="text/html; charset=ISO-8859-1">
+                                    
+  <meta name="GENERATOR" content="Mozilla/4.76 [en] (Win98; U) [Netscape]">
+                                    
+  <meta name="Author" content="Adam Chapweske">
+  <title>The PS/2 Keyboard Interface</title>
+                                     <!--This file created 10:20 PM  3/29/01 by Claris Home Page version 3.0-->
+             
+  <meta name="author" content="Adam Chapweske">
+</head><body vlink="#3333ff" alink="#3333ff" bgcolor="#ffffff" link="#3333ff">
+   <small><b><font face="Arial,Helvetica"><font size="+3"><small>The PS/2 
+Keyboard  Interface</small></font></font></b></small><br>
+
+           
+<center></center>
+           
+<center>              
+<hr size="1" width="400" align="left" noshade="noshade"></center>
+                <br>
+   <font face="Arial,Helvetica">Source: <a href="http://www.computer-engineering.org/">http://www.Computer-Engineering.org</a></font><br>
+    <font face="Arial,Helvetica">Author: Adam Chapweske<br>
+   Last Updated: 04/01/03<br>
+
+   <br>
+   </font><b>Legal Information:</b><br>
+     <br>
+     All information within this article is provided "as is" and without
+any   express or implied warranties, including, without limitation, the implied
+  warranties of merchantibility and fitness for a particular purpose. &nbsp;<br>
+    <br>
+    This article is protected under copyright law. &nbsp;This document may
+ be  copied only if the source, author, date, and legal information is included.<br>
+   <br>
+
+   <b>Abstract:</b><br>
+   <br>
+   This article tries to cover every aspect of AT and PS/2 keyboards.&nbsp; 
+    It includes information on the low-level signals and protocol, scan codes, 
+    the command set, initialization, compatibility issues, and other miscellaneous 
+    information.&nbsp; Since it's closely related, I've also included information 
+    on the PC keyboard controller.&nbsp; All code samples involving the keyboard
+  encoder are written in assembly for <a href="http://www.microchip.com/">Microchip's</a>
+  PIC microcontrollers.&nbsp;   All code samples related to the keyboard
+controller   are written in x86 assembly<br>
+
+     
+<p><b>A History Lesson:</b> </p>
+                                             
+<p>The most popular keyboards in use today include: </p>
+                                             
+<ul>
+     <li> USB keyboard - Latest keyboard supported by all new computers (Macintosh 
+    and IBM/compatible).&nbsp; These are relatively complicated to interface 
+   and are not covered in this article.</li>
+     <li> IBM/Compatible keyboards - Also known as "AT keyboards" or "PS/2
+   keyboards",  all modern PCs support this device.&nbsp; They're the easiest 
+   to interface,  and are the subject of this article.</li>
+
+     <li> ADB keyboards - Connect to the Apple Desktop Bus of older Macintosh
+    systems.&nbsp; These are not covered in this article&nbsp;</li>
+     
+</ul>
+         IBM introduced a new keyboard with each of its major desktop computer
+   models.&nbsp;  The original IBM PC, and later the IBM XT, used what we
+call   the "XT keyboard."&nbsp;  These are obsolete and differ significantly
+from   modern keyboards; the XT  keyboard is not covered in this article.&nbsp;
+  Next came the IBM AT system  and later the IBM PS/2.&nbsp; They introduced
+  the keyboards we use today,  and are the topic of this article.&nbsp; AT
+ keyboards and PS/2 keyboards were very similar devices, but the PS/2 device
+ used a smaller connector and supported a few additional features.&nbsp;
+
+Nonetheless,    it remained backward compatible with AT systems and few of
+the additional    features ever caught on (since software also wanted to
+remain backward compatible.)&nbsp;   Below is a summary of IBM's three major
+keyboards.                                       
+<p>IBM PC/XT Keyboard (1981): </p>
+                                             
+<ul>
+     <li> 83 keys</li>
+     <li> 5-pin DIN connector</li>
+     <li> Simple uni-directional serial protocol</li>
+
+     <li> Uses what we now refer to as scan code set 1</li>
+     <li> No host-to-keyboard commands</li>
+     
+</ul>
+         IBM AT Keyboard (1984) - Not backward compatible with XT systems<tt><a href="#A%20History%20Lesson%20FN">(1)</a></tt>.                        
+              
+<ul>
+     <li> 84 -101 keys</li>
+
+     <li> 5-pin DIN connector</li>
+     <li> Bi-directional serial protocol</li>
+     <li> Uses what we now refer to as scan code set 2</li>
+     <li> Eight host-to-keyboard commands</li>
+     
+
+</ul>
+         IBM PS/2 Keyboard (1987) - Compatible with AT systems, not compatible
+   with  XT systems<tt><a href="#A%20History%20Lesson%20FN">(1)</a></tt>.
+                                     
+<ul>
+     <li> 84 - 101 keys</li>
+     <li> 6-pin mini-DIN connector</li>
+     <li> Bi-direction serial protocol</li>
+
+     <li> Offers optional scan code set 3</li>
+     <li> 17 host-to-keyboard commands&nbsp;</li>
+     
+</ul>
+         The PS/2 keyboard was originally an extension of the AT device.&nbsp;
+   It  supported a few additional host-to-keyboard commands and featured
+a  smaller   connector.&nbsp; These were the only differences between the
+two  devices.&nbsp;   However, computer hardware has never been about standards
+ as much as compatibility.&nbsp;   For this reason, any keyboard you buy
+today  will be <i>compatible</i> with   PS/2 and AT systems, but it may not
+fully  support all the features of the   original devices.              
+                        
+
+<p>Today, "AT keyboard" and "PS/2 keyboard" refers only to their connector 
+    size.&nbsp; Which settings/commands any given keyboard does or does not 
+  support is anyone's guess.&nbsp; For example, the keyboard I'm using right 
+  now has a PS/2-style connector but only fully supports seven commands, partially
+   supports two, and merely "acknowledges" the rest.&nbsp; In contrast, my
+ "Test"  keyboard has an AT-style connector but supports every feature/command
+  of the original PS/2 device (plus a few extra.)&nbsp; It's important you
+ treat modern keyboards as compatible, not standard.&nbsp; If your design
+a keyboard-related device that relies on non-general features, it may work
+on some systems, but not on others...         </p>
+                                             
+<p>Modern PS/2 (AT) compatible keyboards </p>
+                                             
+<ul>
+
+     <li> Any number of keys (usually 101 or 104)</li>
+     <li> 5-pin or 6-pin connector; adaptor usually included</li>
+     <li> Bi-directional serial protocol</li>
+     <li> Only scan code set 2 guaranteed.</li>
+     <li> Acknowledges all commands; may not act on all of them.</li>
+
+     
+</ul>
+         <a name="A History Lesson FN"></a> <br>
+              <i>Footnote 1) XT keyboards use a completely different protocol 
+  than   that used by AT and PS/2 systems, making it incompatible with the 
+ newer PCs.&nbsp; However, there was a transition period where some keyboard 
+ controllers supported both XT and AT (PS/2) keyboards (through a switch, 
+jumper, or auto-sense.)&nbsp;   Also, some keyboards were made to work on 
+both types of systems (again, through the use of a switch or auto-sensing.)&nbsp; 
+If you've owned such a PC or keyboard, don't let it fool you--XT keyboards 
+are NOT compatible with modern computers.</i>                            
+          
+<p><b>General Description:</b> </p>
+
+                                             
+<p>Keyboards consist of a large matrix of keys, all of which are monitored 
+    by an on-board processor (called the "keyboard encoder".)&nbsp; The specific 
+    processor<tt><a href="#General%20Description%20FN">(1)</a></tt> varies 
+ from   keyboard-to-keyboard but they all basically do the same thing:&nbsp; 
+ Monitor   which key(s) are being pressed/released and send the appropriate 
+ data to  the host.&nbsp; This processor takes care of all the debouncing 
+and buffers  any data in its 16-byte buffer, if needed.&nbsp; Your motherboard 
+ contains  a "keyboard controller"<tt><a href="#General%20Description%20FN">(2)</a></tt>   that is in charge of decoding 
+ all of the data received from the keyboard  and informing your software of
+ what's going on.&nbsp; All communication between  the host and the keyboard 
+ uses an IBM protocol.&nbsp; <br>
+
+              <a name="General Description FN"></a> <br>
+              <i>Footnote 1)&nbsp; Originally, IBM used the Intel 8048 microcontroller 
+    as its keyboard encoder. &nbsp;There are now a wide variety of keyboard
+   encoder chips available from many different manufacturers.</i> </p>
+                                                <i>Footnote 2) Originally,
+ IBM used the Intel 8042 microcontroller as  its  keyboard controller.&nbsp;
+ This has since been replaces with compatible   devices integrated in motherboards' 
+ chipsets. The keyboard controller is  covered later in this article.</i> 
+                                      
+<p><b>Electrical Interface / Protocol:</b> </p>
+
+                                             
+<p>The AT and PS/2 keyboards use the same protocol as the PS/2 mouse.&nbsp; 
+    Click <a href="http://www.computer-engineering.org/ps2protocol">here</a>   for detailed information on
+ this protocol. </p>
+                                             
+<p><b>Scan Codes:</b> </p>
+                                             
+<p>Your keyboard's processor spends most of its time "scanning", or   monitoring, 
+ the matrix of keys.&nbsp; If it finds that any key is being pressed,  released, 
+ or held down, the keyboard will send a packet of information known  as a 
+"scan code" to your computer.&nbsp; There are two different types of  scan 
+codes: "make codes"<i> </i>and "break codes".&nbsp; A make code is sent  when
+a key is pressed or held down.&nbsp; A break code is sent when  a key  is
+released.&nbsp; Every key is assigned its own unique make code and break 
+code so the host can determine exactly what happened to which key by looking 
+ at a single scan code.&nbsp; The set of make and break codes for every key 
+ comprises a "scan code set".&nbsp; There are three standard scan code sets, 
+ named one, two, and three.&nbsp; All modern keyboards default  to set two.<tt><a href="#Scancodes%20FN">(1)</a></tt> </p>
+
+                                             
+<p>So how do you figure out what the scan codes are for each key?&nbsp; 
+  Unfortunately, there's no simple formula for calculating this.&nbsp; If 
+  you want to know what the make code or break code is for a specific key, 
+ you'll have to look it up in a table.&nbsp; I've composed tables for all 
+make codes and break codes in all three scan code sets: </p>
+                                             
+<ul>
+     <li> <a href="http://www.computer-engineering.org/ps2keyboard/scancodes1.html">Scan   Code Set 1</a> - Original XT scan
+  code set; supported by some modern keyboards</li>
+
+     <li> <a href="http://www.computer-engineering.org/ps2keyboard/scancodes2.html">Scan   Code Set 2</a> - Default scan
+code  set for all modern keyboards</li>
+     <li> <a href="http://www.computer-engineering.org/ps2keyboard/scancodes3.html">Scan   Code Set 3</a> - Optional PS/2 
+scan  code set--rarely used</li>
+     
+</ul>
+         <a name="Scancodes FN"></a> <br>
+
+              <i>Footnote 1) Originally, the AT keyboard only supported set 
+ two,   and the PS/2 keyboard would default to set two but supported all three.&nbsp;
+    Most modern keyboards behave like the PS/2 device, but I have come across
+    a few that didn't support set one, set three, or both.&nbsp; Also, if
+you've    ever done any low-level PC programming, you've probably notice
+the keyboard    controller supplies set ONE scan codes by default.&nbsp; This
+is because   the keyboard controller converts all incomming scan codes to
+set one (this   stems from retaining compatibility with software written for
+XT systems.)&nbsp;    However, it's still set two scan codes being sent down
+the keyboard's serial    line.&nbsp;</i>                                
+      
+<p><b>Make Codes, Break Codes, and Typematic Repeat:</b> </p>
+                                             
+<p>Whenever a key is pressed, that key's make code is sent to the computer.&nbsp; 
+    Keep in mind that a make code only represents a <u>key</u> on a keyboard--it 
+    does not represent the character printed on that key.&nbsp; This means 
+ that  there is no defined relationship between a make code and an ASCII code.&nbsp;
+
+   It's up to the host&nbsp; to translate scan codes to characters or commands.
+          </p>
+                                             
+<p>Although most set two make codes are only one-byte wide, there are   a 
+ handfull of "extended keys" whose make codes are two or four bytes wide.&nbsp; 
+    These make codes can be identified by the fact that their first byte is
+  E0h.&nbsp;        </p>
+                                             
+<p>Just as a make code is sent to the computer whenever a key is pressed, 
+    a break code is sent whenever a key is released.&nbsp; In addition to 
+every    key having its own unique make code, they all have their own unique 
+break    code<tt><a href="#MakeBreakTypematic%20FN">(1)</a></tt>.&nbsp; Fortunately, 
+    however, you won't always have to use lookup tables to figure out a key's 
+    break code--certain relationships do exist between make codes and break 
+  codes.&nbsp; Most set two break codes are two bytes long where the first 
+ byte is F0h and the second byte is the make code for that key.&nbsp; Break 
+ codes for extended keys are usually three bytes long where the first two 
+bytes are E0h, F0h, and the last byte is the last byte of that key's make 
+code.&nbsp; As an example, I have listed below a the set two make codes and 
+break codes for a few keys:&nbsp;        </p>
+
+                                             
+<blockquote>                                                       
+  <blockquote>                                                          
+            
+    <blockquote>&nbsp;                                                   
+                                   
+      <table width="300" border="1" cols="3">
+         <tbody>
+                        <tr>
+         <td>                                                           
+                                                                        
+  
+            <center>Key</center>
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>(Set 2) <br>
+
+        Make Code</center>
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>(Set 2) <br>
+        Break Code</center>
+         </td>
+         </tr>
+          <tr>
+
+         <td>                                                           
+                                                                        
+  
+            <center>"A"</center>
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>1C</center>
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>F0,1C</center>
+         </td>
+
+         </tr>
+          <tr>
+         <td>                                                           
+                                                                        
+  
+            <center>"5"</center>
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>2E</center>
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>F0,2E</center>
+
+         </td>
+         </tr>
+          <tr>
+         <td>                                                           
+                                                                        
+  
+            <center>"F10"</center>
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>09</center>
+         </td>
+
+          <td>                                                          
+                                                                        
+   
+            <center>F0,09</center>
+         </td>
+         </tr>
+          <tr>
+         <td>                                                           
+                                                                        
+  
+            <center>Right Arrow</center>
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>E0, 74</center>
+
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>E0, F0, 74</center>
+         </td>
+         </tr>
+          <tr>
+         <td>                                                           
+                                                                        
+  
+            <center>Right "Ctrl"</center>
+         </td>
+
+          <td>                                                          
+                                                                        
+   
+            <center>E0, 14</center>
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>E0, F0, 14</center>
+         </td>
+         </tr>
+                                                                        
+                                      
+        </tbody>                                                         
+                            
+      </table>
+
+         </blockquote>
+         </blockquote>
+         Example:&nbsp; What sequence of make codes and break codes should
+ be  sent   to your computer for the character "G" to appear in a word processor?&nbsp; 
+    Since this is an upper-case letter, the sequence of events that need to
+  take place are: press the "Shift" key, press the "G" key, release the "G"
+  key, release the "Shift" key.&nbsp; The scan codes associated with these
+ events are the following:&nbsp; make code for the "Shift" key (12h), make
+ code for the "G" key (34h), break code for the "G" key(F0h,34h), break code
+ for the "Shift" key (F0h,12h).&nbsp; Therefore, the data sent to your computer
+ would be: 12h, 34h, F0h, 34h, F0h, 12h.</blockquote>
+
+         If you press a key, its make code is sent to the computer.&nbsp; 
+When   you  press and hold down a key, that key becomes <i>typematic</i>, 
+which  means  the keyboard will keep sending that key's make code until the 
+key is released  or another key is pressed.&nbsp; To verify this, open a text
+editor and hold down the "A" key.&nbsp; When you first press the key, the
+character "a" immediately appears on your screen.&nbsp; After a short delay,
+another "a" will appear followed by a whole stream of "a"s until you release
+the "A" key.&nbsp; There are two important parameters here:&nbsp; the <i>typematic
+   delay</i>, which is the short delay between the first and second "a",
+and    the <i>typematic rate</i>, which is how many characters per second
+will  appear  on your screen after the typematic delay.&nbsp; The typematic
+delay  can range  from 0.25 seconds to 1.00 second and the typematic rate
+can range  from 2.0  cps (characters per second) to 30.0 cps.&nbsp; You may
+change the  typematic  rate and delay using the "Set Typematic Rate/Delay" 
+(0xF3) command.                                        
+
+<p>Typematic data is not buffered within the keyboard.&nbsp; In the   case 
+ where more than one key is held down, only the last key pressed becomes 
+  typematic.&nbsp; Typematic repeat then stops when that key is released, 
+  even though other keys may be held down.  </p>
+                                             
+<p><a name="MakeBreakTypematic FN"></a> <br>
+              <i>Footnote 1) Actually, the "Pause/Break" key does not have
+ a  break   code in scan code sets one and two.&nbsp; When this key is pressed,
+  its make code is sent; when it's released, it doesn't send anything. &nbsp;So 
+  how do you tell when this key has been released? &nbsp;You can't.</i> </p>
+
+                                             
+<p><b>Reset:</b> </p>
+                                             
+<p>At power-on or software reset (see the "Reset" command) the keyboard 
+  performs a diagnostic self-test referred to as BAT (Basic Assurance Test) 
+    and loads the following default values:&nbsp; </p>
+                                             
+<ul>
+     <li> Typematic delay 500 ms.</li>
+     <li> Typematic rate 10.9 cps.</li>
+
+     <li> Scan code set 2.</li>
+     <li> Set all keys typematic/make/break.</li>
+     
+</ul>
+                                              
+<p>When entering BAT, the keyboard enables its three LED indicators,   and 
+ turns them off when BAT has completed.&nbsp; At this time, a BAT completion 
+    code of either 0xAA (BAT successful) or 0xFC (Error) is sent to the host. 
+  &nbsp; This BAT completion code must be sent 500~750 milliseconds after 
+power-on.          </p>
+
+                                             
+<p>Many of the keyboards I've tested ignore their CLOCK and DATA lines   until
+<i>after</i>  the BAT completion code has been sent.&nbsp; Therefore,   an
+"Inhibit" condition  (CLOCK line low) may not prevent the keyboard from 
+ sending its BAT completion  code. </p>
+                                             
+<p><b>Command Set:</b> </p>
+                                             
+<p>A few notes regarding commands the host can issue to the keyboard:<br>
+           </p>
+
+                     
+<ul>
+     <li>The keyboard clears its output buffer when it recieves any command.</li>
+     <li>If the keyboard receives an invalid command or argument, it must 
+respond  with "resend" (0xFE).</li>
+     <li>The keyboard must not send any scancodes while processing a command.</li>
+     <li>If the keyboard is waiting for an argument byte and it instead 
+receives  a command, it should discard the previous command and process this
+ new one.</li>
+     
+</ul>
+     Below are all the commands the host may send to the keyboard:<br>
+
+                                             
+<ul>
+     <li> 0xFF (Reset) - Keyboard responds with "ack" (0xFA), then enters 
+ "Reset"  mode.&nbsp; (See "Reset"  section.)</li>
+     <li> 0xFE (Resend) - Keyboard responds by resending the last-sent byte. 
+   &nbsp;The exception to this is if the last-sent byte was "resend" (0xFE). 
+   &nbsp;If this is the case, the keyboard resends the last non-0xFE byte. 
+ &nbsp;This  command is used by the host to indicate an error in reception.</li>
+     
+</ul>
+
+                                     
+<blockquote>The next six commands can be issued when the keyboard is  in any
+mode, but it only effects the behavior of the keyboard when in "mode  3"
+(ie, set to scan code set 3.) <br>
+             </blockquote>
+                                     
+<ul>
+     <li> *0xFD (Set Key Type Make) - Disable break codes and typematic repeat 
+ for specified keys. &nbsp;Keyboard responds with "ack" (0xFA), then disables 
+ scanning (if enabled) and reads a list of keys from the host. &nbsp;These 
+  keys are specified by their set 3 make codes. &nbsp;Keyboard responds to 
+ each make code with "ack". &nbsp;Host terminates this list by sending an 
+invalid set 3 make code (eg, a valid command.) &nbsp;The keyboard then re-enables 
+  scanning (if previously disabled).</li>
+     <li> *0xFC (Set Key Type Make/Break) - Similar to previous command,
+ except  this one only disables typematic repeat.</li>
+
+     <li> *0xFB (Set Key Type Typematic) - Similar to previous two, except
+  this one only disables break codes.</li>
+     <li> *0xFA (Set All Keys Typematic/Make/Break) - Keyboard responds with 
+ "ack" (0xFA). &nbsp;Sets all keys to their normal setting (generate scan 
+codes on make, break, and typematic repeat)</li>
+     <li> *0xF9 (Set All Keys Make) - Keyboard responds with "ack" (0xFA).
+  &nbsp;Similar to 0xFD, except applies to all keys.</li>
+     <li> *0xF8 (Set All Keys Make/Break) - Keyboard responds with "ack"
+ (0xFA).  &nbsp;Similar to 0xFC, except applies to all keys.</li>
+
+     <li> *0xF7 (Set All Keys Typematic) - Keyboard responds with "ack" (0xFA). 
+  &nbsp;Similar to 0xFB, except applies to all keys.</li>
+     <li> 0xF6 (Set Default) - Load default typematic rate/delay (10.9cps 
+ /  500ms), key types (all keys typematic/make/break), and scan code set (2).</li>
+     <li> 0xF5 (Disable) - Keyboard stops scanning, loads default values
+ (see   "Set Default" command), and waits further instructions.</li>
+     <li> 0xF4 (Enable) - Re-enables keyboard after disabled using previous
+   command.</li>
+
+     <li> 0xF3 (Set Typematic Rate/Delay) - Host follows this command with
+   one argument byte that defines the typematic rate and delay as follows:</li>
+     <br>
+        .                                                       
+  <center><b>Repeat Rate</b></center>
+           
+  <center>                                                      
+  <table width="90%" border="1" cellpadding="0" cellspacing="0">
+         <tbody>
+                    <tr>
+
+         <td>                                                           
+                                           
+        <center>Bits 0-4</center>
+         </td>
+          <td>                                                          
+                                            
+        <center>Rate(cps)</center>
+         </td>
+          <td bgcolor="#cccccc">&nbsp;</td>
+          <td>                                                          
+                                            
+        <center>Bits 0-4</center>
+
+         </td>
+          <td>                                                          
+                                            
+        <center>Rate(cps)</center>
+         </td>
+          <td bgcolor="#cccccc">&nbsp;</td>
+          <td>                                                          
+                                            
+        <center>Bits 0-4</center>
+         </td>
+          <td>                                                          
+                                            
+        <center>Rate(cps)</center>
+
+         </td>
+          <td bgcolor="#cccccc">&nbsp;</td>
+          <td>                                                          
+                                            
+        <center>Bits 0-4</center>
+         </td>
+          <td>                                                          
+                                            
+        <center>Rate(cps)</center>
+         </td>
+         </tr>
+
+          <tr>
+         <td>                                                           
+                                           
+        <center><tt>00h</tt></center>
+         </td>
+          <td>                                                          
+                                            
+        <center><tt>30.0</tt></center>
+         </td>
+          <td bgcolor="#cccccc">&nbsp;</td>
+          <td>                                                          
+                                            
+        <center><tt>08h</tt></center>
+
+         </td>
+          <td>                                                          
+                                            
+        <center><tt>15.0</tt></center>
+         </td>
+          <td bgcolor="#cccccc">&nbsp;</td>
+          <td>                                                          
+                                            
+        <center><tt>10h</tt></center>
+         </td>
+          <td>                                                          
+                                            
+        <center><tt>7.5</tt></center>
+
+         </td>
+          <td bgcolor="#cccccc">&nbsp;</td>
+          <td>                                                          
+                                            
+        <center><tt>18h</tt></center>
+         </td>
+          <td>                                                          
+                                            
+        <center><tt>3.7</tt></center>
+         </td>
+         </tr>
+
+          <tr>
+         <td>                                                           
+                                           
+        <center><tt>01h</tt></center>
+         </td>
+          <td>                                                          
+                                            
+        <center><tt>26.7</tt></center>
+         </td>
+          <td bgcolor="#cccccc">&nbsp;</td>
+          <td>                                                          
+                                            
+        <center><tt>09h</tt></center>
+
+         </td>
+          <td>                                                          
+                                            
+        <center><tt>13.3</tt></center>
+         </td>
+          <td bgcolor="#cccccc">&nbsp;</td>
+          <td>                                                          
+                                            
+        <center><tt>11h</tt></center>
+         </td>
+          <td>                                                          
+                                            
+        <center><tt>6.7</tt></center>
+
+         </td>
+          <td bgcolor="#cccccc">&nbsp;</td>
+          <td>                                                          
+                                            
+        <center><tt>19h</tt></center>
+         </td>
+          <td>                                                          
+                                            
+        <center><tt>3.3</tt></center>
+         </td>
+         </tr>
+
+          <tr>
+         <td>                                                           
+                                           
+        <center><tt>02h</tt></center>
+         </td>
+          <td>                                                          
+                                            
+        <center><tt>24.0</tt></center>
+         </td>
+          <td bgcolor="#cccccc">&nbsp;</td>
+          <td>                                                          
+                                            
+        <center><tt>0Ah</tt></center>
+
+         </td>
+          <td>                                                          
+                                            
+        <center><tt>12.0</tt></center>
+         </td>
+          <td bgcolor="#cccccc">&nbsp;</td>
+          <td>                                                          
+                                            
+        <center><tt>12h</tt></center>
+         </td>
+          <td>                                                          
+                                            
+        <center><tt>6.0</tt></center>
+
+         </td>
+          <td bgcolor="#cccccc">&nbsp;</td>
+          <td>                                                          
+                                            
+        <center><tt>1Ah</tt></center>
+         </td>
+          <td>                                                          
+                                            
+        <center><tt>3.0</tt></center>
+         </td>
+         </tr>
+
+          <tr>
+         <td>                                                           
+                                           
+        <center><tt>03h</tt></center>
+         </td>
+          <td>                                                          
+                                            
+        <center><tt>21.8</tt></center>
+         </td>
+          <td bgcolor="#cccccc">&nbsp;</td>
+          <td>                                                          
+                                            
+        <center><tt>0Bh</tt></center>
+
+         </td>
+          <td>                                                          
+                                            
+        <center><tt>10.9</tt></center>
+         </td>
+          <td bgcolor="#cccccc">&nbsp;</td>
+          <td>                                                          
+                                            
+        <center><tt>13h</tt></center>
+         </td>
+          <td>                                                          
+                                            
+        <center><tt>5.5</tt></center>
+
+         </td>
+          <td bgcolor="#cccccc">&nbsp;</td>
+          <td>                                                          
+                                            
+        <center><tt>1Bh</tt></center>
+         </td>
+          <td>                                                          
+                                            
+        <center><tt>2.7</tt></center>
+         </td>
+         </tr>
+
+          <tr>
+         <td>                                                           
+                                           
+        <center><tt>04h</tt></center>
+         </td>
+          <td>                                                          
+                                            
+        <center><tt>20.7</tt></center>
+         </td>
+          <td bgcolor="#cccccc">&nbsp;</td>
+          <td>                                                          
+                                            
+        <center><tt>0Ch</tt></center>
+
+         </td>
+          <td>                                                          
+                                            
+        <center><tt>10.0</tt></center>
+         </td>
+          <td bgcolor="#cccccc">&nbsp;</td>
+          <td>                                                          
+                                            
+        <center><tt>14h</tt></center>
+         </td>
+          <td>                                                          
+                                            
+        <center><tt>5.0</tt></center>
+
+         </td>
+          <td bgcolor="#cccccc">&nbsp;</td>
+          <td>                                                          
+                                            
+        <center><tt>1Ch</tt></center>
+         </td>
+          <td align="center">                                           
+                      <font face="Courier New, Courier, monospace"><small>2.5</small></font><br>
+                  </td>
+         </tr>
+
+          <tr>
+         <td>                                                           
+                                           
+        <center><tt>05h</tt></center>
+         </td>
+          <td>                                                          
+                                            
+        <center><tt>18.5</tt></center>
+         </td>
+          <td bgcolor="#cccccc">&nbsp;</td>
+          <td>                                                          
+                                            
+        <center><tt>0Dh</tt></center>
+
+         </td>
+          <td>                                                          
+                                            
+        <center><tt>9.2</tt></center>
+         </td>
+          <td bgcolor="#cccccc">&nbsp;</td>
+          <td>                                                          
+                                            
+        <center><tt>15h</tt></center>
+         </td>
+          <td>                                                          
+                                            
+        <center><tt>4.6</tt></center>
+
+         </td>
+          <td bgcolor="#cccccc">&nbsp;</td>
+          <td>                                                          
+                                            
+        <center><tt>1Dh</tt></center>
+         </td>
+          <td>                                                          
+                                            
+        <center><tt>2.3</tt></center>
+         </td>
+         </tr>
+
+          <tr>
+         <td>                                                           
+                                           
+        <center><tt>06h</tt></center>
+         </td>
+          <td>                                                          
+                                            
+        <center><tt>17.1</tt></center>
+         </td>
+          <td bgcolor="#cccccc">&nbsp;</td>
+          <td>                                                          
+                                            
+        <center><tt>0Eh</tt></center>
+
+         </td>
+          <td>                                                          
+                                            
+        <center><tt>8.6</tt></center>
+         </td>
+          <td bgcolor="#cccccc">&nbsp;</td>
+          <td>                                                          
+                                            
+        <center><tt>16h</tt></center>
+         </td>
+          <td>                                                          
+                                            
+        <center><tt>4.3</tt></center>
+
+         </td>
+          <td bgcolor="#cccccc">&nbsp;</td>
+          <td>                                                          
+                                            
+        <center><tt>1Eh</tt></center>
+         </td>
+          <td>                                                          
+                                            
+        <center><tt>2.1</tt></center>
+         </td>
+         </tr>
+
+          <tr>
+         <td>                                                           
+                                           
+        <center><tt>07h</tt></center>
+         </td>
+          <td>                                                          
+                                            
+        <center><tt>16.0</tt></center>
+         </td>
+          <td bgcolor="#cccccc">&nbsp;</td>
+          <td>                                                          
+                                            
+        <center><tt>0Fh</tt></center>
+
+         </td>
+          <td>                                                          
+                                            
+        <center><tt>8.0</tt></center>
+         </td>
+          <td bgcolor="#cccccc">&nbsp;</td>
+          <td>                                                          
+                                            
+        <center><tt>17h</tt></center>
+         </td>
+          <td>                                                          
+                                            
+        <center><tt>4.0</tt></center>
+
+         </td>
+          <td bgcolor="#cccccc">&nbsp;</td>
+          <td>                                                          
+                                            
+        <center><tt>1Fh</tt></center>
+         </td>
+          <td align="center">                                           
+                 <small><font face="Courier New, Courier, monospace">2.0</font></small><br>
+                  </td>
+         </tr>
+
+                                                                        
+     
+    </tbody>                                                      
+  </table>
+                     
+  <div align="center">            </div>
+            </center>
+           
+  <center>                                                       
+  <p><b>Delay</b></p>
+                </center>
+           
+  <center>                                                      
+  <table width="217" border="1" cellpadding="0" cellspacing="0" cols="2">
+
+         <tbody>
+                    <tr>
+         <td>                                                           
+                                           
+        <center>Bits 5-6</center>
+         </td>
+          <td>                                                          
+                                            
+        <center>Delay (seconds)</center>
+         </td>
+         </tr>
+
+          <tr>
+         <td>                                                           
+                                           
+        <center>00b</center>
+         </td>
+          <td>                                                          
+                                            
+        <center>0.25</center>
+         </td>
+         </tr>
+          <tr>
+
+         <td>                                                           
+                                           
+        <center>01b</center>
+         </td>
+          <td>                                                          
+                                            
+        <center>0.50</center>
+         </td>
+         </tr>
+          <tr>
+         <td>                                                           
+                                           
+        <center>10b</center>
+
+         </td>
+          <td>                                                          
+                                            
+        <center>0.75</center>
+         </td>
+         </tr>
+          <tr>
+         <td>                                                           
+                                           
+        <center>11b</center>
+         </td>
+
+          <td>                                                          
+                                            
+        <center>1.00</center>
+         </td>
+         </tr>
+                                                                        
+     
+    </tbody>                                                      
+  </table>
+                </center>
+     <br>
+        &nbsp; <li> *0xF2 (Read ID) - The keyboard responds by sending a
+two-byte     device ID of 0xAB, 0x83. (0xAB is sent first, followed by 0x83.)</li>
+
+     <li> *0xF0 (Set Scan Code Set) -&nbsp; Keyboard responds with "ack", 
+ then reads argument byte from the host. &nbsp;This argument byte may be 0x01,
+  0x02, or 0x03 to select scan code set 1, 2, or 3, respectively.&nbsp; The
+  keyboard responds to this argument byte with "ack". &nbsp;If the argument 
+  byte is 0x00, the keyboard responds with "ack" followed by the current scan
+  code set.</li>
+     <li> 0xEE (Echo) - The keyboard responds with "Echo" (0xEE).</li>
+     <li> 0xED (Set/Reset LEDs) - The host follows this command with one
+ argument    byte, that specifies the state of the keyboard's Num Lock, Caps 
+ Lock, and   Scroll Lock LEDs.&nbsp; This argument byte is defined as follows:</li>
+
+     
+</ul>
+                                                
+<center>                                      
+<table width="400" border="0" cellpadding="3" cellspacing="0" cols="8">
+         <tbody>
+                  <tr valign="CENTER" align="center">
+         <td>MSb</td>
+          <td><br>
+                    </td>
+          <td><br>
+
+                    </td>
+          <td><br>
+                    </td>
+          <td><br>
+                    </td>
+          <td><br>
+                    </td>
+          <td><br>
+                    </td>
+
+          <td>LSb</td>
+         </tr>
+                                                               
+  </tbody>                                      
+</table>
+              </center>
+                                                
+<center>                                      
+<table width="400" border="1" cellpadding="2" cellspacing="0" cols="8">
+         <tbody>
+                  <tr valign="CENTER" align="center">
+
+         <td>Always 0</td>
+          <td>Always 0</td>
+          <td>Always 0</td>
+          <td>Always 0</td>
+          <td>Always 0</td>
+          <td>Caps Lock</td>
+
+          <td>Num Lock</td>
+          <td>Scroll Lock</td>
+         </tr>
+                                                               
+  </tbody>                                      
+</table>
+              </center>
+                                                
+<blockquote>                                                       
+  <blockquote>                                                          
+            
+    <blockquote>                                                         
+                             
+      <ul>
+
+                             
+        <ul>
+             <li> "Scroll Lock" - Scroll Lock LED off(0)/on(1)</li>
+             <li> "Num Lock" - Num Lock LED off(0)/on(1)</li>
+             <li> "Caps Lock" - Caps Lock LED off(0)/on(1)</li>
+                             
+        </ul>
+                       
+      </ul>
+
+         </blockquote>
+         </blockquote>
+         </blockquote>
+         *Originally available in PS/2 keyboards only.                  
+                    
+<p><b>Emulation:</b> </p>
+                                             
+<ul>
+        Click here   for keyboard/mouse routines.&nbsp; Source in MPASM for 
+ PIC microcontrollers.                                        
+
+</ul>
+         <b>The i8042 Keyboard Controller:</b>                          
+            
+<p>Up to this point in the article, all information has been presented   
+from a hardware point-of-view.&nbsp; However, if you're writing low-level 
+    keyboard-related software for the host PC, you won't be communicating 
+directly    with the keyboard.&nbsp; Instead, a keyboard controller provides 
+an interface    between the keyboard and the peripheral bus.&nbsp; This controller 
+takes   care of all the signal-level and protocol details, as well as providing 
+ some  conversion, interpretation, and handling of scan codes and commands.&nbsp; 
+         </p>
+                                             
+<p>An Intel 8042/compatible microcontroller is used as the PC's keyboard 
+  controller.&nbsp; In modern computers, this microcontroller is hidden within
+   the motherboard's chipset, which integrates many controllers in a single
+  package.&nbsp; Nonetheless, this device is still there, and the keyboard
+ controller is still commonly referred to as "the 8042". </p>
+
+                                             
+<p>Depending on the motherboard, the keyboard controller may operate   in 
+ one of two modes: "AT-compatible" mode, or "PS/2-compatible" mode.&nbsp; 
+   The latter is used if a PS/2 mouse is supported by the motherboard.&nbsp; 
+    If this is the case, the 8042 acts as the keyboard controller and the 
+mouse    controller.&nbsp; The keyboard controller auto-detects which mode 
+it is  to use according to how it's wired to the keyboard port. </p>
+                                             
+<p>The 8042 contains the following registers: </p>
+                                             
+<ul>
+     <li> A one-byte input buffer - contains byte read from keyboard; read-only</li>
+
+     <li> A one-byte output buffer - contains byte to-be-written to keyboard;
+    write-only</li>
+     <li> A one-byte status register - 8 status flags; read-only</li>
+     <li> A one-byte control register - 7 control flags; read/write&nbsp;</li>
+     
+</ul>
+         The first three registers (input, output, status) are directly accessible 
+    via ports 0x60 and 0x64.&nbsp; The last register (control) is read using 
+   the "Read Command Byte" command, and written using the "Write Command Byte"
+   command.&nbsp; The following table shows how the peripheral ports are
+used    to interface the 8042: <br>
+
+        &nbsp;                                       
+<center>                                      
+<table border="1" cellpadding="3" cellspacing="0">
+         <tbody>
+                  <tr>
+         <td>                                                           
+                           
+      <center>Port</center>
+         </td>
+          <td>                                                          
+                            
+      <center>Read /&nbsp; <br>
+
+        Write</center>
+         </td>
+          <td>                                                          
+                            
+      <center>Function</center>
+         </td>
+         </tr>
+          <tr>
+         <td>0x60</td>
+
+          <td>Read</td>
+          <td>Read Input Buffer</td>
+         </tr>
+          <tr>
+         <td>0x60</td>
+          <td>Write</td>
+          <td>Write Output Buffer</td>
+
+         </tr>
+          <tr>
+         <td>0x64</td>
+          <td>Read</td>
+          <td>Read Status Register</td>
+         </tr>
+          <tr>
+
+         <td>0x64</td>
+          <td>Write</td>
+          <td>Send Command</td>
+         </tr>
+                                                               
+  </tbody>                                      
+</table>
+              </center>
+                                                
+
+<p>Writing to port 0x64 doesn't write to any specific register, but   sends 
+ a command for the 8042 to interpret.&nbsp; If the command accepts a  parameter, 
+ this parameter is sent to port 0x60.&nbsp; Likewise, any results   returned 
+ by the command may be read from port 0x60. </p>
+                                             
+<p>When describing the 8042, I may occasionally refer to its physical   I/O 
+ pins.&nbsp; These pins are defined below: </p>
+                                             
+<p><u>AT-compatible mode</u> </p>
+                                             
+<center>                                      
+
+<table border="0" cellpadding="5" cellspacing="0">
+         <tbody>
+                  <tr>
+         <td>Port 1 (Input Port):                                       
+                                               
+      <center>                                                           
+                          
+      <table border="1" cellpadding="2" cellspacing="0">
+         <tbody>
+                        <tr>
+         <td>Pin</td>
+          <td>Name</td>
+
+          <td>Function</td>
+         </tr>
+          <tr>
+         <td>0</td>
+          <td>P10</td>
+          <td> <br>
+        Undefined <br>
+
+        .</td>
+         </tr>
+          <tr>
+         <td>1</td>
+          <td>P11</td>
+          <td> <br>
+        Undefined <br>
+
+        .</td>
+         </tr>
+          <tr>
+         <td>2</td>
+          <td>P12</td>
+          <td> <br>
+        Undefined <br>
+
+        .</td>
+         </tr>
+          <tr>
+         <td>3</td>
+          <td>P13</td>
+          <td> <br>
+        Undefined <br>
+
+        .</td>
+         </tr>
+          <tr>
+         <td>4</td>
+          <td>P14</td>
+          <td>External RAM <br>
+        1: Enable external RAM <br>
+
+        0: Disable external RAM</td>
+         </tr>
+          <tr>
+         <td>5</td>
+          <td>P15</td>
+          <td>Manufacturing Setting <br>
+        1: Setting enabled <br>
+
+        0: Setting disabled</td>
+         </tr>
+          <tr>
+         <td>6</td>
+          <td>P16</td>
+          <td>Display Type Switch <br>
+        1: Color display <br>
+
+        0: Monochrome</td>
+         </tr>
+          <tr>
+         <td>7</td>
+          <td>P17</td>
+          <td>Keyboard Inhibit Switch <br>
+        1: Keyboard enabled <br>
+
+        0: Keyboard inhibited</td>
+         </tr>
+                                                                        
+                                      
+        </tbody>                                                         
+                            
+      </table>
+                    </center>
+         </td>
+          <td>Port 2 (Output Port):                                     
+                                                 
+      <table border="1" cellpadding="2" cellspacing="0">
+         <tbody>
+
+                        <tr>
+         <td>Pin</td>
+          <td>Name</td>
+          <td>Function</td>
+         </tr>
+          <tr>
+         <td>0</td>
+
+          <td>P20</td>
+          <td>System Reset <br>
+        1: Normal <br>
+        0: Reset computer</td>
+         </tr>
+          <tr>
+         <td>1</td>
+
+          <td>P21</td>
+          <td> <br>
+        Gate A20 <br>
+        .</td>
+         </tr>
+          <tr>
+         <td>2</td>
+
+          <td>P22</td>
+          <td> <br>
+        Undefined <br>
+        .</td>
+         </tr>
+          <tr>
+         <td>3</td>
+
+          <td>P23</td>
+          <td> <br>
+        Undefined <br>
+        .</td>
+         </tr>
+          <tr>
+         <td>4</td>
+
+          <td>P24</td>
+          <td> <br>
+        Input Buffer Full <br>
+        .</td>
+         </tr>
+          <tr>
+         <td>5</td>
+
+          <td>P25</td>
+          <td> <br>
+        Output Buffer Empty <br>
+        .</td>
+         </tr>
+          <tr>
+         <td>6</td>
+
+          <td>P26</td>
+          <td>Keyboard Clock <br>
+        1: Pull Clock low <br>
+        0: High-Z</td>
+         </tr>
+          <tr>
+         <td>7</td>
+
+          <td>P27</td>
+          <td>Keyboard Data: <br>
+        1: Pull Data low <br>
+        0: High-Z</td>
+         </tr>
+                                                                        
+                                      
+        </tbody>                                                         
+                            
+      </table>
+
+         </td>
+          <td>Port 3 (Test Port):                                       
+                                               
+      <center>                                                           
+                          
+      <table border="1" cellpadding="2" cellspacing="0">
+         <tbody>
+                        <tr>
+         <td>Pin</td>
+          <td>Name</td>
+          <td>Function</td>
+
+         </tr>
+          <tr>
+         <td>0</td>
+          <td>T0</td>
+          <td>Keyboard Clock&nbsp; <br>
+        (Input) <br>
+
+        .</td>
+         </tr>
+          <tr>
+         <td>1</td>
+          <td>T1</td>
+          <td>Keyboard Data <br>
+        (Input) <br>
+
+        .</td>
+         </tr>
+          <tr>
+         <td>2</td>
+          <td>--</td>
+          <td> <br>
+        Undefined <br>
+
+        .</td>
+         </tr>
+          <tr>
+         <td>3</td>
+          <td>--</td>
+          <td> <br>
+        Undefined <br>
+
+        .</td>
+         </tr>
+          <tr>
+         <td>4</td>
+          <td>--</td>
+          <td> <br>
+        Undefined <br>
+
+        .</td>
+         </tr>
+          <tr>
+         <td>5</td>
+          <td>--</td>
+          <td> <br>
+        Undefined <br>
+
+        .</td>
+         </tr>
+          <tr>
+         <td>6</td>
+          <td>--</td>
+          <td> <br>
+        Undefined <br>
+
+        .</td>
+         </tr>
+          <tr>
+         <td>7</td>
+          <td>--</td>
+          <td> <br>
+        Undefined <br>
+
+        .</td>
+         </tr>
+                                                                        
+                                      
+        </tbody>                                                         
+                            
+      </table>
+                    </center>
+         </td>
+         </tr>
+                                                               
+  </tbody>                                      
+</table>
+
+              </center>
+                                                
+<p><u>PS/2-compatible mode</u> </p>
+                                             
+<center>                                      
+<table border="0" cellpadding="5" cellspacing="0">
+         <tbody>
+                  <tr>
+         <td>Port 1 (Input Port):                                       
+                                               
+      <center>                                                           
+                          
+      <table border="1" cellpadding="2" cellspacing="0">
+
+         <tbody>
+                        <tr>
+         <td>Pin</td>
+          <td>Name</td>
+          <td>Function</td>
+         </tr>
+          <tr>
+
+         <td>0</td>
+          <td>P10</td>
+          <td>Keyboard Data <br>
+        (Input) <br>
+        .</td>
+         </tr>
+
+          <tr>
+         <td>1</td>
+          <td>P11</td>
+          <td>Mouse Data <br>
+        (Input) <br>
+        .</td>
+
+         </tr>
+          <tr>
+         <td>2</td>
+          <td>P12</td>
+          <td> <br>
+        Undefined <br>
+        .</td>
+
+         </tr>
+          <tr>
+         <td>3</td>
+          <td>P13</td>
+          <td> <br>
+        Undefined <br>
+        .</td>
+
+         </tr>
+          <tr>
+         <td>4</td>
+          <td>P14</td>
+          <td>External RAM <br>
+        1: Enable external RAM <br>
+        0: Disable external RAM</td>
+
+         </tr>
+          <tr>
+         <td>5</td>
+          <td>P15</td>
+          <td>Manufacturing Setting <br>
+        1: Setting enabled <br>
+        0: Setting disabled</td>
+
+         </tr>
+          <tr>
+         <td>6</td>
+          <td>P16</td>
+          <td>Display Type Switch <br>
+        1: Color display <br>
+        0: Monochrome</td>
+
+         </tr>
+          <tr>
+         <td>7</td>
+          <td>P17</td>
+          <td>Keyboard Inhibit Switch <br>
+        1: Keyboard enabled <br>
+        0: Keyboard disabled</td>
+
+         </tr>
+                                                                        
+                                      
+        </tbody>                                                         
+                            
+      </table>
+                    </center>
+         </td>
+          <td>Port 2 (Output Port):                                     
+                                                 
+      <center>                                                           
+                          
+      <table border="1" cellpadding="2" cellspacing="0">
+         <tbody>
+                        <tr>
+
+         <td>Pin</td>
+          <td>Name</td>
+          <td>Function</td>
+         </tr>
+          <tr>
+         <td>0</td>
+          <td>P20</td>
+
+          <td>System Reset <br>
+        1: Normal <br>
+        0: Reset computer</td>
+         </tr>
+          <tr>
+         <td>1</td>
+          <td>P21</td>
+
+          <td> <br>
+        Gate A20 <br>
+        .</td>
+         </tr>
+          <tr>
+         <td>2</td>
+          <td>P22</td>
+
+          <td>Mouse Data: <br>
+        1: Pull Data low <br>
+        0: High-Z</td>
+         </tr>
+          <tr>
+         <td>3</td>
+          <td>P23</td>
+
+          <td>Mouse Clock: <br>
+        1: Pull Clock low <br>
+        0: High-Z</td>
+         </tr>
+          <tr>
+         <td>4</td>
+          <td>P24</td>
+
+          <td>Keyboard IBF interrupt: <br>
+        1: Assert IRQ 1 <br>
+        0: De-assert IRQ 1</td>
+         </tr>
+          <tr>
+         <td>5</td>
+          <td>P25</td>
+
+          <td>Mouse IBF interrupt: <br>
+        1: Assert IRQ 12 <br>
+        0: De-assert IRQ 12</td>
+         </tr>
+          <tr>
+         <td>6</td>
+          <td>P26</td>
+
+          <td>Keyboard Clock: <br>
+        1: Pull Clock low <br>
+        0: High-Z</td>
+         </tr>
+          <tr>
+         <td>7</td>
+          <td>P27</td>
+
+          <td>Keyboard Data: <br>
+        1: Pull Data low <br>
+        0: High-Z</td>
+         </tr>
+                                                                        
+                                      
+        </tbody>                                                         
+                            
+      </table>
+                    </center>
+         </td>
+
+          <td>Port 3 (Test Port):                                       
+                                               
+      <center>                                                           
+                          
+      <table border="1" cellpadding="2" cellspacing="0">
+         <tbody>
+                        <tr>
+         <td>Pin</td>
+          <td>Name</td>
+          <td>Function</td>
+
+         </tr>
+          <tr>
+         <td>0</td>
+          <td>T0</td>
+          <td>Keyboard Clock <br>
+        (Input) <br>
+        .</td>
+
+         </tr>
+          <tr>
+         <td>1</td>
+          <td>T1</td>
+          <td>Mouse Clock <br>
+        (Input) <br>
+        .</td>
+
+         </tr>
+          <tr>
+         <td>2</td>
+          <td>--</td>
+          <td> <br>
+        Undefined <br>
+        .</td>
+
+         </tr>
+          <tr>
+         <td>3</td>
+          <td>--</td>
+          <td> <br>
+        Undefined <br>
+        .</td>
+
+         </tr>
+          <tr>
+         <td>4</td>
+          <td>--</td>
+          <td> <br>
+        Undefined <br>
+        .</td>
+
+         </tr>
+          <tr>
+         <td>5</td>
+          <td>--</td>
+          <td> <br>
+        Undefined <br>
+        .</td>
+
+         </tr>
+          <tr>
+         <td>6</td>
+          <td>--</td>
+          <td> <br>
+        Undefined <br>
+        .</td>
+
+         </tr>
+          <tr>
+         <td>7</td>
+          <td>--</td>
+          <td> <br>
+        Undefined <br>
+        .</td>
+
+         </tr>
+                                                                        
+                                      
+        </tbody>                                                         
+                            
+      </table>
+                    </center>
+         </td>
+         </tr>
+                                                               
+  </tbody>                                      
+</table>
+              </center>
+                                                
+
+<p>(Note: Reading keyboard controller datasheets can be confusing--it   will 
+ refer to the "input buffer" as the "output buffer" and vice versa.&nbsp; 
+   This makes sense from the point-of-view of someone writing firmware for 
+  the controller, but for somebody used to interfacing the controller, this 
+  can cause problems.&nbsp; Throughout this document, I only refer to the 
+"input   buffer" as the one containing input from the keyboard, and the "output
+  buffer"   as the one that contains output to be sent to the keyboard.)
+</p>
+                                             
+<p><i>Status Register:</i> </p>
+                                             
+<p>The 8042's status flags are read from port 0x64.&nbsp; They contain   
+error information, status information, and indicate whether or not data 
+is present in the input and output buffers.&nbsp; The flags are defined as
+ follows:        <br>
+
+        &nbsp; </p>
+                                             
+<center>                                      
+<table border="0" cellpadding="0" cellspacing="0">
+         <tbody>
+                  <tr>
+         <td><br>
+                    </td>
+          <td>                                                          
+                            
+      <center>                                                           
+                          
+      <table width="400" border="0" cellpadding="3" cellspacing="0" cols="8">
+
+         <tbody>
+                        <tr>
+         <td>MSb</td>
+          <td><br>
+                          </td>
+          <td><br>
+                          </td>
+          <td><br>
+
+                          </td>
+          <td><br>
+                          </td>
+          <td><br>
+                          </td>
+          <td><br>
+                          </td>
+          <td>                                                          
+                                                                        
+   
+            <div align="right">LSb</div>
+
+         </td>
+         </tr>
+                                                                        
+                                      
+        </tbody>                                                         
+                            
+      </table>
+                    </center>
+         </td>
+         </tr>
+          <tr>
+         <td>AT-compatible mode:</td>
+
+          <td>                                                          
+                            
+      <center>                                                           
+                          
+      <table width="400" border="1" cellpadding="2" cellspacing="0" cols="8">
+         <tbody>
+                        <tr>
+         <td>                                                           
+                                                                        
+  
+            <center>PERR</center>
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>RxTO</center>
+
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>TxTO</center>
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>INH</center>
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>A2</center>
+
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>SYS</center>
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>IBF</center>
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>OBF</center>
+
+         </td>
+         </tr>
+                                                                        
+                                      
+        </tbody>                                                         
+                            
+      </table>
+                    </center>
+         </td>
+         </tr>
+          <tr>
+         <td>PS/2-compatible mode:&nbsp;</td>
+
+          <td>                                                          
+                            
+      <center>                                                           
+                          
+      <table width="400" border="1" cellpadding="2" cellspacing="0" cols="8">
+         <tbody>
+                        <tr>
+         <td>                                                           
+                                                                        
+  
+            <center>PERR</center>
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>TO</center>
+
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>MOBF</center>
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>INH</center>
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>A2</center>
+
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>SYS</center>
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>IBF</center>
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>OBF</center>
+
+         </td>
+         </tr>
+                                                                        
+                                      
+        </tbody>                                                         
+                            
+      </table>
+                    </center>
+         </td>
+         </tr>
+                                                               
+  </tbody>                                      
+</table>
+              </center>
+
+                                                
+<ul>
+     <li> OBF (Output Buffer Full) - Indicates when it's okay to write to 
+ output   buffer.</li>
+     <br>
+        0: Output buffer empty - Okay to write to port 0x60 <br>
+        1: Output buffer full - Don't write to port 0x60 <li> IBF (Input
+Buffer    Full) - Indicates when input is available in the input buffer.</li>
+     <br>
+
+        0: Input buffer empty - No unread input at port 0x60 <br>
+        1: Input buffer full - New input can be read from port 0x60 <li>
+SYS   (System   flag) - Post reads this to determine if power-on reset, or
+software   reset.</li>
+     <br>
+        0: Power-up value - System is in power-on reset. <br>
+        1: BAT code received - System has already beed initialized. <li>
+A2  (Address   line A2) - Used internally by the keyboard controller</li>
+
+     <br>
+        0: A2 = 0 - Port 0x60 was last written to <br>
+        1: A2 = 1 - Port 0x64 was last written to <li> INH (Inhibit flag) 
+-  Indicates   whether or not keyboard communication is inhibited.</li>
+     <br>
+        0: Keyboard Clock = 0 - Keyboard is inhibited <br>
+        1: Keyboard Clock = 1 - Keyboard is not inhibited <li> TxTO (Transmit 
+  Timeout)  - Indicates keyboard isn't accepting input (kbd may not be plugged 
+  in).</li>
+
+     <br>
+        0: No Error - Keyboard accepted the last byte written to it. <br>
+        1: Timeout error - Keyboard didn't generate clock signals within
+15  ms  of  "request-to-send". <li> RxTO (Receive Timeout) - Indicates keyboard
+  didn't   respond to a command (kbd probably broke)</li>
+     <br>
+        0: No Error - Keyboard responded to last byte. <br>
+        1: Timeout error - Keyboard didn't generate clock signals within
+20  ms  of  command reception. <li> PERR (Parity Error) - Indicates communication
+   error  with keyboard (possibly noisy/loose connection)</li>
+
+     <br>
+        0: No Error - Odd parity received and proper command response recieved. 
+           <br>
+        1: Parity Error - Even parity received or 0xFE received as command
+ response.            <li> MOBF (Mouse Output Buffer Full) - Similar to OBF,
+ except for   PS/2 mouse.</li>
+     <br>
+        0: Output buffer empty - Okay to write to auxillary device's output 
+ buffer            <br>
+        1: Output buffer full - Don't write to port auxillary device's output 
+  buffer           <li> TO (General Timout) - Indicates timeout during command 
+  write  or response. (Same as TxTO + RxTO.)</li>
+
+     <br>
+        0: No Error - Keyboard received and responded to last command. <br>
+        1: Timeout Error - See TxTO and RxTO for more information.      
+                               
+</ul>
+         [EG: On my PC, the normal value of the 8042's "Status" register
+is  14h   = 00010100b.&nbsp; This indicates keyboard communication is not
+inhibited,    and the 8042 has already completed its self-test ("BAT").&nbsp;
+The "Status"    register is accessed by reading from port 64h ("IN AL, 64h")]
+                                      
+<p><i>Reading keyboard input:</i> </p>
+
+                                             
+<p>When the 8042 recieves a valid scan code from the keyboard, it is   converted 
+ to its set 1 equivalent.&nbsp; The converted scan code is then  placed in 
+ the input buffer, the IBF (Input Buffer Full) flag is set, and IRQ 1 is asserted.&nbsp;
+ Furthermore, when any byte is received from the keyboard, the 8042 inhibits
+ further reception (by pulling the "Clock" line low), so no other scan codes
+ will be received until the input buffer is emptied.        </p>
+                                             
+<p>If enabled, IRQ 1 will activate the keyboard driver, pointed to by interrupt 
+ vector 0x09.&nbsp; The driver reads the scan code from port 0x60, which causes
+ the 8042 to de-assert IRQ 1 and reset the IBF flag.&nbsp; The scan code
+is  then processed by the driver, which responds to special key combinations 
+and updates an area of the system RAM reserved for keyboard input.       </p>
+                                             
+<p>If you don't want to patch into interrupt 0x09, you may poll the   keyboard 
+ controller for input.&nbsp; This is accomplished by disabling the   8042's 
+ IBF Interrupt and polling the IBF flag.&nbsp; This flag is set (1)   when 
+ data is available in the input buffer, and is cleared (0) when data  is read
+ from the input buffer.&nbsp; Reading the input buffer is accomplished  
+ by reading from port 0x60, and the IBF flag is at port 0x64, bit 1.&nbsp; 
+   The following assembly code illustrates this: </p>
+
+                                             
+<p><tt>kbRead:</tt> <br>
+              <tt>WaitLoop:&nbsp;&nbsp;&nbsp; in&nbsp;&nbsp;&nbsp;&nbsp;
+al,   64h&nbsp;&nbsp;&nbsp;&nbsp;   ; Read Status byte</tt> <br>
+              <tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 
+    and&nbsp;&nbsp;&nbsp; al, 10b&nbsp;&nbsp;&nbsp;&nbsp; ; Test IBF flag 
+(Status&lt;1&gt;)</tt>          <br>
+
+              <tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 
+    jz&nbsp;&nbsp;&nbsp;&nbsp; WaitLoop&nbsp;&nbsp;&nbsp; ; Wait for IBF =
+ 1</tt>         <br>
+              <tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 
+    in&nbsp;&nbsp;&nbsp;&nbsp; al, 60h&nbsp;&nbsp;&nbsp;&nbsp; ; Read input 
+  buffer</tt>        </p>
+
+                                             
+<p><i>Writing to keyboard:</i> </p>
+                                             
+<p>When you write to the 8042's output buffer (via port 0x60), the controller 
+ sets the OBF ("Output Buffer Full") flag and processes the data.&nbsp;  The
+ 8042 will send this data to the keyboard and wait for a response.&nbsp; 
+If the keyboard does not accept or generate a response within a given amount 
+    of time, the appropriate timeout flag will be set (see Status register 
+ definition  for more info.)&nbsp; If an incorrect parity bit is read, the 
+ 8042 will send  the "Resend" (0xFE) command to the keyboard.&nbsp; If the 
+ keyboard continues  to send erroneous bytes, the "Parity Error" flag is set
+ in the Status register.&nbsp;  If no errors occur, the response byte is
+placed  in the input buffer, the IBF ("Input Buffer Full") flag is set, and
+IRQ 1  is activated, signaling the keyboard driver. </p>
+
+                                             
+<p>The following assembly code shows how to write to the output buffer.&nbsp; 
+    (Remember, after you write to the output buffer, you should use int 9h 
+ or  poll port 64h to get the keyboard's response.) </p>
+                                             
+<p><tt>kbWrite:</tt> <br>
+              <tt>WaitLoop:&nbsp;&nbsp;&nbsp; in&nbsp;&nbsp;&nbsp;&nbsp;
+al,   64h&nbsp;&nbsp;&nbsp;&nbsp;   ; Read Status byte</tt> <br>
+
+              <tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 
+    and&nbsp;&nbsp;&nbsp; al, 01b&nbsp;&nbsp;&nbsp;&nbsp; ; Test OBF flag 
+(Status&lt;0&gt;)</tt>          <br>
+              <tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 
+    jnz&nbsp;&nbsp;&nbsp; WaitLoop&nbsp;&nbsp;&nbsp; ; Wait for OBF = 0</tt> 
+         <br>
+
+              <tt>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 
+    out&nbsp;&nbsp;&nbsp; 60h, cl&nbsp;&nbsp;&nbsp;&nbsp; ; Write data to 
+output    buffer</tt> </p>
+                                             
+<p><i>Keyboard Controller Commands:</i> </p>
+                                             
+<p>Commands are sent to the keyboard controller by writing to port 0x64.&nbsp; 
+ Command parameters are written to port 0x60 after teh command is sent.&nbsp; 
+ Results are returned on port 0x60.&nbsp; Always test the OBF ("Output Buffer 
+ Full") flag before writing commands or parameters to the 8042. </p>
+
+                                             
+<ul>
+     <li> 0x20 (Read Command Byte) - Returns command byte.&nbsp; (See "Write
+    Command Byte" below).</li>
+     <li> 0x60 (Write Command Byte) - Stores parameter as command byte.&nbsp;
+    Command byte defined as follows:</li>
+     
+</ul>
+
+                                                
+<center>                                      
+<table border="0" cellpadding="0" cellspacing="0">
+         <tbody>
+                  <tr>
+         <td><br>
+                    </td>
+          <td>                                                          
+                            
+      <center>                                                           
+                          
+      <table width="400" border="0" cellpadding="3" cellspacing="0" cols="8">
+         <tbody>
+
+                        <tr>
+         <td>MSb</td>
+          <td><br>
+                          </td>
+          <td><br>
+                          </td>
+          <td><br>
+                          </td>
+
+          <td><br>
+                          </td>
+          <td><br>
+                          </td>
+          <td><br>
+                          </td>
+          <td>                                                          
+                                                                        
+   
+            <div align="right">LSb</div>
+         </td>
+
+         </tr>
+                                                                        
+                                      
+        </tbody>                                                         
+                            
+      </table>
+                    </center>
+         </td>
+         </tr>
+          <tr>
+         <td>AT-compatible mode:</td>
+          <td>                                                          
+                            
+      <center>                                                           
+                          
+      <table width="400" border="1" cellpadding="2" cellspacing="0" cols="8">
+
+         <tbody>
+                        <tr>
+         <td>                                                           
+                                                                        
+  
+            <center>--</center>
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>XLAT</center>
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>PC</center>
+
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>_EN</center>
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>OVR</center>
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>SYS</center>
+
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>--</center>
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>INT</center>
+         </td>
+         </tr>
+                                                                        
+                                      
+        </tbody>                                                         
+                            
+      </table>
+
+                    </center>
+         </td>
+         </tr>
+          <tr>
+         <td>PS/2-compatible mode:&nbsp;</td>
+          <td>                                                          
+                            
+      <center>                                                           
+                          
+      <table width="400" border="1" cellpadding="2" cellspacing="0" cols="8">
+         <tbody>
+
+                        <tr>
+         <td>                                                           
+                                                                        
+  
+            <center>--</center>
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>XLAT</center>
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>_EN2</center>
+
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>_EN</center>
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>--</center>
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>SYS</center>
+
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>INT2</center>
+         </td>
+          <td>                                                          
+                                                                        
+   
+            <center>INT</center>
+         </td>
+         </tr>
+                                                                        
+                                      
+        </tbody>                                                         
+                            
+      </table>
+
+                    </center>
+         </td>
+         </tr>
+                                                               
+  </tbody>                                      
+</table>
+              </center>
+                                                
+<ul>
+           
+  <ul>
+       <li> INT (Input Buffer Full Interrupt) - When set, IRQ 1 is generated
+   when  data is available in the input buffer.</li>
+
+       <br>
+        0: IBF Interrupt Disabled - You must poll STATUS&lt;IBF&gt; to read 
+ input.              <br>
+        1: IBF Interrupt Enabled - Keyboard driver at software int 0x09 handles 
+   input.            <li> SYS (System Flag) - Used to manually set/clear SYS
+   flag in Status register.</li>
+       <br>
+        0: Power-on value - Tells POST to perform power-on tests/initialization. 
+             <br>
+
+        1: BAT code received - Tells POST to perform "warm boot" tests/initiailization. 
+              <li> OVR (Inhibit Override) - Overrides keyboard's "inhibit" 
+ switch  on older motherboards.</li>
+       <br>
+        0: Inhibit switch enabled - Keyboard inhibited if pin P17 is high.
+     <br>
+        1: Inhibit switch disabled - Keyboard not inhibited even if P17 = 
+high.              <li>  _EN (Disable keyboard) - Disables/enables keyboard 
+interface.</li>
+       <br>
+
+        0: Enable - Keyboard interface enabled. <br>
+        1: Disable - All keyboard communication is disabled. <li> PC ("PC 
+Mode")    - ???Enables keyboard interface somehow???</li>
+       <br>
+        0: Disable - ??? <br>
+        1: Enable - ??? <li> XLAT (Translate Scan Codes) - Enables/disables 
+ translation   to set 1 scan codes.</li>
+
+       <br>
+        0: Translation disabled - Data appears at input buffer exactly as 
+read   from  keyboard <br>
+        1: Translation enabled - Scan codes translated to set 1 before put
+ in  input  buffer <li> INT2 (Mouse Input Buffer Full Interrupt) - When set, 
+ IRQ  12 is  generated when mouse data is available.</li>
+       <br>
+        0: Auxillary IBF Interrupt Disabled -&nbsp; <br>
+        1: Auxillary IBF Interrupt Enabled -&nbsp; <li> _EN2 (Disable Mouse)
+  -  Disables/enables  mouse interface.</li>
+
+       <br>
+        0: Enable - Auxillary PS/2 device interface enabled <br>
+        1: Disable - Auxillary PS/2 device interface disabled           
+                                         
+  </ul>
+     
+</ul>
+                                                
+<ul>
+     <li> ?0x90-0x9F (Write to output port) - Writes command's lower nibble 
+   to lower nibble of output port (see Output Port definition.)</li>
+     <li> ?0xA1 (Get version number) - Returns firmware version number.</li>
+
+     <li> ?0xA4 (Get password) - Returns 0xFA if password exists; otherwise,
+    0xF1.</li>
+     <li> ?0xA5 (Set password) - Set the new password by sending a null-terminated 
+    string of scan codes as this command's parameter.</li>
+     <li> ?0xA6 (Check password) - Compares keyboard input with current password.</li>
+     <li> 0xA7 (Disable mouse interface) - PS/2 mode only.&nbsp; Similar
+ to   "Disable keyboard interface" (0xAD) command.</li>
+
+     <li> 0xA8 (Enable mouse interface) - PS/2 mode only.&nbsp; Similar to
+  "Enable  keyboard interface" (0xAE) command.</li>
+     <li> 0xA9 (Mouse interface test) - Returns 0x00 if okay, 0x01 if Clock
+   line stuck low, 0x02 if clock line stuck high, 0x03 if data line stuck
+low,   and 0x04 if data line stuck high.</li>
+     <li> 0xAA (Controller self-test) - Returns 0x55 if okay.</li>
+     <li> 0xAB (Keyboard interface test) - Returns 0x00 if okay, 0x01 if
+ Clock   line stuck low, 0x02 if clock line stuck high, 0x03 if data line 
+stuck  low,   and 0x04 if data line stuck high.</li>
+
+     <li> 0xAD (Disable keyboard interface) - Sets bit 4 of command byte
+ and   disables all communication with keyboard.</li>
+     <li> 0xAE (Enable keyboard interface) - Clears bit 4 of command byte 
+ and  re-enables communication with keyboard.</li>
+     <li> 0xAF (Get version)</li>
+     <li> 0xC0 (Read input port) - Returns values on input port (see Input
+   Port definition.)</li>
+     <li> 0xC1 (Copy input port LSn) - PS/2 mode only. Copy input port's
+ low   nibble to Status register (see Input Port definition)</li>
+
+     <li> 0xC2 (Copy input port MSn) - PS/2 mode only. Copy input port's
+ high   nibble to Status register (see Input Port definition.)</li>
+     <li> 0xD0 (Read output port) - Returns values on output port (see Output
+    Port definition.)&nbsp;</li>
+     <li> 0xD1 (Write output port) - Write parameter to output port (see
+ Output   Port definition.)</li>
+     <li> 0xD2 (Write keyboard buffer) - Parameter written to input buffer
+   as if received from keyboard.</li>
+     <li> 0xD3 (Write mouse buffer) - Parameter written to input buffer as
+  if received from mouse.</li>
+
+     <li> 0xD4 (Write mouse Device) - Sends parameter to the auxillary PS/2
+   device.</li>
+     <li> 0xE0 (Read test port) - Returns values on test port (see Test Port 
+   definition.)</li>
+     <li> 0xF0-0xFF (Pulse output port) - Pulses command's lower nibble onto 
+   lower nibble of output port (see Output Port definition.)</li>
+     
+</ul>
+                                                
+<p><br>
+              <i>Modern Keyboard Controllers:</i> </p>
+
+                                             
+<p>So far, I've only discussed the 8042 keyboard controller.&nbsp; Although 
+ modern keyboard controllers remain compatible with the original device, compatibility
+ is their only requirement (and their goal.) </p>
+                                             
+<p>My motherboard's keyboard controller is a great example of this.&nbsp; 
+    I connected a microcontroller+LCD in parallel to my keyboard to see what 
+   data is sent by the keyboard controller.&nbsp; At power-up, the keyboard 
+  controller sent the "Set LED state" command to turn off all LEDs, then reads
+  the keyboard's ID.&nbsp; When I tried writing data to the output buffer,
+ I found the keyboard controller only forwards the "Set LED state" command
+ and "Set Typematic Rate/Delay" command.&nbsp; It does not allow any other
+ commands to be sent to the keyboard.&nbsp; However, it does emulate the
+keyboard's   response by placing "acknowledge" (0xFA) in the input buffer 
+when appropriate   (or 0xEE in response to the "Echo" command.)&nbsp; Furthermore, 
+if the keyboard   sends it an erroneous byte, the keyboard controller takes 
+care of error handling  (sends the "Retry" command; if byte still erroneous; 
+sends error code to keyboard and places error code in input buffer.) </p>
+
+                                             
+<p>Once again, keep in mind chipset designers are more interested in   compatibility 
+ than standardization.&nbsp; </p>
+                                             
+<p><b>Initialization:</b> </p>
+                                             
+<p>The following is the communication between my computer and keyboard   
+when it boots-up.&nbsp; I beleive the first three commands were initiated 
+    by the keyboad controller, the next command (which enables Num lock LED) 
+   was sent by the BIOS, then the rest of the commands were sent my the OS 
+ (Win98SE).&nbsp;  Remember, these results are specific to my computer, but 
+ it should give you  a general idea as to what happens at startup. </p>
+                                             
+<blockquote><tt>Keyboard: AA&nbsp; Self-test passed&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 
+    ;Keyboard controller init</tt> <br>
+
+                <tt>Host:&nbsp;&nbsp;&nbsp;&nbsp; ED&nbsp; Set/Reset Status 
+ Indicators&nbsp;</tt>            <br>
+                <tt>Keyboard: FA&nbsp; Acknowledge</tt> <br>
+                <tt>Host:&nbsp;&nbsp;&nbsp;&nbsp; 00&nbsp; Turn off all LEDs</tt> 
+            <br>
+
+                <tt>Keyboard: FA&nbsp; Acknowledge</tt> <br>
+                <tt>Host:&nbsp;&nbsp;&nbsp;&nbsp; F2&nbsp; Read ID</tt> <br>
+                <tt>Keyboard: FA&nbsp; Acknowledge</tt> <br>
+
+                <tt>Keyboard: AB&nbsp; First byte of ID</tt> <br>
+                <tt>Host:&nbsp;&nbsp;&nbsp;&nbsp; ED&nbsp; Set/Reset Status 
+ Indicators&nbsp;&nbsp;&nbsp;&nbsp;    ;BIOS init</tt> <br>
+                <tt>Keyboard: FA&nbsp; Acknowledge</tt> <br>
+
+                <tt>Host:&nbsp;&nbsp;&nbsp;&nbsp; 02&nbsp; Turn on Num Lock 
+ LED</tt>            <br>
+                <tt>Keyboard: FA&nbsp; Acknowledge</tt> <br>
+                <tt>Host:&nbsp;&nbsp;&nbsp;&nbsp; F3&nbsp; Set Typematic
+Rate/Delay&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;     ;Windows init</tt>
+
+  <br>
+                <tt>Keyboard: FA&nbsp; Acknowledge</tt> <br>
+                <tt>Host:&nbsp;&nbsp;&nbsp;&nbsp; 20&nbsp; 500 ms / 30.0
+reports/sec</tt>             <br>
+                <tt>Keyboard: FA&nbsp; Acknowledge</tt> <br>
+
+                <tt>Host:&nbsp;&nbsp;&nbsp;&nbsp; F4&nbsp; Enable</tt> <br>
+                <tt>Keyboard: FA&nbsp; Acknowledge</tt> <br>
+                <tt>Host:&nbsp;&nbsp;&nbsp;&nbsp; F3&nbsp; Set Typematic
+Rate/delay</tt>             <br>
+
+                <tt>Keyboard: FA&nbsp; Acknowledge</tt> <br>
+                <tt>Host:&nbsp;&nbsp;&nbsp;&nbsp; 00&nbsp; 250 ms / 30.0
+reports/sec</tt>             <br>
+                <tt>Keyboard: FA&nbsp; Acknowledge</tt></blockquote>
+
+     <br>
+ <br>
+ 
+</body></html>

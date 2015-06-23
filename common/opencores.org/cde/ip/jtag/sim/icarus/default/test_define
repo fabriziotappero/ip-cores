@@ -1,0 +1,146 @@
+reg actual;
+
+
+parameter       EXTEST=4'b0000;
+parameter       SAMPLE=4'b0001;
+parameter       HIGHZ_MODE=4'b0010;
+parameter       CHIP_ID_ACCESS=4'b0011;
+parameter       CLAMP=4'b1000;
+parameter       RPC_DATA=4'b1010;
+parameter       RPC_ADD=4'b1001;
+parameter       BYPASS=4'b1111;
+parameter       INST_RETURN=4'b1101;
+
+initial
+begin
+$display("              ");
+$display("              ===================================================");
+$display("              Test Start");
+$display("              ===================================================");
+$display("              ");
+test.cg.next(2);
+test.jtag_model.enable_tclk; 
+test.cg.next(20);
+
+test.cg.next(20);
+test.jtag_model.enable_trst_n; 
+test.jtag_model.enable_reset; 
+test.jtag_model.init; 
+test.cg.next(10);
+test.jtag_model.LoadTapInst(EXTEST,INST_RETURN);
+test.cg.next(100);
+test.jtag_model.LoadTapInst(CLAMP,INST_RETURN);
+
+
+test.cg.next(100);
+test.jtag_model.LoadTapInst(CHIP_ID_ACCESS,INST_RETURN);
+test.jtag_model.Shift_Cmp_32(32'ha5a5a5a5,32'h12345678);
+
+
+test.cg.next(100);
+test.jtag_model.LoadTapInst(RPC_ADD,INST_RETURN);
+                Shift_Cmp_8(8'h00,8'h12);
+                Shift_Cmp_8(8'h34,8'h00);
+                Shift_Cmp_8(8'h12,8'h34);
+                Shift_Cmp_8(8'hff,8'h12);
+                Shift_Cmp_8(8'hcd,8'hff);
+
+test.cg.next(100);
+test.jtag_model.LoadTapInst(RPC_DATA,INST_RETURN);
+                Shift_Cmp_24(24'ha5a5a5,24'h123456);
+
+test.cg.next(100);
+
+test.rpc_2_reg  <= 24'h654321;
+test.jtag_model.LoadTapInst(RPC_DATA,INST_RETURN);
+                Shift_Cmp_24(24'ha5a5a5,24'h654321);
+
+
+
+test.jtag_model.LoadTapInst(BYPASS,INST_RETURN);
+
+
+                Shift_Cmp_24(24'h124708,24'h248e10);
+
+test.cg.next(100);
+
+
+test.cg.exit;
+end
+
+
+
+
+
+
+task automatic  Shift_Cmp_8;    // Initialize boundary register with outputs disabled
+                         // This tasks starts at RT_IDLE and ends at SHIFT_DR
+
+  parameter [15:0] LENGTH =  8;
+
+
+  input [LENGTH:1]  Dataout;
+  input [LENGTH:1]  DataExp;
+
+  integer i;
+      
+  reg [LENGTH:1]  DataBack;
+
+  begin
+    test.jtag_model.Clk_bit(1'b1,1'b0,actual);// Transition from RT_IDLE to SELECT_DR
+    test.jtag_model.Clk_bit(1'b0,1'b0,actual);// Transition from SELECT_DR to CAPTURE_DR
+    test.jtag_model.Clk_bit(1'b0,1'b0,actual);// Transition from CAPTURE_DR to SHIFT_DR 
+    for (i = 1; i <= LENGTH; i = i+1)
+       test.jtag_model.Clk_bit((i==LENGTH),Dataout[i],DataBack[i]);
+    $display  ("%t  %m    Shift_data_register    wr-%h  exp-%h rd-%h    ",$realtime,Dataout,DataExp,DataBack  );
+
+   if (DataBack  !== DataExp )
+   begin
+   test.cg.fail  (" Shift_cmp  receive error  ");
+   end
+
+    test.jtag_model.Clk_bit(1'b1,1'b0,actual);//Transition from EXIT1-DR to UPDATE-DR 
+    test.jtag_model.Clk_bit(1'b0,1'b0,actual);// Transition from UPDATE-DR to IDLE
+  end
+endtask // ShiftRegister
+
+
+
+
+task automatic  Shift_Cmp_24;    // Initialize boundary register with outputs disabled
+                         // This tasks starts at RT_IDLE and ends at SHIFT_DR
+
+  parameter [15:0] LENGTH =  24;
+
+
+  input [LENGTH:1]  Dataout;
+  input [LENGTH:1]  DataExp;
+
+  integer i;
+      
+  reg [LENGTH:1]  DataBack;
+
+  begin
+    test.jtag_model.Clk_bit(1'b1,1'b0,actual);// Transition from RT_IDLE to SELECT_DR
+    test.jtag_model.Clk_bit(1'b0,1'b0,actual);// Transition from SELECT_DR to CAPTURE_DR
+    test.jtag_model.Clk_bit(1'b0,1'b0,actual);// Transition from CAPTURE_DR to SHIFT_DR 
+    for (i = 1; i <= LENGTH; i = i+1)
+       test.jtag_model.Clk_bit((i==LENGTH),Dataout[i],DataBack[i]);
+    $display  ("%t  %m    Shift_data_register    wr-%h  exp-%h rd-%h    ",$realtime,Dataout,DataExp,DataBack  );
+
+   if (DataBack  !== DataExp )
+   begin
+   test.cg.fail  (" Shift_cmp  receive error  ");
+   end
+
+    test.jtag_model.Clk_bit(1'b1,1'b0,actual);//Transition from EXIT1-DR to UPDATE-DR 
+    test.jtag_model.Clk_bit(1'b0,1'b0,actual);// Transition from UPDATE-DR to IDLE
+  end
+endtask // ShiftRegister
+
+
+
+
+
+
+

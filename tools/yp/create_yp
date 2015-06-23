@@ -1,0 +1,421 @@
+eval 'exec `which perl` -S $0 ${1+"$@"}'
+   if 0;
+
+#/**********************************************************************/
+#/*                                                                    */
+#/*             -------                                                */
+#/*            /   SOC  \                                              */
+#/*           /    GEN   \                                             */
+#/*          /    TOOL    \                                            */
+#/*          ==============                                            */
+#/*          |            |                                            */
+#/*          |____________|                                            */
+#/*                                                                    */
+#/*  Traverse a socgen project and link it                             */
+#/*                                                                    */
+#/*                                                                    */
+#/*  Author(s):                                                        */
+#/*      - John Eaton, jt_eaton@opencores.org                          */
+#/*                                                                    */
+#/**********************************************************************/
+#/*                                                                    */
+#/*    Copyright (C) <2010-2011>  <Ouabache Design Works>              */
+#/*                                                                    */
+#/*  This source file may be used and distributed without              */
+#/*  restriction provided that this copyright statement is not         */
+#/*  removed from the file and that any derivative work contains       */
+#/*  the original copyright notice and the associated disclaimer.      */
+#/*                                                                    */
+#/*  This source file is free software; you can redistribute it        */
+#/*  and/or modify it under the terms of the GNU Lesser General        */
+#/*  Public License as published by the Free Software Foundation;      */
+#/*  either version 2.1 of the License, or (at your option) any        */
+#/*  later version.                                                    */
+#/*                                                                    */
+#/*  This source is distributed in the hope that it will be            */
+#/*  useful, but WITHOUT ANY WARRANTY; without even the implied        */
+#/*  warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR           */
+#/*  PURPOSE.  See the GNU Lesser General Public License for more      */
+#/*  details.                                                          */
+#/*                                                                    */
+#/*  You should have received a copy of the GNU Lesser General         */
+#/*  Public License along with this source; if not, download it        */
+#/*  from http://www.opencores.org/lgpl.shtml                          */
+#/*                                                                    */
+#/**********************************************************************/
+
+
+############################################################################
+# General PERL config
+############################################################################
+use Getopt::Long;
+use English;
+use File::Basename;
+use Cwd;
+use XML::LibXML;
+use lib './tools';
+use sys::lib;
+use BerkeleyDB;
+
+
+$OUTPUT_AUTOFLUSH = 1; # set autoflush of stdout to TRUE.
+
+
+
+
+############################################################################
+### Process the options
+############################################################################
+
+Getopt::Long::config("require_order", "prefix=-");
+GetOptions("h","help"
+) || die "(use '$program_name -h' for help)";
+
+
+##############################################################################
+## Help option
+##############################################################################
+if ( $opt_h or $opt_help  ) 
+   { 
+   print "\n type create_yp  $path  \n";
+   exit 1;
+   }
+
+
+##############################################################################
+## 
+##############################################################################
+
+my $home           = cwd();
+my $path           = $ARGV[0];
+
+mkdir $path,0755   unless( -e $path );
+
+
+$repo_db                    = new BerkeleyDB::Hash( -Filename => "${path}/repo.dbm",                   -Flags => DB_CREATE ) or die "Cannot open file: $!";
+$component_db               = new BerkeleyDB::Hash( -Filename => "${path}/component.dbm",              -Flags => DB_CREATE ) or die "Cannot open file: $!";
+$design_db                  = new BerkeleyDB::Hash( -Filename => "${path}/design.dbm",                 -Flags => DB_CREATE ) or die "Cannot open file: $!";
+$busDefinition_db           = new BerkeleyDB::Hash( -Filename => "${path}/busDefinition.dbm",          -Flags => DB_CREATE ) or die "Cannot open file: $!";
+$abstractionDefinition_db   = new BerkeleyDB::Hash( -Filename => "${path}/abstractionDefinition.dbm",  -Flags => DB_CREATE ) or die "Cannot open file: $!";
+$libraryConfiguration_db    = new BerkeleyDB::Hash( -Filename => "${path}/libraryConfiguration.dbm",   -Flags => DB_CREATE ) or die "Cannot open file: $!";
+$componentConfiguration_db  = new BerkeleyDB::Hash( -Filename => "${path}/componentConfiguration.dbm", -Flags => DB_CREATE ) or die "Cannot open file: $!";
+
+
+
+my $parser = XML::LibXML->new();
+
+
+
+my    $workspace    = $parser->parse_file("${home}/workspace.xml"); 
+
+
+
+
+
+
+
+
+
+my @repos =();
+my $repo;
+
+
+foreach my $repo ($workspace->findnodes('//socgen:workspace/socgen:external/socgen:repo')) 
+                  {
+                  my $repo_name  = $repo->findnodes('./socgen:name/text()')->to_literal ;
+                  my $repo_path  = $repo->findnodes('./socgen:path/text()')->to_literal ;
+                  print "Linking $repo_name   $repo_path \n";
+                  if(-e  $repo_name)
+                   {
+                   print "Removing $repo_name  \n";
+                   my $cmd = "rm -r $repo_name  \n";
+                   if(system($cmd)){};
+                   }
+
+                  my $cmd = "mkdir $repo_name ;lndir  $repo_path  $repo_name;";
+                  if(system($cmd)){};
+
+
+
+                  }
+
+
+
+
+foreach my $repo ($workspace->findnodes('//socgen:workspace/socgen:repos/socgen:repo')) 
+                  {
+                  my $repo_name  = $repo->findnodes('./socgen:name/text()')->to_literal ;
+                  push  @repos,$repo_name;                   
+                  }
+
+my $repos_dir ;
+
+
+
+foreach $repos_dir (@repos)
+{
+print "Project_dir  $repos_dir  \n";
+
+
+
+
+#/*********************************************************************************************/
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/*********************************************************************************************/
+
+
+$root = "${home}${repos_dir}";
+&link_dir( "$root","$repos_dir"  );
+
+
+
+#/*********************************************************************************************/
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/*********************************************************************************************/
+
+# recursively map directory information 
+
+sub link_dir {
+    my $src  = shift;
+    my $repos_dir  = shift;
+
+
+    return unless( -e $src );
+
+    if( -d $src ) 
+        {
+        my @contents = (  );
+        opendir( DIR, $src );
+        while( my $item = readdir( DIR )) 
+            {
+            next if( $item eq '.' or $item eq '..'   or $item eq '.svn'    );
+            push( @contents, $item );
+            }
+        closedir( DIR );
+ 
+        # recurse on items in the directory
+        foreach my $item ( @contents )          
+          {
+          $_ = $item;
+          if(/(\S+)\.xml/) 
+             { 
+             my $t_name                = $1;
+             $_ = $src;
+             if(/${home}(\S+)/) { $t_local = $1; }
+
+             my    $xml_file    = $parser->parse_file("${home}${t_local}/${t_name}.xml"); 
+
+            if(${t_name} eq "libraryCfg"  )
+               {
+               foreach my $design ($xml_file->findnodes('//socgen:libraryConfiguration')) 
+                  {
+                  $vendor   = $design->findnodes('./socgen:vendor/text()')->to_literal ;
+                  $library  = $design->findnodes('./socgen:name/text()')->to_literal ;
+                  $name     = "";
+                  $version  = "";
+                  $type     = "socgen:libraryConfiguration";
+                  }
+                }
+             elsif(${t_name} eq "componentCfg"  )
+              {
+              foreach my $design ($xml_file->findnodes('//socgen:componentConfiguration')) 
+                  {
+                  $vendor   = $design->findnodes('./socgen:vendor/text()')->to_literal ;
+                  $library  = $design->findnodes('./socgen:library/text()')->to_literal ;
+                  $name     = $design->findnodes('./socgen:component/text()')->to_literal ;
+                  $version  = "";
+                  $type     = "socgen:componentConfiguration";
+                  }
+              } 
+
+             else
+             {
+               
+               foreach my $comp ($xml_file->findnodes('//spirit:component')) 
+                  {
+                  $vendor   = $comp->findnodes('./spirit:vendor/text()')->to_literal ;
+                  $library  = $comp->findnodes('./spirit:library/text()')->to_literal ;
+                  $type     = "spirit:component";
+                  $name     = $comp->findnodes('./spirit:name/text()')->to_literal ;
+                  $version  = $comp->findnodes('./spirit:version/text()')->to_literal ;
+                  }
+               
+               
+               foreach my $design ($xml_file->findnodes('//spirit:design')) 
+                  {
+                  $vendor   = $design->findnodes('./spirit:vendor/text()')->to_literal ;
+                  $library  = $design->findnodes('./spirit:library/text()')->to_literal ;
+                  $name     = $design->findnodes('./spirit:name/text()')->to_literal ;
+                  $version  = $design->findnodes('./spirit:version/text()')->to_literal ;
+                  $type     = "spirit:design";
+               
+                  }
+               
+                                    
+               
+               foreach my $design ($xml_file->findnodes('//spirit:abstractionDefinition')) 
+                  {
+                  $vendor   = $design->findnodes('./spirit:vendor/text()')->to_literal ;
+                  $library  = $design->findnodes('./spirit:library/text()')->to_literal ;
+                  $name     = $design->findnodes('./spirit:name/text()')->to_literal ;
+                  $version  = $design->findnodes('./spirit:version/text()')->to_literal ;
+                  $type     = "spirit:abstractionDefinition";
+                  }
+               
+               
+               foreach my $design ($xml_file->findnodes('//spirit:busDefinition')) 
+                  {
+                  $vendor   = $design->findnodes('./spirit:vendor/text()')->to_literal ;
+                  $library  = $design->findnodes('./spirit:library/text()')->to_literal ;
+                  $name     = $design->findnodes('./spirit:name/text()')->to_literal ;
+                  $version  = $design->findnodes('./spirit:version/text()')->to_literal ;
+                  $type     = "spirit:busDefinition";
+                  }
+
+
+               
+               
+
+              
+
+               }
+
+             $vendor_match = "/${vendor}/";
+             $library_match = "/${library}/";
+             $name_match = "/${name}/";
+   
+             $_ = $t_local;
+             if(/\S+($vendor_match)(\S+)/)                     { $vendor_path      = $2; }
+             else                                              { $vendor_path      = ""; }
+             if(/\S+($library_match)(\S+)/)                    { $library_path     = $2; }
+             else                                              { $library_path     = ""; }
+             if(/\S+($library_match)(\S+)($name_match)(\S+)/)  { $lib_comp_sep     = "/${2}/"; }
+             else                                              { $lib_comp_sep     = "/"; }
+             if(/(\S+)($name_match)(\S+)/)                       
+               { 
+               $component_path   = "/${3}"; 
+               $environment_path = $1;
+               }
+             else                                              { $component_path   = "/"; }
+
+
+
+             
+#               print "${vendor}__${library}_${name}_${version}     $t_local  $library_match  $lib_comp_sep  $name_match    \n";
+               $V_L_N_V  = "${vendor}__${library}_${name}_${version}"    ;
+
+
+
+             if($type eq "spirit:component")
+               {
+
+               my $V = "${vendor}"    ;
+               my @repo_info  = ("vendor","$vendor","idle","$repos_dir" );
+               $repo_db->db_put( $V, join(':', @repo_info) );
+
+
+               my $V_L = "${vendor}__${library}"    ;
+               @repo_info  = ("library","$library","$library_path" ,"idle","$repos_dir");
+               $repo_db->db_put( $V_L, join(':', @repo_info) );
+
+
+
+               my $V_L_N = "${vendor}__${library}_${name}"    ;
+               @repo_info  = ("component","$name","$lib_comp_sep","$repos_dir" );
+               $repo_db->db_put( $V_L_N, join(':', @repo_info) );
+
+
+
+               my @comp_info  = (".${t_local}/${t_name}.xml","${component_path}","${version}" );
+               $component_db->db_put( $V_L_N_V, join(':', @comp_info) );
+
+
+#               print " .${t_local}/${t_name}.xml , ${component_path}                     \n  ";
+
+
+               }
+
+
+               $V_L_N_V  = "${vendor}__${library}_${name}_${version}"    ;
+
+
+
+             if($type eq "spirit:design")
+               {
+               @info  = (".${t_local}/${t_name}.xml","${component_path}","${version}" );
+               $design_db->db_put( $V_L_N_V, join(':', @info) );
+               }
+
+
+             elsif($type eq "spirit:abstractionDefinition")
+               {
+#               print "ABSDEF  $V_L_N_V    \n";
+               @info  = (".${t_local}/${t_name}.xml","${component_path}","${version}","${name}","${library}","${vendor}"         );
+               $abstractionDefinition_db->db_put( $V_L_N_V, join(':', @info) );
+               }
+
+
+             elsif($type eq "spirit:busDefinition")
+               {
+               @info  = (".${t_local}/${t_name}.xml","${component_path}","${version}" );
+               $busDefinition_db->db_put( $V_L_N_V, join(':', @info) );
+               }
+
+
+
+
+
+
+             if($type eq "socgen:libraryConfiguration")
+               {
+               $V_L  = "${vendor}__${library}"    ;
+               @info  = (".${t_local}/${t_name}.xml" );
+               $libraryConfiguration_db->db_put( $V_L, join(':', @info) );
+               }
+
+
+             if($type eq "socgen:componentConfiguration")
+               {
+               my $V_L_N = "${vendor}__${library}_${name}"    ;
+               @info  = (".${t_local}/${t_name}.xml" );
+               $componentConfiguration_db->db_put( $V_L_N, join(':', @info) );
+               }
+
+
+my $uplift_data;
+$repo_db->db_get("log_name", $uplift_data );
+
+
+
+
+             }
+
+          &link_dir("$src/$item","$repos_dir" );
+          } 
+      
+     }
+
+}
+
+
+
+}
+
+
+$repo_db->db_close();
+$component_db->db_close();
+$design_db->db_close();
+$abstractionDefinition_db->db_close();
+$busDefinition_db->db_close();
+$libraryConfiguration_db->db_close();
+$componentConfiguration_db->db_close();

@@ -1,0 +1,1689 @@
+T6502  Embedded Microprocessor 
+==================================================================================
+
+The T6502 IP is a processor that uses most of MosTechnology M6502 processor instructions
+and processor registers.It has been updated for a synthesized embedded design in a FGPA or ASIC.
+
+
+It differs from the original Mos6502 in the following ways
+
+
+
+1) Changed memory interface from asynchronous to synchronous. 
+
+2) Number of clock cycles to execute instructions has changed
+
+3) Page Zero is fully filled with SRAM. Page zero is not usable as I/O space
+
+ 
+
+
+
+
+
+
+An extended version is also avaiable. Before we can extend we must first remove some features that either
+did not make sense at the time or made only made sense for a 40 pin part sitting in a sea or ttl parts.
+
+
+
+1) Remove Binary Coded Decimal mode. The D bit in the PSR does nothing. 
+
+2) Moved stack from Page 01 into a seperate RAM. Stack size is now parameterized and only accessable via 
+   pushes and pulls.Removed the TSX and TXS commands. If you need to manipulate the stack pointer and stack
+   data then you really should get a more powerfull processor 
+
+3) Replaced old interrupt/brk system with vectored interrupt. Masking is done externally and vectors provide 
+   as many interrupts as you like. PSR is not pushed on interrupt and rts/rti become one instruction
+
+4) Indirect addresses stored in page 00 MUST be aligned on even addresses. This is done by shifting a
+   page zero indirect address bu one bit and using both page 00 and 01.
+
+5) Bit (5) of the PSR is now a run bit. Forcing it to 0 will halt the processor until the next reset/interrupt 
+
+6) Added Debugging logic and error checking
+
+7) self modifying code is no longer supported. You must provide a single rom image with all executable code 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+History
+=========================================================================================
+
+
+
+
+This component is derived  from the opencores t6507lp  project. 
+
+The original project checked in by Gabriel Oshiro Zardo and Samuel Nascimento Pagliarini 
+was a atari 2600 on a chip. This takes the t6507 portion and turns it into a fully functional updated  6502.  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Processor Model
+===============================================================================================
+
+             +----------+
+             |   Acc    |     Accumulator            (A)
+             +----------+
+             |   X      |   X Index Register         (X)
+             +----------+
+             |   Y      |   Y Index Register         (Y) 
+  +----------+----------+
+  |    PCH   |   PCL    |     Program Counter        (PC)
+  +----------+----------+
+  | 00000001 |   SP     |     Stack Pointer          (SP)
+  +----------+----------+
+             |    P     |     Processor Status Word  (P)
+             +----------+
+               NV1BDIZC
+               |||||||+----  Carry Flag     1 = True
+               ||||||+-----  Zero Flag      1 = Result == 8'h00
+               |||||+------  IRQ Disable    1 = Disable
+               ||||+-------  Decimal Mode   Not used
+               |||+--------  Break Command  1 = In break routine
+               ||+---------  Run Mode       1 = Processor is running
+               |+----------  Overflow Flag  1 = True
+               +-----------  Negative       1 = Negative Number
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Memory  Model
+===============================================================================================
+
+0000-00FF | Page Zero RAM
+0010-01FF | Stack RAM
+0200-FFF9 | Program and Data RAM
+     FFFA | NMI  Vector Low
+     FFFB | NMI  Vector High
+     FFFC | Boot Vector Low
+     FFFD | Boot Vector High
+     FFFE | IRQ/BRK  Vector Low
+     FFFF | IRQ/BRK  Vector High
+
+
+
+
+
+
+
+
+
+Definitions
+===============================================================================================
+Opcode         Current Instruction byte
+New_opcode     Next Instruction byte
+Opc_Add        Address of current instruction
+Next_Op_Add    Address of next instruction byte
+Operand        Data operand
+Address        Address of data operand if in memory
+Offset         Value added to Opc_Add if branch is taken
+Pointer        Address to store the address of data opeand if in memory
+Vector         Address to store the Next_Op_Add
+
+
+
+
+
+
+
+
+
+Instruction Set
+===============================================================================================
+
+Inst                 Description                                Effect on flags
+-----------------------------------------------------------------------------------------------
+ADC   Operand        Add Acc to Operand with Carry                 NZCV
+SBC   Operand        Subract Operand from Acc with Borrow          NZXV
+AND   Operand        Logical AND Acc and Operand                   NZ  
+CMP   Operand        Compare Acc with Operand                      NZC 
+CPX   Operand        Compare X_index   with Operand                NZC 
+CPY   Operand        Compare Y_index   with Operand                NZC 
+EOR   Operand        Exclusive Or Acc with  Operand                NZ  
+LDA   Operand        Load Operand into Acc                         NZ  
+LDX   Operand        Load Operand into X_index                     NZ  
+LDY   Operand        Load Operand into Y_index                     NZ  
+ORA   Operand        Logical Or Acc with Operand                   NZ  
+BIT   Operand        Bit Test Acc with operand                     Z67 
+STA   Address        Store Acc @ address                           NONE  
+STX   Address        Store X_Index @ address                       NONE  
+STY   Address        Store Y_Index @ address                       NONE  
+ASL   Operand        Arithmetic Shift Left Operand into Carry      NZC   
+DEC   Operand        Decrement Operand                             NZ    
+INC   Operand        Incremement Operand                           NZ    
+DEX                  Decrement X Index                             NZ    
+INX                  Incremement X Index                           NZ    
+DEY                  Decrement Y Index                             NZ    
+INY                  Incremement Y Index                           NZ  
+LSR   Operand        Logical Shift Right Operand into Carry        NZC   
+ROL   Operand        Rotate Left Operand  thru Carry               NZC   
+ROR   Operand        Rotate Right Operand  thru Carry              NZC   
+NOP                  No Operation                                  NONE  
+SEC                  Set Carry Flag                                1 ->  C   
+SED                  Set Decimal Flag                              1 ->  D   
+SEI                  Set Interrupt Flag                            1 ->  I   
+CLC                  Clear Carry Flag                              0 ->  C   
+CLD                  Clear Decimal Flag                            0 ->  D   
+CLI                  Clear Interrupt Flag                          0 ->  I   
+CLV                  Clear Overflow Flag                           0 ->  V   
+TAX                  Transfer Acc into X_Index                     NZ    
+TAY                  Transfer Acc into Y_Index                     NZ    
+TXA                  Transfer X_Index into Acc                     NZ    
+TYA                  Transfer Y_Index into Acc                     NZ    
+BCC   Offset         Branch if C == 0                              NONE 
+BCS   Offset         Branch if C == 1                              NONE 
+BNE   Offset         Branch if Z == 0                              NONE 
+BEQ   Offset         Branch if Z == 1                              NONE 
+BVC   Offset         Branch if V == 0                              NONE 
+BVS   Offset         Branch if V == 1                              NONE 
+BPL   Offset         Branch if N == 0                              NONE 
+BMI   Offset         Branch if N == 1                              NONE 
+PLA                  Pull  Acc from Stack                          NZ 
+PLP                  Pull  PSR from Stack                          RESTORE
+PHA                  Push  Acc onto Stack                          NONE    
+PHP                  Push  PSR onto Stack                          NONE    
+JMP   Next_Op_Add    Jump to New Address                           NONE    
+JMP   Vector         Jump to New Address found by  vector          NONE    
+JSR   Next_Op_Add    Save PC+2  on stack and jump to New Address   NONE   
+BRK                  Save status and PC+1 on stack and jump to New Address   set 1 -> B       
+RTI                  Pull Status and PC   from stack               RESTORED
+RTS                  Pull PC   from stack                          NONE     
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Definitions
+===============================================================================================
+Opcode         Current Instruction byte
+New_opcode     Next Instruction byte
+Opc_Add        Address of current instruction
+Next_Op_Add    Address of next instruction byte
+Operand        Data operand
+Address        Address of data operand if in memory
+Offset         Value added to Opc_Add if branch is taken
+Pointer        Address to store the address of data opeand if in memory
+Vector         Address to store the Next_Op_Add
+
+
+
+
+
+
+
+
+
+
+Addressing Modes
+===============================================================================================
+
+
+Immediate                Read
+-----------------------------------------------------------------------------------------------------
+Operand is located in memory following the opcode
+
+
+Opcode Operand
+
+
+
+
+Absolute                 Read/Write/ReadModifyWrite
+-----------------------------------------------------------------------------------------------------
+16 bit address of operand is located in memory following opcode (low byte,high byte) 
+
+Opcode Address_l,Address_h
+
+
+
+Absolute Indexed         Read/Write/ReadModifyWrite
+-----------------------------------------------------------------------------------------------------
+Operand is found by adding index value to 16 bit address following opcode.(no wraparound)
+
+Opcode Address_l,Address_h
+
+
+
+Page Zero                Read/Write/ReadModifyWrite
+-----------------------------------------------------------------------------------------------------
+8 bit page zero address of operand is located in memory following opcode. 
+
+
+Opcode Address_l
+
+
+
+Page Zero Indexed        Read/Write/ReadModifyWrite
+-----------------------------------------------------------------------------------------------------
+Operand is found in page zero by adding index value to 8 bit address following opcode.(wraps around)
+
+
+Opcode Address_l
+
+
+
+Page Zero  Indirect X    Read/Write
+-----------------------------------------------------------------------------------------------------
+Operand address lower byte  is read from the address found  by adding X index value to 8 bit address following opcode and
+the upper byte  is read from the address found  by adding X index value to 8 bit address plus 1 (no wraparound)
+
+Opcode Pointer_l
+
+
+
+
+Page Zero  Indirect Y    Read/Write
+-----------------------------------------------------------------------------------------------------
+8 bit page zero address containing a 16 bit address is located in memory following opcode. Y index is added to this address
+(no wraparound). 
+
+
+Opcode Pointer_l
+
+
+Implied                  Read/Write/Read_Modify_Write
+-----------------------------------------------------------------------------------------------------
+Operand is specified in the Opcode
+
+Opcode
+
+
+Branch                   Read
+-----------------------------------------------------------------------------------------------------
+Opcode is followed  by the relative offset for the branch   
+
+Opcode Offset
+
+                       
+Stack                    StackRead/StackWrite
+-----------------------------------------------------------------------------------------------------
+Operation uses the Stack
+
+Opcode
+
+
+Stack_Pointer                   
+-----------------------------------------------------------------------------------------------------
+Transfer between  Stack_pointer and X index
+
+Opcode
+
+
+Jump  Absolute           Read
+-----------------------------------------------------------------------------------------------------
+16 bit destination address follows opcode
+
+
+Opcode Next_Op_add_l,Next_Op_add_h
+
+
+
+Jump Indirect            Read
+-----------------------------------------------------------------------------------------------------
+16 bit Address following opcode points to destination address 
+
+Opcode Vector_l, Vector_h
+
+
+JumpSub   Absolute       Read_Stackwrite  
+-----------------------------------------------------------------------------------------------------
+16 bit destination address follows opcode. Return address is pushed on stack
+
+Opcode Next_Op_add_l,Next_Op_add_h
+
+
+Break                    Read_Stackwrite  
+-----------------------------------------------------------------------------------------------------
+Return address is pushed on stack and the IRQ vector is taken 
+
+Opcode
+
+
+Return from Interrupt    Read_Stackread  
+-----------------------------------------------------------------------------------------------------
+PSR and Prog_counter are pulled from stack
+
+
+Opcode
+ 
+
+
+
+
+Return from Subroutine   Read_Stackread  
+-----------------------------------------------------------------------------------------------------
+Prog_counter is pulled from stack
+
+
+Opcode
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Instruction Opcodes (hex)
+====================================================================================================
+
+
+
+ ADC abs                  6D
+ ADC abs,X                7D
+ ADC abs,Y                79
+ ADC #n                   69
+ ADC zp                   65
+ ADC (zp,X)               61
+ ADC zp,X                 75
+ ADC (zp),Y               71
+
+ AND abs                  2D
+ AND abs,X                3D
+ AND abs,Y                39
+ AND #n                   29
+ AND zp                   25
+ AND (zp,X)               21
+ AND zp,X                 35
+ AND (zp),Y               31
+
+ ASL A                    0A
+ ASL abs                  0E
+ ASL abs,X                1E
+ ASL zp                   06
+ ASL zp,X                 16
+
+ BCC rel                  90
+ BCS rel                  B0
+ BEQ rel                  F0
+
+ BIT abs                  2C
+ BIT zp                   24
+
+ BMI rel                  30
+ BNE rel                  D0
+ BPL rel                  10
+
+ BRK                      00
+
+ BVC rel                  50
+ BVS rel                  70
+
+
+ CLC                      18
+ CLD                      D8
+ CLI                      58
+ CLV                      B8
+
+ CMP abs                  CD
+ CMP abs,X                DD
+ CMP abs,Y                D9
+ CMP #n                   C9
+ CMP zp                   C5
+ CMP (zp,X)               C1
+ CMP zp,X                 D5
+ CMP (zp),Y               D1
+
+ CPX abs                  EC
+ CPX #n                   E0
+ CPX zp                   E4
+ CPY abs                  CC
+ CPY #n                   C0
+ CPY zp                   C4
+
+ DEC abs                  CE
+ DEC abs,X                DE
+ DEC zp                   C6
+ DEC zp,X                 D6
+
+ DEX                      CA
+ DEY                      88
+
+ EOR abs                  4D
+ EOR abs,X                5D
+ EOR abs,Y                59
+ EOR #n                   49
+ EOR zp                   45
+ EOR (zp,X)               41
+ EOR zp,X                 55
+ EOR (zp),Y               51
+
+ INC abs                  EE
+ INC abs,X                FE
+ INC zp                   E6
+ INC zp,X                 F6
+ INX                      E8
+ INY                      C8
+
+ JMP abs                  4C
+ JMP (abs)                6C
+ JSR abs                  20
+
+ LDA abs                  AD
+ LDA abs,X                BD
+ LDA abs,Y                B9
+ LDA #n                   A9
+ LDA zp                   A5
+ LDA (zp,X)               A1
+ LDA zp,X                 B5
+ LDA (zp),Y               B1
+
+ LDX abs                  AE
+ LDX abs,Y                BE
+ LDX #n                   A2
+ LDX zp                   A6
+ LDX zp,Y                 B6
+
+ LDY abs                  AC
+ LDY abs,X                BC
+ LDY #n                   A0
+ LDY zp                   A4
+ LDY zp,X                 B4
+
+ LSR A                    4A
+ LSR abs                  4E
+ LSR abs,X                5E
+ LSR zp                   46
+ LSR zp,X                 56
+
+ NOP                      EA
+
+ ORA abs                  0D
+ ORA abs,X                1D
+ ORA abs,Y                19
+ ORA #n                   09
+ ORA zp                   05
+ ORA (zp,X)               01
+ ORA zp,X                 15
+ ORA (zp),Y               11
+
+ PHA                      48
+ PHP                      08
+
+ PLA                      68
+ PLP                      28
+
+ ROL A                    2A
+ ROL abs                  2E
+ ROL abs,X                3E
+ ROL zp                   26
+ ROL zp,X                 36
+
+ ROR A                    6A
+ ROR abs                  6E
+ ROR abs,X                7E
+ ROR zp                   66
+ ROR zp,X                 76
+
+ RTI                      40
+
+ RTS                      60
+
+ SBC abs                  ED
+ SBC abs,X                FD
+ SBC abs,Y                F9
+ SBC #n                   E9
+ SBC zp                   E5
+ SBC (zp,X)               E1
+ SBC zp,X                 F5
+ SBC (zp),Y               F1
+
+ SEC                      38
+ SED                      F8
+ SEI                      78
+
+ STA abs                  8D
+ STA abs,X                9D
+ STA abs,Y                99
+ STA zp                   85
+ STA (zp,X)               81
+ STA zp,X                 95
+ STA (zp),Y               91
+
+ STX abs                  8E
+ STX zp                   86
+ STX zpy                  96
+
+ STY abs                  8C
+ STY zp                   84
+ STY zp,X                 94
+
+ TAX                      AA
+ TAY                      A8
+ TXA                      8A
+ TYA                      98
+
+
+
+
+
+
+
+
+
+Instruction Decode
+======================================================================================================================================================
+
+
+
+
+
+
+
+
+
+
+// alu_mode
+`define  alu_mode_add             3'b000
+`define  alu_mode_and             3'b001
+`define  alu_mode_orr             3'b010
+`define  alu_mode_eor             3'b011
+`define  alu_mode_sfl             3'b100
+`define  alu_mode_sfr             3'b101
+`define  alu_mode_afl             3'b110
+`define  alu_mode_afr             3'b111
+
+// alu_op_a_sel
+
+`define  alu_op_a_00              3'b000
+`define  alu_op_a_acc             3'b001
+`define  alu_op_a_x               3'b010
+`define  alu_op_a_y               3'b011
+`define  alu_op_a_ff              3'b100
+`define  alu_op_a_psr             3'b101
+
+// alu_op_b_sel
+
+`define  alu_op_b_00              2'b00
+`define  alu_op_b_prog            2'b01
+`define  alu_op_b_sp              2'b10
+`define  alu_op_b_temp            2'b11
+
+// alu_op_b_inv                  1=invert
+
+
+
+// alu_op_c_sel
+
+`define  alu_op_c_00              2'b00
+`define  alu_op_c_01              2'b01
+`define  alu_op_c_cin             2'b10
+`define  alu_op_c_xx              2'b11
+
+
+// alu_status_update
+`define  alu_status_update_none   3'b000
+`define  alu_status_update_nz     3'b001
+`define  alu_status_update_nzc    3'b010
+`define  alu_status_update_nzcv   3'b011
+`define  alu_status_update_wr     3'b100
+`define  alu_status_update_z67    3'b101
+`define  alu_status_update_res    3'b110
+
+
+
+// dest
+`define  dest_none                3'b000
+`define  dest_alu_a               3'b001
+`define  dest_alu_x               3'b010
+`define  dest_alu_y               3'b011
+`define  dest_mem                 3'b100
+
+
+// ctrl
+`define  ctrl_none                3'b000
+`define  ctrl_jsr                 3'b001
+`define  ctrl_jmp                 3'b010
+`define  ctrl_jmp_ind             3'b011
+`define  ctrl_brk                 3'b100
+`define  ctrl_rti                 3'b101
+`define  ctrl_rts                 3'b110
+`define  ctrl_branch              3'b111
+
+// cmd
+`define  cmd_none                 2'b00
+`define  cmd_push_psr             2'b01
+`define  cmd_push_pc              2'b10
+`define  cmd_load_vec             2'b11
+
+
+// ins_type
+`define  ins_type_none            2'b00
+`define  ins_type_read            2'b01
+`define  ins_type_write           2'b10
+`define  ins_type_rmw             2'b11
+
+
+// idx_sel
+`define  idx_sel_00               2'b00
+`define  idx_sel_x                2'b01
+`define  idx_sel_y                2'b10
+
+
+
+// branch_value
+
+
+// branch_enable
+
+
+
+
+
+
+
+
+
+                      
+Immediate             
+
+                      alu        alu    alu      alu       alu
+                      op_a       op_b   op_b     op_c      status      alu      ins     idx       branch    branch
+                      src        src    inv      src       update      mode     type    sel       value     enable     dest     ctrl    cmd
+------------------------------------------------------------------------------------------------------------------------------------------------------
+ ADC #n      |  |     alu_a      prog    0       cin        NZCV       ADD       R       0         00         00        A       none    none
+ AND #n      |  |     alu_a      prog    0        0         NZ         AND       R       0         00         00        A       none    none
+ CMP #n      |  |     alu_a      prog    1        1         NZC        ADD       R       0         00         00        0       none    none
+ CPX #n      |  |     alu_x      prog    1        1         NZC        ADD       R       0         00         00        0       none    none
+ CPY #n      |  |     alu_y      prog    1        1         NZC        ADD       R       0         00         00        0       none    none
+ EOR #n      |  |     alu_a      prog    0        0         NZ         EOR       R       0         00         00        A       none    none
+ LDA #n      |  |     00         prog    0        0         NZ         ADD       R       0         00         00        A       none    none
+ LDX #n      |  |     00         prog    0        0         NZ         ADD       R       0         00         00        X       none    none
+ LDY #n      |  |     00         prog    0        0         NZ         ADD       R       0         00         00        Y       none    none
+ ORA #n      |  |     alu_a      prog    0        0         NZ         ORR       R       0         00         00        A       none    none
+ SBC #n      |  |     alu_a      prog    1       cin        NZXV       ADD       R       0         00         00        A       none    none
+
+
+
+
+Absolute 
+
+------------------------------------------------------------------------------------------------------------------------------------------------------
+ ADC abs     |  |     alu_a      temp    0       cin        NZCV       ADD       R       0         00         00        A       none    none
+ AND abs     |  |     alu_a      temp    0        0         NZ         AND       R       0         00         00        A       none    none
+ BIT abs     |  |     alu_a      temp    0        0         Z67        AND       R       0         00         00        0       none    none
+ CMP abs     |  |     alu_a      temp    1        1         NZC        ADD       R       0         00         00        0       none    none
+ CPX abs     |  |     alu_x      temp    1        1         NZC        ADD       R       0         00         00        0       none    none
+ CPY abs     |  |     alu_y      temp    1        1         NZC        ADD       R       0         00         00        0       none    none
+ EOR abs     |  |     alu_a      temp    0        0         NZ         EOR       R       0         00         00        A       none    none
+ LDA abs     |  |     00         temp    0        0         NZ         ADD       R       0         00         00        A       none    none
+ LDX abs     |  |     00         temp    0        0         NZ         ADD       R       0         00         00        X       none    none
+ LDY abs     |  |     00         temp    0        0         NZ         ADD       R       0         00         00        Y       none    none
+ ORA abs     |  |     alu_a      temp    0        0         NZ         ORR       R       0         00         00        A       none    none
+ SBC abs     |  |     alu_a      temp    1       cin        NZXV       ADD       R       0         00         00        A       none    none
+ STA abs     |  |     alu_a      temp    0        0         NONE       ADD       W       0         00         00        M       none    none
+ STX abs     |  |     alu_x      temp    0        0         NONE       ADD       W       0         00         00        M       none    none
+ STY abs     |  |     alu_y      temp    0        0         NONE       ADD       W       0         00         00        M       none    none
+ ASL abs     |  |      00        temp    0        0         NZC        SFL      RMW      0         00         00        M       none    none
+ DEC abs     |  |      FF        temp    0        0         NZ         ADD      RMW      0         00         00        M       none    none
+ INC abs     |  |      00        temp    0        1         NZ         ADD      RMW      0         00         00        M       none    none
+ LSR abs     |  |      00        temp    0        0         NZC        SFR      RMW      0         00         00        M       none    none
+ ROL abs     |  |      00        temp    0       cin        NZC        SFL      RMW      0         00         00        M       none    none
+ ROR abs     |  |      00        temp    0       cin        NZC        SFR      RMW      0         00         00        M       none    none
+
+
+Absolute  indexed 
+
+------------------------------------------------------------------------------------------------------------------------------------------------------
+ ADC abs,X   |  |     alu_a      temp    0       cin        NZCV       ADD       R       X         00         00        A       none    none
+ AND abs,X   |  |     alu_a      temp    0        0         NZ         AND       R       X         00         00        A       none    none
+ CMP abs,X   |  |     alu_a      temp    1        1         NZC        ADD       R       X         00         00        0       none    none
+ EOR abs,X   |  |     alu_a      temp    0        0         NZ         EOR       R       X         00         00        A       none    none
+ LDA abs,X   |  |     00         temp    0        0         NZ         ADD       R       X         00         00        A       none    none
+ LDY abs,X   |  |     00         temp    0        0         NZ         ADD       R       X         00         00        Y       none    none
+ ORA abs,X   |  |     alu_a      temp    0        0         NZ         ORR       R       X         00         00        A       none    none
+ SBC abs,X   |  |     alu_a      temp    1       cin        NZXV       ADD       R       X         00         00        A       none    none
+ ADC abs,Y   |  |     alu_a      temp    0       cin        NZCV       ADD       R       Y         00         00        A       none    none
+ AND abs,Y   |  |     alu_a      temp    0        0         NZ         AND       R       Y         00         00        A       none    none
+ CMP abs,Y   |  |     alu_a      temp    1        1         NZC        ADD       R       Y         00         00        0       none    none
+ EOR abs,Y   |  |     alu_a      temp    0        0         NZ         EOR       R       Y         00         00        A       none    none
+ LDA abs,Y   |  |     00         temp    0        0         NZ         ADD       R       Y         00         00        A       none    none
+ LDX abs,Y   |  |     00         temp    0        0         NZ         ADD       R       Y         00         00        X       none    none
+ ORA abs,Y   |  |     alu_a      temp    0        0         NZ         ORR       R       Y         00         00        A       none    none
+ SBC abs,Y   |  |     alu_a      temp    1       cin        NZXV       ADD       R       Y         00         00        A       none    none
+ STA abs,X   |  |     alu_a      temp    0        0         NONE       ADD       W       X         00         00        M       none    none
+ STA abs,Y   |  |     alu_a      temp    0        0         NONE       ADD       W       Y         00         00        M       none    none
+ ASL abs,X   |  |      00        temp    0        0         NZC        SFL      RMW      X         00         00        M       none    none
+ DEC abs,X   |  |      FF        temp    0        0         NZ         ADD      RMW      X         00         00        M       none    none
+ INC abs,X   |  |      00        temp    0        1         NZ         ADD      RMW      X         00         00        M       none    none
+ LSR abs,X   |  |      00        temp    0        0         NZC        SFR      RMW      X         00         00        M       none    none
+ ROL abs,X   |  |      00        temp    0       cin        NZC        SFL      RMW      X         00         00        M       none    none
+ ROR abs,X   |  |      00        temp    0       cin        NZC        SFR      RMW      X         00         00        M       none    none
+
+
+
+
+
+
+Page Zero  
+
+------------------------------------------------------------------------------------------------------------------------------------------------------
+ ADC zp      |  |     alu_a      temp    0       cin        NZCV       ADD       R       0         00         00        A       none    none
+ AND zp      |  |     alu_a      temp    0        0         NZ         AND       R       0         00         00        A       none    none
+ BIT zp      |  |     alu_a      temp    0        0         Z67        AND       R       0         00         00        0       none    none
+ CMP zp      |  |     alu_a      temp    1        1         NZC        ADD       R       0         00         00        0       none    none
+ CPX zp      |  |     alu_x      temp    1        1         NZC        ADD       R       0         00         00        0       none    none
+ CPY zp      |  |     alu_y      temp    1        1         NZC        ADD       R       0         00         00        0       none    none
+ EOR zp      |  |     alu_a      temp    0        0         NZ         EOR       R       0         00         00        A       none    none
+ LDA zp      |  |     00         temp    0        0         NZ         ADD       R       0         00         00        A       none    none
+ LDX zp      |  |     00         temp    0        0         NZ         ADD       R       0         00         00        X       none    none
+ LDY zp      |  |     00         temp    0        0         NZ         ADD       R       0         00         00        Y       none    none
+ ORA zp      |  |     alu_a      temp    0        0         NZ         ORR       R       0         00         00        A       none    none
+ SBC zp      |  |     alu_a      temp    1       cin        NZXV       ADD       R       0         00         00        A       none    none
+ STA zp      |  |     alu_a      temp    0        0         NONE       ADD       W       0         00         00        M       none    none
+ STX zp      |  |     alu_x      temp    0        0         NONE       ADD       W       0         00         00        M       none    none
+ STY zp      |  |     alu_y      temp    0        0         NONE       ADD       W       0         00         00        M       none    none
+ ASL zp      |  |      00        temp    0        0         NZC        SFL      RMW      0         00         00        M       none    none
+ DEC zp      |  |      FF        temp    0        0         NZ         ADD      RMW      0         00         00        M       none    none
+ INC zp      |  |      00        temp    0        1         NZ         ADD      RMW      0         00         00        M       none    none
+ LSR zp      |  |      00        temp    0        0         NZC        SFR      RMW      0         00         00        M       none    none
+ ROL zp      |  |      00        temp    0       cin        NZC        SFL      RMW      0         00         00        M       none    none
+ ROR zp      |  |      00        temp    0       cin        NZC        SFR      RMW      0         00         00        M       none    none
+
+
+
+Page Zero   indexed  
+
+------------------------------------------------------------------------------------------------------------------------------------------------------
+ ADC zp,X    |  |     alu_a      temp    0       cin        NZCV       ADD       R       X         00         00        A       none    none
+ AND zp,X    |  |     alu_a      temp    0        0         NZ         AND       R       X         00         00        A       none    none
+ CMP zp,X    |  |     alu_a      temp    1        1         NZC        ADD       R       X         00         00        0       none    none
+ EOR zp,X    |  |     alu_a      temp    0        0         NZ         EOR       R       X         00         00        A       none    none
+ LDA zp,X    |  |     00         temp    0        0         NZ         ADD       R       X         00         00        A       none    none
+ LDY zp,X    |  |     00         temp    0        0         NZ         ADD       R       X         00         00        Y       none    none
+ ORA zp,X    |  |     alu_a      temp    0        0         NZ         ORR       R       X         00         00        A       none    none
+ SBC zp,X    |  |     alu_a      temp    1       cin        NZXV       ADD       R       X         00         00        A       none    none
+ LDX zp,Y    |  |     00         temp    0        0         NZ         ADD       R       Y         00         00        X       none    none
+ STA zp,X    |  |     alu_a      temp    0        0         NONE       ADD       W       X         00         00        M       none    none
+ STY zp,X    |  |     alu_y      temp    0        0         NONE       ADD       W       X         00         00        M       none    none
+ STX zp,Y    |  |     alu_x      temp    0        0         NONE       ADD       W       Y         00         00        M       none    none
+ ASL zp,X    |  |      00        temp    0        0         NZC        SFL      RMW      X         00         00        M       none    none
+ DEC zp,X    |  |      FF        temp    0        0         NZ         ADD      RMW      X         00         00        M       none    none
+ INC zp,X    |  |      00        temp    0        1         NZ         ADD      RMW      X         00         00        M       none    none
+ LSR zp,X    |  |      00        temp    0        0         NZC        SFR      RMW      X         00         00        M       none    none
+ ROR zp,X    |  |      00        temp    0       cin        NZC        SFR      RMW      X         00         00        M       none    none
+ ROL zp,X    |  |      00        temp    0       cin        NZC        SFL      RMW      X         00         00        M       none    none
+
+
+
+Page Zero  indirectX
+
+------------------------------------------------------------------------------------------------------------------------------------------------------
+ ADC (zp,X)  |  |     alu_a      temp    0       cin        NZCV       ADD       R       X         00         00        A       none    none
+ AND (zp,X)  |  |     alu_a      temp    0        0         NZ         AND       R       X         00         00        A       none    none
+ CMP (zp,X)  |  |     alu_a      temp    1        1         NZC        ADD       R       X         00         00        0       none    none
+ EOR (zp,X)  |  |     alu_a      temp    0        0         NZ         EOR       R       X         00         00        A       none    none
+ LDA (zp,X)  |  |     00         temp    0        0         NZ         ADD       R       X         00         00        A       none    none
+ ORA (zp,X)  |  |     alu_a      temp    0        0         NZ         ORR       R       X         00         00        A       none    none
+ SBC (zp,X)  |  |     alu_a      temp    1       cin        NZXV       ADD       R       X         00         00        A       none    none
+ STA (zp,X)  |  |     alu_a      temp    0        0         NONE       ADD       W       X         00         00        M       none    none
+
+
+
+======================================================================================================================================================   
+
+
+Page Zero IndirectY
+
+------------------------------------------------------------------------------------------------------------------------------------------------------
+ ADC (zp),Y  |  |     alu_a      temp    0       cin        NZCV       ADD       R       Y         00         00        A       none    none
+ AND (zp),Y  |  |     alu_a      temp    0        0         NZ         AND       R       Y         00         00        A       none    none
+ CMP (zp),Y  |  |     alu_a      temp    1        1         NZC        ADD       R       Y         00         00        0       none    none
+ EOR (zp),Y  |  |     alu_a      temp    0        0         NZ         EOR       R       Y         00         00        A       none    none
+ LDA (zp),Y  |  |     00         temp    0        0         NZ         ADD       R       Y         00         00        A       none    none
+ ORA (zp),Y  |  |     alu_a      temp    0        0         NZ         ORR       R       Y         00         00        A       none    none
+ SBC (zp),Y  |  |     alu_a      temp    1       cin        NZXV       ADD       R       Y         00         00        A       none    none
+ STA (zp),Y  |  |     alu_a      temp    0        0         NONE       ADD       W       Y         00         00        M       none    none
+
+
+
+
+
+Implied
+
+------------------------------------------------------------------------------------------------------------------------------------------------------
+ NOP         |  |     00           00    0        0         NONE       ADD       0       0         00         00        0       none    none
+ SEC         |  |     00           00    0        0         WR         ADD       0       0         01         01        0       none    none
+ SED         |  |     00           00    0        0         WR         ADD       0       0         08         08        0       none    none
+ SEI         |  |     00           00    0        0         WR         ADD       0       0         04         04        0       none    none
+ CLC         |  |     00           00    0        0         WR         ADD       0       0         00         01        0       none    none
+ CLD         |  |     00           00    0        0         WR         ADD       0       0         00         08        0       none    none
+ CLI         |  |     00           00    0        0         WR         ADD       0       0         00         04        0       none    none
+ CLV         |  |     00           00    0        0         WR         ADD       0       0         00         40        0       none    none
+ ASL A       |  |     alu_a        00    0        0         NZC        SFL      RMW      0         00         00        A       none    none
+ DEX         |  |     alu_x        00    0        0         NZ         ADD      RMW      0         00         00        X       none    none
+ DEY         |  |     alu_y        00    0        0         NZ         ADD      RMW      0         00         00        Y       none    none
+ INX         |  |     alu_x        00    0        1         NZ         ADD      RMW      0         00         00        X       none    none
+ INY         |  |     alu_y        00    0        1         NZ         ADD      RMW      0         00         00        Y       none    none
+ LSR A       |  |     alu_a        00    0        0         NZC        SFR      RMW      0         00         00        A       none    none
+ ROL A       |  |     alu_a        00    0       cin        NZC        SFL      RMW      0         00         00        A       none    none
+ ROR A       |  |     alu_a        00    0       cin        NZC        SFR      RMW      0         00         00        A       none    none
+ TAX         |  |     alu_a        00    0        0         NZ         ADD      RMW      0         00         00        A       none    none
+ TAY         |  |     alu_a        00    0        0         NZ         ADD      RMW      0         00         00        X       none    none
+ TXA         |  |     alu_x        00    0        0         NZ         ADD      RMW      0         00         00        A       none    none
+ TYA         |  |     alu_y        00    0        0         NZ         ADD      RMW      0         00         00        A       none    none
+
+
+
+Branch 
+                      alu        alu    alu      alu       alu
+                      op_a       op_b   op_b     op_c      status      alu                       branch     branch
+                      src        src    inv      src       update      mode     type   index      value     enable     dest
+------------------------------------------------------------------------------------------------------------------------------------------------------
+ BCC rel     |  |     00           00    0        0         NONE       ADD       0       0         00         01        0      branch    none
+ BCS rel     |  |     00           00    0        0         NONE       ADD       0       0         01         01        0      branch    none
+ BNE rel     |  |     00           00    0        0         NONE       ADD       0       0         00         02        0      branch    none
+ BEQ rel     |  |     00           00    0        0         NONE       ADD       0       0         02         02        0      branch    none
+ BVC rel     |  |     00           00    0        0         NONE       ADD       0       0         00         40        0      branch    none
+ BVS rel     |  |     00           00    0        0         NONE       ADD       0       0         40         40        0      branch    none
+ BPL rel     |  |     00           00    0        0         NONE       ADD       0       0         00         80        0      branch    none
+ BMI rel     |  |     00           00    0        0         NONE       ADD       0       0         80         80        0      branch    none
+
+
+
+Stack 
+------------------------------------------------------------------------------------------------------------------------------------------------------
+ PLA         |  |        00        00    0        0         NZ         ADD       R       0         00         00        A
+ PLP         |  |        00        00    0        0         RESTORE    ADD       R       0         00         00       PSR
+ PHA         |  |     alu_a        00    0        0         NONE       ADD       W       0         00         00        M
+ PHP         |  |      psr         00    0        0         NONE       ADD       W       0         00         00        M
+
+
+
+Jump  absolute
+------------------------------------------------------------------------------------------------------------------------------------------------------
+ JMP abs     |  |       00         00    0        0         NONE       ADD       0       0         00         00        0
+
+
+
+Jump  indirect
+------------------------------------------------------------------------------------------------------------------------------------------------------
+ JMP (abs)   |  |       00         00    0        0         NONE       ADD       0       0         00         00        0
+ 
+
+
+Jump Sub absolute
+------------------------------------------------------------------------------------------------------------------------------------------------------
+ JSR abs     |  |      00          00    0        0         NONE       ADD       0       0         00         00        0
+
+
+
+Break
+------------------------------------------------------------------------------------------------------------------------------------------------------
+ BRK         |  |     alu_a        00    0        0         WR         ADD       0       0         10         10        0
+
+
+
+Return from 
+Interrupt
+------------------------------------------------------------------------------------------------------------------------------------------------------
+ RTI         |  |     00           00    0       0          RESTORE    ADD       0       0         00         00        P
+
+
+
+Return from 
+Subroutine
+------------------------------------------------------------------------------------------------------------------------------------------------------    
+ RTS         |  |     00           00    0       0          NONE       ADD       0       0         00            00     0 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Opcode         Current Instruction byte
+New_opcode     Next Instruction byte
+Opc_Add        Address of current instruction
+Next_Op_Add    Address of next instruction byte
+Operand        Data operand
+Address        Address of data operand if in memory
+Offset         Value added to Opc_Add if branch is taken
+Pointer        Address to store the address of data opeand if in memory
+Vector         Address to store the Next_Op_Add
+
+
+
+
+
+
+
+
+
+Address  Sequence   Decodes
+=========================================================================
+
+
+
+
+
+
+Implied  Addressing Mode
+
+c  e                                                                                                             ALU  
+l  n    prog      prog       prog        data  memory            page zero           stack                     Control   Processsor
+k  b   counter    data       fetch    add rw wdata rdata    add rw wdata rdata    op rdata wdata    execute    Signals   registers 
+______________________________________________________________________________________________________________________________________
+0  0   Opc_Add                     
+1  1   Opc_Add   Opcode      opcode
+--------------------------------------------------------------------------------------------------------------------------------------
+2  0   Opc_Add+1 Opcode                                                                                1          Set
+3  1   Opc_Add+1 New_Opcode      opcode                                                                    1         Set
+--------------------------------------------------------------------------------------------------------------------------------------
+4  0   Opc_Add+2 New_Opcode                                                                                                    updated
+
+
+
+
+Immediate  Addressing Mode
+
+
+c  e                                                                                                             ALU  
+l  n    prog      prog       prog        data  memory            page zero           stack                     Control   Processsor
+k  b   counter    data       fetch    add rw wdata rdata    add rw wdata rdata    op rdata wdata    execute    Signals   registers 
+____________________________________________________________________________________________________________________________________________________________
+0  0   Opc_Add                     
+1  1   Opc_Add   opcode      opcode
+----------------------------------------------------------------------------------------------------------------------------------------------------
+2  0   Opc_Add+1 opcode                                                                                         Set
+3  1   Opc_Add+1 operand     operand                                                                            Set
+----------------------------------------------------------------------------------------------------------------------------------------------------
+4  0   Opc_Add+2 operand                                                                              1          Set                          
+5  1   Opc_Add+2 new_op      opcode                                                                   1         Set
+----------------------------------------------------------------------------------------------------------------------------------------------------
+6  0   Opc_Add+3 new_op                                                                                                    updated
+
+
+
+
+
+
+
+Absolute Read  Addressing Mode
+
+c  e                                                                                                             ALU  
+l  n    prog      prog       prog        data  memory            page zero           stack                     Control   Processsor
+k  b   counter    data       fetch    add rw wdata rdata    add rw wdata rdata    op rdata wdata    execute    Signals   registers 
+___________________________________________________________________________________________________________________________________________________________
+0  0   Opc_Add                     
+1  1   Opc_Add   opcode      opcode
+--------------------------------------------------------------------------------------------------------------------------------------------
+2  0   Opc_Add+1 opcode                                                                                          Set
+3  1   Opc_Add+2 add_lo      add_lo                                                                              Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+4  0   Opc_Add+3 add_hi      add_hi                                                                              Set                          
+5  1   Opc_Add+3 new_op               addr  r  00                                                                Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+6  0   Opc_Add+3 new_op               addr  r  00  operand                                                       Set
+7  1   Opc_Add+3 new_op               addr  r  00  operand                                                       Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+8  0   Opc_Add+3 new_op                                                                                 1         Set
+9  1   Opc_Add+3 new_op      opcode                                                                     1        Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+10 0                                                                                                                        updated
+
+
+
+
+
+
+Absolute Write Addressing Mode
+
+c  e                                                                                                             ALU  
+l  n    prog      prog       prog        data  memory            page zero           stack                     Control   Processsor
+k  b   counter    data       fetch    add rw wdata rdata    add rw wdata rdata    op rdata wdata    execute    Signals   registers 
+___________________________________________________________________________________________________________________________________________________________
+0  0   Opc_Add                     
+1  1   Opc_Add   opcode      opcode
+--------------------------------------------------------------------------------------------------------------------------------------------
+2  0   Opc_Add+1 opcode                                                                                          Set
+3  1   Opc_Add+2 add_lo      add_lo                                                                              Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+4  0   Opc_Add+3 add_hi      add_hi                                                                              Set                          
+5  1   Opc_Add+3 new_op      opcode   addr  w  operand                                                  1        Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+6  0   Opc_Add+4 new_op                                                                                                     updated
+7  1   Opc_Add+4                                                                                         
+
+
+
+
+
+Absolute Read/Modify/Write Addressing Mode
+
+c  e                                                                                                             ALU  
+l  n    prog      prog       prog        data  memory            page zero           stack                     Control   Processsor
+k  b   counter    data       fetch    add rw wdata rdata    add rw wdata rdata    op rdata wdata    execute    Signals   registers 
+___________________________________________________________________________________________________________________________________________________________
+0  0   Opc_Add                     
+1  1   Opc_Add   opcode      opcode
+--------------------------------------------------------------------------------------------------------------------------------------------
+2  0   Opc_Add+1 opcode                                                                                          Set
+3  1   Opc_Add+2 add_lo      add_lo                                                                              Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+4  0   Opc_Add+3 add_hi      add_hi                                                                              Set                          
+5  1   Opc_Add+3 new_op               addr  r                                                                    Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+6  0   Opc_Add+3 new_op                            operand                                                       Set
+7  1   Opc_Add+3 new_op                                                                                          Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+8  0   Opc_Add+3 new_op               addr  w  result                                                   1        Set
+9  1   Opc_Add+3 new_op      opcode                                                                     1        Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+10 0                                                                                                                        updated
+
+
+  
+
+
+
+
+Absolute Indexed Read  Addressing Mode
+
+c  e                                                                                                             ALU  
+l  n    prog      prog       prog        data  memory            page zero           stack                     Control   Processsor
+k  b   counter    data       fetch    add rw wdata rdata    add rw wdata rdata    op rdata wdata    execute    Signals   registers 
+___________________________________________________________________________________________________________________________________________________________
+0  0   Opc_Add                     
+1  1   Opc_Add   opcode      opcode
+--------------------------------------------------------------------------------------------------------------------------------------------
+2  0   Opc_Add+1 opcode                                                                                          Set
+3  1   Opc_Add+2 add_lo      add_lo                                                                              Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+4  0   Opc_Add+3 add_hi      add_hi                                                                              Set                          
+5  1   Opc_Add+3 new_op               addr+i  r  00                                                                Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+6  0   Opc_Add+3 new_op               addr+i  r  00  operand                                                       Set
+7  1   Opc_Add+3 new_op               addr+i  r  00  operand                                                       Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+8  0   Opc_Add+3 new_op                                                                                 1         Set
+9  1   Opc_Add+3 new_op      opcode                                                                     1        Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+10 0                                                                                                                        updated
+
+
+
+Absolute Indexed Write Addressing Mode
+
+c  e                                                                                                             ALU  
+l  n    prog      prog       prog        data  memory            page zero           stack                     Control   Processsor
+k  b   counter    data       fetch    add rw wdata rdata    add rw wdata rdata    op rdata wdata    execute    Signals   registers 
+___________________________________________________________________________________________________________________________________________________________
+0  0   Opc_Add                     
+1  1   Opc_Add   opcode      opcode
+--------------------------------------------------------------------------------------------------------------------------------------------
+2  0   Opc_Add+1 opcode                                                                                          Set
+3  1   Opc_Add+2 add_lo      add_lo                                                                              Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+4  0   Opc_Add+3 add_hi      add_hi                                                                       1       Set                          
+5  1   Opc_Add+3 new_op      opcode   addr+i  w  operand                                                  1        Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+6  0   Opc_Add+4 new_op                                                                                                     updated
+7  1   Opc_Add+4                                                                                         
+
+
+
+
+
+Absolute Indexed Read/Modify/Write Addressing Mode
+
+c  e                                                                                                             ALU  
+l  n    prog      prog       prog        data  memory            page zero           stack                     Control   Processsor
+k  b   counter    data       fetch    add rw wdata rdata    add rw wdata rdata    op rdata wdata    execute    Signals   registers 
+___________________________________________________________________________________________________________________________________________________________
+0  0   Opc_Add                     
+1  1   Opc_Add   opcode      opcode
+--------------------------------------------------------------------------------------------------------------------------------------------
+2  0   Opc_Add+1 opcode                                                                                          Set
+3  1   Opc_Add+2 add_lo      add_lo                                                                              Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+4  0   Opc_Add+3 add_hi      add_hi                                                                              Set                          
+5  1   Opc_Add+3 new_op               addr+i  r                                                                    Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+6  0   Opc_Add+3 new_op                            operand                                                       Set
+7  1   Opc_Add+3 new_op                                                                                          Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+8  0   Opc_Add+3 new_op               addr+i  w  result                                                 1           Set
+9  1   Opc_Add+3 new_op      opcode                                                                     1        Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+10 0                                                                                                                        updated
+
+
+
+
+
+
+
+
+
+
+
+
+Page Zero Read  Addressing Mode
+
+c  e                                                                                                             ALU  
+l  n    prog      prog       prog        data  memory            page zero           stack                     Control   Processsor
+k  b   counter    data       fetch    add rw wdata rdata    add rw wdata rdata    op rdata wdata    execute    Signals   registers 
+___________________________________________________________________________________________________________________________________________________________
+0  0   Opc_Add                     
+1  1   Opc_Add   opcode      opcode
+--------------------------------------------------------------------------------------------------------------------------------------------
+2  0   Opc_Add+1 opcode                                                                                          Set
+3  1   Opc_Add+1 add_lo      add_lo                                                                              Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+4  0   Opc_Add+2 add_lo                                     addr r                                               Set                          
+5  1   Opc_Add+2 new_op                                             operand                                      Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+6  0   Opc_Add+2 new_op                                                                                 1         Set
+7  1   Opc_Add+2 new_op      opcode                                                                     1        Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+8  0   Opc_Add+3 new_op                                                                                                     updated
+
+
+
+
+
+
+
+
+Page Zero Write Addressing Mode
+
+c  e                                                                                                             ALU  
+l  n    prog      prog       prog        data  memory            page zero           stack                     Control   Processsor
+k  b   counter    data       fetch    add rw wdata rdata    add rw wdata rdata    op rdata wdata    execute    Signals   registers 
+___________________________________________________________________________________________________________________________________________________________
+0  0   Opc_Add                     
+1  1   Opc_Add   opcode      opcode
+--------------------------------------------------------------------------------------------------------------------------------------------
+2  0   Opc_Add+1 opcode                                                                                          Set
+3  1   Opc_Add+1 add_lo      add_lo                                                                              Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+4  0   Opc_Add+2 add_lo                                                                                 1         Set                          
+5  1   Opc_Add+2 new_op      opcode                          addr  w  operand                           1        Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+6  0   Opc_Add+3 new_op                                                                                                     updated
+7  1   Opc_Add+3                                                                                         
+
+
+
+
+
+
+
+Page Zero Read/Modify/Write Addressing Mode
+
+c  e                                                                                                             ALU  
+l  n    prog      prog       prog        data  memory            page zero           stack                     Control   Processsor
+k  b   counter    data       fetch    add rw wdata rdata    add rw wdata rdata    op rdata wdata    execute    Signals   registers 
+___________________________________________________________________________________________________________________________________________________________
+0  0   Opc_Add                     
+1  1   Opc_Add   opcode      opcode
+--------------------------------------------------------------------------------------------------------------------------------------------
+2  0   Opc_Add+1 opcode                                                                                          Set
+3  1   Opc_Add+1 add_lo      add_lo                                                                              Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+4  0   Opc_Add+2 add_lo                                     addr r                                               Set                          
+5  1   Opc_Add+2 new_op                                             operand                                      Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+6  0   Opc_Add+2 new_op                                                                                 1         Set
+7  1   Opc_Add+2 new_op      opcode                         addr w result                               1        Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+8  0   Opc_Add+3 new_op                                                                                                     updated
+
+
+
+
+
+
+
+
+
+
+Page Zero Indexed Read  Addressing Mode
+
+c  e                                                                                                             ALU  
+l  n    prog      prog       prog        data  memory            page zero           stack                     Control   Processsor
+k  b   counter    data       fetch    add rw wdata rdata    add rw wdata rdata    op rdata wdata    execute    Signals   registers 
+___________________________________________________________________________________________________________________________________________________________
+0  0   Opc_Add                     
+1  1   Opc_Add   opcode      opcode
+--------------------------------------------------------------------------------------------------------------------------------------------
+2  0   Opc_Add+1 opcode                                                                                          Set
+3  1   Opc_Add+1 add_lo      add_lo                                                                              Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+4  0   Opc_Add+2 add_lo                                     addr+i r                                               Set                          
+5  1   Opc_Add+2 new_op                                             operand                                      Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+6  0   Opc_Add+2 new_op                                                                                 1         Set
+7  1   Opc_Add+2 new_op      opcode                                                                     1        Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+8  0   Opc_Add+3 new_op                                                                                                     updated
+
+
+
+
+
+Page Zero Indexed Write Addressing Mode
+
+c  e                                                                                                             ALU  
+l  n    prog      prog       prog        data  memory            page zero           stack                     Control   Processsor
+k  b   counter    data       fetch    add rw wdata rdata    add rw wdata rdata    op rdata wdata    execute    Signals   registers 
+___________________________________________________________________________________________________________________________________________________________
+0  0   Opc_Add                     
+1  1   Opc_Add   opcode      opcode
+--------------------------------------------------------------------------------------------------------------------------------------------
+2  0   Opc_Add+1 opcode                                                                                          Set
+3  1   Opc_Add+1 add_lo      add_lo                                                                              Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+4  0   Opc_Add+2 add_lo                                                                                 1         Set                          
+5  1   Opc_Add+2 new_op      opcode                          addr  w  operand                           1        Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+6  0   Opc_Add+3 new_op                                                                                                     updated
+7  1   Opc_Add+3                                                                                         
+
+
+
+
+
+
+
+Page Zero Indexed Read/Modify/Write Addressing Mode
+
+c  e                                                                                                             ALU  
+l  n    prog      prog       prog        data  memory            page zero           stack                     Control   Processsor
+k  b   counter    data       fetch    add rw wdata rdata    add rw wdata rdata    op rdata wdata    execute    Signals   registers 
+___________________________________________________________________________________________________________________________________________________________
+0  0   Opc_Add                     
+1  1   Opc_Add   opcode      opcode
+--------------------------------------------------------------------------------------------------------------------------------------------
+2  0   Opc_Add+1 opcode                                                                                          Set
+3  1   Opc_Add+1 add_lo      add_lo                                                                              Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+4  0   Opc_Add+2 add_lo                                     addr r                                               Set                          
+5  1   Opc_Add+2 new_op                                             operand                                      Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+6  0   Opc_Add+2 new_op                                                                                 1         Set
+7  1   Opc_Add+2 new_op      opcode                         addr w result                               1        Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+8  0   Opc_Add+3 new_op                                                                                                     updated
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Page Zero  Indirect X    Read
+-------------------------------------------------------
+Operand address lower byte  is read from the address found  by adding X index value to 8 bit address following opcode and
+the upper byte  is read from the address found  by adding X index value to 8 bit address plus 1 (no wraparound)
+
+
+
+
+Page Zero IndirectX Read  Addressing Mode
+
+c  e                                                                                                             ALU  
+l  n    prog      prog       prog        data  memory            page zero           stack                     Control   Processsor
+k  b   counter    data       fetch    add rw wdata rdata    add rw wdata rdata    op rdata wdata    execute    Signals   registers 
+___________________________________________________________________________________________________________________________________________________________
+0  0   Opc_Add                     
+1  1   Opc_Add   opcode      opcode
+--------------------------------------------------------------------------------------------------------------------------------------------
+2  0   Opc_Add+1 opcode                                                                                          Set
+3  1   Opc_Add+1 add_lo      add_lo                                                                              Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+4  0   Opc_Add+2 add_lo                                     addr+i r                                             Set                          
+5  1   Opc_Add+2 new_op                                     addr+i+1 r    add_l                                    Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+6  0   Opc_Add+2 new_op                                                   add_h                                        Set
+7  1   Opc_Add+2 new_op               addr r                                                                  Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+8  0   Opc_Add+2 new_op                       operand                                                   1               Set
+9  1                         opcode                                                                     1        Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+10 0                                                                                                                      updated
+
+
+
+
+
+Page Zero IndirectX Write  Addressing Mode
+
+c  e                                                                                                             ALU  
+l  n    prog      prog       prog        data  memory            page zero           stack                     Control   Processsor
+k  b   counter    data       fetch    add rw wdata rdata    add rw wdata rdata    op rdata wdata    execute    Signals   registers 
+___________________________________________________________________________________________________________________________________________________________
+0  0   Opc_Add                     
+1  1   Opc_Add   opcode      opcode
+--------------------------------------------------------------------------------------------------------------------------------------------
+2  0   Opc_Add+1 opcode                                                                                          Set
+3  1   Opc_Add+1 add_lo      add_lo                                                                              Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+4  0   Opc_Add+2 add_lo                                     addr+i r                                             Set                          
+5  1   Opc_Add+2 new_op                                     addr+i+1     add_l                                   Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+6  0   Opc_Add+2 new_op                                                  add_h                          1        Set
+7  1   Opc_Add+2 new_op      opcode   addr w  result                                                    1        Set            
+--------------------------------------------------------------------------------------------------------------------------------------------
+8  0   Opc_Add+3 new_op                                                                                                 updated
+9  1                                                                                                                        
+                      
+
+
+
+
+
+
+
+
+Page Zero IndirectY Read  Addressing Mode
+
+c  e                                                                                                             ALU  
+l  n    prog      prog       prog        data  memory            page zero           stack                     Control   Processsor
+k  b   counter    data       fetch    add rw wdata rdata    add rw wdata rdata    op rdata wdata    execute    Signals   registers 
+___________________________________________________________________________________________________________________________________________________________
+0  0   Opc_Add                     
+1  1   Opc_Add   opcode      opcode
+--------------------------------------------------------------------------------------------------------------------------------------------
+2  0   Opc_Add+1 opcode                                                                                          Set
+3  1   Opc_Add+1 add_lo      add_lo                                                                              Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+4  0   Opc_Add+2 add_lo                                     addr_lo r                                               Set                          
+5  1   Opc_Add+2 new_op                                                  addr                                      Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+6  0   Opc_Add+2 new_op               addr+i r                                                                              Set
+7  1   Opc_Add+2 new_op               addr+i r  operand                                                                  Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+8  0   Opc_Add+2 new_op                                                                                             1   Set
+9  1                         opcode                                                                                 1   Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+10 0                                                                                                                      updated
+
+
+
+
+Page Zero IndirectX Write  Addressing Mode
+
+c  e                                                                                                             ALU  
+l  n    prog      prog       prog        data  memory            page zero           stack                     Control   Processsor
+k  b   counter    data       fetch    add rw wdata rdata    add rw wdata rdata    op rdata wdata    execute    Signals   registers 
+___________________________________________________________________________________________________________________________________________________________
+0  0   Opc_Add                     
+1  1   Opc_Add   opcode      opcode
+--------------------------------------------------------------------------------------------------------------------------------------------
+2  0   Opc_Add+1 opcode                                                                                          Set
+3  1   Opc_Add+1 add_lo      add_lo                                                                              Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+4  0   Opc_Add+2 add_lo                                     add_lo r                                     1         Set                          
+5  1   Opc_Add+2 new_op                                                  addr                            1         Set
+--------------------------------------------------------------------------------------------------------------------------------------------
+6  0   Opc_Add+2 new_op               addr+i w  result                                                              Set
+7  1   Opc_Add+2 new_op      opcode                                                                               Set    updated
+--------------------------------------------------------------------------------------------------------------------------------------------
+8  0   Opc_Add+3 new_op                                                                                                      
+9  1                                                                                                                        
+
+
+
+
+
+
+Relative  Addressing Mode
+
+
+c  e                                                                                                             ALU  
+l  n    prog      prog       prog        data  memory            page zero           stack                     Control   Processsor
+k  b   counter    data       fetch    add rw wdata rdata    add rw wdata rdata    op rdata wdata    execute    Signals   registers 
+____________________________________________________________________________________________________________________________________________________________
+0  0   Opc_Add                     
+1  1   Opc_Add       opcode      opcode
+----------------------------------------------------------------------------------------------------------------------------------------------------
+2  0   Opc_Add+1     opcode                                                                                          Set
+3  1   Opc_Add+1     offset      offset                                                                              Set
+----------------------------------------------------------------------------------------------------------------------------------------------------
+4  0   Next_Op_Add   offset                                                                             1                                        
+5  1   Next_Op_Add   new_op      opcode                                                                 1               
+----------------------------------------------------------------------------------------------------------------------------------------------------
+6  0   Next_Op_Add+1 new_op                                                                                                              
+
+
+
+
+
+Addressing Modes
+===============================================================================================
+
+
+
+
+                       
+Stack                    StackRead/StackWrite
+-------------------------------------------------------
+Operation uses the Stack
+
+
+
+Jump  Absolute           Read
+-------------------------------------------------------
+16 bit destination address follows opcode
+
+
+Jump Indirect            Read
+-------------------------------------------------------
+16 bit Address following opcode points to destination address 
+
+
+
+
+Jump Sub  Absolute       Read_Stackwrite  
+-------------------------------------------------------
+16 bit destination address follows opcode. Return address is pushed on stack
+
+
+
+Break                    Read_Stackwrite  
+-------------------------------------------------------
+Return address is pushed on stack and the IRQ vector is taken 
+
+
+
+Return from Interrupt    Read_Stackread  
+-------------------------------------------------------
+PSR and Prog_counter are pulled from stack
+
+
+
+ 
+Return from Subroutine   Read_Stackread  
+-------------------------------------------------------
+Prog_counter is pulled from stack
+
+
+
+
+
+
+
+
+
+
+
+
+
+Interrupts
+===============================================================================================
+
+Non-Maskable  (NMI)
+
+ 1) Finish current instruction
+ 2) Push Address of next instruction on stack
+ 3) Read Vector Address from FFFA
+ 4) Execute code @ vector address
+
+
+
+Maskable  (IRQ) ( if I bit is clear)
+
+ 1) Finish current instruction
+ 2) Push Address of next instruction on stack
+ 3) Push PSR  on stack
+ 4) Read Vector Address from FFFE
+ 5) Execute code @ vector address
+
+
+Reset
+
+ 1) Clear A,X,Y: Set PSR to 20h
+ 2) Wait for Reset to deassert
+ 3) Read Vector Address from FFFC
+ 4) Execute code @ vector address
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,512 @@
+eval 'exec `which perl` -S $0 ${1+"$@"}'
+   if 0;
+
+#/**********************************************************************/
+#/*                                                                    */
+#/*             -------                                                */
+#/*            /   SOC  \                                              */
+#/*           /    GEN   \                                             */
+#/*          /    TOOL    \                                            */
+#/*          ==============                                            */
+#/*          |            |                                            */
+#/*          |____________|                                            */
+#/*                                                                    */
+#/*                                                                    */
+#/*                                                                    */
+#/*  Author(s):                                                        */
+#/*      - John Eaton, jt_eaton@opencores.org                          */
+#/*                                                                    */
+#/**********************************************************************/
+#/*                                                                    */
+#/*    Copyright (C) <2010-2013>  <Ouabache Design Works>              */
+#/*                                                                    */
+#/*  This source file may be used and distributed without              */
+#/*  restriction provided that this copyright statement is not         */
+#/*  removed from the file and that any derivative work contains       */
+#/*  the original copyright notice and the associated disclaimer.      */
+#/*                                                                    */
+#/*  This source file is free software; you can redistribute it        */
+#/*  and/or modify it under the terms of the GNU Lesser General        */
+#/*  Public License as published by the Free Software Foundation;      */
+#/*  either version 2.1 of the License, or (at your option) any        */
+#/*  later version.                                                    */
+#/*                                                                    */
+#/*  This source is distributed in the hope that it will be            */
+#/*  useful, but WITHOUT ANY WARRANTY; without even the implied        */
+#/*  warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR           */
+#/*  PURPOSE.  See the GNU Lesser General Public License for more      */
+#/*  details.                                                          */
+#/*                                                                    */
+#/*  You should have received a copy of the GNU Lesser General         */
+#/*  Public License along with this source; if not, download it        */
+#/*  from http://www.opencores.org/lgpl.shtml                          */
+#/*                                                                    */
+#/**********************************************************************/
+
+
+############################################################################
+# General PERL config
+############################################################################
+use Getopt::Long;
+use English;
+use File::Basename;
+use Cwd;
+use XML::LibXML;
+use lib './tools';
+use sys::lib;
+use yp::lib;
+use BerkeleyDB;
+use Parallel::ForkManager;
+
+$OUTPUT_AUTOFLUSH = 1; # set autoflush of stdout to TRUE.
+
+
+############################################################################
+### Process the options
+############################################################################
+Getopt::Long::config("require_order", "prefix=-");
+GetOptions("h","help",
+) || die "(use '$program_name -h' for help)";
+
+
+
+
+##############################################################################
+## Help option
+##############################################################################
+if ( $opt_h or $opt_help  ) 
+  { print "\n build_elab_master";
+    print "\n";
+    exit 1;
+  }
+
+
+my $parser = XML::LibXML->new();
+
+
+
+
+#/**********************************************************************/
+#/*  Process each library by finding any ip-xact file in any component */
+#/*                                                                    */
+#/*  Each ip-xact file is parsed and it's filename and the names of any*/
+#/*  modules that it uses are saved.                                   */
+#/*                                                                    */
+#/*                                                                    */
+#/**********************************************************************/
+
+my @elab_cmds = ();
+my @des_cmds = ();
+my @gen_cmds = ();
+my @top_levels =();
+my @children =();
+
+
+print "Build_elab_master \n";
+
+my $number_of_cpus   = yp::lib::get_number_of_cpus();
+
+my $home = cwd();
+
+my $prefix   = yp::lib::get_workspace();
+   $prefix   = "/${prefix}";
+
+my @vendors = yp::lib::find_vendors();
+
+foreach my $vendor (@vendors)
+ {
+
+ my $vendor_status    =  yp::lib::get_vendor_status($vendor);
+ if($vendor_status eq "active") 
+   { 
+   my @libraries = yp::lib::find_libraries($vendor);
+   foreach my $library (@libraries)
+     {
+
+     my $library_status   =  yp::lib::get_library_status($vendor,$library);
+     if($library_status eq "active") 
+         {
+
+
+
+
+
+
+my @components   = yp::lib::find_components($vendor,$library);
+
+foreach my $component (@components) 
+   {
+   my $socgen_filename     = yp::lib::find_componentConfiguration($vendor,$library,$component);
+   if($socgen_filename)
+   {
+   my $socgen_file     = $parser->parse_file($socgen_filename);
+
+
+
+   #/*********************************************************************************************/
+   #/   elaborate  each testbench                                                                */
+   #/                                                                                            */
+   #/*********************************************************************************************/
+
+   foreach  my   $j_name ($socgen_file->findnodes("//socgen:componentConfiguration/socgen:sim/socgen:testbenches/socgen:testbench/socgen:variant"))
+      {
+
+      my $testbench_variant            = $j_name ->findnodes('./text()')->to_literal ;
+      my $testbench_version            = $j_name ->findnodes('../socgen:version/text()')->to_literal ;
+      my $testbench_config             = $j_name ->findnodes('../socgen:configuration/text()')->to_literal ;
+      my $testbench_instance           = $j_name ->findnodes('../socgen:bus/socgen:instance/text()')->to_literal ;
+      my $testbench_bus_name           = $j_name ->findnodes('../socgen:bus/socgen:bus_name/text()')->to_literal ;
+
+
+if(defined $testbench_config   && length $testbench_config > 0)
+{
+$cmd ="./tools/verilog/elab_verilog  -vendor ${vendor} -library ${library} -component   ${component}  -version ${testbench_version} -configuration ${testbench_config}  \n";
+}
+else
+{
+$cmd ="./tools/verilog/elab_verilog  -vendor ${vendor} -library ${library} -component   ${component}  -version ${testbench_version}   \n";
+}
+
+
+       push @elab_cmds, $cmd;
+
+$cmd ="./tools/verilog/gen_root   -vendor ${vendor}  -library ${library}  -component ${component} -version ${testbench_version}  \n  ";
+       push @gen_cmds, $cmd;
+
+$cmd ="./tools/verilog/gen_design   -vendor ${vendor}  -library ${library}  -component ${component} -version ${testbench_version} \n    ";
+       push @des_cmds, $cmd;
+
+    if  ($testbench_instance)
+         {
+$cmd ="./tools/verilog/trace_bus -prefix  ${prefix}  -vendor ${vendor}  -library ${library}  -component ${component} -version ${testbench_version}  -path $testbench_instance  -bus_name $testbench_bus_name  ";
+
+       push @gen_cmds, $cmd;
+         }  
+      }
+
+
+
+
+
+
+   #/*********************************************************************************************/
+   #/   elaborate for each test                                                                  */
+   #/                                                                                            */
+   #/*********************************************************************************************/
+
+   foreach  my   $i_name ($socgen_file->findnodes("//socgen:componentConfiguration/socgen:sim/socgen:icarus/socgen:test/socgen:name"))
+      {
+      my $test_name            = $i_name ->findnodes('./text()')->to_literal ;
+      my $test_variant          = $i_name ->findnodes('../socgen:variant/text()')->to_literal ;
+
+#      print "XXXX $vendor $library $component  $test_variant   $test_name  \n ";
+
+
+   foreach  my   $j_name ($socgen_file->findnodes("//socgen:componentConfiguration/socgen:sim/socgen:testbenches/socgen:testbench/socgen:variant"))
+      {
+      my $testbench_variant            = $j_name ->findnodes('./text()')->to_literal ;
+      my $testbench_version            = $j_name ->findnodes('../socgen:version/text()')->to_literal ;
+      my $testbench_instance           = $j_name ->findnodes('../socgen:bus/socgen:instance/text()')->to_literal ;
+      my $testbench_bus_name           = $j_name ->findnodes('../socgen:bus/socgen:bus_name/text()')->to_literal ;
+
+
+      if($test_variant eq $testbench_variant )
+       {
+#       print "YYYY $prefix  $vendor $library $component   $testbench_version  $test_name   \n ";
+
+#print "ELAB_XXXXX  test_variant  $vendor $library \n";
+
+push @top_levels,  "${vendor}::${library}::${component}::${testbench_version}::${test_name}";
+
+$cmd ="./tools/verilog/elab_verilog  -vendor ${vendor} -library ${library} -component   ${component}  -version ${testbench_version}  -env sim -tool icarus -unit test -name  $test_name  \n";
+
+       push @elab_cmds, $cmd;
+
+
+
+$cmd ="./tools/verilog/gen_root   -vendor ${vendor} -library ${library} -component   ${component}  -version ${testbench_version}  -name  $test_name  \n";
+
+       push @gen_cmds, $cmd;
+
+$cmd ="./tools/verilog/gen_design   -vendor ${vendor} -library ${library} -component   ${component}  -version ${testbench_version}  -name  $test_name  \n";
+
+       push @des_cmds, $cmd;
+
+
+
+
+    if  ($testbench_instance)
+         {
+
+$cmd ="./tools/verilog/trace_bus -prefix  ${prefix}  -vendor ${vendor}  -library ${library}  -component ${component} -version ${testbench_version}  -path $testbench_instance  -bus_name $testbench_bus_name  -test_name  $test_name ";
+
+       push @gen_cmds, $cmd;
+         }  
+       }
+
+      }
+      }
+
+
+
+
+
+
+
+
+   #/*********************************************************************************************/
+   #/   elaborate for each chip                                                                  */
+   #/                                                                                            */
+   #/*********************************************************************************************/
+
+   foreach  my   $i_name ($socgen_file->findnodes("//socgen:componentConfiguration/socgen:syn/socgen:ise/socgen:chip/socgen:name"))
+      {
+      my $chip_name            = $i_name ->findnodes('./text()')->to_literal ;
+      my $chip_variant          = $i_name ->findnodes('../socgen:variant/text()')->to_literal ;
+
+#      print "XXXX $vendor $library $component  $chip_variant   $chip_name  \n ";
+
+
+   foreach  my   $j_name ($socgen_file->findnodes("//socgen:componentConfiguration/socgen:syn/socgen:fpgas/socgen:fpga/socgen:variant"))
+      {
+      my $fpga_variant            = $j_name ->findnodes('./text()')->to_literal ;
+      my $fpga_version                 = $j_name ->findnodes('../socgen:version/text()')->to_literal ;
+
+
+      if($chip_variant eq $fpga_variant )
+       {
+#       print "YYYY $prefix  $vendor $library $component   $fpga_version  $chip_name   \n ";
+
+#print "ELAB_XXXXX  test_variant  $vendor $library \n";
+
+push @top_levels,  "${vendor}::${library}::${component}::${fpga_version}::${chip_name}";
+$cmd ="./tools/verilog/elab_verilog  -vendor ${vendor} -library ${library} -component   ${component}  -version ${fpga_version}  -env syn -tool ise -unit chip -name $chip_name  \n";
+
+        push @elab_cmds, $cmd;
+
+
+
+$cmd ="./tools/verilog/gen_root   -vendor ${vendor} -library ${library} -component   ${component}  -version ${fpga_version}  -name  $chip_name  \n";
+
+       push @gen_cmds, $cmd;
+
+$cmd ="./tools/verilog/gen_design   -vendor ${vendor} -library ${library} -component   ${component}  -version ${fpga_version}  -name  $chip_name  \n";
+
+       push @des_cmds, $cmd;
+       }
+
+      }
+      }
+
+
+
+
+
+
+
+
+   #/*********************************************************************************************/
+   #/   elaborate for each rtlcheck                                                              */
+   #/                                                                                            */
+   #/*********************************************************************************************/
+
+   foreach  my   $i_name ($socgen_file->findnodes("//socgen:componentConfiguration/socgen:sim/socgen:rtl_check/socgen:lint/socgen:name"))
+      {
+      my $lint_name            = $i_name ->findnodes('./text()')->to_literal ;
+      my $lint_variant          = $i_name ->findnodes('../socgen:variant/text()')->to_literal ;
+
+   foreach  my   $j_name ($socgen_file->findnodes("//socgen:componentConfiguration/socgen:sim/socgen:testbenches/socgen:testbench/socgen:variant"))
+      {
+      my $testbench_variant            = $j_name ->findnodes('./text()')->to_literal ;
+      my $testbench_version                 = $j_name ->findnodes('../socgen:version/text()')->to_literal ;
+
+      if($lint_variant eq $testbench_variant )
+       {
+       $cmd ="./tools/verilog/elab_verilog  -vendor ${vendor} -library ${library} -component   ${component}  -version ${testbench_version}  -env sim -tool rtl_check -unit lint -name $lint_name  \n";
+        push @elab_cmds, $cmd;
+       }
+
+      }
+      }
+
+
+  #/**********************************************************************************************/
+   #/   elaborate for each top module                                                            */
+   #/                                                                                            */
+   #/*********************************************************************************************/
+
+   foreach  my   $i_name ($socgen_file->findnodes("//socgen:componentConfiguration/socgen:configurations/socgen:configuration/socgen:version"))
+      {
+      my $version_name          = $i_name ->findnodes('./text()')->to_literal ;
+      my $configuration         = $i_name ->findnodes('../socgen:name/text()')->to_literal ;
+$cmd ="./tools/verilog/elab_verilog  -vendor ${vendor} -library ${library} -component   ${component}  -version ${version_name} -configuration ${configuration}\n";
+        push @elab_cmds, $cmd;
+      }
+
+
+}
+
+
+
+}
+
+
+
+
+         }
+     }
+   }
+ }
+
+
+
+
+
+@elab_cmds      = sys::lib::trim_sort(@elab_cmds);
+
+print "Start elab_cmds \n";
+
+foreach $cmd (@elab_cmds)
+ {
+
+# $manager->start and next;
+#print "$cmd";
+  if (system($cmd)) {}
+# $manager->finish;
+ }
+
+
+print "End elab_cmds \n";
+
+
+
+
+
+
+
+
+
+
+
+
+@top_levels     = sys::lib::trim_sort(@top_levels);
+
+
+foreach $level (@top_levels)
+ {
+
+ ( $ven,$lib,$cmp,$ver,$nam) = split( /\::/ , $level);
+
+ my $elab_db_filename = yp::lib::get_elab_db_filename($ven,$lib,$cmp,$ver,"default");
+
+ my $elab_db  = new BerkeleyDB::Hash( -Filename => "$elab_db_filename", -Flags => DB_CREATE ) or die "Cannot open $elab_db_filename: $!";
+
+ my $key;
+ my $value;
+
+ $cursor = $elab_db ->db_cursor() ;
+ while ($cursor->c_get($key, $value, DB_NEXT) == 0) 
+   {
+
+#   print "$key \n";
+my $VLNV;
+my $vlnv;
+
+
+   ( ${VLNV},${vlnv}) = split( /___root./ , $key);
+   if($VLNV eq "component") 
+     {
+     if($vlnv)
+       {
+       push @children,$value;
+
+       }
+     }
+}
+}
+
+@children     = sys::lib::trim_sort(@children);
+
+foreach my $child (@children)
+ {
+ my $ven;
+ my $lib;
+ my $cmp;
+ my $ver;
+ ( ${ven},${lib},${cmp},${ver}) = split( /:/ , $child);
+
+
+
+ my $child_filename     = yp::lib::find_componentConfiguration($ven,$lib,$cmp);
+ if($child_filename)
+    {  
+    my $socgen_file     = $parser->parse_file($child_filename);
+    foreach  my   $i_name ($socgen_file->findnodes("//socgen:componentConfiguration/socgen:configurations/socgen:configuration/socgen:version"))
+      {
+      my $version_name          = $i_name ->findnodes('./text()')->to_literal ;
+      my $configuration         = $i_name ->findnodes('../socgen:name/text()')->to_literal ;
+      $cmd ="./tools/verilog/elab_verilog  -vendor ${ven} -library ${lib} -component   ${cmp}  -version ${version_name} -configuration ${configuration}\n";
+
+      if (system($cmd)) {}
+      }
+    }
+ }
+
+
+
+
+
+
+
+
+@des_cmds       = sys::lib::trim_sort(@des_cmds);
+@gen_cmds       = sys::lib::trim_sort(@gen_cmds);
+
+
+#print "Execute cmds \n";
+
+my $manager = new Parallel::ForkManager( $number_of_cpus );
+
+
+
+
+#$manager->wait_all_children;
+
+
+
+
+
+
+
+foreach $cmd (@des_cmds)
+ {
+      if (system($cmd)) {}
+ }
+
+print "End des_cmds \n";
+
+foreach $cmd (@gen_cmds)
+ {
+# $manager->start and next;
+  if (system($cmd)) {}
+# $manager->finish;
+ }
+
+#$manager->wait_all_children;
+
+print "End All \n";
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

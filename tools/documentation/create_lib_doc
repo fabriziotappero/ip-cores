@@ -1,0 +1,300 @@
+eval 'exec `which perl` -S $0 ${1+"$@"}'
+   if 0;
+
+#/**********************************************************************/
+#/*                                                                    */
+#/*             -------                                                */
+#/*            /   SOC  \                                              */
+#/*           /    GEN   \                                             */
+#/*          /    TOOL    \                                            */
+#/*          ==============                                            */
+#/*          |            |                                            */
+#/*          |____________|                                            */
+#/*                                                                    */
+#/*                                                                    */
+#/*                                                                    */
+#/*                                                                    */
+#/*  Author(s):                                                        */
+#/*      - John Eaton, jt_eaton@opencores.org                          */
+#/*                                                                    */
+#/**********************************************************************/
+#/*                                                                    */
+#/*    Copyright (C) <2010-2011>  <Ouabache Design Works>              */
+#/*                                                                    */
+#/*  This source file may be used and distributed without              */
+#/*  restriction provided that this copyright statement is not         */
+#/*  removed from the file and that any derivative work contains       */
+#/*  the original copyright notice and the associated disclaimer.      */
+#/*                                                                    */
+#/*  This source file is free software; you can redistribute it        */
+#/*  and/or modify it under the terms of the GNU Lesser General        */
+#/*  Public License as published by the Free Software Foundation;      */
+#/*  either version 2.1 of the License, or (at your option) any        */
+#/*  later version.                                                    */
+#/*                                                                    */
+#/*  This source is distributed in the hope that it will be            */
+#/*  useful, but WITHOUT ANY WARRANTY; without even the implied        */
+#/*  warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR           */
+#/*  PURPOSE.  See the GNU Lesser General Public License for more      */
+#/*  details.                                                          */
+#/*                                                                    */
+#/*  You should have received a copy of the GNU Lesser General         */
+#/*  Public License along with this source; if not, download it        */
+#/*  from http://www.opencores.org/lgpl.shtml                          */
+#/*                                                                    */
+#/**********************************************************************/
+
+
+############################################################################
+# General PERL config
+############################################################################
+use Getopt::Long;
+use English;
+use File::Basename;
+use Cwd;
+use XML::LibXML;
+use lib './tools';
+use sys::lib;
+use yp::lib;
+
+
+$OUTPUT_AUTOFLUSH = 1; # set autoflush of stdout to TRUE.
+
+
+############################################################################
+### Process the options
+############################################################################
+
+Getopt::Long::config("require_order", "prefix=-");
+GetOptions("h","help",
+) || die "(use '$program_name -h' for help)";
+
+
+##############################################################################
+## Help option
+##############################################################################
+if (  $opt_h or $opt_help  ) 
+  { print "\n create_lib_doc  vendor_name library_name [component_name]";
+    print "\n";
+    exit 1;
+  }
+
+
+##############################################################################
+## 
+##############################################################################
+
+
+
+my $parser = XML::LibXML->new();
+
+$home = cwd();
+
+
+#############################################################################
+## 
+## 
+#############################################################################
+
+my $vendor         = $ARGV[0];
+my $library        = $ARGV[1];
+my $work_dir       = $ARGV[2];
+my $repo           = yp::lib::find_library_repo($vendor,$library);
+
+
+my $doc_dir        = yp::lib::get_doc_dir();
+
+
+if(defined $work_dir)
+  {chomp($work_dir);}
+else 
+  {$work_dir ="/${doc_dir}";}
+
+
+
+my $path  = "${home}${work_dir}";
+mkdir $path,0755             unless( -e $path );
+my $path  = "${home}${work_dir}/${vendor}__${library}";
+mkdir $path,0755             unless( -e $path );
+
+
+
+$root = "${home}${repo}/${vendor}/${library}";
+$dest = "${home}${work_dir}/${vendor}__${library}";
+&sys::lib::link_dir( "$root", "$dest"  );
+
+my @components   = yp::lib::find_components($vendor,$library);
+
+foreach my  $component (@components) 
+{
+unless (yp::lib::find_componentConfiguration($vendor,$library,$component)) {print "Missing ComponentCfg  $vendor, $library, $component \n";  }
+
+my $socgen_filename      = yp::lib::find_componentConfiguration($vendor,$library,$component);
+
+if($socgen_filename)
+
+{
+
+
+
+
+ my $socgen_file      = $parser->parse_file($socgen_filename);
+
+
+
+ my $doc_library_path = $socgen_file->findnodes("//socgen:componentConfiguration/socgen:doc/socgen:library_path/text()")->to_literal;
+ my $lib_comp_sep     = yp::lib::find_lib_comp_sep($vendor,$library,$component);           
+
+ my $path  = "${home}${repo}/${vendor}/${library}${doc_library_path}";
+ mkdir $path,0755             unless( -e $path );
+
+ $doc_library_path = "${doc_library_path}/Geda";
+
+ my $path  = "${home}${repo}/${vendor}/${library}${doc_library_path}";
+ mkdir $path,0755             unless( -e $path );
+
+ my $path  = "${home}${repo}/${vendor}/${library}${doc_library_path}/sym";
+ mkdir $path,0755             unless( -e $path );
+
+ my $path  = "${home}${repo}/${vendor}/${library}${doc_library_path}/sch";
+ mkdir $path,0755             unless( -e $path );
+
+ my $path  = "${home}${repo}/${vendor}/${library}${doc_library_path}/png";
+ mkdir $path,0755             unless( -e $path );
+
+ my $path  = "${home}${repo}/${vendor}/${library}${doc_library_path}/src";
+ mkdir $path,0755             unless( -e $path );
+
+ my @versions =       yp::lib::find_component_versions($vendor,$library,$component);
+
+foreach my  $version   (@versions)
+   {
+   my $variant;
+   if($version) {$variant = "${component}_${version}"}
+   else         {$variant = "${component}"}
+   my $module_name =       yp::lib::get_module_name($vendor,$library,$component, $version);
+   print "gEDA directories  for   $vendor  $library - $component  $version $variant ==  $module_name  \n"; 
+
+
+#/*********************************************************************************************/
+#/                                                                                            */
+#/  Create filelists for simulation, synthesis and linting                                    */
+#/                                                                                            */
+#/                                                                                            */
+#/*********************************************************************************************/
+
+my  @filelist =       yp::lib::parse_component_brothers("$vendor","$library","$component","$version");
+
+foreach $line (@filelist) 
+   {
+   $_ = $line;
+   if(/::(\S+)::(\S+)::(\S+)::(\S+)::/) 
+     { 
+     $new_library        = $2;
+     $new_component      = $3;
+     $new_vendor         = $1;
+     $new_version        = $4;                
+     print "Seeking  $new_vendor $new_library $new_component $new_version \n";
+     my $spirit_component_file    = $parser->parse_file(yp::lib::find_ipxact_component($new_vendor,$new_library,$new_component,$new_version));
+
+     foreach  my   $i_name ($spirit_component_file->findnodes("//spirit:componentGenerator/spirit:name"))
+       {
+       my($gen_name)            = $i_name ->findnodes('../spirit:name/text()')->to_literal ;
+       my($gen_generatorExe)    = $i_name ->findnodes('../spirit:generatorExe/text()')->to_literal ;
+       foreach  my   $i_name ($spirit_component_file->findnodes("//spirit:componentGenerator[spirit:name/text() = '$gen_name']/spirit:vendorExtensions/socgen:envIdentifier"))
+          {
+          my($gen_envidentifier)  = $i_name ->findnodes('./text()')->to_literal ;
+
+          if($gen_envidentifier eq ":*Documentation:*"   )           
+             {
+             my $cmd = "./tools/sys/build_generate -prefix /doc_dir -vendor    $vendor -library  $library -component  $component -version  $version  \n";
+             if (system($cmd)) {}
+             my $filename = find_filename("fs-sim",   ${vendor},  ${library} , ${component} ,  ${version}  );
+             my $cmd = "cp     ${home}${work_dir}/${filename}.v    ${home}${repo}/${vendor}/${library}${doc_library_path}/src/${module_name}.v     \n";
+             if (system($cmd)) {}
+             my $filename = find_filename("fs-doc",   ${vendor},  ${library} , ${component} ,  ${version}  );
+             my $outfile ="${home}${repo}/${vendor}/${library}${doc_library_path}/sym/";
+             my $cmd = "./tools/documentation/ver2gedasym     ${home}${work_dir}/${filename}    $outfile   \n";
+             if (system($cmd)) {}
+             my $outfile ="${home}${repo}/${vendor}/${library}${doc_library_path}/sch/";
+             my $cmd = "./tools/documentation/ver2gedasch     ${home}${work_dir}/${filename}    $outfile   \n";
+             if (system($cmd)) {}
+             my $symfile ="${home}${repo}/${vendor}/${library}${doc_library_path}/sym/${module_name}.sym";
+             my $pngfile ="${home}${repo}/${vendor}/${library}${doc_library_path}/png/${module_name}_sym.png";
+             my $cmd ="gaf export -c -s auto -m 5px  --dpi  600  --no-color -o  $pngfile $symfile \n";
+             if (system($cmd)) {}
+             my $schfile ="${home}${repo}/${vendor}/${library}${doc_library_path}/sch/${module_name}.sch";
+             my $pngfile ="${home}${repo}/${vendor}/${library}${doc_library_path}/png/${module_name}_sch.png";
+             my $cmd ="gaf export -c -s auto -m 5px  --dpi  600  --no-color -o  $pngfile $schfile \n";
+             if (system($cmd)) {}
+             }
+
+
+          }
+       }
+     }
+   }
+   
+   }
+
+}
+
+}
+
+
+
+
+#/*********************************************************************************************/
+#/  find filename                                                                             */
+#/                                                                                            */
+#/  returns gloabal  name of the file                                                         */
+#/                                                                                            */
+#/                                                                                            */
+#/*********************************************************************************************/
+
+sub find_filename 
+   {
+   my @params             = @_;
+   my $version            = pop(@params);
+   my $component          = pop(@params);
+   my $library            = pop(@params);
+   my $vendor             = pop(@params);
+   my $filesetref_name    = pop(@params);
+
+
+   my $variant;
+   if($version)       {$variant   = "${component}_${version}";}
+   else               {$variant   = "${component}";}
+
+   my  @filelist       = yp::lib::parse_component_brothers("$vendor","$library","$component","$version");
+   my $comp_xml_sep    = yp::lib::find_comp_xml_sep($vendor,$library,$component,$version);  
+   my $lib_comp_sep    = yp::lib::find_lib_comp_sep($vendor,$library,$component);
+   my $library_path    = "${lib_comp_sep}${component}${comp_xml_sep}";
+
+
+   foreach $line (@filelist) 
+     {
+     $_ = $line;
+     if(/::(\S+)::(\S+)::(\S+)::(\S+)::/) 
+       { 
+       $new_vendor         = $1;
+       $new_library        = $2;
+       $new_component      = $3;
+       $new_version        = $4;
+       my $spirit_component_file    = $parser->parse_file(yp::lib::find_ipxact_component($new_vendor,$new_library,$new_component,$new_version));
+
+       foreach  my   $i_name ($spirit_component_file->findnodes("//spirit:fileSets/spirit:fileSet/spirit:file/spirit:name"))
+              {    
+              my($file_name)      = $i_name ->findnodes('./text()')->to_literal ;
+              my($file_type)      = $i_name ->findnodes('../spirit:userFileType/text()')->to_literal ;
+              my($logical_name)   = $i_name ->findnodes('../spirit:logicalName/text()')->to_literal ;
+              my($view_file)      = $i_name ->findnodes('../../spirit:name/text()')->to_literal ;
+              if(($file_type eq "libraryDir") &&  ($logical_name eq "dest_dir")  )
+                 { 
+                 if( $view_file eq  $filesetref_name )  { return ("${vendor}__${library}${library_path}/${file_name}${variant}"); };
+                 }     
+              }
+      }
+     }
+   }
+

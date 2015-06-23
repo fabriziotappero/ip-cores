@@ -1,0 +1,623 @@
+
+module `VARIANT`SEQUENCER
+
+#(parameter VEC_TABLE = 8'hff,
+  parameter STATE_SIZE=3
+)
+
+(
+
+    input  wire            clk,         
+    input  wire            reset,        
+    input  wire            enable,
+    input  wire            now_fetch_op,
+    input  wire    [STATE_SIZE:0]   state,         // current and next state registers
+    input  wire    [1:0]   cmd,         
+    input  wire    [7:0]   vector,         
+    input  wire    [1:0]   length,         
+    input  wire    [7:0]   alu_a,     
+    input  wire    [7:0]   alu_result,    // result from alu operation
+    input  wire    [7:0]   alu_status,    // 
+    input  wire    [7:0]   data_in,       // data that comes from the bus controller
+    input  wire    [15:0]  prog_data16,       // data that comes from the bus controller
+    input  wire    [7:0]   prog_data,
+    input  wire    [7:0]   pg0_data,
+    input  wire    [7:0]   index,         // selected index 
+
+    input  wire    [1:0]   ins_type,
+    input  wire    [2:0]   alu_op_a_sel,
+
+    input  wire            implied,
+    input  wire            immediate,  
+    input  wire            relative,
+    input  wire            absolute,
+    input  wire            zero_page,
+    input  wire            indirectx,
+    input  wire            indirecty, 
+    input  wire            stack,
+    input  wire            jump_indirect,
+
+    input  wire            brk,
+    input  wire            rti,
+    input  wire            rts,
+    input  wire            jump,
+    input  wire            jsr,
+ 
+    input  wire            branch_inst, 
+
+
+    output  reg            fetch_op,
+    output  reg   [15:0]   prog_counter,            // program counter
+
+
+    output  reg   [15:0]   address,       // system bus address
+    output  reg            alu_enable,       
+ 
+    output  reg    [7:0]   pg0_add,       
+    output  reg            pg0_wr,       
+    output  reg            pg0_rd,       
+
+
+    output  reg   [7:0]    operand,        
+    output  reg   [7:0]    imm_data,       
+    output  reg            rd,        // read = 1
+    output  reg            wr,        // write = 1
+    output  reg    [7:0]   data_out,      // data that will be written somewhere else
+
+
+    output  reg    [15:0]  offset,
+
+    output  reg            stk_push,
+    output  reg  [15:0]    stk_push_data,
+    output  reg            stk_pull,
+    input  wire  [15:0]    stk_pull_data      
+);
+
+   
+
+
+
+
+  reg 		   stk_push_p;
+
+
+   
+
+ wire [15:0]   next_pc;             // a simple logic to add one to the PC
+ wire  [8:0]   p_indexed;  
+ 
+ assign next_pc              = prog_counter + 16'b0000000000000001;
+ assign p_indexed            = prog_data +index;
+
+   
+
+always @ (posedge clk ) 
+   if (reset)     stk_push              <= 1'b1;  
+   else           stk_push              <= stk_push_p  || 
+                                           (stack   &&   !enable &&   (state == `EXECUTE )  &&     (ins_type == `ins_type_write )) ||   
+                                           (              enable &&   (state != `INT_1 )  &&     now_fetch_op &&   (cmd == `cmd_load_vec))  ;
+
+
+
+
+   
+
+   
+
+always @ (posedge clk ) begin 
+   if (reset) 
+        begin
+            stk_push_p      <=  1'b0;
+	   
+        end 
+   else if(!enable)
+        begin
+            stk_push_p      <=  1'b0;
+        end
+    else begin
+            case (state)
+                
+                `EXECUTE: 
+                    begin
+		     if( jsr )  
+                          begin
+			  stk_push_p         <= 1'b1;
+                          end            
+                    end
+
+                default: 
+                  begin
+                   stk_push_p      <=  1'b0;
+                  end                    
+            endcase
+        end
+    end
+
+
+
+
+
+
+   
+
+always @ (posedge clk ) begin 
+   if (reset) 
+        begin
+            stk_pull        <=  1'b0;
+	   
+        end 
+   else if( enable)
+        begin
+            stk_pull        <=  1'b0;
+        end
+    else begin
+            case (state)
+                
+
+                `EXECUTE: 
+                    begin
+                     if( rts || rti)  
+                       begin
+		       stk_pull               <= 1'b1;   	  
+                       end
+                     else
+                     if( stack )  
+                       begin
+			if(ins_type == `ins_type_read )
+                         begin
+		         stk_pull             <= 1'b1;   	  
+			 end 
+	               end
+
+                    end
+
+                default: 
+                  begin
+                   stk_pull        <=  1'b0;     
+                  end                    
+            endcase
+        end
+    end
+
+
+
+   
+
+
+
+
+
+
+
+
+
+   
+always @ (posedge clk ) 
+   begin 
+   if (reset)                                      stk_push_data      <= 16'h0000;
+   else 
+   if((state ==  `AXE_1)  &&  jsr )                stk_push_data      <= prog_counter;
+   else
+   if((cmd == `cmd_load_vec) && now_fetch_op )     stk_push_data      <= prog_counter;
+   else                                            stk_push_data      <= (alu_op_a_sel ==  `alu_op_a_psr)? {alu_status,alu_status}:{alu_a,alu_a};
+   end
+
+
+
+
+   
+always @ (posedge clk ) 
+   begin 
+   if (reset) 
+        begin
+            prog_counter    <= 16'h0000;  
+            alu_enable      <=  1'b0;
+            pg0_add         <=  8'h00;
+            pg0_wr          <=  1'b0;
+            pg0_rd          <=  1'b0;
+            fetch_op        <=  1'b0;
+            operand         <=  8'h00;        
+            imm_data        <=  8'h00;
+            address         <= 16'h0000;
+            rd          <=  1'b0;       
+            wr          <=  1'b0;
+            data_out        <=  8'h00;
+            offset          <=  16'h0000;
+        end // if (reset)
+   else if(!enable)
+
+
+
+
+
+           begin
+            case (state)
+                
+
+
+                `EXECUTE: 
+                    begin
+                     if( jump || jsr || absolute)  
+                       begin
+		       prog_counter           <= next_pc;             	  	  
+                       end
+
+                    end
+
+
+	      
+                `AXE_1: 
+                    begin
+
+		     if( jump || jsr  )  
+                       begin
+		          prog_counter       <= {prog_data,address[7:0]};
+                          end
+                     else
+		     if( absolute  )  
+                       begin
+                        address               <= {prog_data,8'h00}  + {7'b0000000,address[8:0]};
+                        if((ins_type == `ins_type_read) || (ins_type == `ins_type_rmw))
+                           begin
+                           rd             <= 1'b1;                           
+                           end
+                          end                     
+
+		       
+                    end 
+
+
+
+
+
+	      
+	      
+              default:
+             begin
+            prog_counter    <=  prog_counter;      
+            pg0_add         <=  pg0_add;
+            pg0_wr          <=  pg0_wr;
+            pg0_rd          <=  pg0_rd;	   
+            alu_enable      <=  alu_enable;
+            operand         <=  operand;
+            imm_data        <=  imm_data;
+            address         <=  address;
+            rd          <=  rd;
+	    fetch_op        <=  fetch_op;
+            wr          <=  wr;
+            data_out        <=  data_out;
+            offset          <=  offset;
+        end
+	    endcase // case (state)
+	   end
+
+
+	      
+    else begin
+            case (state)
+                
+                `RESET: 
+                    begin 
+                     prog_counter             <=  {VEC_TABLE,vector}; 
+                    end
+
+                `FETCH_OP:
+                    begin 
+                     prog_counter             <= next_pc;
+                    end
+
+                `EXECUTE: 
+                    begin
+                       alu_enable             <= 1'b0;
+                       wr                 <= 1'b0;
+		       pg0_wr                 <= 1'b0;
+                     if(immediate)  
+                       begin
+		       prog_counter           <= next_pc;             	  
+                       imm_data               <= prog_data;
+		       alu_enable             <= 1'b1;
+                       fetch_op               <= 1'b1;  
+                       end          
+                     else
+                     if(zero_page  )  
+                       begin
+		       prog_counter           <= next_pc;             	  
+                       address                <= {8'h00,p_indexed[7:0]};
+                       pg0_add                <= p_indexed[7:0];
+                       alu_enable             <= 1'b1;
+		       fetch_op               <= 1'b1;  	  
+                       if((ins_type == `ins_type_read) || (ins_type == `ins_type_rmw))
+                          begin
+		          pg0_rd              <= 1'b1;
+                          end
+                       end
+                     else
+                     if( absolute || jump  || jsr || jump_indirect)  
+                       begin
+		       prog_counter           <= next_pc;             	  
+                       address                <= {7'b0000000,p_indexed};
+		       pg0_add                <= p_indexed[7:0];	  
+                       end
+                     else
+                     if( relative )  
+                       begin
+                         fetch_op             <= 1'b1;  
+			 alu_enable           <= 1'b1; 
+                         if(branch_inst)
+                         prog_counter         <= prog_counter + 1'b1 + { prog_data[7],prog_data[7],prog_data[7],prog_data[7], 
+                                                 prog_data[7],prog_data[7],prog_data[7],prog_data[7],prog_data} ;
+                         else
+                         prog_counter         <= next_pc;             	   
+                       end	    
+                     else
+
+                     if( rts || rti)  
+                       begin
+		       prog_counter           <= stk_pull_data;
+                       end
+                     else
+
+                     if( stack )  
+                       begin
+	               prog_counter           <= next_pc;                	  
+			if(ins_type == `ins_type_read )
+                         begin
+                         operand              <= stk_pull_data[7:0];	                 
+			 end 
+	               end
+                     else
+
+                     if(indirectx  )  
+                       begin
+		       prog_counter           <= next_pc;             	  
+                       pg0_add                <= p_indexed[7:0];
+                       pg0_rd                 <= 1'b1;
+                       end 
+                     else
+                     if(indirecty  )  
+                       begin
+		       prog_counter           <= next_pc;             	  
+                       pg0_add                <= prog_data;
+                       pg0_rd                 <= 1'b1;
+                       end 
+                     else
+                      prog_counter            <= next_pc;                
+                    end
+
+
+	      
+                `EXE_1: 
+                    begin
+                     if(immediate )  
+                       begin
+			fetch_op              <=  1'b0;  
+                        prog_counter          <= next_pc;             
+                        alu_enable            <= 1'b0;
+                        end          
+                     else
+                     if(zero_page  )  
+                       begin
+			fetch_op              <=  1'b0;    
+			prog_counter          <= next_pc;               
+                        rd                <= 1'b0;
+                        wr                <= 1'b0;
+                        pg0_rd                <= 1'b0;
+                        operand               <= data_in;
+                        alu_enable            <= 1'b0;
+                       if((ins_type == `ins_type_write ) || (ins_type == `ins_type_rmw ))
+                          begin
+		          pg0_wr              <= 1'b1;
+                          data_out            <= alu_result;               
+                          end                 
+                        end          
+                     else
+                     if( relative )  
+                       begin
+			  fetch_op            <= 1'b0;  
+                          alu_enable          <= 1'b0; 
+                          prog_counter        <= next_pc;             	   
+                          end	    
+                     else
+                     prog_counter            <= next_pc;             
+                    end 
+
+
+
+                `AXE_1: 
+                    begin
+                     if(absolute  )  
+                       begin
+			fetch_op              <=  1'b1;    
+			prog_counter          <= prog_counter;           
+                        alu_enable            <= 1'b1;
+                        end          
+                     else
+		     if(  jump || jsr)  
+                       begin
+			  fetch_op           <=  1'b1;  
+		          prog_counter       <= prog_counter;
+                          end
+                     else
+		     if( jump_indirect )  
+                          begin
+		          prog_counter       <= next_pc;
+                          address            <= {prog_data,address[7:0]};
+                          end            		       
+                     else            
+                     prog_counter            <= next_pc;             
+                    end 
+
+
+	      
+
+	      
+
+
+                `AXE_2: 
+                     begin
+                     fetch_op          <= 1'b0;
+                     prog_counter      <= next_pc;
+                     rd            <= 1'b0;
+                     pg0_rd            <= 1'b0;
+                     operand           <= data_in;
+		     alu_enable        <= 1'b0;  
+                     if(absolute  )  
+                       begin
+                        if((ins_type == `ins_type_rmw ) || (ins_type == `ins_type_write ))
+                           begin
+                           wr       <= 1'b1;
+                           data_out     <= alu_result;                                          
+                           end                 
+                       end			
+                     end
+ 	      
+
+                      
+
+
+                `IDX_1: 
+                     begin
+                     prog_counter     <= prog_counter;
+                     address[7:0]     <= pg0_data;
+		     pg0_add          <= pg0_add + 1'b1;
+                     pg0_rd           <= 1'b1;
+                     end
+
+
+                `IDX_2: 
+                     begin
+                     prog_counter     <= prog_counter;
+                     address[15:8]    <= pg0_data;
+		     pg0_add          <= address[7:0];
+		     alu_enable       <= 1'b1;
+       	             fetch_op         <= 1'b1;    			
+                     if( ins_type == `ins_type_read)
+                          begin
+                          rd      <= 1'b1;
+                          pg0_rd      <= 1'b1;
+                          end
+                     else
+                     if(ins_type == `ins_type_write )
+                          begin
+                          wr       <= 1'b1;
+			  pg0_rd       <= 1'b0;
+                          data_out     <= alu_result;               
+                          end                 
+                     end
+
+                `IDX_3: 
+                     begin
+       	             fetch_op         <= 1'b0;    
+                     prog_counter     <= next_pc;
+         	     alu_enable       <= 1'b0;
+                     rd           <= 1'b0;
+                     wr           <= 1'b0;
+                     pg0_rd           <= 1'b0;
+                     pg0_wr           <= 1'b0;
+			
+                     end
+
+                `IDY_1: 
+                     begin
+                     prog_counter    <= prog_counter;
+                     address[8:0]    <= pg0_data + index;
+		     pg0_add         <= pg0_add + 1'b1;
+                     pg0_rd          <= 1'b1;
+                     end
+
+
+                `IDY_2: 
+                     begin
+                     prog_counter     <= prog_counter;
+                     address[15:8]    <= pg0_data + {7'b0,address[8]} ;
+		     pg0_add          <= address[7:0];
+		     pg0_rd           <= 1'b0;
+         	     alu_enable       <= 1'b1;
+       	             fetch_op         <=  1'b1;    			
+                     if( ins_type == `ins_type_read)
+                          begin
+                          rd      <= 1'b1;
+                          pg0_rd      <= 1'b1;
+                          end
+                     else
+                     if(ins_type == `ins_type_write )
+                       begin
+	                  pg0_rd      <= 1'b0;
+                          wr      <= 1'b1;
+                          data_out    <= alu_result;               
+                          end                 
+                     end
+
+
+                `IDY_3: 
+                     begin
+       	             fetch_op         <=  1'b0;    
+                     prog_counter     <= next_pc;
+         	     alu_enable       <= 1'b0;
+                     rd           <= 1'b0;
+                     wr           <= 1'b0;
+                     pg0_rd           <= 1'b0;
+                     pg0_wr           <= 1'b0;
+			
+                     end
+
+
+
+                `INT_1: 
+                    begin
+                    alu_enable               <= 1'b0;
+                    if(cmd == `cmd_load_vec)
+                       begin 
+                       address               <=  16'h0000;
+                       rd                <=  1'b0;
+                       prog_counter          <=  {VEC_TABLE,vector}; 
+                       end
+                    else	      
+                       begin 
+                       prog_counter          <=  prog_data16;
+                       end
+                    end
+
+	      
+	      
+           
+                `INT_2: 
+                    begin 
+                     address               <=  16'h0000;
+                     rd                <=  1'b0;               
+                     prog_counter          <=  prog_data16;
+                    end
+
+
+
+	      
+                `HALT: 
+                    begin 
+                    address                <= 16'h0000;
+                    rd                 <= 1'b0;
+                    wr                 <= 1'b0;
+                    end
+           
+                default: 
+                  begin
+                    address                <= 16'h0000;
+                    prog_counter           <= 16'h0000;
+                    rd                 <= 1'b0;
+                    wr                 <= 1'b0;
+                end                    
+            endcase
+        end
+    end
+
+
+
+
+
+
+   
+
+
+endmodule
+
+
+

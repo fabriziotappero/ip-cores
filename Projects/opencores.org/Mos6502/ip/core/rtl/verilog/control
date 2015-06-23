@@ -1,0 +1,92 @@
+
+module  `VARIANT`CONTROL
+
+#( parameter BOOT_VEC =8'hfc,
+   parameter STATE_SIZE=3
+)
+(
+input wire                    clk,
+input wire                    reset,
+input wire                    enable,
+input wire                    nmi,
+input wire [7:0]              vec_int,
+input wire                    invalid,
+input wire                    run_status, 
+input wire                    irq_status,
+input wire                    brk_status,
+input wire [STATE_SIZE:0]    state,
+input wire   [2:0]            ctrl,
+input wire   [7:0]            ir,
+input wire  [15:0]            address,
+input wire                    branch_inst,
+ 
+output reg   [7:0]            vector,
+output reg   [1:0]            cmd, 
+output reg                    core_reset
+);
+
+ 
+reg nmi_taken   ;   
+   
+always @ (posedge clk )
+begin
+     if (reset)
+      begin                                
+      nmi_taken      <= 1'b0;
+      end
+     else
+     if (!nmi)       
+      begin
+      nmi_taken      <= 1'b0;
+      end
+     else
+     if (ir == `RTI_IMP)       
+      begin
+      nmi_taken      <= 1'b0;
+      end
+     else
+     if (nmi && (state == `INT_1))           
+      begin
+      nmi_taken      <= 1'b1;
+      end
+     else                         
+      begin
+      nmi_taken      <= nmi_taken;
+      end
+end
+   
+always @ (posedge clk )
+begin
+     if (reset)             core_reset     <= 1'b1;
+     else
+     if (!enable)           core_reset     <= core_reset;
+     else                   core_reset     <= 1'b0;
+
+end
+   
+always @ (posedge clk )
+begin
+     if (reset)             vector     <= 8'h00;
+     else
+     if (!enable)           vector     <= vector;
+     else
+     if(state == `RESET)    vector     <= BOOT_VEC;
+     else                   vector     <= vec_int;
+  
+end
+
+always @ (posedge clk )
+begin
+     if ( reset)            cmd            <= `cmd_none;
+     else
+     if (!enable)           cmd            <=  cmd;
+     else
+     if(state == `RESET)    cmd            <= `cmd_load_vec;
+     else
+     if(state == `HALT)     cmd            <= `cmd_load_vec;
+     else
+     if(nmi &&(!nmi_taken)) cmd            <= `cmd_load_vec;
+     else                   cmd            <= `cmd_run;
+end
+
+endmodule

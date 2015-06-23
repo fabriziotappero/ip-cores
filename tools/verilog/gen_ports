@@ -1,0 +1,1029 @@
+eval 'exec `which perl` -S $0 ${1+"$@"}'
+   if 0;
+#/**********************************************************************/
+#/*                                                                    */
+#/*             -------                                                */
+#/*            /   SOC  \                                              */
+#/*           /    GEN   \                                             */
+#/*          /    TOOL    \                                            */
+#/*          ==============                                            */
+#/*          |            |                                            */
+#/*          |____________|                                            */
+#/*                                                                    */
+#/*                                                                    */
+#/*                                                                    */
+#/*                                                                    */
+#/*  Author(s):                                                        */
+#/*      - John Eaton, jt_eaton@opencores.org                          */
+#/*                                                                    */
+#/**********************************************************************/
+#/*                                                                    */
+#/*    Copyright (C) <2010-2011>  <Ouabache Design Works>              */
+#/*                                                                    */
+#/*  This source file may be used and distributed without              */
+#/*  restriction provided that this copyright statement is not         */
+#/*  removed from the file and that any derivative work contains       */
+#/*  the original copyright notice and the associated disclaimer.      */
+#/*                                                                    */
+#/*  This source file is free software; you can redistribute it        */
+#/*  and/or modify it under the terms of the GNU Lesser General        */
+#/*  Public License as published by the Free Software Foundation;      */
+#/*  either version 2.1 of the License, or (at your option) any        */
+#/*  later version.                                                    */
+#/*                                                                    */
+#/*  This source is distributed in the hope that it will be            */
+#/*  useful, but WITHOUT ANY WARRANTY; without even the implied        */
+#/*  warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR           */
+#/*  PURPOSE.  See the GNU Lesser General Public License for more      */
+#/*  details.                                                          */
+#/*                                                                    */
+#/*  You should have received a copy of the GNU Lesser General         */
+#/*  Public License along with this source; if not, download it        */
+#/*  from http://www.opencores.org/lgpl.shtml                          */
+#/*                                                                    */
+#/**********************************************************************/
+
+
+############################################################################
+# General PERL config
+############################################################################
+use Getopt::Long;
+use English;
+use File::Basename;
+use Cwd;
+use Scalar::Util qw(looks_like_number);
+use XML::LibXML;
+use lib './tools';
+use sys::lib;
+use yp::lib;
+use BerkeleyDB;
+
+
+$OUTPUT_AUTOFLUSH = 1; # set autoflush of stdout to TRUE.
+
+
+############################################################################
+### Process the options
+############################################################################
+Getopt::Long::config("require_order", "prefix=-");
+GetOptions("h","help",
+           "vendor=s" => \$vendor,
+           "library=s" => \$library,
+           "version=s" => \$version,
+           "component=s" => \$component,
+           "debug","verbose"
+) || die "(use '$program_name -h' for help)";
+
+
+##############################################################################
+## Help option
+##############################################################################
+if ( $opt_h  or $opt_help  ) 
+  { print "\n gen_ports   - -vendor vendor_name -library library_name  -component component_name  -version version_name  \n";
+    exit 1;
+  }
+
+
+
+
+
+
+#############################################################################
+## 
+## 
+#############################################################################
+
+
+$home = cwd();
+
+
+my $variant;
+
+if($version)       {$variant   = "${component}_${version}";}
+else               {$variant   = "${component}";}
+
+
+my $main_module_name = yp::lib::get_module_name($vendor,$library,$component,$version) ;
+my $parser = XML::LibXML->new();
+
+
+my $spirit_component_file    = $parser->parse_file(yp::lib::find_ipxact_component($vendor,$library,$component,$version));
+
+#print "\n GEN_ports     $vendor $library $component $version         \n";
+
+
+
+my $io_ports  = yp::lib::get_io_ports() ;
+
+
+
+
+my $path  = "${home}/${io_ports}";
+   mkdir $path,0755             unless( -e $path );
+   $path  = "${home}/${io_ports}/${vendor}__${library}";
+   mkdir $path,0755             unless( -e $path );
+   $path  = "${home}/${io_ports}/${vendor}__${library}/${component}";
+   mkdir $path,0755             unless( -e $path );
+   $path  ="${path}/${main_module_name}";
+   mkdir $path,0755             unless( -e $path );
+
+
+   $outfile    ="${path}/busses.txt";
+
+   if(-e ${outfile} )
+     {
+     # print " $outfile Exists, exiting \n";
+     exit 0
+     }
+
+#   print " $outfile Does not Exist, creating \n";
+   open  DEST_FILE,">$outfile" or die "unable to open $outfile";
+ 
+
+   $outfile = yp::lib::get_io_busses_db_filename($vendor,$library,$component,$version,"default");
+   $busses_db   = new BerkeleyDB::Hash( -Filename => $outfile, -Flags => DB_CREATE ) or die "Cannot open ${outfile}: $!";
+
+
+
+#   print "XXXXXXXX   $outfile           GEN_PORTS CREATE \n";
+   process_design_files($spirit_component_file);
+   parse_component_file($spirit_component_file);
+
+   my $key;
+   my $value;
+
+
+   my @bus_list;
+
+
+   my $cursor = $busses_db ->db_cursor() ;
+   while ($cursor->c_get($key, $value, DB_NEXT) == 0) 
+   {
+
+                 ( ${key_type},${busref},${conn}) = split( /\./ , $key);
+                 ( ${log_name},${direction},${type},${vector},${left},${right},${phy_name}) = split ':', $value;
+                 if(($key_type eq "BusRef"))
+                    {
+                    push (@bus_list,  "${busref}_${conn}     ${phy_name}  ${log_name}   ${direction}  ${type}  ${vector}   ${left}:${right}    ");
+                    }
+                 else
+                    {
+
+                    }
+
+   }
+
+   my $status = $cursor->c_close() ;
+
+
+   $busses_db   -> db_close();
+
+
+
+
+   @bus_list      = sys::lib::trim_sort(@bus_list);
+
+   foreach $list (@bus_list) 
+      { print DEST_FILE  "${list}\n";}
+
+
+#   print "XXXXXXXX   $outfile  GEN_PORTS CLOSED \n";
+
+
+#/*********************************************************************************************/
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/*********************************************************************************************/
+
+
+
+
+sub parse_component_file
+   {
+   my @params     = @_;
+   my $spirit_component_file      = pop(@params);
+
+
+   foreach my $new_comp ($spirit_component_file->findnodes("//spirit:component/spirit:model/spirit:views/spirit:view/spirit:vendorExtensions/spirit:componentRef")) 
+    {
+    my($new_vendor)        = $new_comp->findnodes('./@spirit:vendor')->to_literal ;
+    my($new_library)       = $new_comp->findnodes('./@spirit:library')->to_literal ;
+    my($new_name)          = $new_comp->findnodes('./@spirit:name')->to_literal ;
+    my($new_version)       = $new_comp->findnodes('./@spirit:version')->to_literal ;
+    if(yp::lib::find_ipxact_component($new_vendor,$new_library,$new_name,$new_version))
+     {
+     parse_component_file($parser->parse_file(yp::lib::find_ipxact_component($new_vendor,$new_library,$new_name,$new_version))    );
+     }
+   }
+
+
+
+
+
+     #/**********************************************************************/
+     #/*                                                                    */
+     #/*                                                                    */
+     #/*                                                                    */
+     #/**********************************************************************/
+
+foreach my $bus_iface ($spirit_component_file->findnodes("//spirit:component/spirit:busInterfaces/spirit:busInterface/spirit:slave"))
+        {
+        my $busInterface_name          = $bus_iface->findnodes('../spirit:name/text()')->to_literal ;
+        my $memMap_name                = $bus_iface->findnodes('./spirit:memoryMapRef/@spirit:memoryMapRef')->to_literal ;
+
+
+        foreach my $bus_iface ($spirit_component_file->findnodes("//spirit:busInterface[spirit:name/text() = '$busInterface_name']/spirit:slave/spirit:bridge")) 
+          {
+          my($bridge_map)        = $bus_iface->findnodes('./@spirit:masterRef')->to_literal ;
+#          print "FFFFFFF SLAVE BRIDGE  $busInterface_name  $memMap_name --  $bridge_map   \n";
+
+          foreach my $mem_map ($spirit_component_file->findnodes("//spirit:component/spirit:memoryMaps/spirit:memoryMap[spirit:name/text() = '$memMap_name']/spirit:subspaceMap[spirit:name/text() = '$bridge_map']/spirit:baseAddress"))
+              {
+#               my $xxx         = $mem_map->findnodes('../spirit:subspaceMap/@spirit:masterRef')->to_literal ;
+               my $add         = $mem_map->findnodes('./text()')->to_literal ;
+               my $int_base_addr    = hex($add);
+
+                  my $repo_data;
+                  $busses_db->db_get( "AbsDef.${busInterface_name}.bridge", $repo_data );
+                  $busses_db->db_put( "AbsDef.${busInterface_name}.bridge","${bridge_map}..${int_base_addr}::${repo_data}" );
+
+#                  print "FFFFFFF SUBSPACE   BI name  $busInterface_name MM name  $memMap_name bridge  $bridge_map  Add - $add   \n";
+
+
+
+
+          foreach my $addSpace_map ($spirit_component_file->findnodes("//spirit:component/spirit:addressSpaces/spirit:addressSpace[spirit:name/text() = '$bridge_map']/spirit:range"))
+               { 
+               my $range         = $addSpace_map->findnodes('./text()')->to_literal ;
+               my $int_range    = hex($range);
+             $busses_db->db_put( "BlkDef.${busInterface_name}.${bridge_map}","${int_base_addr}::${int_range}::8" );
+#             print "FFFFFFF RANGE    BlkDef.${busInterface_name}.${bridge_map}   ${int_base_addr}::${int_range}::8   \n";
+               }
+
+              }
+
+          }
+
+
+
+        foreach my $mem_map ($spirit_component_file->findnodes("//spirit:component/spirit:memoryMaps/spirit:memoryMap[spirit:name/text() = '$memMap_name']/spirit:bank/spirit:addressBlock"))
+                {
+                     my($addB_name)        = $mem_map->findnodes('./spirit:name/text()')->to_literal ;
+                     my($baseAdd)          = $mem_map->findnodes('../spirit:baseAddress/text()')->to_literal ;
+                     my($range)            = $mem_map->findnodes('./spirit:range/text()')->to_literal ;
+                     my($width)            = $mem_map->findnodes('./spirit:width/text()')->to_literal ;
+                     my $int_baseAdd      = hex($baseAdd);
+                     my $int_range      = hex($range);
+                     $busses_db->db_put( "BlkDef.${memMap_name}.${addB_name}","${int_baseAdd}::${int_range}::${width}" );
+                     }
+
+
+
+
+
+        foreach my $mem_map ($spirit_component_file->findnodes("//spirit:component/spirit:memoryMaps/spirit:memoryMap[spirit:name/text() = '$memMap_name']/spirit:bank/spirit:addressBlock/spirit:register"))
+                {
+                     my($reg_name)         = $mem_map->findnodes('./spirit:name/text()')->to_literal ;
+                     my($bank_name)        = $mem_map->findnodes('../../../spirit:name/text()')->to_literal ;
+                     my($reg_offset)       = $mem_map->findnodes('./spirit:addressOffset/text()')->to_literal ;
+                     my($reg_size)         = $mem_map->findnodes('./spirit:size/text()')->to_literal ;
+                     my($reg_access)       = $mem_map->findnodes('./spirit:access/text()')->to_literal ;
+                     my $int_reg_offset    = hex($reg_offset);
+                     $busses_db->db_put( "RegDef.${bank_name}.${reg_name}","${int_reg_offset}::${reg_name}::${reg_size}::${reg_access}" );
+#                     print "FFFFFFF REGISTER  ${bank_name}.${reg_name}    ${reg_offset}::${reg_size}::${reg_access}   \n";
+                     }
+
+
+
+
+
+
+
+
+
+
+
+
+
+}
+
+
+
+
+
+
+
+
+
+
+
+ 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+     #/**********************************************************************/
+     #/*                                                                    */
+     #/* Read each  busInterface and save master/slave direction            */
+     #/*                                                                    */
+     #/**********************************************************************/
+
+
+     my @mas_slave;
+
+     push @mas_slave  , "master"; 
+     push @mas_slave  , "slave"; 
+
+     foreach $seek_type (@mas_slave) 
+        { 
+
+         foreach my $bus_iface ($spirit_component_file->findnodes("//spirit:component/spirit:busInterfaces/spirit:busInterface/spirit:${seek_type}")) 
+            {
+            my($mmm_cname)         = $bus_iface->findnodes('../spirit:name/text()')->to_literal ;
+            my($mmm_vendor)        = $bus_iface->findnodes('../spirit:abstractionType/@spirit:vendor')->to_literal ;
+            my($mmm_library)       = $bus_iface->findnodes('../spirit:abstractionType/@spirit:library')->to_literal ;
+            my($mmm_name)          = $bus_iface->findnodes('../spirit:abstractionType/@spirit:name')->to_literal ;
+            my($mmm_version)       = $bus_iface->findnodes('../spirit:abstractionType/@spirit:version')->to_literal ;
+   
+
+
+            if($mmm_cname)
+              {
+              $busses_db->db_put( "AbsDef.${mmm_cname}.${seek_type}","${mmm_vendor}:${mmm_library}:${mmm_name}:${mmm_version}"  );
+              }
+
+            foreach my $port_face ($spirit_component_file->findnodes('//spirit:component/spirit:busInterfaces/spirit:busInterface/spirit:portMaps/spirit:portMap/spirit:logicalPort')) 
+               {
+               my($rrr_log_name)      = $port_face->findnodes('./spirit:name/text()')->to_literal ;
+               my($rrr_int_name)      = $port_face->findnodes('../../../spirit:name/text()')->to_literal ;
+               my($rrr_phy_name)      = $port_face->findnodes('../spirit:physicalPort/spirit:name/text()')->to_literal ;
+               my($rrr_type_name)     = $port_face->findnodes('../spirit:physicalPort/spirit:wireTypeDefs/spirit:wireTypeDef/spirit:typeName/text()')->to_literal ;
+               my($rrr_left_value)    = $port_face->findnodes('../spirit:physicalPort/spirit:wire/spirit:vector/spirit:left/text()')->to_literal ;
+               my($rrr_right_value)   = $port_face->findnodes('../spirit:physicalPort/spirit:wire/spirit:vector/spirit:right/text()')->to_literal ;
+    
+               unless ($rrr_type_name)  {$rrr_type_name = "wire";}
+               unless ($rrr_phy_name)   {$rrr_phy_name  = ${rrr_log_name} ;}
+    
+               if(   $mmm_cname  eq  $rrr_int_name )
+                 {
+                 my $absDef_filename = yp::lib::get_absDef_db_filename($mmm_vendor,$mmm_library,$mmm_name,$mmm_version);
+                 $absDef_db   = new BerkeleyDB::Hash( -Filename => $absDef_filename, -Flags => DB_CREATE ) or die "Cannot open ${absDef_filename}: $!";
+
+                  my $abs_data;
+                  $absDef_db->db_get("${seek_type}__${rrr_log_name}", $abs_data );
+
+                 ( $berk_name, $berk_presence,$berk_width,$berk_direction ) = split ':', $abs_data;                      
+                 my        $rrr_direction = $berk_direction;
+                
+
+
+
+                 if($rrr_left_value ne "")
+                     { 
+                      $berk_vector = "vector";
+                      }
+                  else                
+                      { 
+                      $berk_vector = "scaler";
+                      $rrr_left_value = "none";
+                      $rrr_right_value = "none";
+                       } 
+
+
+
+                  uplift_busref(${mmm_cname},${rrr_log_name},${rrr_direction},${rrr_type_name},${berk_vector},${rrr_left_value},${rrr_right_value},${rrr_phy_name});
+
+
+
+                  $absDef_db->db_close();              
+                 }
+               }
+        }
+     }
+
+
+
+
+     #/**********************************************************************/
+     #/*                                                                    */
+     #/* Read all ports and store into array                                */
+     #/*                                                                    */
+     #/**********************************************************************/
+
+     foreach  my   $i_name ($spirit_component_file->findnodes("//spirit:component/spirit:model/spirit:ports/spirit:port/spirit:name"))
+        {
+        my($port_name)       = $i_name ->findnodes('./text()')->to_literal ;
+        my($direction)       = $i_name ->findnodes('../spirit:wire/spirit:direction/text()')->to_literal ;
+        my($left)            = $i_name ->findnodes('../spirit:wire/spirit:vector/spirit:left/text()')->to_literal ;
+        my($right)           = $i_name ->findnodes('../spirit:wire/spirit:vector/spirit:right/text()')->to_literal ;
+        my($type)            = $i_name ->findnodes('../spirit:wireTypeDefs/spirit:wireTypeDef/spirit:typeName/text()')->to_literal ;
+
+
+        if    ($direction eq "in")  { $direction = "input";}
+        elsif ($direction eq "out") { $direction = "output";}
+
+
+        my $vector;
+        $vector  ="vector";
+
+        if($left ne "")  
+           { 
+
+           }
+        else       
+           { 
+           $vector = "scaler";
+           $left   = "none";
+           $right  = "none";
+           }
+
+
+           uplift_busref("adhoc", ${port_name} , ${direction}, ${type} , ${vector},${left},${right},${port_name} );
+
+
+        }
+ 
+}
+
+
+
+
+
+#/*********************************************************************************************/
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/*********************************************************************************************/
+
+
+
+
+sub process_design_files
+   {
+   my @params     = @_;
+   my $spirit_component_file      = pop(@params);
+
+   #print "\n";
+
+
+  foreach my $new_comp ($spirit_component_file->findnodes("//spirit:component/spirit:model/spirit:views/spirit:view/spirit:vendorExtensions/spirit:componentRef")) 
+    {
+            my($new_vendor)        = $new_comp->findnodes('./@spirit:vendor')->to_literal ;
+            my($new_library)       = $new_comp->findnodes('./@spirit:library')->to_literal ;
+            my($new_name)          = $new_comp->findnodes('./@spirit:name')->to_literal ;
+            my($new_version)       = $new_comp->findnodes('./@spirit:version')->to_literal ;
+            process_design_files($parser->parse_file(yp::lib::find_ipxact_component($new_vendor,$new_library,$new_name,$new_version )) );
+    }
+
+  foreach my $new_comp ($spirit_component_file->findnodes("//spirit:component/spirit:model/spirit:views/spirit:view/spirit:hierarchyRef")) 
+    {
+            my($new_vendor)        = $new_comp->findnodes('./@spirit:vendor')->to_literal ;
+            my($new_library)       = $new_comp->findnodes('./@spirit:library')->to_literal ;
+            my($new_name)          = $new_comp->findnodes('./@spirit:name')->to_literal ;
+            my($new_version)       = $new_comp->findnodes('./@spirit:version')->to_literal ;
+            if( yp::lib::find_ipxact_design($new_vendor,$new_library,$new_name,$new_version )  )
+              {
+              if($opt_verbose){print "process_design_file  $new_vendor $new_library $new_name $new_version  \n"; }
+              process_design_file($parser->parse_file(yp::lib::find_ipxact_design($new_vendor,$new_library,$new_name,$new_version )) );
+              }
+    }
+}
+
+
+#/*********************************************************************************************/
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/*********************************************************************************************/
+
+
+sub process_design_file
+   {
+   my @params     = @_;
+   my $spirit_design_file      = pop(@params);
+
+   foreach my $new_comp ($spirit_design_file->findnodes("//spirit:design/spirit:vendor")) 
+     {
+     my($new_vendor)          = $new_comp->findnodes('./text()')->to_literal ;
+     my($new_library)         = $new_comp->findnodes('../spirit:library/text()')->to_literal ;
+     my($new_name)            = $new_comp->findnodes('../spirit:name/text()')->to_literal ;
+     my($new_version)         = $new_comp->findnodes('../spirit:version/text()')->to_literal ;
+     #   print "XXXXXX-  $new_vendor $new_library $new_name $new_version  DESIGN \n";
+     }
+
+   foreach  my   $i_name ($spirit_design_file->findnodes("//spirit:design/spirit:componentInstances/spirit:componentInstance/spirit:instanceName"))
+        {
+        my($instance_name)       = $i_name ->findnodes('./text()')->to_literal ;
+        my($vendor_name)         = $i_name  ->findnodes('../spirit:componentRef/@spirit:vendor')->to_literal ;
+        my($library_name)        = $i_name  ->findnodes('../spirit:componentRef/@spirit:library')->to_literal ;
+        my($component_name)      = $i_name  ->findnodes('../spirit:componentRef/@spirit:name')->to_literal ;
+        my($version_name)        = $i_name  ->findnodes('../spirit:componentRef/@spirit:version')->to_literal ;
+        my $module_name          = yp::lib::get_module_name($vendor_name,$library_name,$component_name,$version_name) ;
+        my $inst_path             = "${home}/${io_ports}/${vendor_name}__${library_name}/${component_name}";
+
+        my $file =  "$inst_path/${module_name}";
+        if(-e $file) { # print "XXXXXXXX   $file  Exists \n"; 
+                     }
+        else
+          {
+#           print "XXXXXXXX   $file           Doesn't Exist \n";          
+          $cmd = "./tools/verilog/gen_ports    -vendor $vendor_name -library $library_name  -component $component_name  -version $version_name   ";
+          if (system($cmd)) {}
+
+
+          }
+
+        }
+
+
+            #/**********************************************************************/
+            #/*                                                                    */
+            #/* Hierarchical connections                                           */
+            #/*                                                                    */
+            #/**********************************************************************/
+
+
+#        print "XCCCD  Process HierConns \n";
+        foreach  my   $i_name ($spirit_design_file->findnodes('//spirit:hierConnections/spirit:hierConnection/@spirit:interfaceRef'))
+        {
+
+        my($hierConn_name)                   = $i_name ->to_literal ;
+        my($hierConn_comref_name)            = $i_name ->findnodes('../spirit:interface/@spirit:componentRef')->to_literal ;
+        my($hierConn_busref_name)            = $i_name ->findnodes('../spirit:interface/@spirit:busRef')->to_literal ;
+     
+#        print "XCCCC HIER_CONN  inst  ${hierConn_comref_name}  name  ${hierConn_name} busref  $hierConn_busref_name \n";
+
+          
+          foreach  my   $i_name ($spirit_design_file->findnodes("//spirit:design/spirit:componentInstances/spirit:componentInstance/spirit:instanceName[text() = '$hierConn_comref_name']"))
+            {
+            #/**********************************************************************/
+            #/*                                                                    */
+            #/* Lookup VLNV for each instantiated component                        */
+            #/*                                                                    */
+            #/**********************************************************************/
+
+            my($vendor_name)         = $i_name  ->findnodes('../spirit:componentRef/@spirit:vendor')->to_literal ;
+            my($library_name)        = $i_name  ->findnodes('../spirit:componentRef/@spirit:library')->to_literal ;
+            my($component_name)      = $i_name  ->findnodes('../spirit:componentRef/@spirit:name')->to_literal ;
+            my($version_name)        = $i_name  ->findnodes('../spirit:componentRef/@spirit:version')->to_literal ;
+
+#            print "XCCXX HIER_CONN  inst  ${hierConn_comref_name}  name  ${hierConn_name} busref  $hierConn_busref_name  child ${vendor_name}_${library_name}_${component_name}_${version_name}\n";
+
+            my $child_file  = yp::lib::get_io_busses_db_filename($vendor_name,$library_name,$component_name,$version_name,"default");
+            $child_ports_db   = new BerkeleyDB::Hash( -Filename => $child_file, -Flags => DB_CREATE ) or die "Cannot open ${child_file}: $!";
+
+#            print "XXXXXXXX         GEN_PORTS OPENNED $child_file  \n";
+
+            my $child_cursor = $child_ports_db->db_cursor() ;
+            while ($child_cursor->c_get($key, $value, DB_NEXT) == 0) 
+               {
+               ( ${log_name},${direction},${type},${vector},${left},${right}) = split ':', $value;
+
+
+               if(($key eq "BusRef.${hierConn_busref_name}.${log_name}"))
+                 {
+                 if(${vector} eq "vector")
+                      {
+                      unless( looks_like_number($left) ) { $left=0;}
+                      }
+                  uplift_busref(${hierConn_name},${log_name},${direction},"wire",${vector},${left},${right},"${hierConn_name}_${log_name}");
+
+                $busses_db->db_put( "IXstance.${hierConn_comref_name}.${hierConn_busref_name}.${log_name}","${value}"  );
+
+                }
+               elsif (($key eq "AbsDef.${hierConn_busref_name}.master"))
+                {
+                ( ${xx_vendor},${xx_library},${xx_name},${xx_version}) = split ':', $value;
+                $busses_db->db_put( "AbsDef.${hierConn_name}.master","${xx_vendor}:${xx_library}:${xx_name}:${xx_version}"  );
+                $busses_db->db_put( "AbsDef.${hierConn_name}.interconnect","${hierConn_comref_name}..${hierConn_busref_name}::"  );
+                $busses_db->db_put( "Instance.${hierConn_comref_name}.${hierConn_busref_name}","${hierConn_name}"  );
+
+                }
+               elsif (($key eq "AbsDef.${hierConn_busref_name}.slave"))
+                {
+                ( ${xx_vendor},${xx_library},${xx_name},${xx_version}) = split ':', $value;
+                $busses_db->db_put( "AbsDef.${hierConn_name}.slave","${xx_vendor}:${xx_library}:${xx_name}:${xx_version}"  );
+                $busses_db->db_put( "AbsDef.${hierConn_name}.interconnect","${hierConn_comref_name}..${hierConn_busref_name}::"  );
+                $busses_db->db_put( "Instance.${hierConn_comref_name}.${hierConn_busref_name}","${hierConn_name}"  );
+                }
+               }
+
+               my $status = $child_cursor->c_close() ;
+               $child_ports_db   -> db_close();
+            }
+   }
+
+
+
+
+
+
+
+     #/*******************************************************************************/
+     #/*                                                                             */
+     #/* Read each  interconnection         */
+     #/*                                                                             */
+     #/*******************************************************************************/
+
+
+
+
+
+        foreach  my  $i_name ($spirit_design_file->findnodes('//spirit:interconnections/spirit:interconnection/spirit:activeInterface'))
+           {
+           my($lp_componentref_name)   = $i_name ->findnodes('./@spirit:componentRef')->to_literal ;
+           my($lp_busref_name)         = $i_name ->findnodes('./@spirit:busRef')->to_literal ;
+           my($lp_interconnect_name)   = $i_name ->findnodes('../spirit:name/text()')->to_literal ;
+
+           my $repo_data;
+           $busses_db->db_get( "AbsDef.${lp_interconnect_name}.interconnect" , $repo_data );
+           $busses_db->db_put( "AbsDef.${lp_interconnect_name}.interconnect","${lp_componentref_name}..${lp_busref_name}::${repo_data}"  );
+           $busses_db->db_put( "Instance.${lp_componentref_name}.${lp_busref_name}","${lp_interconnect_name}"  );
+           }
+
+
+
+
+
+
+
+
+     #/**************************************************************************/
+     #/*                                                                        */
+     #/* Read each  interconnection and enter sub signals into wire_decs        */
+     #/*                                                                        */
+     #/**************************************************************************/
+
+
+
+
+     foreach  my   $i_name ($spirit_design_file->findnodes('//spirit:interconnections/spirit:interconnection/spirit:activeInterface/@spirit:componentRef'))
+        {
+        my($hierConn_comref_name)            = $i_name ->to_literal;
+        my($hierConn_busref_name)            = $i_name ->findnodes('../@spirit:busRef')->to_literal ;
+        my($hierConn_name)                   = $i_name ->findnodes('../../spirit:name/text()')->to_literal ;
+
+
+     #/*******************************************************************************/
+     #/*                                                                             */
+     #/* Read each  interconnection and enter modified signals into wire_decs        */
+     #/*                                                                             */
+     #/*******************************************************************************/
+
+
+
+
+
+        foreach  my  $i_name ($spirit_design_file->findnodes('//spirit:interconnections/spirit:interconnection/spirit:activeInterface/spirit:portMaps/spirit:portMap/spirit:logicalPort/spirit:name'))
+           {
+           my($lp_name)                = $i_name ->to_literal;
+           my($lp_pname)               = $i_name ->findnodes('../../spirit:physicalPort/spirit:name/text()')->to_literal ;
+           my($lp_left)                = $i_name ->findnodes('../../spirit:physicalPort/spirit:wire/spirit:vector/spirit:left/text()')->to_literal ;
+           my($lp_right)               = $i_name ->findnodes('../../spirit:physicalPort/spirit:wire/spirit:vector/spirit:right/text()')->to_literal ;
+           my($lp_componentref_name)   = $i_name ->findnodes('../../../../@spirit:componentRef')->to_literal ;
+           my($lp_busref_name)         = $i_name ->findnodes('../../../../@spirit:busRef')->to_literal ;
+           my($lp_interconnect_name)   = $i_name ->findnodes('../../../../../spirit:name/text()')->to_literal ;
+           $lp_vector = "vector";
+
+
+           if ( $lp_pname eq '' ) { $lp_pname ="${lp_interconnect_name}_${lp_name}";}
+           if ( $lp_left  eq '' ) 
+              { 
+              $lp_left ="none";
+              $lp_vector = "scaler";
+              }
+           if ( $lp_right eq '' ) 
+              { 
+              $lp_right ="none";
+              $lp_vector = "scaler";
+              }
+
+
+
+           if( ($hierConn_name eq $lp_interconnect_name) &&  ( $hierConn_comref_name  eq   $lp_componentref_name  )            )
+             {
+#             print  "TTTTTTTTTTTT  ${lp_pname}_${lp_name}  => ${lp_interconnect_name}_${lp_name}   ${lp_pname}   $lp_left  $lp_right   $lp_busref_name   \n";
+
+                 if(${lp_vector} eq "vector")
+                     {
+                     unless( looks_like_number($lp_left) ) { $lp_left=0;}
+                     }
+
+              uplift_busref(${hierConn_name},${lp_name},"node","wire",${lp_vector},${lp_left},${lp_right},${lp_pname});
+             }
+           }
+
+          foreach  my   $i_name ($spirit_design_file->findnodes("//spirit:design/spirit:componentInstances/spirit:componentInstance/spirit:instanceName[text() = '$hierConn_comref_name']"))
+            {
+            #/**********************************************************************/
+            #/*                                                                    */
+            #/* Lookup VLNV for each instantiated component                        */
+            #/*                                                                    */
+            #/**********************************************************************/
+
+            my($vendor_name)         = $i_name  ->findnodes('../spirit:componentRef/@spirit:vendor')->to_literal ;
+            my($library_name)        = $i_name  ->findnodes('../spirit:componentRef/@spirit:library')->to_literal ;
+            my($component_name)      = $i_name  ->findnodes('../spirit:componentRef/@spirit:name')->to_literal ;
+            my($version_name)        = $i_name  ->findnodes('../spirit:componentRef/@spirit:version')->to_literal ;
+
+
+
+
+
+#            print "XCCXX INTERCONN  inst  ${hierConn_comref_name}  name  ${hierConn_name} busref  $hierConn_busref_name  child ${vendor_name}_${library_name}_${component_name}_${version_name}\n";
+            my $child_file  = yp::lib::get_io_busses_db_filename($vendor_name,$library_name,$component_name,$version_name,"default");
+            $child_ports_db   = new BerkeleyDB::Hash( -Filename => $child_file, -Flags => DB_CREATE ) or die "Cannot open ${child_file}: $!";
+#            print "XXXXXXXX         GEN_PORTS OPENNED $child_file  \n";
+
+            my $child_cursor = $child_ports_db->db_cursor() ;
+            while ($child_cursor->c_get($key, $value, DB_NEXT) == 0) 
+               {
+               ( ${log_name},${direction},${type},${vector},${left},${right}) = split ':', $value;
+
+              if(($key eq "BusRef.${hierConn_busref_name}.${log_name}"))
+                {
+#                 print "INTERCONN  ${hierConn_name}_${log_name}      $direction , $vector, $left , $right  \n";
+                 uplift_busref(${hierConn_name},${log_name},"node","wire",${vector},${left},${right},"${hierConn_name}_${log_name}");
+
+                $busses_db->db_put( "IXstance.${hierConn_comref_name}.${hierConn_busref_name}.${log_name}","${value}"  );
+
+
+
+                }
+               elsif(($key eq "AbsDef.${hierConn_busref_name}.master"))
+                {
+                $busses_db->db_put( "AbsDef.${hierConn_name}.node","$value"  );
+                }
+               elsif(($key eq "AbsDef.${hierConn_busref_name}.slave"))
+                {
+                $busses_db->db_put( "AbsDef.${hierConn_name}.node","$value"  );
+                }
+
+
+               }
+               my $status = $child_cursor->c_close() ;
+               $child_ports_db   -> db_close();
+            }
+
+
+        foreach  my   $i_name ($spirit_design_file->findnodes("//spirit:design/spirit:componentInstances/spirit:componentInstance/spirit:instanceName"))
+           {
+           #/**********************************************************************/
+           #/*                                                                    */
+           #/* Lookup VLNV for each instantiated component                        */
+           #/*                                                                    */
+           #/**********************************************************************/
+
+           my($instance_name)       = $i_name ->findnodes('./text()')->to_literal ;
+           my($vendor_name)         = $i_name  ->findnodes('../spirit:componentRef/@spirit:vendor')->to_literal ;
+           my($library_name)        = $i_name  ->findnodes('../spirit:componentRef/@spirit:library')->to_literal ;
+           my($component_name)      = $i_name  ->findnodes('../spirit:componentRef/@spirit:name')->to_literal ;
+           my($version_name)        = $i_name  ->findnodes('../spirit:componentRef/@spirit:version')->to_literal ;
+
+           if( "$instance_name" eq  "$hierConn_comref_name"     )
+             {
+#              print "INTERCONNECTION    $instance_name   $vendor_name   $library_name    $component_name  $version_name  $hierConn_busref_name   $hierConn_name           \n";
+             }
+           }
+         }
+
+     #/**********************************************************************/
+     #/*                                                                    */
+     #/* Read all wires and store into array                                */
+     #/*                                                                    */
+     #/**********************************************************************/
+
+
+
+   foreach  my   $i_name ($spirit_design_file->findnodes("//spirit:design/spirit:vendorExtensions/socgen:nodes/socgen:node/spirit:name"))
+        {
+        my($node_name)       = $i_name ->findnodes('./text()')->to_literal ;
+        my($node_busdef)     = $i_name ->findnodes('../socgen:busDef/text()')->to_literal ;
+        my($node_left)       = $i_name ->findnodes('../spirit:wire/spirit:vector/spirit:left/text()')->to_literal ;
+        my($node_right)      = $i_name ->findnodes('../spirit:wire/spirit:vector/spirit:right/text()')->to_literal ; 
+        my($node_type)       = $i_name ->findnodes('../spirit:typeName/text()')->to_literal ;
+      
+        unless($node_busdef){   $node_busdef =    $node_name;     }
+
+        if(  $node_left ne "" ) 
+          { 
+          if(  $node_right  eq "" ){ $node_right = $node_left; } 
+          $node_vector = "vector";
+          }
+        else                     
+          { 
+          $node_vector = "scaler";
+          $node_left   = "none";
+          $node_right  = "none";
+          }
+
+#          print "WIRE_NODE  ${node_name}     node  , $node_type , $node_vector, $node_left , $node_right    $node_busdef \n";
+          uplift_busref("adhoc",     "${node_name}" , "node" , ${node_type} , ${node_vector}, ${node_left} , ${node_right},${node_name});
+        }
+
+
+     #/**********************************************************************/
+     #/*                                                                    */
+     #/* Read all adHocConnections and load instance connect info into array*/
+     #/*                                                                    */
+     #/**********************************************************************/
+
+
+
+     foreach  my   $i_name ($spirit_design_file->findnodes('//spirit:adHocConnections/spirit:adHocConnection/spirit:internalPortReference/@spirit:componentRef'))
+        {
+        my($componentRef_name)      = $i_name ->to_literal;
+        my($adhocConnection_name)   = $i_name ->findnodes('../../spirit:name/text()')->to_literal ;
+        my($tied_value)             = $i_name ->findnodes('../../@spirit:tiedValue')->to_literal ;
+        my($int_portRef_name)       = $i_name ->findnodes('../@spirit:portRef')->to_literal ;
+        my($ext_portRef_name)       = $i_name ->findnodes('../../spirit:externalPortReference/@spirit:portRef')->to_literal ;
+        my($left)                   = $i_name ->findnodes('../../spirit:externalPortReference/@spirit:left')->to_literal ;
+        my($right)                  = $i_name ->findnodes('../../spirit:externalPortReference/@spirit:right')->to_literal ;
+
+
+        if(  $left ne "" ) 
+          { 
+          if(  $right  eq "" ){ $right = $left; } 
+          $vector = "vector";
+          }
+        else                     
+          { 
+          $vector = "scaler";
+          $left   = "none";
+          $right  = "none";
+          }
+
+
+
+          if ( ${adhocConnection_name} eq "" )  { $adhocConnection_name = "***";}
+          if (  ${ext_portRef_name} eq ""    )  { $ext_portRef_name     = "***";}
+
+
+#print "NNNNNNNNNN $componentRef_name $adhocConnection_name ||${tied_value}||  $int_portRef_name $ext_portRef_name $left $right \n";
+
+        if($tied_value )
+          { 
+          $busses_db->db_put( "AdHoc_${componentRef_name}__${int_portRef_name}","${tied_value}:${ext_portRef_name}:${type}:${vector}:${left}:${right}"  );
+
+#print"NNNNNNNNNNNNN  AdHoc_${componentRef_name}__${int_portRef_name}    ${tied_value}:${ext_portRef_name}:${type}:${vector}:${left}:${right}\n"  ;
+
+          }
+         else
+          {
+          $busses_db->db_put( "AdHoc_${componentRef_name}__${int_portRef_name}","${adhocConnection_name}:${ext_portRef_name}:${type}:${vector}:${left}:${right}"  );
+#          print "NNNNNNNNN   AdHoc_${componentRef_name}__${int_portRef_name}    ${adhocConnection_name}:${ext_portRef_name}:${type}:${vector}:${left}:${right} \n"  ;
+
+
+        $_ = ${adhocConnection_name};
+        if(/(\w+)/)   
+            {        
+            $adhocConnection_name      = $1;
+            unless( looks_like_number($adhocConnection_name) ) 
+                  {
+#                  print "ADHOC_NODE   ${adhocConnection_name}  ,  node  ,  wire  , $vector, $left , $right  \n";
+                  uplift_busref("adhoc", ${adhocConnection_name} , "node" , "wire" , ${vector}, ${left} , ${right}, ${adhocConnection_name});
+                  }
+            }
+
+          }
+
+
+        }
+}
+
+
+
+
+
+
+#/*********************************************************************************************/
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/*********************************************************************************************/
+
+
+
+
+sub uplift_busref
+   {
+   my @params     = @_;
+   my $phy_name         = pop(@params);
+   my $right            = pop(@params);
+   my $left             = pop(@params);
+   my $vector           = pop(@params);
+   my $type             = pop(@params);
+   my $direction        = pop(@params);
+   my $log_name         = pop(@params);
+   my $busref_name      = pop(@params);
+ 
+#   print "BUS_UPLIFT  $busref_name $log_name  $direction  $type  $vector  $left  $right  $phy_name  \n";
+   $busses_db->db_put( "","${log_name}:${direction}:${type}:${vector}:${left}:${right}:${phy_name}"  );
+
+   my $uplift_data;
+   my $uplift_log_name ;
+   my $uplift_phy_name ;
+   my $uplift_direction ;
+   my $uplift_type;
+   my $uplift_vector;
+   my $uplift_left;
+   my $uplift_right;
+
+
+   $busses_db->db_get("BusRef.${busref_name}.$log_name", $uplift_data );
+   (${uplift_log_name},${uplift_direction},${uplift_type},${uplift_vector},${uplift_left},${uplift_right},${uplift_phy_name}  ) = split ':', $uplift_data;
+
+   $busses_db->db_get("", $uplift_data );
+   (${log_name},${direction},${type},${vector},${left},${right},${phy_name}  ) = split ':', $uplift_data;
+   $busses_db->db_del("");
+
+
+  if(${uplift_phy_name} ne "")
+     {
+     if(${uplift_phy_name} ne "${busref_name}_${uplift_log_name}"  )
+       {
+       ${phy_name}= ${uplift_phy_name};
+#       print "SET   |${uplift_phy_name}|${busref_name}_${uplift_log_name}| \n";
+       }
+
+     }
+
+
+
+   if(${uplift_log_name})
+     {
+#     print "REPLACING   ${busref_name} ${uplift_log_name}  ${uplift_direction}  ${uplift_type}  ${uplift_vector}  ${uplift_left}  ${uplift_right} ${uplift_phy_name} \n";
+     if(${uplift_direction} ne "node"   ) {        $direction =${uplift_direction};}
+
+     if(${type} eq "wire" )   { $type =${uplift_type};}
+
+     if(${uplift_vector} eq "vector") 
+          {
+          if( $vector eq "vector" )
+              {
+              if( looks_like_number($uplift_left))
+                  {
+                  if( looks_like_number($left) )
+                    {
+                    if($uplift_left  > $left ) {$left  = $uplift_left;}
+                    }
+          
+                  }
+              else  
+                 { 
+                 if( looks_like_number($left) ) {$left  = ${uplift_left}; }               
+                 unless(${direction} ne "node") {$left  = ${uplift_left}; }               
+                 }
+               if( looks_like_number($uplift_right) &&  looks_like_number($right) )  { if($uplift_right  < $right ) {$right  = $uplift_right;}}
+               }
+          else
+             {
+             $vector = "vector";
+             $left   = ${uplift_left};
+             $right  = ${uplift_right};
+             }
+          }
+      }
+#   print "WITH       ${busref_name}  $log_name  $direction  $type  $vector  $left  $right $phy_name \n";
+
+   $busses_db->db_put( "BusRef.${busref_name}.$log_name","${log_name}:${direction}:${type}:${vector}:${left}:${right}:${phy_name}"  );
+   }
+
+
+
+          
+        
+
+
+
+
+
+
+
+
+1

@@ -1,0 +1,195 @@
+
+
+assign cde_serial_xmit_edge_enable =( load_tx_data && force_startbit) || ps2_clk_fall ;
+assign cde_serial_xmit_load        =  load_tx_data && force_startbit;
+assign cde_serial_rcvr_reset       =  reset ||(ps2_clk_s && ps2_data_s && !busy);
+
+
+   
+always@(posedge clk)
+    begin
+       if (reset)                                  tx_ack_error <= 1'b0 ;
+       else
+       if (tx_write)                               tx_ack_error <= 1'b0 ;
+       else
+       if ((bit_count == 4'b1010)&& ps2_clk_fall)  tx_ack_error <= ps2_data_s && sending ;
+       else                                        tx_ack_error <= tx_ack_error ;
+
+    end      
+
+  
+
+`VARIANT`FSM
+  #(.NUMBITS(11))
+fsm
+(
+    .clk                        ( clk                         ),          
+    .reset                      ( reset                       ),          
+    .ps2_idle                   ( ps2_data_s &&   ps2_clk_s   ),  
+    .ps2_clk_fall               ( ps2_clk_fall                ),  
+    .bit_count                  ( bit_count                   ),
+    .write                      ( tx_write                    ),        
+    .force_startbit             ( force_startbit              ),
+    .usec_delay_done            ( usec_delay_done             ),
+    .load_tx_data               ( load_tx_data                ),
+    .ps2_clk_oe                 ( ps2_clk_pad_oe              ),
+    .busy                       ( busy                        ),
+    .shift_frame                ( shift_frame                 ),
+    .enable_usec_delay          ( enable_usec_delay           )
+);
+
+
+
+always@(posedge clk )
+if(reset)  
+         begin
+         usec_prescale_count        <= FREQ-1;
+         usec_tick                  <= 1'b0;  
+ end
+   else
+        begin 
+         if(enable_usec_delay )
+   begin
+            if(usec_prescale_count == 0) 
+              begin
+               usec_prescale_count  <= FREQ-1;
+               usec_tick            <= 1'b1;   
+      end
+            else
+      begin
+               usec_prescale_count  <= usec_prescale_count - 1;
+               usec_tick            <= 1'b0;  
+              end
+            end 
+         else
+            begin
+            usec_prescale_count     <= FREQ-1;
+            usec_tick               <= 1'b0;  
+            end 
+         end 
+
+   
+
+always@(posedge clk )
+if(reset)                                       force_startbit  <= 1'b0;
+   else 
+        if(usec_delay_count <= DATA_SETUP_DELAY)        force_startbit  <= 1;
+        else                                            force_startbit  <= 0;
+      
+
+
+
+ always@(posedge clk )
+if(reset)  
+          begin
+          usec_delay_count        <=  CLK_HOLD_DELAY + DATA_SETUP_DELAY;
+          usec_delay_done         <=  0;
+          end
+   else
+        if(enable_usec_delay )
+  begin
+          if(usec_delay_count == 7'b0000000) 
+            begin
+            usec_delay_count      <=  usec_delay_count;
+            usec_delay_done       <=  1;
+    end
+          else      
+  if(usec_tick)  
+    begin
+            usec_delay_count      <=  usec_delay_count - 1;
+            usec_delay_done       <=  0;
+            end
+          else
+            begin
+            usec_delay_count      <=  usec_delay_count;
+            usec_delay_done       <=  usec_delay_done;
+            end  
+          end 
+        else
+          begin
+          usec_delay_count        <=  CLK_HOLD_DELAY + DATA_SETUP_DELAY;
+          usec_delay_done         <=  1'b0;
+          end 
+       
+       
+
+     
+    always@(posedge clk ) 
+      if(reset)               bit_count  <= 4'b0000;
+      else
+      if(!busy)               bit_count  <= 4'b0000;
+      else 
+      if(shift_frame)         bit_count  <= bit_count + 1;
+      else                    bit_count  <= bit_count; 
+
+
+
+   
+    always@(posedge clk ) 
+      if(reset)               sending    <= 1'b0;
+      else
+      if(tx_write)            sending    <= 1'b1;
+      else 
+      if(busy)                sending    <= sending;
+      else                    sending    <= 1'b0; 
+
+ 
+
+
+       
+   
+
+
+   
+
+
+
+
+
+
+   always@(posedge clk)
+     if(reset)                    
+       begin
+        rx_data          <=  8'h00;
+        rx_read          <=  1'b0;  
+        rx_full          <=  1'b0;
+        rx_parity_error  <=  1'b0;
+        rx_parity_rcv    <=  1'b0;
+rx_parity_cal    <=  1'b0;
+        rx_frame_error   <=  1'b0;   
+end
+     else
+     if(rx_clear)      
+        begin
+        rx_full          <=  1'b0;
+        rx_read          <=  1'b0;
+        rx_parity_error  <=  1'b0;
+rx_parity_cal    <=  1'b0;
+        rx_frame_error   <=  1'b0;
+        end
+     else                    
+     if(x_last_cnt && !sending )      
+       begin
+rx_data          <=   x_shift_buffer;
+rx_read          <=  1'b1;  
+        rx_full          <=  1'b1;
+        rx_parity_error  <=  x_parity_samp ^ x_parity_calc;
+        rx_parity_rcv    <=  x_parity_samp;
+rx_parity_cal    <=  x_parity_calc;
+rx_frame_error   <=  x_frame_err;
+        end
+     else 
+        begin
+        rx_full          <=  rx_full;
+        rx_read          <=  1'b0;
+        rx_parity_error  <=  rx_parity_error;
+rx_frame_error   <=  rx_frame_error;
+        rx_parity_rcv    <=  rx_parity_rcv;   
+        rx_parity_cal    <=  rx_parity_cal;   
+rx_data          <=  rx_data;  
+        end
+
+
+   
+   
+

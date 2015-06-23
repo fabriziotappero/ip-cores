@@ -1,0 +1,291 @@
+eval 'exec `which perl` -S $0 ${1+"$@"}'
+   if 0;
+
+#/**********************************************************************/
+#/*                                                                    */
+#/*             -------                                                */
+#/*            /   SOC  \                                              */
+#/*           /    GEN   \                                             */
+#/*          /    TOOL    \                                            */
+#/*          ==============                                            */
+#/*          |            |                                            */
+#/*          |____________|                                            */
+#/*                                                                    */
+#/*                                                                    */
+#/*                                                                    */
+#/*  Author(s):                                                        */
+#/*      - John Eaton, jt_eaton@opencores.org                          */
+#/*                                                                    */
+#/**********************************************************************/
+#/*                                                                    */
+#/*    Copyright (C) <2010-2013>  <Ouabache Design Works>              */
+#/*                                                                    */
+#/*  This source file may be used and distributed without              */
+#/*  restriction provided that this copyright statement is not         */
+#/*  removed from the file and that any derivative work contains       */
+#/*  the original copyright notice and the associated disclaimer.      */
+#/*                                                                    */
+#/*  This source file is free software; you can redistribute it        */
+#/*  and/or modify it under the terms of the GNU Lesser General        */
+#/*  Public License as published by the Free Software Foundation;      */
+#/*  either version 2.1 of the License, or (at your option) any        */
+#/*  later version.                                                    */
+#/*                                                                    */
+#/*  This source is distributed in the hope that it will be            */
+#/*  useful, but WITHOUT ANY WARRANTY; without even the implied        */
+#/*  warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR           */
+#/*  PURPOSE.  See the GNU Lesser General Public License for more      */
+#/*  details.                                                          */
+#/*                                                                    */
+#/*  You should have received a copy of the GNU Lesser General         */
+#/*  Public License along with this source; if not, download it        */
+#/*  from http://www.opencores.org/lgpl.shtml                          */
+#/*                                                                    */
+#/**********************************************************************/
+
+
+############################################################################
+# General PERL config
+############################################################################
+use Getopt::Long;
+use English;
+use File::Basename;
+use Cwd;
+use XML::LibXML;
+use lib './tools';
+use sys::lib;
+use yp::lib;
+use Parallel::ForkManager;
+
+
+$OUTPUT_AUTOFLUSH = 1; # set autoflush of stdout to TRUE.
+
+
+############################################################################
+### Process the options
+############################################################################
+Getopt::Long::config("require_order", "prefix=-");
+GetOptions("h","help",
+) || die "(use '$program_name -h' for help)";
+
+
+
+
+##############################################################################
+## Help option
+##############################################################################
+if ( $opt_h or $opt_help  ) 
+  { print "\n build_master";
+    print "\n";
+    exit 1;
+  }
+
+
+my $parser = XML::LibXML->new();
+
+
+
+
+#/**********************************************************************/
+#/*  Process each library by finding any ip-xact file in any component */
+#/*                                                                    */
+#/*  Each ip-xact file is parsed and it's filename and the names of any*/
+#/*  modules that it uses are saved.                                   */
+#/*                                                                    */
+#/*                                                                    */
+#/**********************************************************************/
+
+my $home = cwd();
+
+my $prefix   = yp::lib::get_workspace();
+   $prefix   = "/${prefix}";
+
+my $number_of_cpus   = yp::lib::get_number_of_cpus();
+
+my @vendors = yp::lib::find_vendors();
+
+foreach my $vendor (@vendors)
+ {
+         print "$vendor   \n ";
+ my $vendor_status    =  yp::lib::get_vendor_status($vendor);
+ if($vendor_status eq "active") 
+   { 
+   my @libraries = yp::lib::find_libraries($vendor);
+   foreach my $library (@libraries)
+     {
+         print "$vendor $library   \n ";
+     my $library_status   =  yp::lib::get_library_status($vendor,$library);
+     if($library_status eq "active") 
+         {
+         print "$vendor $library   \n ";
+         run_vendor_library ( $vendor ,  $library)        
+         }
+     }
+   }
+ }
+
+
+
+
+sub run_vendor_library
+   {
+   my @params     = @_;
+   my $library    = pop(@params);
+   my $vendor     = pop(@params);
+ 
+
+my @components   = yp::lib::find_components($vendor,$library);
+
+foreach my $component (@components) 
+   {
+   my $socgen_filename     = yp::lib::find_componentConfiguration($vendor,$library,$component);
+   if($socgen_filename)
+   {
+   my $socgen_file     = $parser->parse_file($socgen_filename);
+
+   #/*********************************************************************************************/
+   #/   files for simulation                                                                     */
+   #/                                                                                            */
+   #/*********************************************************************************************/
+
+   foreach  my   $i_name ($socgen_file->findnodes("//socgen:codeSets/socgen:codeSet/socgen:name"))
+      {
+      my $codeSet_name        = $i_name ->findnodes('./text()')->to_literal ;
+      my $codeSet_vendor      = $i_name ->findnodes('../socgen:vendor/text()')->to_literal ;
+      my $codeSet_library     = $i_name ->findnodes('../socgen:library/text()')->to_literal ;
+      my $codeSet_component   = $i_name ->findnodes('../socgen:component/text()')->to_literal ;
+      my $codeSet_version     = $i_name ->findnodes('../socgen:version/text()')->to_literal ;
+      my $codeSet_prefix      = "${prefix}/children"; 
+
+
+      print "$codeSet_name    $codeSet_prefix           $codeSet_vendor $codeSet_library $codeSet_component  $codeSet_version  \n ";
+
+
+
+
+
+
+
+
+
+##############################################################################
+## 
+##############################################################################
+
+
+
+my @cmd_list  = ();
+
+
+
+
+my $lib_comp_sep    = yp::lib::find_lib_comp_sep($codeSet_vendor,$codeSet_library,$codeSet_component);
+
+
+
+
+#/*********************************************************************************************/
+#/                                                                                            */
+#/  Create filelists for simulation, synthesis and linting                                    */
+#/                                                                                            */
+#/                                                                                            */
+#/*********************************************************************************************/
+
+my  @filelist =       yp::lib::parse_component_brothers("$codeSet_vendor","$codeSet_library","$codeSet_component","$codeSet_version");
+
+foreach $line (@filelist) 
+   {
+   $_ = $line;
+   if(/::(\S+)::(\S+)::(\S+)::(\S+)::/) 
+     { 
+     $new_library        = $2;
+     $new_component      = $3;
+     $new_vendor         = $1;
+     $new_version        = $4;                
+
+
+     my $spirit_component_file    = $parser->parse_file(yp::lib::find_ipxact_component($new_vendor,$new_library,$new_component,$new_version));
+
+     foreach  my   $i_name ($spirit_component_file->findnodes("//spirit:componentGenerator/spirit:name"))
+       {
+       my($gen_name)            = $i_name ->findnodes('../spirit:name/text()')->to_literal ;
+       my($gen_generatorExe)    = $i_name ->findnodes('../spirit:generatorExe/text()')->to_literal ;
+       my($gen_phase)           = $i_name ->findnodes('../spirit:phase/text()')->to_literal ;
+
+       my $cmd;   
+       $cmd = "   -prefix $codeSet_prefix -vendor $codeSet_vendor     -library $codeSet_library  -component $codeSet_component -version $codeSet_version  ";
+    
+       foreach  my   $i_name ($spirit_component_file->findnodes("//spirit:componentGenerator[spirit:name/text() = '$gen_name']/spirit:parameters/spirit:parameter"))
+          {
+          my($gen_param)             = $i_name ->findnodes('./spirit:value/text()')->to_literal ;
+          my($gen_param_name)        = $i_name ->findnodes('./spirit:name/text()')->to_literal ;
+    
+          if   ($gen_param_name eq "in_pipe")     {$cmd =  "$cmd <${home}${codeSet_prefix}/${codeSet_vendor}__${codeSet_library}${lib_comp_sep}${codeSet_component}/${gen_param}";}
+          elsif($gen_param_name eq "out_pipe")    {$cmd =  "$cmd >${home}${codeSet_prefix}/${codeSet_vendor}__${codeSet_library}${lib_comp_sep}${codeSet_component}/${gen_param}";}
+          elsif($gen_param_name)                  {$cmd =  "$cmd -${gen_param_name} $gen_param ";}
+          else                                    {$cmd =  "$cmd $gen_param";}
+          }
+
+       foreach  my   $i_name ($spirit_component_file->findnodes("//spirit:componentGenerator[spirit:name/text() = '$gen_name']/spirit:vendorExtensions/socgen:envIdentifier"))
+          {
+          my($gen_envidentifier)  = $i_name ->findnodes('./text()')->to_literal ;
+
+          my $New_cmd =  "  ${gen_generatorExe}  -envidentifier $gen_envidentifier      ${cmd}\n";
+          if(${gen_generatorExe} ) 
+              {
+              push  @cmd_list, "${gen_phase}::$New_cmd";
+              }
+          }
+       }
+     }
+   }
+
+
+
+               my $manager = new Parallel::ForkManager( $number_of_cpus );
+               @cmd_list      = sys::lib::trim_sort(@cmd_list);
+               my $cmd;
+               my $phase;
+
+               foreach my $Cmd_line (@cmd_list)
+                   {
+                   ( $phase,$cmd) = split( /\::/ , $Cmd_line);
+                   $manager->start and next;
+                   if (system($cmd)) {}
+                   $manager->finish;
+                   }
+
+               $manager->wait_all_children;
+               print "Software COMPLETE \n";
+               }
+
+}
+
+}
+
+
+
+   return(0);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

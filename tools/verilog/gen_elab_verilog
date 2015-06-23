@@ -1,0 +1,467 @@
+eval 'exec `which perl` -S $0 ${1+"$@"}'
+   if 0;
+#/**********************************************************************/
+#/*                                                                    */
+#/*             -------                                                */
+#/*            /   SOC  \                                              */
+#/*           /    GEN   \                                             */
+#/*          /    TOOL    \                                            */
+#/*          ==============                                            */
+#/*          |            |                                            */
+#/*          |____________|                                            */
+#/*                                                                    */
+#/*                                                                    */
+#/*                                                                    */
+#/*                                                                    */
+#/*  Author(s):                                                        */
+#/*      - John Eaton, jt_eaton@opencores.org                          */
+#/*                                                                    */
+#/**********************************************************************/
+#/*                                                                    */
+#/*    Copyright (C) <2010-2011>  <Ouabache Design Works>              */
+#/*                                                                    */
+#/*  This source file may be used and distributed without              */
+#/*  restriction provided that this copyright statement is not         */
+#/*  removed from the file and that any derivative work contains       */
+#/*  the original copyright notice and the associated disclaimer.      */
+#/*                                                                    */
+#/*  This source file is free software; you can redistribute it        */
+#/*  and/or modify it under the terms of the GNU Lesser General        */
+#/*  Public License as published by the Free Software Foundation;      */
+#/*  either version 2.1 of the License, or (at your option) any        */
+#/*  later version.                                                    */
+#/*                                                                    */
+#/*  This source is distributed in the hope that it will be            */
+#/*  useful, but WITHOUT ANY WARRANTY; without even the implied        */
+#/*  warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR           */
+#/*  PURPOSE.  See the GNU Lesser General Public License for more      */
+#/*  details.                                                          */
+#/*                                                                    */
+#/*  You should have received a copy of the GNU Lesser General         */
+#/*  Public License along with this source; if not, download it        */
+#/*  from http://www.opencores.org/lgpl.shtml                          */
+#/*                                                                    */
+#/**********************************************************************/
+
+
+############################################################################
+# General PERL config
+############################################################################
+use Getopt::Long;
+use English;
+use File::Basename;
+use Cwd;
+use Scalar::Util qw(looks_like_number);
+use XML::LibXML;
+use lib './tools';
+use sys::lib;
+use yp::lib;
+use BerkeleyDB;
+
+
+$OUTPUT_AUTOFLUSH = 1; # set autoflush of stdout to TRUE.
+
+
+############################################################################
+### Process the options
+############################################################################
+Getopt::Long::config("require_order", "prefix=-");
+GetOptions("h","help",
+           "envidentifier=s"  => \$envidentifier,
+           "prefix=s"         => \$prefix,
+           "vendor=s"         => \$vendor,
+           "library=s"        => \$library,
+           "version=s"        => \$version,
+           "component=s"      => \$component,
+           "configuration=s"  => \$configuration,
+           "destination=s"    => \$destination,
+           "local_parameters"
+) || die "(use '$program_name -h' for help)";
+
+
+##############################################################################
+## Help option
+##############################################################################
+if ( $opt_h  or $opt_help  ) 
+  { print "\n gen_verilog -envidentifier :*Simulation:*  -prefix /work/children -vendor vendor_name -library library_name  -component component_name  -version version_name -destination destination -configuration configuration -local_parameters  \n";
+    exit 1;
+  }
+
+
+
+#############################################################################
+## 
+## 
+#############################################################################
+
+$home = cwd();
+
+
+my $variant;
+my $view;
+
+if($version)       {$variant   = "${component}_${version}";}
+else               {$variant   = "${component}";}
+
+my $dest_dir = "../verilog";
+
+
+unless (defined $destination && length $destination > 0)
+{$destination = $variant;}
+
+if(defined $configuration && length $configuration > 0)
+{
+#print "QQQQQQQQQQQQW  Configuration  $vendor $library $component $version  $configuration \n";  
+}
+else 
+{ $configuration = "default";}
+
+
+if($opt_local_parameters)
+{
+#print "QQQQQQQQQQQQW  Local_Parameters  $vendor $library $component $version   \n";  
+}
+
+
+
+
+
+
+print "\n---GEN_elab_verilog    -envidentifier $envidentifier -prefix  $prefix -vendor $vendor -library $library -component $component -version $version -configuration $configuration -dest_dir     $dest_dir -destination  $destination   \n";
+
+my $main_module_name = yp::lib::get_module_name($vendor,$library,$component,$version) ;
+my $lib_comp_sep     = yp::lib::find_lib_comp_sep($vendor,$library,$component);
+my $comp_xml_sep     = yp::lib::find_comp_xml_sep($vendor,$library,$component,$version);
+
+my $parser = XML::LibXML->new();
+
+my $socgen_file              = $parser->parse_file(yp::lib::find_componentConfiguration($vendor,$library,$component));
+my $spirit_component_file    = $parser->parse_file(yp::lib::find_ipxact_component($vendor,$library,$component,$version));
+
+my $sim_library_path ;
+
+my $sim_comp_path            = $socgen_file->findnodes("//socgen:componentConfiguration/socgen:sim/socgen:comp_path/text()")->to_literal;
+
+if ($sim_comp_path)  {$sim_library_path  ="${lib_comp_sep}${sim_comp_path}";}
+else                 {$sim_library_path  = $socgen_file->findnodes("//socgen:componentConfiguration/socgen:sim/socgen:library_path/text()")->to_literal;}
+
+
+foreach my $X_view ($spirit_component_file->findnodes("//spirit:component/spirit:model/spirit:views/spirit:view/spirit:envIdentifier[text() = '$envidentifier']")) 
+         {
+         $view   = $X_view->findnodes('../spirit:name/text()')->to_literal ;
+         }
+
+my $path  = "${home}${prefix}/${vendor}__${library}${lib_comp_sep}${component}${comp_xml_sep}/${dest_dir}";
+mkdir $path,0755             unless( -e $path );
+
+my $path  = "${home}${prefix}/${vendor}__${library}${lib_comp_sep}${component}${comp_xml_sep}/${dest_dir}/${view}";
+mkdir $path,0755             unless( -e $path );
+
+
+my   @instantiations    =       ();
+my   @parameters        =       ();
+my   %parameter_values  =       ();
+my   %parameter_descriptions  = ();
+
+unless ($socgen_file)      { print "No socgen ip file   \n";};
+
+#/******************************************************************************************/
+#/*                                                                                        */
+#/* get parameters                                                                         */
+#/*                                                                                        */
+#/******************************************************************************************/
+
+
+my @Pams = yp::lib::get_parameters($vendor,$library,$component,$version,$configuration);
+
+foreach my $Pam (@Pams)
+{
+my $param_name;
+my $param_value;
+
+( $param_name,$param_value) = split( /\::/ , $Pam); 
+unless(defined $parameter_values{$param_name}) {push ( @parameters,  "$param_name");};
+$parameter_values{$param_name} = $param_value;
+}
+
+
+
+
+my @signals = yp::lib::get_signals($vendor,$library,$component,$version);
+   
+
+
+#/**********************************************************************/
+#/*                                                                    */
+#/* Every hier cell is constructed from the ipxact file with seperate  */
+#/* version  for each view                                             */
+#/*                                                                    */
+#/* Start by opening the output file                                   */
+#/* get fileset name                                                   */
+#/* check that requested view exists                                   */
+#/*                                                                    */
+#/**********************************************************************/
+
+foreach my $comp_view ($spirit_component_file->findnodes("//spirit:component/spirit:model/spirit:views/spirit:view/spirit:name[text() = '$view']"             )) 
+   {
+   my($view_fileset_name)  = $comp_view->findnodes('../spirit:fileSetRef/spirit:localName/text()')->to_literal ;
+
+   if($configuration eq "default")
+   {
+   $outfile ="${home}${prefix}/${vendor}__${library}${lib_comp_sep}${component}${comp_xml_sep}/${dest_dir}/${view}/${destination}";
+   }
+   else
+   {
+   $outfile ="${home}${prefix}/${vendor}__${library}${lib_comp_sep}${component}${comp_xml_sep}/${dest_dir}/${view}/${destination}_${configuration}";
+   }
+
+
+   open DEST_FILE,">$outfile" or die "unable to open $outfile";
+
+   if($configuration eq "default")
+   {
+   print DEST_FILE  "\n module \n\n  $main_module_name \n ";
+   }
+   else
+   {
+   print DEST_FILE  "\n module \n\n  ${main_module_name}_${configuration} \n ";
+   }
+
+
+   my @I_names = yp::lib::get_instance_names($vendor,$library,$component,$version,$configuration);
+ 
+   foreach my $I_name (@I_names)
+        {
+        my $foo_ven;
+        my $foo_lib;
+        my $foo_cmp;
+        my $foo_ver;
+        my $foo_cfg;
+
+        my $vlnvc  = yp::lib::get_instance_vlnvc($vendor,$library,$component,$version,$I_name,$configuration );
+
+          ( $foo_ven,$foo_lib,$foo_cmp,$foo_ver,$foo_cfg) = split( /\:/ , $vlnvc); 
+
+
+        push @instantiations  , "/*  ${vlnvc}  */ \n";
+        my $module_name  = yp::lib::get_instance_module_name($vendor,$library,$component,$version,$I_name,$configuration);
+        if(defined $foo_cfg && length $foo_cfg > 0)
+          {
+          push @instantiations  ,          "${module_name}_${foo_cfg}\n";
+          }
+        else
+          {
+          push @instantiations  ,          "${module_name}\n";
+          $first = 1;
+          my @Pams = yp::lib::get_Parameters($vendor,$library,$component,$version,"root.${I_name}",$configuration);
+          foreach my $pam (@Pams)
+            {
+            ( $foo_name,$foo_value) = split( /\::/ , $pam); 
+            if($first)
+              {
+              push @instantiations  , "#( .${foo_name} (${foo_value})";
+              $first = 0;         
+              }  
+            else  {push @instantiations  , ",\n   .${foo_name} (${foo_value})";}  
+            }
+ 
+          if($first == 0)  { push @instantiations  , ")\n";}
+          }
+
+ 
+
+
+
+
+          push @instantiations  , "$I_name \n   (\n ";
+          $first = 1;
+ 
+          my @Inst_conns = yp::lib::get_instance_adhoc_conns($vendor,$library,$component,$version,$I_name);
+          my @Buss_conns = yp::lib::get_instance_conns($vendor,$library,$component,$version,$I_name);
+          foreach my $Buss_conn (@Buss_conns)
+             {
+             if($first)
+               {
+               push @instantiations  ,          "  $Buss_conn";
+               $first =0;
+               }
+             else   
+               {           
+               push @instantiations  , ",\n   $Buss_conn";
+               }
+             }
+          foreach my $Inst_conn (@Inst_conns)
+             {
+             if($first)
+               {
+               push @instantiations  ,          "  $Inst_conn";
+               $first =0;
+               }
+             else   
+               {           
+               push @instantiations  , ",\n   $Inst_conn";
+               }
+             }
+        push @instantiations  , ");\n\n";         
+        }
+ 
+
+
+
+
+
+
+ 
+   #/**********************************************************************/
+   #/*                                                                    */
+   #/* Add any and all global parameters with their default values        */
+   #/*                                                                    */
+   #/**********************************************************************/
+      
+   unless ($opt_local_parameters)
+     {
+     my $first = 1;
+     foreach my $parameter_name (@parameters)  
+        {
+        my $parameter_value = $parameter_values{$parameter_name};
+        if($first)
+          {
+          print DEST_FILE  "   #( parameter \n      ${parameter_name}=${parameter_value}";
+          $first=0;
+          }
+        else  { print DEST_FILE  ",\n      ${parameter_name}=${parameter_value}";}
+        }
+      
+     if    ($first == 0)   { print DEST_FILE  ")\n"; }
+       }
+      
+
+
+  foreach my $Pam (@Pams)
+      {
+#      print DEST_FILE  "//*** $Pam  ***/ \n";  
+      }  
+
+
+
+   #/**********************************************************************/
+   #/*                                                                    */
+   #/* sort all  ports  with their type, size and direction               */
+   #/*                                                                    */
+   #/**********************************************************************/
+
+   my @port_list  = (); 
+   my @wire_nodes = ();  
+   my $key;
+   my $value;
+
+   foreach my $signal (@signals)  
+         {
+         ( ${port_name},${direction},${type},${vector},${left},${right}) = split ':', $signal;
+
+            if(  $direction ne "node"   )
+              {
+              my $q_width  = "     ";
+              if( ${vector} eq "vector" )  { $q_width = "[ ${left} :  ${right}]";             }
+              push (@port_list,  "${direction}   ${type}    $q_width        ${port_name}");       
+              }
+            else
+              {
+              my $q_width  = "     ";
+              if( ${vector} eq "vector" )   { $q_width = "[ $left :  $right]";}
+              if( $direction eq "node" )    { push @wire_nodes,     "$type     $q_width              ${port_name};";}
+              }
+         }
+
+   @port_list      = sys::lib::trim_sort(@port_list);
+
+   #/**********************************************************************/
+   #/*                                                                    */
+   #/* Now add all ports  with their type, size and direction             */
+   #/*                                                                    */
+   #/**********************************************************************/
+
+   print DEST_FILE  "\n    ";
+   $first = 1;
+      
+   foreach $port_line (@port_list)  
+        {
+          if($first)
+            {
+            print DEST_FILE  " (\n ${port_line}";
+            $first=0;
+            }
+          else
+            {
+            print DEST_FILE  ",\n ${port_line}";
+            }
+          
+        }
+
+   if    ($first == 0)   { print DEST_FILE  ");\n\n\n\n"; }
+   else                  { print DEST_FILE  "();\n\n\n\n";}
+
+
+   #/**********************************************************************/
+   #/*                                                                    */
+   #/* Add any and all local parameters with their default values         */
+   #/*                                                                    */
+   #/**********************************************************************/
+      
+   if ($opt_local_parameters)
+     {
+     foreach my $parameter_name (@parameters)  
+        {
+        my $parameter_value = $parameter_values{${parameter_name}};
+        print DEST_FILE  "parameter     ${parameter_name} = ${parameter_value};\n";
+        }
+     }
+
+   @wire_nodes      = sys::lib::trim_sort(@wire_nodes);
+
+   foreach my $wire_node (@wire_nodes)
+       {
+       print DEST_FILE  "${wire_node}\n";
+       }
+
+
+     #/**********************************************************************/
+     #/*                                                                    */
+     #/* Dump everything from the ip-xact files into component              */
+     #/*                                                                    */
+     #/**********************************************************************/
+
+     print DEST_FILE  "\n\n\n";
+     while(   my $line_out      = shift(@instantiations))             {  print DEST_FILE  "$line_out";}
+
+
+     #/**********************************************************************/
+     #/*                                                                    */
+     #/* After all the data from the ip-xact file has been entered we now   */
+     #/* insert any and all verilog fragments at the end before closing     */
+     #/* the module                                                         */
+     #/*                                                                    */
+     #/**********************************************************************/
+      
+      
+      my @fragments = yp::lib::get_files($vendor,$library,$component,$version,$view_fileset_name,"fragment") ;
+
+      foreach my $fragment(@fragments)
+      {
+          $SRCFILE ="${home}${prefix}/${fragment}";
+          open(SRCFILE) or die("Could not open src file.  $SRCFILE ");
+          foreach $line (<SRCFILE>) 
+             {
+             chomp($line);   
+             print DEST_FILE  "${line}\n";
+             }
+
+     }
+
+
+     
+   print DEST_FILE  "\n\n\n  endmodule\n\n";
+   }
+
+1
+

@@ -1,0 +1,282 @@
+#!/usr/bin/perl -w
+# Copyright 2009, Andrew Ross <andy@plausible.org>
+# Distributable under the terms of the GNU GPL licence version 2 or later.
+use strict;
+use POSIX qw(isatty);
+use Time::HiRes qw(usleep);
+
+# prog_usbblaster - turn a Digilent  FPGA board over USB into a usbblaster
+#
+# Usage: prog_usbblaster  [-v|--verbose] 
+#
+# This script automatically finds an attached Nexys 2 board and loads
+# it with the specified Xilinx bitstream with a minimum of fuss,
+# configuration, and external dependencies.  Specifically, the
+# hacked/patched firmware for the Cypress FX2 chip is stored inline.
+# The user only needs user-level software installed and a single local
+# configuration change (optional, for the USB device files -- the lazy
+# can just run the script as root).
+#
+# Prerequisites:
+#
+# 1. A working Xilinx ISE installation.  This was tested against 10.1,
+#    but I believe older versions share the same iMPACT syntax and
+#    BSDL file locations.
+#
+# 2. The "fxload" utility is required to reprogram the board's FX2 USB
+#    chip, available in Debian and Ubuntu via "apt-get install
+#    fxload".  Note that fxload requires write access to the raw USB
+#    device files under /dev/bus/usb, and that these are by default
+#    read-only on Ubuntu Intrepid.  You can either run the script as
+#    root, or else set the files to be owned by the "plugdev" group by
+#    adding the GROUP field to this line in
+#    /etc/udev/rules.d/40-basic-permissions.rules:
+#    SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", MODE="0664", GROUP="plugdev"
+#
+# 3. UrJTAG, available from http://urjtag.org.  UrJTAG is an active
+#    fork of the moribund openwince-jtag project.  Note that
+#    openwince-jtag is still an available Debian/Ubuntu package, that
+#    it shares the same "jtag" binary name and most of its syntax, and
+#    that IT DOES NOT WORK with the firmware in this script.  You need
+#    to install UrJTAG.  Also note that you will need libftdi
+#    installed for the protocol handler, again available on
+#    Debian/Ubuntu via "apt-get install libftdi1".  UrJTAG will build
+#    without this, but you won't be able to program the Nexys 2
+#    without libftdi.
+#
+# Note that this script contains a binary firmware blob built from
+# free software sources.  See the note above it for source
+# information.
+
+
+# TODO:
+# + Figure out the JTAG interface for the boot PROM, so it can be
+#   flashed with the bitstream instead of (or in addition to) doing a
+#   direct load to the FPGA.
+# + Pull down and parse the JTAG chain from the device to verify that
+#   it's actually a Nexys 2 and not another device sharing the same
+#   firmware family and bus ID.  Kolja's firmware runs on other
+#   devices too...
+# + Extend the script to recognize arbitrary JTAG chains and find the
+#   appropriate part number automatically.  So you'd just specify a
+#   .bit file (which contains the FPGA type) and it would crawl the
+#   JTAG bus looking for a matching FPGA to program.
+
+my $USBID_KOLJA = "16c0:06ad";
+my $USBID_DIGILENT = "1443:0005";
+my $XILINX;
+my $TMPID = sprintf("./digilent-blastcode", $$);
+
+my $verbose = 0;
+my $filebase;
+my $bit;
+
+# Parse the command line
+while(@ARGV) {
+    my $arg = shift;
+    if($arg eq "-v" or $arg eq "--verbose") { $verbose = 1; }
+    elsif(!defined $bit and -f $arg and -R $arg) {
+	$bit = $arg;
+	$filebase = $bit;
+	$filebase =~ s/\.bit$//i;
+    } else { }
+}
+
+
+# Find the tools
+check_tools();
+
+# Locate and configure the board's USB interface
+find_board();
+
+
+########################################################################
+
+sub usage { die "Usage:\n  $0 [-v|--verbose] <Bitstream File>\n"; }
+sub vlog { print join("", @_) if $verbose; }
+
+# Idiot-proofing, to help mitigate the Rube Goldbergisms inherent in
+# this process.
+sub check_tools {
+    system("which fxload >/dev/null") == 0 or die
+	("Cannot find fxload executable.\n".
+	 "Try:  \"apt-get install fxload\" ?\n");
+}
+
+sub find_board {
+    my $nx = find_digilent();
+    die "Cannot find a digilent board on the USB bus.  Plug it in?\n"
+	if(!defined $nx);
+    my ($bus, $dev, $id) = @$nx;
+    if($id ne $USBID_KOLJA) {
+	$dev = blasterize($bus, $dev);
+    } else {
+	vlog("Found already-configured board on bus $bus dev $dev\n");
+    }
+}
+
+
+
+# Run an external tool, emitting the output only if it fails.  iMPACT
+# and UrJTAG are annoyingly verbose...
+sub run {
+    my $cmd = shift;
+    print($cmd, "\n") if $verbose;
+    open CMD, "$cmd 2>&1|" or die;
+    # FIXME: if the subprocess crashes (as jtag does without a cable),
+    # we get incomplete output...
+    my $out = join "", <CMD>;
+    close CMD;
+    die "Command failure:\n  $cmd\n\n$out" if $?;
+}
+
+sub find_digilent {
+    my ($bus, $dev, $id);
+    open LSUSB, "lsusb|" or die "Cannot run lsusb";
+    while(<LSUSB>) {
+	next if ! /Bus (\d+) Device (\d+): ID ([0-9a-f]{4}:[0-9a-f]{4})/;
+	next if !($3 eq $USBID_DIGILENT or $3 eq $USBID_KOLJA);
+	($bus, $dev, $id) = ($1, $2, $3);
+    }
+    close LSUSB;
+    if(defined $bus) {
+	vlog("Found USB device $id on bus $bus device $dev\n");
+	return [$bus, $dev, $id];
+    }
+    return undef;
+}
+
+# Reprogram a connected FX2 device with Kolja Waschk's usb_jtag
+# firmware, patched to support the Nexys 2 pin assignments and FPGA
+# bitstream sizes as per Morgan Delahaye's instructions at
+# http://m-del.net/info.html. Uses the fxload tool from the
+# linux-hotplug project.  The end result is an interface compatible
+# with the FTDI-based Altera USBBlaster product.
+sub blasterize {
+    my ($bus, $dev) = @_;
+    my $usbfile = "/dev/bus/usb/$bus/$dev";
+    if(!-w $usbfile) {
+	die ("Cannot write to $usbfile.\n\n" .
+	     "Either run this tool as root or modify your udev settings to\n" .
+	     "allow write access to USB device files.\n");
+    }
+    my $firmware = gen_fx2();
+    vlog("Loading 8051 firmware into board...\n");
+    run("fxload -t fx2 -D $usbfile -I $firmware");
+    my $nx;
+    # Wait for it to reboot, renumerate and appear on the bus.
+    for(my $i=0; $i<20; $i++) {
+	usleep 10000;
+	last if defined($nx = find_digilent()) and $nx->[2] eq $USBID_KOLJA;
+    }
+    if(!defined $nx or $nx->[2] ne $USBID_KOLJA) {
+	die ("Reprogrammed FX2 device not found on USB bus.\n",
+	     "fxload failure? device unplugged? ... !?\n");
+    }
+    return $nx->[1];
+}
+
+
+
+# Firmware for the FX2 chip
+# Original source (GPLv2) -- http://www.ixo.de/info/usb_jtag
+# Modifications:
+#   hw_nexys.c     -- http://www.m-del.net/files/nexys/hw_nexys2.c
+#   bit_fpga.patch -- http://www.m-del.net/files/nexys/big_fpga.patch
+# It was built with the sdcc-nf ("non-free") compiler from Ubuntu 8.10
+# multiverse, and the resulting Intel hex file was filtered through
+# bzip2 and then base64 to produce the string below.
+sub gen_fx2 {
+    my $filename = "$TMPID.fx2";
+    vlog("Unpacking FX2 firmware to $filename\n");
+    open FX2, "|base64 -d | bzip2 -d > $filename"
+	or die "cannot write to $filename";
+    print FX2 <<__EOF__
+QlpoOTFBWSZTWf0aqD8AEcBMAHgQf/A/AGAXntpC7s763WvY+8vm9nz3qlzNDNk233a769fb5976
+Ou+tbH3O7fbp9vd77h9775nr7u9eN7vp3t699fdet77uXr59977K+3u5L217WhqniZGAqkANNRgE
+JKhphqegamgmqQA0xEATUlRgZqRkTTRpKTIJEQAJKmhpbwNpo/yUJ9/267v2VMV/cR/ynknP0f3R
+1fdtf5u/wbXhJJJJDrXInDOUu+63nN/y1aap/T7i8g38pZ56fMwVuRkDzKfmr3MZ8nM7J6TCCE9i
+VYLTR8Wdru4+GXyteWPVvW177DMK7nSv3kxnPnqFzCbViSSSSSzyNNr5T6fiw7OdVYmK3Y9PYdc1
+qTywpRBCfZWHS01+5ReZrllLmH5r4ZtiqRcd9Whl0PcW44EXnaipK8gF1+U9s9mft0jhZRPa/r3a
+Wi4V9F2Ztjc6qN7Z9Yyi6Sx3rTyBqhIHemLlT7ms7h/Y+Jp3Hrgx90AIlZunfkTdV6e497oAIjEA
+IhGzN2rkgkkkkkkkgp/vL3OLUz3eQM+Dhx/krG+H4U393qm2tgAAA/d13GPc4NQqq9lpew2MIBCb
+7w8mvrZxazzDx5sETd+2gCUU7T853RnkTuOZPAzkU2CbJTVLR9GswM4/D4hud+dFzan62e6scyX4
+z7SA0TYN3IlIKKjVp9L1c6tzvOW7prOlhXhICYgVAa8IYaQVxJiYeU3Aq12XMeIO5h7OumDBCumz
+mN6YeGcKkCtIBBup3lhspb30rzWBst1Cgbf64MB17zduoiGgmNJmfN3c45WUKkVkvWMXUtdoLjbc
+VZzqIgJREgSM93h0Pe08VGXt+3k7jFOT2ppwECn8x+OtMYoU9jGRnkJ9YjWZN30RIgKZ2IY6RE97
+J8wAUgeOybvbTe/jAWG4R2dEZdXKzvueVe+dmLZqQfqHCH5D1C7A2eQqY8K95S3WStt3lsKQMGo4
+m95VZb5Q+YgM7jiVizSiVN3xSrczoXp17TQDCNXSAUtltBrKpjyTkEWvZ7rrqFGG+l2ddNRjy+Kg
+c+rgfO7qq7i136n0jREaMHW+Jb6p3bcxg/qRKjbIURkS+Na1ZUYJjk2sC+BCSgT9EkoF3KgHYaKB
+uEoQMA9UQj76PG7+fdSPzFla1rcNypbdI5l/qURPsI5iqRPih8R5ggt+3s1f1SnMmSCXDPzvmEf6
+MK2aDy/RBMBpDBjHEdiLRBTsIVtlVo+zaAbbEj6Hj53syoraj2zhcz4fakkqcm8qMLy8PLdfFQE5
+z+ihARTNZEpqlnzxxJQJI6URx85FOxhhhlWH7zCO+jYFYiYvSsisxjZLSqeoj1aywbQjLRLJaPYn
+GaSWpA7xG68qfM3w50XGI/7Y+eYWFfW28tqDTbkpXJoXX56nSrQ4w3Q5+koxAw0UsgFRvG6pB6fi
+9/VcDS37Bwl2AtKfpFBrnJYqagMwYMAgxEqIBO1SXx9yhz3zoiPKjjxkChtgpGomqMTQQD9TgmSG
+pf5o/vUJFH6SbliTF+t/XatiqujGKrlX8Ih6Q4FtDSWh3V9FdWZ7C7yXTnbMkbfLUF7fXYeS9eIg
+BtBEHvo8zP52aoaSgSCEQAdZCJ5qMQT+25mM+Toa6mFQrmTiicpuD6ZqFJ2QNaz5pLQJnxkiLphS
+A7IQD84e772VsdanRCBtG6wmTChh6YEXZT6YX2kyEn6SWSQFOFfKbyP2GWPfihRw9amBc5IXPzA0
+BvLriF5mYkflbklFndW+8k8bpRVBhqCySgTFihFohQLIk1DBIHiLDswYmmGohoaIwfuU+QQV79xT
+gD9b7EUCXqxmXlAUs0lITLTfXP0mEYEMGAPiAF+14OCea65Ozr71jIvHF5KYhtyEhGcoANoViLve
+G+dgqx5+cO/37EMwL5QFm/F1+X1aOp8L5atOeyHSpIWGfOtV2TDGs2hJFaZ7o/YpX2PxIEv8zIht
+JfhgVaUni0FHWYI9v1NDS7fueOf1s8otpcRrPSmOuutROBX2s2+Qkpr5r4B0hQLCwX4VDCOz2eAs
+5OHdzHTf8OY66+Q2/15s0EcuZyxdP6BHTEXyUjAEDw4iYh1g2vNkrghAQ4dcjSIF4jY1CEzEAMQg
+AABgwbBMG0DY0JIQ2gbTAWOuESxXZmPqIJ+xKt8eSmjnV/PEFSTVW2Wez4feG7LH7cYdMQGYAMBE
+EjxhG8NeGCmmhchtQMwZAnMeVZW+uu81uejk+WxNBZK5Cp00k1j10sO+59XLIFzuLfdvBuBcITyP
+iPp48eL4/hebHmiGg2404Ms+GrMKXRC4KAnM3aBZm1VfvWNyd2S4dIQ2OQ6cI20FGv0DI8zEUn0e
+kONEHN1NVisamGbkaf2+fYu/xWngcfKRiTA21GgMZdppvdsS85l4MNWWUNvucx897/JFnhHCryzi
+vz2NeryUExJCPqQcAE4so1OGB8wEO9WcK8TrdvytwnQzA1lVX05kxcH1YaGdDG98JwjknVOdQqGT
+5zeUugHG1XQhIZLCUReUYE8dGyznDBQ4HTtPpB0A6IRiH+NobDyoyvCnZfVvIm/bwj4m+v4n7vf1
+rL9hBCDs71X9/cgfAXMGZfn6/c8xtdcqF0rMheEHcKAVDcCuKDAoTZaIcCUNiG0hgMaTQDB/yH8L
+7X7uf5lRP5S8SNjTSYm3PsUCjUmIO8ihu2HR7lwNnTuXYhAiJNyxSjRWFLJKsQVlgJ2e6jLRZYGD
+hoLAbfyGyOAgJNctDwjAoimoKPOKRI8fZC4bBkkWPOUKgTnstmlMiV8+G9rFNhpH5QTsxkgRogUc
+Y3IkMBIZRbgMNFroLPdWd7pkFpwbGfsZEm8IWi8vGKoSUhef5lpKpSuIBsGhJWi0sWKKXZEBmLGF
+FZRX8wzj5fjHGhgKIhAYMWe9XJLsIcCUe9ijxiHFyidFCe+ZqHKQm2I1EbKgjSe3+ijfjbrmM8/t
+DB336846DZ/FO8gwwtMEtF82rrmPXt737vDowyyEMbS+KMQAMAPLirG2pVsalmxU6TzNENkMxery
+FLUnMEDbRl8rRSEj3adWtAzDJ99IZy0kDJ5Sn1JWa1MQ17qEBU3pUG1IAMAheaxGJdZGGFCQQi1Y
+QkeupiOhMXpOdqBeCMa43mqIgEx7Kh2dEAYogJC4tZJV9HLTbDe6UUVPslJzyu85NXtKXu3977I+
+gMb16p/wPr13DtHHbtB6n8tj2Nrnw1++sAmQaFUeQDg0FpJJba81A7uKwX+ICgN0YavesukaigUI
+0EbchvNnj1uV169fuRt1zahQ6kogORpQnNMM7+GMBZJLWPx76aeJfdb/41g7tymkoHSMyUJsG7E+
+iEoH4zBZ4GkwkmQ5VqZc3eEsxSYEaYE2I+3zfFXIog/Yyp8wquVOGVFGQ4w2msATbjMR9mdFUnVX
+UYJwwCKwvngQzsBkCARhBlWmLogRYG+vN1NHpeRG6qF7DGJ569u8PE/nZ4m78sN679a+989vWuPK
+0rSyAKMDvEdBIgmCQJLaFinxiNEAmJmwynbGXdDX/mO2xj4qoy2lH4ztBGPRZEqQZ3zlZrqKPQSD
+MW6m1hqpwW7yi+6LCf2rKvCqSBBbf4TpcUfV56gU/Ocr0SSiGEjkEJw2KGwExnzFLEqFXO6bt6Cx
+NJC+cT8oplJaTF5ZGVl06MkMhqEsLshgGNESG+y2ZRrjuCXcve8LtJA0R3nocvVDENmqu34QuVZF
+xIOnCNq4HsrPujhn6KkT0+tHM7muc2vv7XKnORAxYYbQ09clI7SzJSzenaFRsKxAUxNvbnrMPzjc
+LLWUnv9Wf319eRVjaDThlN9r7lkXReIqzV5l0FCghEQ4E2BacTDCjGrT+2wKqWECvZjH1H5g0DTG
+05aENDY2kCSEK9/rrRP1rddD+Bt2z99CBMkT1DLrcoj6cf251WO/rPu/FtPi+rDAx/dyJ4fu/cv0
+9aGCzpP9BRHIAJvV732kQxVtTN4qu1CBH51qjHMSzjZIw0hiScH4iuW462eMTAJwalemimCWdja+
+FVVDdnSgffzo9PfXm8uV6pE6rq54WE0tc49dimQRnCCrbpqIj7+74zH4if04kZ/KGkh+BR3G66+j
+NU32CCXbMzDWfRpgdBiwPPJDqnZsYInmzmo33TgWMRJAMRpq4Pqcr4HvjKqjE9T29dm7GFXoOa7V
+Mt85WbKDSLpfNEopHTcuE4BMc8xezkxo01UPorZFEDCGSPnZoOzV8dPozIRTLicNKiYwaJYnRTJh
+SDFURSmRSqprzwdFxc7RKKKQgExoaBRNSVTroSsUhSIY6C/MgTByxUmDz1gh91bFAIGCIlRAwCAx
+TWvymcVJ5i1s1adLW0zagrHF/ix0yYwLGxYv+UOC6Q6ggPmq0gFP5gMxoR8v3PVswKjeFJvSA68r
+vKwDgkwCP1txkEX5/zCRwIeHkU6aO71z0MijwI6mZT88722nnM+pTWZVi68XkU8NRDzRl4tb0H2M
+v6hyaFfvcpejbo0dpHmQ0fxhL0y1tyBhtrfUN2MDb0J/hLf6Pht+kjpaI/Z35jIqR54a4wLMn0d1
+Aq0gNMPzozqu2EW977deJtl/85EuU2DRFoiPbk4znSEuWL613uNVgIFTP+XAcaQhZza7187+Vzq9
+HijadUThfm4urKlDGjPzEXajiUAW01aXw42sHE/SB2htZoXn3sRPmUX/iBIXM8zN/Yzz8fsUz8/1
+fY/Fu6qZiTovp4/n8TQHT7KReIn5KpLMWleba1Fs6AyBMebQxhpv0Q0pGRENhhkNJU8O9vXG1JDu
+ejvVY2ZtnVgE0CQoUTCFYDFnKGRC6tTdm3ODbcTBHYZ3xkEztxad1AT3nw5KpsWYyhbV8XtzKt5R
+scN4nD4CEIMKw6e628K/jA4XnlrhQeSBe6vWFJBFkpB7n0zylynVpGDTsvVHbG/j3qpuN2JQt1WI
+LIdJR8ElRJVD03iAadNIHUqUaRIThfDEBgPw/oFTBp01riMyJVbdauH3jVW0/L2iIPclq+iECDt4
+NYd/W42kkLrVYrdlvs+4d7PAPuKGGUaORWTozloMVeZpm8lDFokfncjJ9zDR4sMYNnWuLCkFHAKv
+iuQCUi2AASAFhKB1Z3m+hnmeyFWBX3mqFRUrkA7lm8GBDEEkBYyWzSFGhToItqH7UMCGLwC/28Gn
+3EjNxAQxZaw5ZSuQIOPJ4toLRi+YqFCuoAgB5fEuUhSIVZi/bBvVW2xSFmFpWtUG9b3bbT4Dzr8m
+ilLuPN7y11QbKLtz3HHaVKpFF3Eajv1OAnKiE/AICeD4CBKjAHIjgXJFMAz6T77PeUd53rdsLQkg
+ICNWOgRwWgQ0l0hWibRuc+S+Mny8fizYnd7jrW5c7hv5iQeXtE/TkrqD7tVU9nDq3E616cwSJDXy
+oCxLGml8nt1QFGiEo5EcZho2t39696217ud1VLPZfj4HaAAQcPIczUyI50yQKp2Q3l9Ez3l15qYb
+u+CTMFtUVTB3qd1TRnE3WN8z8aDjGVUhsyM7mkRHbFvqDjrnmXudJHsiEQNAwzyNBCIwRZhX6LKo
+kgQLIHCyVdcOYiDJD2EFPzu95kc4h26FnHzuMy77gV/iH8bk25soWnVlNRl2Yvd9KXcbnFJTdDU4
+gjbEj5Zsvt1fL09jJPwZXgsbr38Q33evuLFcV60J3m+xLvSC0BBBJgzqEHGFmks3hDYjA1TcJIje
+7Hdb4ldLJB3nVzgGyhUqXcL5qE6sOJ6y91lYL3xqnlWVbnDwwrxzO+TgDeHDSjKUZ8oCA5mnPwIW
+VvGAUIlpCRteCLjtsvZUuHN1drtKIvjXcRAc+mdrGgyL6VU97abQcre3zQQIib9la1MRHaUFK/Mj
+ehPatzvs57Z34DIGE2Ga31CORF8N9KCgGXl+J+bTu7IDtwJfCPqgze1yHIjVPOxh7bgh0Txq/Rhv
+19y2ApB8OK8XseNWkotsOCbvtxJ2VQRIrE4hEQKk1Bwib5Qre5Avokp48/szNYeujzfp3jNRjHJA
+4QZviLMlD8MaqlPpAqNoZD/Egg2QSUMPO6Er7CEqETbQuYxK2JybwiyJZrr9cTWdBPfsfUJn6y+a
+0+tBdxdkAv2e7oKccksQBSTRGobY7OtFKcOo/ZPD2B+EviHPlddrJjiNCU/ntfimWdiIaD4cMDTy
+5j1rTWrSyGaEh4DCx5QahT8KkOrQdTcfBR/Bz+roHaUDl85KIJN2vQMIV6cqf0XckU4UJD9Gqg/A
+__EOF__
+;
+    close FX2;
+    return $filename;
+}
+

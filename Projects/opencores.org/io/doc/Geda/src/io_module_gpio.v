@@ -1,0 +1,240 @@
+////////////////////////////////////////////////////////////////////
+//     --------------                                             //
+//    /      SOC     \                                            //
+//   /       GEN      \                                           //
+//  /     COMPONENT    \                                          //
+//  ====================                                          //
+//  |digital done right|                                          //
+//  |__________________|                                          //
+//                                                                //
+//                                                                //
+//                                                                //
+//    Copyright (C) <2009>  <Ouabache DesignWorks>                //
+//                                                                //
+//                                                                //  
+//   This source file may be used and distributed without         //  
+//   restriction provided that this copyright statement is not    //  
+//   removed from the file and that any derivative work contains  //  
+//   the original copyright notice and the associated disclaimer. //  
+//                                                                //  
+//   This source file is free software; you can redistribute it   //  
+//   and/or modify it under the terms of the GNU Lesser General   //  
+//   Public License as published by the Free Software Foundation; //  
+//   either version 2.1 of the License, or (at your option) any   //  
+//   later version.                                               //  
+//                                                                //  
+//   This source is distributed in the hope that it will be       //  
+//   useful, but WITHOUT ANY WARRANTY; without even the implied   //  
+//   warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR      //  
+//   PURPOSE.  See the GNU Lesser General Public License for more //  
+//   details.                                                     //  
+//                                                                //  
+//   You should have received a copy of the GNU Lesser General    //  
+//   Public License along with this source; if not, download it   //  
+//   from http://www.opencores.org/lgpl.shtml                     //  
+//                                                                //  
+////////////////////////////////////////////////////////////////////
+ module 
+  io_module_gpio 
+    #( parameter 
+      ADDR_WIDTH=16,
+      BASE_WIDTH=8,
+      IRQ_MODE=8'h00,
+      NMI_MODE=8'h00,
+      UART_DIV=0,
+      UART_PRESCALE=5'b01100,
+      UART_PRE_SIZE=5)
+     (
+ input   wire                 clk,
+ input   wire                 cts_pad_in,
+ input   wire                 enable,
+ input   wire                 reg_mb_cs,
+ input   wire                 reg_mb_rd,
+ input   wire                 reg_mb_wr,
+ input   wire                 reset,
+ input   wire                 uart_rxd_pad_in,
+ input   wire    [ 7 :  0]        gpio_0_in,
+ input   wire    [ 7 :  0]        gpio_1_in,
+ input   wire    [ 7 :  0]        pic_irq_in,
+ input   wire    [ 7 :  0]        reg_mb_addr,
+ input   wire    [ 7 :  0]        reg_mb_wdata,
+ output   wire                 pic_irq,
+ output   wire                 pic_nmi,
+ output   wire                 reg_mb_wait,
+ output   wire                 rts_pad_out,
+ output   wire                 rx_irq,
+ output   wire                 tx_irq,
+ output   wire                 uart_txd_pad_out,
+ output   wire                 wait_n,
+ output   wire    [ 1 :  0]        timer_irq,
+ output   wire    [ 15 :  0]        reg_mb_rdata,
+ output   wire    [ 7 :  0]        gpio_0_oe,
+ output   wire    [ 7 :  0]        gpio_0_out,
+ output   wire    [ 7 :  0]        gpio_1_oe,
+ output   wire    [ 7 :  0]        gpio_1_out);
+wire                        mas_0_cs;
+wire                        mas_0_rd;
+wire                        mas_0_wr;
+wire                        mas_1_cs;
+wire                        mas_1_rd;
+wire                        mas_1_wr;
+wire                        mas_2_cs;
+wire                        mas_2_rd;
+wire                        mas_2_wr;
+wire                        mas_3_cs;
+wire                        mas_3_rd;
+wire                        mas_3_wr;
+wire                        mas_4_cs;
+wire                        mas_4_rd;
+wire                        mas_4_wr;
+wire     [ 3 :  0]              mas_0_addr;
+wire     [ 3 :  0]              mas_1_addr;
+wire     [ 3 :  0]              mas_2_addr;
+wire     [ 3 :  0]              mas_3_addr;
+wire     [ 3 :  0]              mas_4_addr;
+wire     [ 7 :  0]              mas_0_rdata;
+wire     [ 7 :  0]              mas_0_wdata;
+wire     [ 7 :  0]              mas_1_rdata;
+wire     [ 7 :  0]              mas_1_wdata;
+wire     [ 7 :  0]              mas_2_rdata;
+wire     [ 7 :  0]              mas_2_wdata;
+wire     [ 7 :  0]              mas_3_rdata;
+wire     [ 7 :  0]              mas_3_wdata;
+wire     [ 7 :  0]              mas_4_rdata;
+wire     [ 7 :  0]              mas_4_wdata;
+io_gpio_def
+gpio 
+   (
+   .addr      ( mas_0_addr[3:0]  ),
+   .cs      ( mas_0_cs  ),
+   .rd      ( mas_0_rd  ),
+   .rdata      ( mas_0_rdata[7:0]  ),
+   .wdata      ( mas_0_wdata[7:0]  ),
+   .wr      ( mas_0_wr  ),
+    .clk      ( clk  ),
+    .enable      ( enable  ),
+    .gpio_0_in      ( gpio_0_in  ),
+    .gpio_0_oe      ( gpio_0_oe  ),
+    .gpio_0_out      ( gpio_0_out  ),
+    .gpio_1_in      ( gpio_1_in  ),
+    .gpio_1_oe      ( gpio_1_oe  ),
+    .gpio_1_out      ( gpio_1_out  ),
+    .reset      ( reset  ));
+micro_bus_exp5
+mb_exp 
+   (
+   .addr_in      ( reg_mb_addr[7:0]  ),
+   .cs_in      ( reg_mb_cs  ),
+   .mas_0_addr_out      ( mas_0_addr[3:0]  ),
+   .mas_0_cs_out      ( mas_0_cs  ),
+   .mas_0_rd_out      ( mas_0_rd  ),
+   .mas_0_rdata_in      ( mas_0_rdata[7:0]  ),
+   .mas_0_wdata_out      ( mas_0_wdata[7:0]  ),
+   .mas_0_wr_out      ( mas_0_wr  ),
+   .mas_1_addr_out      ( mas_1_addr[3:0]  ),
+   .mas_1_cs_out      ( mas_1_cs  ),
+   .mas_1_rd_out      ( mas_1_rd  ),
+   .mas_1_rdata_in      ( mas_1_rdata[7:0]  ),
+   .mas_1_wdata_out      ( mas_1_wdata[7:0]  ),
+   .mas_1_wr_out      ( mas_1_wr  ),
+   .mas_2_addr_out      ( mas_2_addr[3:0]  ),
+   .mas_2_cs_out      ( mas_2_cs  ),
+   .mas_2_rd_out      ( mas_2_rd  ),
+   .mas_2_rdata_in      ( mas_2_rdata[7:0]  ),
+   .mas_2_wdata_out      ( mas_2_wdata[7:0]  ),
+   .mas_2_wr_out      ( mas_2_wr  ),
+   .mas_3_addr_out      ( mas_3_addr[3:0]  ),
+   .mas_3_cs_out      ( mas_3_cs  ),
+   .mas_3_rd_out      ( mas_3_rd  ),
+   .mas_3_rdata_in      ( mas_3_rdata[7:0]  ),
+   .mas_3_wdata_out      ( mas_3_wdata[7:0]  ),
+   .mas_3_wr_out      ( mas_3_wr  ),
+   .mas_4_addr_out      ( mas_4_addr[3:0]  ),
+   .mas_4_cs_out      ( mas_4_cs  ),
+   .mas_4_rd_out      ( mas_4_rd  ),
+   .mas_4_rdata_in      ( mas_4_rdata[7:0]  ),
+   .mas_4_wdata_out      ( mas_4_wdata[7:0]  ),
+   .mas_4_wr_out      ( mas_4_wr  ),
+   .rd_in      ( reg_mb_rd  ),
+   .rdata_out      ( reg_mb_rdata[15:0]  ),
+   .wait_out      ( reg_mb_wait  ),
+   .wdata_in      ( reg_mb_wdata[7:0]  ),
+   .wr_in      ( reg_mb_wr  ),
+    .clk      ( clk  ),
+    .enable      ( enable  ),
+    .reset      ( reset  ));
+io_pic_def
+#( .IRQ_MODE (IRQ_MODE),
+   .NMI_MODE (NMI_MODE))
+pic 
+   (
+   .addr      ( mas_3_addr[3:0]  ),
+   .cs      ( mas_3_cs  ),
+   .rd      ( mas_3_rd  ),
+   .rdata      ( mas_3_rdata[7:0]  ),
+   .wdata      ( mas_3_wdata[7:0]  ),
+   .wr      ( mas_3_wr  ),
+    .clk      ( clk  ),
+    .enable      ( enable  ),
+    .int_in      ( pic_irq_in  ),
+    .irq_out      ( pic_irq  ),
+    .nmi_out      ( pic_nmi  ),
+    .reset      ( reset  ));
+io_timer_def
+tim_0 
+   (
+   .addr      ( mas_1_addr[3:0]  ),
+   .cs      ( mas_1_cs  ),
+   .rd      ( mas_1_rd  ),
+   .rdata      ( mas_1_rdata[7:0]  ),
+   .wdata      ( mas_1_wdata[7:0]  ),
+   .wr      ( mas_1_wr  ),
+    .clk      ( clk  ),
+    .enable      ( enable  ),
+    .irq      ( timer_irq  ),
+    .reset      ( reset  ));
+io_uart_def
+#( .DIV (UART_DIV),
+   .PRESCALE (UART_PRESCALE),
+   .PRE_SIZE (UART_PRE_SIZE))
+uart 
+   (
+   .addr      ( mas_2_addr[3:0]  ),
+   .cs      ( mas_2_cs  ),
+   .rd      ( mas_2_rd  ),
+   .rdata      ( mas_2_rdata[7:0]  ),
+   .uart_rxd_pad_in      ( uart_rxd_pad_in  ),
+   .uart_txd_pad_out      ( uart_txd_pad_out  ),
+   .wdata      ( mas_2_wdata[7:0]  ),
+   .wr      ( mas_2_wr  ),
+    .clk      ( clk  ),
+    .cts_pad_in      ( cts_pad_in  ),
+    .enable      ( enable  ),
+    .reset      ( reset  ),
+    .rts_pad_out      ( rts_pad_out  ),
+    .rx_irq      ( rx_irq  ),
+    .rxd_data_avail_IRQ      (      ),
+    .tx_irq      ( tx_irq  ),
+    .txd_buffer_empty_NIRQ      (      ));
+io_utimer_def
+utimer 
+   (
+   .addr      ( mas_4_addr[3:0]  ),
+   .cs      ( mas_4_cs  ),
+   .rd      ( mas_4_rd  ),
+   .rdata      ( mas_4_rdata[7:0]  ),
+   .wdata      ( mas_4_wdata[7:0]  ),
+   .wr      ( mas_4_wr  ),
+    .clk      ( clk  ),
+    .enable      ( enable  ),
+    .reset      ( reset  ));
+reg       wait_n_reg;
+always@(posedge clk)
+if(reset || enable) 
+   begin
+   wait_n_reg  <= 1'b0;
+   end   
+else
+    wait_n_reg <= 1'b1;  
+assign    wait_n = wait_n_reg;  
+  endmodule

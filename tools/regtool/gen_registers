@@ -1,0 +1,2035 @@
+eval 'exec `which perl` -S $0 ${1+"$@"}'
+   if 0;
+
+#/**********************************************************************/
+#/*                                                                    */
+#/*             -------                                                */
+#/*            /   SOC  \                                              */
+#/*           /    GEN   \                                             */
+#/*          /    TOOL    \                                            */
+#/*          ==============                                            */
+#/*          |            |                                            */
+#/*          |____________|                                            */
+#/*                                                                    */
+#/*                                                                    */
+#/*                                                                    */
+#/*  Author(s):                                                        */
+#/*      - John Eaton, jt_eaton@opencores.org                          */
+#/*                                                                    */
+#/**********************************************************************/
+#/*                                                                    */
+#/*    Copyright (C) <2010-2011>  <Ouabache Design Works>              */
+#/*                                                                    */
+#/*  This source file may be used and distributed without              */
+#/*  restriction provided that this copyright statement is not         */
+#/*  removed from the file and that any derivative work contains       */
+#/*  the original copyright notice and the associated disclaimer.      */
+#/*                                                                    */
+#/*  This source file is free software; you can redistribute it        */
+#/*  and/or modify it under the terms of the GNU Lesser General        */
+#/*  Public License as published by the Free Software Foundation;      */
+#/*  either version 2.1 of the License, or (at your option) any        */
+#/*  later version.                                                    */
+#/*                                                                    */
+#/*  This source is distributed in the hope that it will be            */
+#/*  useful, but WITHOUT ANY WARRANTY; without even the implied        */
+#/*  warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR           */
+#/*  PURPOSE.  See the GNU Lesser General Public License for more      */
+#/*  details.                                                          */
+#/*                                                                    */
+#/*  You should have received a copy of the GNU Lesser General         */
+#/*  Public License along with this source; if not, download it        */
+#/*  from http://www.opencores.org/lgpl.shtml                          */
+#/*                                                                    */
+#/**********************************************************************/
+
+
+
+############################################################################
+# General PERL config
+############################################################################
+use Getopt::Long;
+use English;
+use File::Basename;
+use Cwd;
+use XML::LibXML;
+use lib './tools';
+use sys::lib;
+use yp::lib;
+
+
+$OUTPUT_AUTOFLUSH = 1; # set autoflush of stdout to TRUE.
+
+
+############################################################################
+### Process the options
+############################################################################
+
+Getopt::Long::config("require_order", "prefix=-");
+GetOptions("h",
+           "envidentifier=s" => \$envidentifier,
+           "prefix=s" => \$prefix,
+           "vendor=s" => \$vendor,
+           "library=s" => \$library,
+           "version=s" => \$version,
+           "component=s" => \$component,
+           "dest_dir=s" => \$dest_dir,
+           "bus_intf=s" => \$bus_intf
+) || die "(use '$program_name -h' for help)";
+
+
+##############################################################################
+## Help option
+##############################################################################
+if (  $opt_h ) 
+   { 
+   print "\n build_registers  -envidentifier {sim|syn} -prefix /work -library library_name   -component comp_name  -version version_name  -bus_intf bus_interface  -dest_dir dest_dir";
+   print "\n";
+   exit 1;
+   }
+
+
+##############################################################################
+## 
+##############################################################################
+
+my $parser = XML::LibXML->new();
+
+
+$home = cwd();
+
+
+my $socgen_file               = $parser->parse_file(yp::lib::find_componentConfiguration($vendor,$library,$component));
+my $ip_name_base_macro       = $socgen_file->findnodes("//socgen:componentConfiguration/socgen:ip_name_base_macro/text()")->to_literal;
+
+
+
+
+
+
+
+
+my $variant;
+ if($version)       {$variant   = "${component}_${version}";}
+ else               {$variant   = "${component}";}
+
+my $lib_comp_sep    = yp::lib::find_lib_comp_sep($vendor,$library,$component);
+my $comp_xml_sep    = yp::lib::find_comp_xml_sep($vendor,$library,$component,$version);
+
+#############################################################################
+## 
+## 
+#############################################################################
+
+print "  Building  RTL Registers  for  $prefix $vendor $library  $component  $variant in $dest_dir\n" ;
+
+
+
+my $path  = "${home}${prefix}/${vendor}__${library}${lib_comp_sep}${component}${comp_xml_sep}/${dest_dir}";
+mkdir $path,0755             unless( -e $path );
+
+
+
+my $name;   
+
+my $memmap_name; 
+my $memmap_base; 
+my $addblk_name; 
+my $addblk_range;
+my $addblk_numrange;
+my $addblk_numaddbits;
+my $addblk_width;
+my $byte_size; 
+my $reg_dim;
+my $memMap;
+
+
+my $memmap_name;
+my $memmap_base;
+my $memmap_numbase;
+my $memmap_size;
+my $memmap_type;
+my $parmap_name;
+
+my $reg_offset;
+my $reg_numoffset;
+my $reg_dimbits;
+my $reg_create;
+my $reg_has_read;
+my $reg_has_write;
+my $opt_bigendian;
+
+my  $reg_numdim;
+
+my $max_dim = 1;
+my $max_has_read = 0;
+my $max_has_write = 0;
+my $max_has_create = 0;
+
+my $pad;
+my $sys_byte_lanes;
+
+
+@registers = ();
+
+#/**********************************************************************/
+#/*                                                                    */
+#/* Parse register block info from ip-xact file                        */
+#/*                                                                    */
+#/*                                                                    */
+#/**********************************************************************/
+
+
+
+
+my $spirit_component_file    = $parser->parse_file(yp::lib::find_ipxact_component($vendor,$library,$component,$version));
+
+   $name     = $spirit_component_file->findnodes('//spirit:component/spirit:name/text()')->to_literal ;
+   $version  = $spirit_component_file->findnodes('//spirit:component/spirit:version/text()')->to_literal ;
+   $vendor   = $spirit_component_file->findnodes('//spirit:component/spirit:vendor/text()')->to_literal ;
+   $library  = $spirit_component_file->findnodes('//spirit:component/spirit:library/text()')->to_literal ;
+
+foreach my $bus_iface ($spirit_component_file->findnodes("//spirit:busInterface[spirit:name/text() = '$bus_intf']/spirit:slave")) 
+   {
+   $BI_name         = $bus_iface->findnodes('../spirit:name/text()')->to_literal ;
+   $BI_endian       = $bus_iface->findnodes('../spirit:endianness/text()')->to_literal ;
+   $BI_width        = $bus_iface->findnodes('../spirit:bitsInLau/text()')->to_literal ;
+   $BI_xname        = $bus_iface->findnodes('../spirit:abstractionType/@spirit:name')->to_literal ;
+   $memMap          = $bus_iface->findnodes('../spirit:slave/spirit:memoryMapRef/@spirit:memoryMapRef')->to_literal ;
+   }
+
+unless($BI_endian) {$BI_endian = "little";}
+$byte_size         = int($BI_width) ;
+
+
+
+
+
+
+
+foreach my $comp_view ($spirit_component_file->findnodes("//spirit:memoryMap[spirit:name/text() = '$memMap']")) 
+   {
+   $memmap_name  = $comp_view->findnodes('./spirit:bank/spirit:name/text()')->to_literal ;
+   $memmap_base  = $comp_view->findnodes('./spirit:bank/spirit:baseAddress/text()')->to_literal ;
+   $memmap_size  = $comp_view->findnodes('./spirit:addressUnitBits/text()')->to_literal ;
+   $memmap_type  = $comp_view->findnodes('./spirit:bank/@spirit:bankAlignment')->to_literal ;
+   $parmap_name  = $comp_view->findnodes('./spirit:name/text()')->to_literal ;
+
+
+
+   $memmap_numbase = hex($memmap_base);
+
+   #/**********************************************************************/
+   #/*                                                                    */   
+   #/* Print header, module name and start parameters                     */
+   #/*                                                                    */
+   #/*                                                                    */   
+   #/**********************************************************************/
+   
+   my $outfile ="${home}${prefix}/${vendor}__${library}${lib_comp_sep}${component}${comp_xml_sep}/${dest_dir}/${name}_${version}_${memmap_name}";
+   open   OUTFILE,">$outfile" or die "unable to open $outfile";
+   
+   print  OUTFILE " /*********************************************/  \n";
+   print  OUTFILE sprintf(" /* Vendor:       %24s    */  \n",$vendor);
+   print  OUTFILE sprintf(" /* Library:      %24s    */  \n",$library);
+   print  OUTFILE sprintf(" /* Component:    %24s    */  \n",$name);
+   print  OUTFILE sprintf(" /* Version:      %24s    */  \n",$version);
+   print  OUTFILE sprintf(" /* MemMap:       %24s    */  \n",$memmap_name);
+   print  OUTFILE sprintf(" /* Base:         %24s    */  \n",$memmap_base);
+   print  OUTFILE sprintf(" /* Type:         %24s    */  \n",$memmap_type);
+
+
+
+
+   if($BI_endian eq "big" )
+   {
+   $opt_bigendian = 1;
+   print  OUTFILE   " /* Endian:                            Big    */  \n";
+   }
+   else
+
+   {
+   print  OUTFILE   " /* Endian:                         Little    */  \n";       
+   $opt_bigendian = 0;
+   }
+
+   print  OUTFILE sprintf(" /*********************************************/  \n");
+
+
+   foreach my $comp_view ($spirit_component_file->findnodes("//spirit:memoryMap[spirit:name/text() = '$memMap']/spirit:bank/spirit:addressBlock/spirit:name")) 
+   {
+   $addblk_name    = $comp_view->findnodes('../spirit:name/text()')->to_literal;
+   $addblk_range   = $comp_view->findnodes('../spirit:range/text()')->to_literal;
+   $addblk_width   = $comp_view->findnodes('../spirit:width/text()')->to_literal;
+
+
+
+   $addblk_numrange = hex($addblk_range);
+   $addblk_numaddbits = log($addblk_numrange)/log(2);
+   
+   $sys_byte_lanes  = int( $addblk_width) / $byte_size ;
+
+   if    ($sys_byte_lanes == 4 ) { $adr_base = 2;}
+   elsif ($sys_byte_lanes == 2 ) { $adr_base = 1;}
+   else                          { $adr_base = 0;}
+
+
+   print  OUTFILE sprintf(" /* AddressBlock: %24s    */  \n",$addblk_name);
+   print  OUTFILE sprintf(" /* NumBase:      %24s    */  \n",$memmap_numbase);
+   print  OUTFILE sprintf(" /* Range:        %24s    */  \n",$addblk_range);
+   print  OUTFILE sprintf(" /* NumRange:     %24s    */  \n",$addblk_numrange);
+   print  OUTFILE sprintf(" /* NumAddBits:   %24s    */  \n",$addblk_numaddbits);
+   print  OUTFILE sprintf(" /* Width:        %24s    */  \n",$addblk_width);
+   print  OUTFILE sprintf(" /* Byte_lanes:   %24s    */  \n",$sys_byte_lanes);
+   print  OUTFILE sprintf(" /* Byte_size:    %24s    */  \n",$byte_size);
+   print  OUTFILE sprintf(" /*********************************************/  \n");
+
+
+   foreach my $reg_view ($spirit_component_file->findnodes("//spirit:memoryMap[spirit:name/text() = '$memMap']/spirit:bank/spirit:addressBlock[spirit:name/text() = '$addblk_name']/spirit:register/spirit:name "))
+
+        {
+        $reg_name    = $reg_view->findnodes('./text()')->to_literal ;
+        $reg_offset  = $reg_view->findnodes('../spirit:addressOffset/text()')->to_literal ;
+        $reg_dim     = $reg_view->findnodes('../spirit:dim/text()')->to_literal ;
+        $reg_size    = $reg_view->findnodes('../spirit:size/text()')->to_literal ;
+        $reg_access  = $reg_view->findnodes('../spirit:access/text()')->to_literal ;
+        $reg_numoffset = hex($reg_offset) + $memmap_numbase;
+        unless($reg_dim) {$reg_dim     = "0x1" ;}
+        $reg_numdim         = hex($reg_dim);
+
+        if($reg_numdim > $max_dim )  {$max_dim = $reg_numdim;}
+
+        if($reg_numdim)     
+          { 
+          $reg_dimbits      = log($reg_numdim)/log(2);
+          }
+        else                
+          { 
+          $reg_dimbits    = 1;
+          }
+
+        if($reg_access eq "read-write") 
+         {
+          $reg_has_read   = 1;
+          $reg_has_write  = 1;
+          if($reg_numdim)     
+            { 
+            if($reg_dimbits)     {$reg_create     = 0;}
+            else                 {$reg_create     = 1;}
+            }
+          else                
+            { 
+            $reg_create     = 0;
+            }
+         }
+
+
+
+
+
+
+        if($reg_access eq "read-only") 
+         {
+          $reg_has_read   = 1;
+          $reg_has_write  = 0;
+          if($reg_numdim)     
+            { 
+            if($reg_dimbits)     {$reg_create     = 0;}
+            else                 {$reg_create     = 1;}
+            }
+          else                
+            { 
+            $reg_create     = 0;
+            }
+
+         }
+
+
+        if($reg_access eq "write-only") 
+         {
+          $reg_has_read   = 0;
+          $reg_has_write  = 1;
+          if($reg_numdim)     
+            { 
+            if($reg_dimbits)     {$reg_create     = 0;}
+            else                 {$reg_create     = 1;}
+            }
+          else                
+            { 
+            $reg_create     = 0;
+            }
+
+         }
+
+
+        if($reg_access eq "write-strobe") 
+         {
+          $reg_has_read   = 0;
+          $reg_has_write  = 1;
+          $reg_create     = 0;
+         }
+   
+     if($reg_has_read){$max_has_read = 1;}
+     if($reg_has_write){$max_has_write = 1;}
+     if($reg_create)   {$max_has_create = 1;}
+
+
+
+
+
+
+          print  OUTFILE sprintf(" /* Reg Name:       %22s    */  \n",$reg_name);
+          print  OUTFILE sprintf(" /* Reg Offset:     %22s    */  \n",$reg_offset);
+          print  OUTFILE sprintf(" /* Reg numOffset:  %22s    */  \n",$reg_numoffset);
+          print  OUTFILE sprintf(" /* Reg size:       %22s    */  \n",$reg_size);
+          print  OUTFILE sprintf(" /* Reg Dim:        %22s    */  \n",$reg_dim);
+          print  OUTFILE sprintf(" /* Reg numDim:     %22s    */  \n",$reg_numdim);
+          print  OUTFILE sprintf(" /* Reg DimBits:    %22s    */  \n",$reg_dimbits);
+          print  OUTFILE sprintf(" /* Reg Create:     %22s    */  \n",$reg_create);
+          print  OUTFILE sprintf(" /* Reg access:     %22s    */  \n",$reg_access);
+          print  OUTFILE sprintf(" /* Reg has_read:   %22s    */  \n",$reg_has_read);
+          print  OUTFILE sprintf(" /* Reg has_write:  %22s    */  \n",$reg_has_write);
+          print  OUTFILE sprintf(" /*********************************************/  \n");
+
+          push @registers , ":::${reg_name}:::${reg_numoffset}:::${reg_size}:::${reg_numdim}:::${reg_dimbits}:::${reg_create}:::${reg_access}:::${reg_has_read}:::${reg_has_write}:::"; 
+
+        } 
+   }
+     
+   if($memmap_type eq "serial")    {     $memmap_numbase = $memmap_numbase + $addblk_numrange;     }
+
+
+       
+
+   }
+
+
+
+
+          $num_add = log($max_dim)/log(2);
+          print  OUTFILE sprintf(" /*********************************************/  \n");
+          print  OUTFILE sprintf(" /* Max_dim:        %22s    */  \n",$max_dim);
+          print  OUTFILE sprintf(" /* num_add:        %22s    */  \n",$num_add);
+          print  OUTFILE sprintf(" /* mas_has_read:   %22s    */  \n",$max_has_read);
+          print  OUTFILE sprintf(" /* mas_has_write:  %22s    */  \n",$max_has_write);
+          print  OUTFILE sprintf(" /* mas_has_create: %22s    */  \n",$max_has_create);
+          print  OUTFILE sprintf(" /*********************************************/  \n");
+
+
+
+
+
+
+
+
+   print  OUTFILE     " /*********************************************/  \n";
+   print  OUTFILE "\n\nmodule `${ip_name_base_macro}`";
+   print  OUTFILE  uc(${memmap_name});
+   print  OUTFILE "\n";
+   print  OUTFILE "#(  parameter UNSELECTED = {${byte_size}{1'b1}},\n";
+   print  OUTFILE "    parameter UNMAPPED   = {${byte_size}{1'b0}}";
+
+
+
+
+
+
+
+
+     foreach $line (@registers)  
+        { 
+
+        $_ = $line;
+        if(/:::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::/) 
+          { 
+          my $t_name                = $1;
+          my $t_numoffset           = $2;
+          my $t_size                = $3;
+          my $t_numdim              = $4;
+          my $t_dimbits             = $5;        
+          my $t_create              = $6;        
+          my $t_access              = $7;
+          my $t_has_read            = $8;
+          my $t_has_write           = $9;
+ 
+          if( $t_has_write eq "1" and   $t_create eq "1")
+            { 
+            print  OUTFILE ",\n    parameter ";
+            print  OUTFILE uc(${t_name});
+            print  OUTFILE "_RST = ${t_size}'b0";
+            }
+
+         $pad = $byte_size -( int(${t_size}) % $byte_size )  ;
+         if ( $pad == $byte_size ) { $pad = 0;}
+   
+   
+   
+        if($pad)
+          {
+          if( $t_has_read eq "1")
+            { 
+            print  OUTFILE ",\n    parameter ";
+            print  OUTFILE uc(${t_name});
+            print  OUTFILE "_PAD = ${pad}'b0";
+            }
+   
+       }
+
+         }
+       }
+   
+   print  OUTFILE ")\n ";
+
+
+
+
+
+
+
+   #/**********************************************************************/
+   #/*                                                                    */
+   #/* Print io ports                                                     */
+   #/*                                                                    */
+   #/*                                                                    */
+   #/**********************************************************************/
+   
+   print  OUTFILE "(\n";
+   print  OUTFILE " input  wire             clk,\n";
+   print  OUTFILE " input  wire             reset,\n";
+   print  OUTFILE " input  wire             enable,\n";
+   print  OUTFILE " input  wire             cs,\n";
+   if($max_has_write){   print  OUTFILE " input  wire             wr,\n";}
+   if($max_has_read) {print  OUTFILE " input  wire             rd,\n";}
+   if($max_has_write) {print  OUTFILE " input  wire  [${addblk_width}-1:0]    wdata,\n";}
+   if($max_has_read) {print  OUTFILE " output  reg  [${addblk_width}-1:0]    rdata,\n";}
+   print  OUTFILE " input  wire  [${sys_byte_lanes}-1:0]    byte_lanes,\n";
+   print  OUTFILE " input  wire  [${addblk_numaddbits}-1:${adr_base}]    addr";
+   
+   if($max_dim gt "1" )
+     {
+     print  OUTFILE " ,\n output  wire  [${num_add}-1:0]    addr_out";
+     }
+
+
+
+
+
+
+
+
+
+
+     foreach $line (@registers)  
+        { 
+        $_ = $line;
+        if(/:::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::/) 
+          { 
+          my $t_name                = $1;
+          my $t_numoffset           = $2;
+          my $t_size                = $3;
+          my $t_numdim              = $4;
+          my $t_dimbits             = $5;        
+          my $t_create              = $6;        
+          my $t_access              = $7;
+          my $t_has_read            = $8;
+          my $t_has_write           = $9;
+ 
+        print  OUTFILE ",\n output  wire  ${t_name}_cs  ";
+        print  OUTFILE ",\n output   reg  ${t_name}_dec  ";
+
+        if($t_size == 1)
+          {
+          if( $t_has_read eq "1")
+            { 
+            print  OUTFILE ",\n input  wire                     ${t_name}_rdata  ";
+            }
+   
+          if( $t_has_write eq "1")
+            { 
+            print  OUTFILE ",\n output   reg  ${t_name}_wr_0  ";
+            if( $t_create eq "1")
+              { 
+              print  OUTFILE ",\n output  reg                     $t_name  ";
+              print  OUTFILE ",\n input  wire                     next_${t_name}  ";
+              }
+            else
+              {
+              print  OUTFILE ",\n output  reg                     ${t_name}_wdata  ";
+              }
+            }
+          }
+         
+       else
+          {
+          if( $t_has_read eq "1")
+            { 
+            print  OUTFILE ",\n input  wire  [${t_size}-1:0]    ${t_name}_rdata  ";
+            }
+   
+          if( $t_has_write eq "1")
+            { 
+            print  OUTFILE ",\n output   reg  ${t_name}_wr_0  ";
+            if( $t_create eq "1")
+              { 
+              print  OUTFILE ",\n output  reg  [${t_size}-1:0]    $t_name  ";
+              print  OUTFILE ",\n input  wire  [${t_size}-1:0]    next_${t_name}  ";
+              }
+            else
+              {
+              print  OUTFILE ",\n output  reg  [${t_size}-1:0]    ${t_name}_wdata  ";
+              }
+            }
+          }
+ 
+
+        if( $t_has_write eq "1")
+          { 
+          if($t_size > ${byte_size})        { print  OUTFILE ",\n output   reg  ${t_name}_wr_1  ";  }
+          if($t_size > (${byte_size}*2))    { print  OUTFILE ",\n output   reg  ${t_name}_wr_2  ";  }
+          if($t_size > (${byte_size}*3))    { print  OUTFILE ",\n output   reg  ${t_name}_wr_3  ";  }
+          }
+       }
+     }
+   
+   print  OUTFILE "\n);\n\n\n";
+   
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   #/**********************************************************************/  
+   #/*                                                                    */ 
+   #/* Print parameters for register addresses                            */  
+   #/*                                                                    */
+   #/*                                                                    */
+   #/**********************************************************************/
+   
+
+     foreach $line (@registers)  
+        { 
+        $_ = $line;
+        if(/:::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::/) 
+          { 
+          my $t_name                = $1;
+          my $t_numoffset           = $2;
+          my $t_size                = $3;
+          my $t_numdim              = $4;
+          my $t_dimbits             = $5;        
+          my $t_create              = $6;        
+          my $t_access              = $7;
+          my $t_has_read            = $8;
+          my $t_has_write           = $9;
+
+          print  OUTFILE "parameter ";
+          print  OUTFILE uc(${t_name});
+          print  OUTFILE " = ${addblk_numaddbits}'d${t_numoffset};\n";
+          my $register_addressOffset_end = $t_numoffset + $t_numdim;
+          print  OUTFILE "parameter ";
+          print  OUTFILE uc(${t_name});
+          print  OUTFILE "_END = ${addblk_numaddbits}'d${register_addressOffset_end};\n";
+
+          }
+   
+        }
+
+
+#   print  OUTFILE " input  wire  [${addblk_numaddbits}-1:${adr_base}]    addr";
+
+
+   #/**********************************************************************/  
+   #/*                                                                    */ 
+   #/* write data register creation                                       */  
+   #/*                                                                    */
+   #/*                                                                    */
+   #/**********************************************************************/
+
+
+
+   print  OUTFILE "\n\n";
+   print  OUTFILE " reg  [${addblk_width}-1:0]    rdata_i;\n";
+   
+   
+
+     foreach $line (@registers)  
+        { 
+        $_ = $line;
+        if(/:::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::/) 
+          { 
+          my $t_name                = $1;
+          my $t_numoffset           = $2;
+          my $t_size                = $3;
+          my $t_numdim              = $4;
+          my $t_dimbits             = $5;        
+          my $t_create              = $6;        
+          my $t_access              = $7;
+          my $t_has_read            = $8;
+          my $t_has_write           = $9;
+
+          if(( $t_has_write eq "1") and ( $t_create eq "1"))   
+            { 
+            if($t_size eq 1){ print  OUTFILE "reg   ${t_name}_wdata;\n";}
+            else            { print  OUTFILE "reg  [${t_size}-1:0]    ${t_name}_wdata;\n";}
+            }
+          } 
+        }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   
+   #/**********************************************************************/
+   #/*                                                                    */
+   #/* Set up for block width and endian                                  */
+   #/* seperate pass for each byte lane                                   */
+   #/*                                                                    */
+   #/**********************************************************************/
+   
+   
+   
+   
+
+   
+   for ($log_byte_lane =0; $log_byte_lane < $sys_byte_lanes;  $log_byte_lane++)
+       {
+       if($adr_base == 2)
+         {
+         if ($opt_bigendian)
+          {
+          if    ( $log_byte_lane == 0) {$phy_byte_lane = 3;}
+          elsif ( $log_byte_lane == 1) {$phy_byte_lane = 2;}
+          elsif ( $log_byte_lane == 2) {$phy_byte_lane = 1;}
+          else             {$phy_byte_lane = 0;}
+          }
+         else
+           {$phy_byte_lane = $log_byte_lane}
+        }
+   
+       elsif($adr_base == 1)
+         {
+         if ($opt_bigendian)
+          {
+          if    ( $log_byte_lane == 0) {$phy_byte_lane = 1;}
+          else             {$phy_byte_lane = 0;}
+          }
+         else
+           {$phy_byte_lane = $log_byte_lane}
+        }
+         else
+           {$phy_byte_lane = $log_byte_lane}
+   
+   
+   
+    #/**********************************************************************/
+    #/*                                                                    */
+    #/* Debug                                                              */
+    #/*                                                                    */
+    #/*                                                                    */
+    #/**********************************************************************/
+     
+     
+     print  OUTFILE "/*QQQ        Reg_Name     Reg_Access sys_byte_lanes  reg_byte_lanes reg_size  reg_add   ar_base log_byte_lane phy_byte_lane  reg_lane   pad_size        padding     bigend    */  \n";
+   
+     
+
+     foreach $line (@registers)  
+        { 
+        $_ = $line;
+        if(/:::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::/) 
+          { 
+          my $t_name                = $1;
+          my $t_numoffset           = $2;
+          my $t_size                = $3;
+          my $t_numdim              = $4;
+          my $t_dimbits             = $5;        
+          my $t_create              = $6;        
+          my $t_access              = $7;
+          my $t_has_read            = $8;
+          my $t_has_write           = $9;
+
+
+          my $reg_byte_lane           =     $t_numoffset   % $sys_byte_lanes  ;
+          my $reg_byte_lanes          =     $t_size   / ${byte_size}  ;
+          my $pad_size                =     $t_size  % $byte_size    ;
+
+
+    
+       if($pad_size)  {$padding = $byte_size - $pad_size;}
+       else        
+         {  
+         $padding = 0;
+         $pad_size = ${byte_size};
+         }
+   
+          $reg_byte_lanes   = ($padding +  $t_size)/ $byte_size;   
+          my $strng = sprintf( "/*QQQ %16s  %12s %11s  %6s          %6s   %6s   %6s   %6s            %6s      %6s          %2s       %6s     %6s       */  \n",${t_name},${t_access},${sys_byte_lanes},${reg_byte_lanes},${t_size},${t_numoffset},${adr_base},${log_byte_lane},${phy_byte_lane},${reg_byte_lane},${pad_size},${padding},${opt_bigendian});
+   
+         print  OUTFILE  $strng;
+
+
+
+          }
+        }
+   
+         print  OUTFILE "\n\n\n";
+   
+       
+   
+   
+
+   
+    #/**********************************************************************/
+    #/*                                                                    */
+    #/* Read Data Muxing                                                   */
+    #/*                                                                    */
+    #/*                                                                    */
+    #/**********************************************************************/
+     
+   
+    if($max_has_read == "1" and $max_has_create == "1")
+     {   
+     print  OUTFILE "always@(*)\n";
+     print  OUTFILE "  if(rd && cs)\n";
+     print  OUTFILE "    begin\n";
+     print  OUTFILE "  if(byte_lanes[ $phy_byte_lane ])\n";
+     print  OUTFILE "   rdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] =  rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}];         \n";
+     print  OUTFILE "  else\n";
+     print  OUTFILE "                rdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = UNMAPPED;\n";
+     print  OUTFILE "    end\n";
+     print  OUTFILE "  else          rdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = UNSELECTED;\n\n\n";
+   
+     print  OUTFILE "always@(*)\n";
+     print  OUTFILE "    case(addr[$addblk_numaddbits-1:${adr_base}])\n";
+   
+   
+
+
+
+
+
+
+     foreach $line (@registers)  
+        { 
+        $_ = $line;
+        if(/:::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::/) 
+          { 
+          my $t_name                = $1;
+          my $t_numoffset           = $2;
+          my $t_size                = $3;
+          my $t_numdim              = $4;
+          my $t_dimbits             = $5;        
+          my $t_create              = $6;        
+          my $t_access              = $7;
+          my $t_has_read            = $8;
+          my $t_has_write           = $9;
+
+
+     
+
+          my $reg_byte_lane           =     $t_numoffset   % $sys_byte_lanes  ;
+          my $reg_byte_lanes          =     $t_size   / ${byte_size}  ;
+          my $pad_size                =     $t_size  % $byte_size    ;
+
+
+    
+       if($pad_size)  {$padding = $byte_size - $pad_size;}
+       else        
+         {  
+         $padding = 0;
+         $pad_size = ${byte_size};
+         }
+   
+          $reg_byte_lanes   = ($padding +  $t_size)/ $byte_size;   
+
+
+       my $REG_NAME =  uc($t_name);
+   
+   
+   
+       if(  $t_has_read eq "1" )
+         { 
+   
+         if(( $sys_byte_lanes eq "1" ) and ( $reg_byte_lanes  eq "1") )
+            {
+             if(   $reg_byte_lanes - 1  eq       $phy_byte_lane )
+              {
+              print  OUTFILE "${REG_NAME}[$addblk_numaddbits-1:${adr_base}]:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              if($padding) 
+                { 
+                if($pad_size eq "1")
+                  {                print  OUTFILE "{${REG_NAME}_PAD , ${t_name}_rdata };//QQQQ\n";} 
+                else
+                  {                print  OUTFILE "{${REG_NAME}_PAD , ${t_name}_rdata[${t_size}-1:$phy_byte_lane*${byte_size}] };//QQQQ\n";} 
+                }
+              else         { print  OUTFILE " ${t_name}_rdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] ;//QQQQ\n";}
+              }
+
+
+            }
+
+         elsif( $sys_byte_lanes eq  $reg_byte_lanes )
+            {
+             if(   $reg_byte_lanes - 1  eq       $phy_byte_lane )
+              {
+              print  OUTFILE "${REG_NAME}[$addblk_numaddbits-1:${adr_base}]:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              if($padding) { print  OUTFILE "{${REG_NAME}_PAD , ${t_name}_rdata[${t_size}-1:$phy_byte_lane*${byte_size}] };//QQQQ\n"; }
+              else         { print  OUTFILE " ${t_name}_rdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] ;//QQQQ\n";}
+              }
+            else
+              {
+              print  OUTFILE "${REG_NAME}[$addblk_numaddbits-1:${adr_base}]:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              print  OUTFILE " ${t_name}_rdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] ;//QQQQ\n";
+              }
+            }
+         elsif (  ($sys_byte_lanes eq "1") and  ( $reg_byte_lanes eq "2"))
+            {
+            if($opt_bigendian)             
+              {
+              print  OUTFILE "{";
+              print  OUTFILE "${REG_NAME}[$addblk_numaddbits-1:1],1'b1}:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              print  OUTFILE " ${t_name}_rdata[${byte_size}-1:0] ;//QQQQ\n";
+              print  OUTFILE "{${REG_NAME}[$addblk_numaddbits-1:1],1'b0}:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = "; 
+              if($padding) { print  OUTFILE "{${REG_NAME}_PAD , ${t_name}_rdata[${t_size}-1:${byte_size}] };//QQQQ\n"; }
+              else         { print  OUTFILE " ${t_name}_rdata[$(byte_size}-1:${byte_size}] ;//QQQQ\n";}
+              }
+            else
+              {
+              print  OUTFILE "{${REG_NAME}[$addblk_numaddbits-1:1],1'b0}:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              print  OUTFILE "${t_name}_rdata[${byte_size}-1:0] ;//QQQQ\n";
+              print  OUTFILE "{${REG_NAME}[$addblk_numaddbits-1:1],1'b1}:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              if($padding) { print  OUTFILE "{${REG_NAME}_PAD , ${t_name}_rdata[${t_size}-1:${byte_size}] };//QQQQ\n";}
+              else         { print  OUTFILE " ${t_name}_rdata[$(byte_size}-1:${byte_size}] ;//QQQQ\n"; }
+              }
+            }
+   
+         elsif (  ($sys_byte_lanes eq "1") and  ( $reg_byte_lanes eq "3"))
+            {
+            if($opt_bigendian)             
+              {
+              print  OUTFILE "{${REG_NAME}[$addblk_numaddbits-1:2],2'b11}:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              print  OUTFILE " ${t_name}_rdata[${byte_size}-1:0] ;//QQQQ\n";
+              print  OUTFILE "{${REG_NAME}[$addblk_numaddbits-1:2],2'b10}:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              print  OUTFILE " ${t_name}_rdata[$(byte_size}-1:${byte_size}] ;//QQQQ\n";
+              print  OUTFILE "{${REG_NAME}[$addblk_numaddbits-1:2],2'b01}:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              if($padding) { print  OUTFILE "{${REG_NAME}_PAD , ${t_name}_rdata[${t_size}-1:(${byte_size}*2)] };//QQQQ\n"; }
+              else         { print  OUTFILE " ${t_name}_rdata[(${byte_size}*3)-1:(${byte_size}*2)] ;//QQQQ\n"; }
+              print  OUTFILE "{${REG_NAME}[$addblk_numaddbits-1:2],2'b00}:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              print  OUTFILE " ${byte_size}'h0 ;//QQQQ\n";
+              }
+            else
+              {
+              print  OUTFILE "{${REG_NAME}[$addblk_numaddbits-1:2],2'b00}:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              print  OUTFILE " ${t_name}_rdata[${byte_size}-1:0] ;//QQQQ\n";
+              print  OUTFILE "{${REG_NAME}[$addblk_numaddbits-1:2],2'b01}:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              print  OUTFILE " ${t_name}_rdata[$(byte_size}-1:${byte_size}] ;//QQQQ\n";
+              print  OUTFILE "{${REG_NAME}[$addblk_numaddbits-1:2],2'b10}:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              if($padding) { print  OUTFILE "{${REG_NAME}_PAD , ${t_name}_rdata[${t_size}-1:(${byte_size}*2)] };//QQQQ\n"; }
+              else         { print  OUTFILE " ${t_name}_rdata[(${byte_size}*3)-1:(${byte_size}*2)] ;//QQQQ\n";}
+              print  OUTFILE "{${REG_NAME}[$addblk_numaddbits-1:2],2'b11}:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              print  OUTFILE " ${byte_size}'h0 ;//QQQQ\n";
+              }
+           }
+   
+         elsif (  ($sys_byte_lanes eq "1") and  ( $reg_byte_lanes eq "4"))
+            {
+            if($opt_bigendian)             
+              {
+              print  OUTFILE "{${REG_NAME}[$addblk_numaddbits-1:2],2'b11}:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              print  OUTFILE " ${t_name}_rdata[${byte_size}-1:0] ;//QQQQ\n";
+              print  OUTFILE "{${REG_NAME}[$addblk_numaddbits-1:2],2'b10}:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              print  OUTFILE " ${t_name}_rdata[$(byte_size}-1:${byte_size}] ;//QQQQ\n";
+              print  OUTFILE "{${REG_NAME}[$addblk_numaddbits-1:2],2'b01}:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              print  OUTFILE " ${t_name}_rdata[(${byte_size}*3)-1:(${byte_size}*2)] ;//QQQQ\n";
+              print  OUTFILE "{${REG_NAME}[$addblk_numaddbits-1:2],2'b00}:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              if($padding) { print  OUTFILE "{${REG_NAME}_PAD , ${t_name}_rdata[${t_size}-1:(${byte_size}*3)] };//QQQQ\n";}
+              else         { print  OUTFILE " ${t_name}_rdata[(${byte_size}*4)-1:(${byte_size}*3)] ;//QQQQ\n";}
+              }
+            else
+              {
+              print  OUTFILE "{${REG_NAME}[$addblk_numaddbits-1:2],2'b00}:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              print  OUTFILE " ${t_name}_rdata[${byte_size}-1:0] ;//QQQQ\n";
+              print  OUTFILE "{${REG_NAME}[$addblk_numaddbits-1:2],2'b01}:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              print  OUTFILE " ${t_name}_rdata[(${byte_size}*2)-1:${byte_size}] ;//QQQQ\n";
+              print  OUTFILE "{${REG_NAME}[$addblk_numaddbits-1:2],2'b10}:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              print  OUTFILE " ${t_name}_rdata[(${byte_size}*3)-1:(${byte_size}*2)] ;//QQQQ\n";
+              print  OUTFILE "{${REG_NAME}[$addblk_numaddbits-1:2],2'b11}:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              if($padding) { print  OUTFILE "{${REG_NAME}_PAD , ${t_name}_rdata[${t_size}-1:(${byte_size}*3)] };//QQQQ\n"; }
+              else         { print  OUTFILE " ${t_name}_rdata[(${byte_size}*4)-1:(${byte_size}*3)] ;//QQQQ\n";}
+              }
+            }
+   
+
+
+         elsif (  ($sys_byte_lanes eq "2") and  ( $reg_byte_lanes eq "3") )
+            {
+            if($opt_bigendian)             
+              {
+              print  OUTFILE "{${REG_NAME}[$addblk_numaddbits-1:2],1'b1}:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              if($padding) { print  OUTFILE "{${REG_NAME}_PAD , ${t_name}_rdata[${t_size}-1:$phy_byte_lane*${byte_size}]   };//QQQQ\n"; }
+              else         { print  OUTFILE " ${t_name}_rdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}]      ;//QQQQ\n"; }
+              }
+            else
+              {
+
+
+              print  OUTFILE "{${REG_NAME}[$addblk_numaddbits-1:2],1'b0}:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              print  OUTFILE " ${t_name}_rdata[$log_byte_lane*${byte_size}+${byte_size}-1:$log_byte_lane*${byte_size}]      ;//QQQQ\n";
+
+              unless ($log_byte_lane){
+              print  OUTFILE "{${REG_NAME}[$addblk_numaddbits-1:2],1'b1}:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              if($padding) { print  OUTFILE "{${REG_NAME}_PAD , ${t_name}_rdata[${t_size}-1:(${byte_size}*2)]   };//QQQQ\n"; }
+              else         { print  OUTFILE " ${t_name}_rdata[(${byte_size}*3)-1:(${byte_size}*2)]      ;//QQQQ\n";}
+              }
+
+
+
+              }
+            }
+
+         elsif (  ($sys_byte_lanes eq "2") and  ( $reg_byte_lanes eq "4") )
+            {
+            if($opt_bigendian)             
+              {
+              print  OUTFILE "{${REG_NAME}[$addblk_numaddbits-1:2],1'b1}:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              print  OUTFILE " ${t_name}_rdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] ;//QQQQ\n";
+              print  OUTFILE "{${REG_NAME}[$addblk_numaddbits-1:2],1'b0}:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              if($padding) { print  OUTFILE "{${REG_NAME}_PAD , ${t_name}_rdata[${t_size}-1:$phy_byte_lane*${byte_size}+(${byte_size}*2)]   };//QQQQ\n"; }
+              else         { print  OUTFILE " ${t_name}_rdata[$phy_byte_lane*${byte_size}+${byte_size}-1+(${byte_size}*2):$phy_byte_lane*${byte_size}+(${byte_size}*2)]      ;//QQQQ\n"; }
+              }
+            else
+              {
+              print  OUTFILE "{${REG_NAME}[$addblk_numaddbits-1:2],1'b0}:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              print  OUTFILE " ${t_name}_rdata[$log_byte_lane*${byte_size}+${byte_size}-1:$log_byte_lane*${byte_size}] ;//QQQQ\n";
+              print  OUTFILE "{${REG_NAME}[$addblk_numaddbits-1:2],1'b1}:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              if($padding) { print  OUTFILE "{${REG_NAME}_PAD , ${t_name}_rdata[${t_size}-1:$log_byte_lane*${byte_size}+(${byte_size}*2)]   };//QQQQ\n"; }
+              else         { print  OUTFILE " ${t_name}_rdata[$log_byte_lane*${byte_size}+${byte_size}-1+(${byte_size}*2):$log_byte_lane*${byte_size}+(${byte_size}*2)]      ;//QQQQ\n";}
+              }
+            }
+   
+         elsif(( $sys_byte_lanes eq "2") and  ( $reg_byte_lanes eq "1") and ($reg_byte_lane eq $log_byte_lane)  )
+            {
+             print  OUTFILE "${REG_NAME}[$addblk_numaddbits-1:${adr_base}]:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+             if($padding) { print  OUTFILE "{${REG_NAME}_PAD , ${t_name}_rdata };//QQQQ\n"; }
+             else         { print  OUTFILE " ${t_name}_rdata ;//QQQQ\n"; }
+            }
+   
+
+         elsif(( $sys_byte_lanes eq "4") and  ( $reg_byte_lanes eq "1") and ($reg_byte_lane eq $log_byte_lane)  )
+            {
+            print  OUTFILE "${REG_NAME}[$addblk_numaddbits-1:${adr_base}]:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+            if($padding) { print  OUTFILE "{${REG_NAME}_PAD , ${t_name}_rdata };//QQQQ\n";}
+            else         { print  OUTFILE " ${t_name}_rdata ;//QQQQ\n"; }
+            }
+
+
+
+
+         elsif(( $sys_byte_lanes eq "4") and  ( $reg_byte_lanes eq "2") and ($reg_byte_lane eq $log_byte_lane)  )
+            {
+            print  OUTFILE "${REG_NAME}[$addblk_numaddbits-1:${adr_base}]:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+            print  OUTFILE " ${t_name}_rdata[${byte_size}-1:0] ;//QQQQ\n"; 
+            }
+
+
+
+         elsif(( $sys_byte_lanes eq "4") and  ( $reg_byte_lanes eq "2") and ($reg_byte_lane ==    ${log_byte_lane}-1 ))
+            {
+            print  OUTFILE "${REG_NAME}[$addblk_numaddbits-1:${adr_base}]:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+            if($padding) { print  OUTFILE "{${REG_NAME}_PAD , ${t_name}_rdata[${t_size}-1:${byte_size}] };//QQQQ\n";}
+            else         { print  OUTFILE " ${t_name}_rdata[$(byte_size}-1:${byte_size}] ;//QQQQ\n"; }
+            }
+
+
+
+         elsif(( $sys_byte_lanes eq "4") and  ( $reg_byte_lanes eq "3") and ($phy_byte_lane) ne "3"  )
+            {
+             if(   $reg_byte_lanes - 1  eq       $phy_byte_lane )
+              {
+              print  OUTFILE "${REG_NAME}[$addblk_numaddbits-1:${adr_base}]:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              if($padding) { print  OUTFILE "{${REG_NAME}_PAD , ${t_name}_rdata[${t_size}-1:$phy_byte_lane*${byte_size}] };//QQQQ\n"; }
+              else         { print  OUTFILE " ${t_name}_rdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] ;//QQQQ\n";}
+              }
+            else
+              {
+              print  OUTFILE "${REG_NAME}[$addblk_numaddbits-1:${adr_base}]:      rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = ";
+              print  OUTFILE " ${t_name}_rdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] ;//QQQQ\n";
+              }
+            }
+
+         }
+      }
+
+   }
+      
+         print  OUTFILE "\n\n\n";
+         print  OUTFILE "    default:    rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = UNMAPPED;\n";
+         print  OUTFILE "    endcase\n\n";
+
+
+
+
+     }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    #/**********************************************************************/
+    #/*                                                                    */
+    #/* Read Data Muxing                                                   */
+    #/*                                                                    */
+    #/*                                                                    */
+    #/**********************************************************************/
+     
+   
+    if($max_has_read == "1" and $max_has_create == "0" )
+     {   
+     print  OUTFILE "always@(*)\n";
+     print  OUTFILE "  if(rd && cs)\n";
+     print  OUTFILE "    begin\n";
+     print  OUTFILE "  if(byte_lanes[ $phy_byte_lane ])\n";
+     print  OUTFILE "   rdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] =  rdata_i[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}];         \n";
+     print  OUTFILE "  else\n";
+     print  OUTFILE "                rdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = UNMAPPED;\n";
+     print  OUTFILE "    end\n";
+     print  OUTFILE "  else          rdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}] = UNSELECTED;\n\n\n";
+   
+     print  OUTFILE "always@(*)\n";
+     print  OUTFILE "    begin\n";
+     print  OUTFILE "        rdata_i  = UNMAPPED;\n";
+
+   
+     foreach $line (@registers)  
+        { 
+        $_ = $line;
+        if(/:::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::/) 
+          { 
+          my $t_name                = $1;
+          my $t_numoffset           = $2;
+          my $t_size                = $3;
+          my $t_numdim              = $4;
+          my $t_dimbits             = $5;        
+          my $t_create              = $6;        
+          my $t_access              = $7;
+          my $t_has_read            = $8;
+          my $t_has_write           = $9;
+          my $reg_byte_lane           =     $t_numoffset   % $sys_byte_lanes  ;
+          my $reg_byte_lanes          =     $t_size   / ${byte_size}  ;
+          my $pad_size                =     $t_size  % $byte_size    ;
+
+
+       if($pad_size)  {$padding = $byte_size - $pad_size;}
+       else        
+         {  
+         $padding = 0;
+         $pad_size = ${byte_size};
+         }
+   
+
+         my $REG_NAME =  uc($t_name);
+   
+   
+
+
+   
+         if(  $t_has_read eq "1" )
+           { 
+           print  OUTFILE "if( ${t_name}_cs )     rdata_i = ";
+                if($padding) {   print  OUTFILE "{${REG_NAME}_PAD , ${t_name}_rdata };//QQQQ\n";} 
+                else         {   print  OUTFILE " ${t_name}_rdata ;//QQQQ\n";}
+           }
+
+
+
+
+      
+         print  OUTFILE "\n";
+
+
+
+     }
+
+
+}
+
+         print  OUTFILE "    end\n\n";
+
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    #/**********************************************************************/
+    #/*                                                                    */
+    #/* Write Data Selection                                               */
+    #/*                                                                    */
+    #/*                                                                    */
+    #/**********************************************************************/
+     
+   
+   
+    if($max_has_write)
+     {
+
+     print  OUTFILE "always@(*)\n";
+     print  OUTFILE "    begin\n";
+
+     foreach $line (@registers)  
+        { 
+        $_ = $line;
+        if(/:::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::/) 
+          { 
+          my $t_name                = $1;
+          my $t_numoffset           = $2;
+          my $t_size                = $3;
+          my $t_numdim              = $4;
+          my $t_dimbits             = $5;        
+          my $t_create              = $6;        
+          my $t_access              = $7;
+          my $t_has_read            = $8;
+          my $t_has_write           = $9;
+          my $reg_byte_lane           =     $t_numoffset   % $sys_byte_lanes  ;
+          my $reg_byte_lanes          =     $t_size   / ${byte_size}  ;
+          my $pad_size                =     $t_size  % $byte_size    ;
+
+
+       if($pad_size)  {$padding = $byte_size - $pad_size;}
+       else        
+         {  
+         $padding = 0;
+         $pad_size = ${byte_size};
+         }
+   
+
+       my $REG_NAME =  uc($t_name);
+
+
+         $reg_byte_lanes   = ($padding + $t_size)/ $byte_size;
+   
+   
+   
+   
+       if( $t_has_write eq "1" )
+         { 
+         if (  ($sys_byte_lanes eq "1") and  ( $reg_byte_lanes eq "1"))
+            {
+            print  OUTFILE "${t_name}_wdata      =  wdata[$phy_byte_lane*${byte_size}+${pad_size}-1:0];//    1\n";
+            }
+
+        elsif( $sys_byte_lanes eq  $reg_byte_lanes )
+            {
+             if(   $reg_byte_lanes - 1  eq       $phy_byte_lane )
+              {
+              print  OUTFILE "${t_name}_wdata[$phy_byte_lane*${byte_size}+${pad_size}-1:$phy_byte_lane*${byte_size}]     =  wdata[$phy_byte_lane*${byte_size}+${pad_size}-1:$phy_byte_lane*${byte_size}];// 2\n";
+
+              }
+            else
+              {
+
+              print  OUTFILE "${t_name}_wdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}]     =  wdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}]; //    3 \n";
+              }
+            }
+         elsif (  ($sys_byte_lanes eq "1") and  ( $reg_byte_lanes eq "2"))
+            {
+            if($opt_bigendian)             
+              {
+              print  OUTFILE "${t_name}_wdata[${byte_size}-1:0]            =  wdata[$phy_byte_lane*${byte_size}+${byte_size}-1:0]; //   4  \n";
+
+
+              print  OUTFILE "${t_name}_wdata[${pad_size}+${byte_size}-1:${byte_size}]            =  wdata[$phy_byte_lane*${byte_size}+${pad_size}-1:0]; //  5   \n"; 
+
+              }
+            else
+              {
+              print  OUTFILE "${t_name}_wdata[${byte_size}-1:0]            =  wdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}]; //   6  \n";
+
+
+              print  OUTFILE "${t_name}_wdata[${pad_size}+${byte_size}-1:${byte_size}]            =  wdata[$phy_byte_lane*${byte_size}+${pad_size}-1:0]; //  ${byte_size}-1   \n";
+
+              }
+            }
+   
+         elsif (  ($sys_byte_lanes eq "1") and  ( $reg_byte_lanes eq "3"))
+            {
+            if($opt_bigendian)             
+              {
+              print  OUTFILE "${t_name}_wdata[${byte_size}-1:0]             =  wdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}]; //   8  \n";
+              print  OUTFILE "${t_name}_wdata[$(byte_size}-1:${byte_size}]             =  wdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}]; //  9   \n";
+              print  OUTFILE "${t_name}_wdata[${pad_size}+$(byte_size}-1:(${byte_size}*2)]             =  wdata[$phy_byte_lane*${byte_size}+${pad_size}-1:0]; // 10    \n";
+              }
+            else
+              {
+              print  OUTFILE "${t_name}_wdata[${byte_size}-1:0]                  =  wdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}]; //  11   \n";
+              print  OUTFILE "${t_name}_wdata[$(byte_size}-1:${byte_size}]                 =  wdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}]; //  12   \n";
+              print  OUTFILE "${t_name}_wdata[${pad_size}+$(byte_size}-1:(${byte_size}*2)]    =  wdata[$phy_byte_lane*${byte_size}+${pad_size}-1:0]; // 13    \n";
+              }
+           }
+   
+         elsif (  ($sys_byte_lanes eq "1") and  ( $reg_byte_lanes eq "4"))
+            {
+            if($opt_bigendian)             
+              {
+              print  OUTFILE "${t_name}_wdata[${byte_size}-1:0]             =  wdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}]; //   14  \n";
+              print  OUTFILE "${t_name}_wdata[$(byte_size}-1:${byte_size}]             =  wdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}]; //  15   \n";
+              print  OUTFILE "${t_name}_wdata[(${byte_size}*3)-1:(${byte_size}*2)]             =  wdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}]; // 16    \n";
+              print  OUTFILE "${t_name}_wdata[${pad_size}+(${byte_size}*3)-1:(${byte_size}*3)]             =  wdata[$phy_byte_lane*${byte_size}+${pad_size}-1:0]; // 17    \n";
+
+              }
+            else
+              {
+              print  OUTFILE "${t_name}_wdata[${byte_size}-1:0]             =  wdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}]; //   18  \n";
+              print  OUTFILE "${t_name}_wdata[$(byte_size}-1:${byte_size}]             =  wdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}]; //  19   \n";
+              print  OUTFILE "${t_name}_wdata[(${byte_size}*3)-1:(${byte_size}*2)]             =  wdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}]; // 20    \n";
+              print  OUTFILE "${t_name}_wdata[${pad_size}+(${byte_size}*3)-1:(${byte_size}*3)]             =  wdata[$phy_byte_lane*${byte_size}+${pad_size}-1:0]; // 21    \n";
+              }
+            }
+   
+         elsif (  ($sys_byte_lanes eq "2") and  ( $reg_byte_lanes eq "3") )
+            {
+            if($opt_bigendian)             
+              {
+              print  OUTFILE "${t_name}_wdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}]            =  wdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}]; //  22   \n";
+              }
+            else
+              {
+              print  OUTFILE "${t_name}_wdata[$log_byte_lane*${byte_size}+${byte_size}-1:$log_byte_lane*${byte_size}]            =  wdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}]; //    \n";
+              if($log_byte_lane == 0)
+              {
+              print  OUTFILE "${t_name}_wdata[$log_byte_lane*${byte_size}+${pad_size}+$(byte_size}-1:$log_byte_lane*${byte_size}+(${byte_size}*2)]            =  wdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}]; //     \n";
+              }
+              }
+            }
+
+         elsif (  ($sys_byte_lanes eq "2") and  ( $reg_byte_lanes eq "4") )
+            {
+            if($opt_bigendian)             
+              {
+              print  OUTFILE "${t_name}_wdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}]            =  wdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}]; //  24   \n";
+              print  OUTFILE "${t_name}_wdata[$phy_byte_lane*${byte_size}+${byte_size}-1+$(byte_size}-1:$phy_byte_lane*${byte_size}+(${byte_size}*2)]           =  wdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}]; //  25   \n";
+              }
+            else
+              {
+              print  OUTFILE "${t_name}_wdata[$log_byte_lane*${byte_size}+${byte_size}-1:$log_byte_lane*${byte_size}]            =  wdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}]; // 26    \n";
+             if($log_byte_lane)
+               {
+
+              print  OUTFILE "${t_name}_wdata[$log_byte_lane*${byte_size}+${pad_size}+$(byte_size}-1:$log_byte_lane*${byte_size}+(${byte_size}*2)]            =  wdata[$phy_byte_lane*${byte_size}+${pad_size}-1:$phy_byte_lane*${byte_size}]; //  27   \n";
+               } 
+             else
+                      {
+
+              print  OUTFILE "${t_name}_wdata[$log_byte_lane*${byte_size}+${byte_size}-1+(${byte_size}*2):$log_byte_lane*${byte_size}+(${byte_size}*2)]            =  wdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}]; //  27   \n";
+               } 
+ 
+             }
+            }
+                 
+         elsif(( $sys_byte_lanes eq "2") and  ( $reg_byte_lanes eq "1") and ($reg_byte_lane eq $log_byte_lane)  )
+            {
+             print  OUTFILE "${t_name}_wdata     =  wdata[$phy_byte_lane*${byte_size}+${pad_size}-1:$phy_byte_lane*${byte_size}]; //  28   \n";
+            }
+
+         elsif(( $sys_byte_lanes eq "4") and  ( $reg_byte_lanes eq "1") and ($reg_byte_lane eq $log_byte_lane)  )
+            {
+            print  OUTFILE "${t_name}_wdata     =  wdata[$phy_byte_lane*${byte_size}+${pad_size}-1:$phy_byte_lane*${byte_size}]; //  29   \n";
+            }
+
+         elsif(( $sys_byte_lanes eq "4") and  ( $reg_byte_lanes eq "2") and ($reg_byte_lane eq $log_byte_lane)  )
+            {
+            print  OUTFILE "${t_name}_wdata[${byte_size}-1:0]     =  wdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}]; //  30   \n";
+            }
+
+         elsif(( $sys_byte_lanes eq "4") and  ( $reg_byte_lanes eq "2") and ($reg_byte_lane == ${log_byte_lane}-1 ))
+            {
+            print  OUTFILE "${t_name}_wdata[${pad_size}+${byte_size}-1:${byte_size}]     =  wdata[$phy_byte_lane*${byte_size}+${pad_size}-1:$phy_byte_lane*${byte_size}]; //    \n";
+            }
+
+         elsif(( $sys_byte_lanes eq "4") and  ( $reg_byte_lanes eq "3") and ($phy_byte_lane) ne "3"  )
+            {
+             if(   $reg_byte_lanes - 1  eq       $phy_byte_lane )
+              {
+              print  OUTFILE "${t_name}_wdata[$phy_byte_lane*${byte_size}+${pad_size}-1:$phy_byte_lane*${byte_size}]     =  wdata[$phy_byte_lane*${byte_size}+${pad_size}-1:$phy_byte_lane*${byte_size}]; //  32   \n";
+              }
+            else
+              {
+              print  OUTFILE "${t_name}_wdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}]     =  wdata[$phy_byte_lane*${byte_size}+${byte_size}-1:$phy_byte_lane*${byte_size}]; //  33   \n";
+              }
+            }
+
+         }
+      }
+
+   }
+      
+         print  OUTFILE "\n\n\n";
+         print  OUTFILE "    end\n\n";
+
+
+
+
+
+    #/**********************************************************************/
+    #/*                                                                    */
+    #/* Write strobe Creation                                              */
+    #/*                                                                    */
+    #/*                                                                    */
+    #/**********************************************************************/
+     
+   
+   
+     print  OUTFILE "always@(*)\n";
+     print  OUTFILE "    begin\n";
+
+
+
+     foreach $line (@registers)  
+        { 
+        $_ = $line;
+        if(/:::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::/) 
+          { 
+          my $t_name                = $1;
+          my $t_numoffset           = $2;
+          my $t_size                = $3;
+          my $t_numdim              = $4;
+          my $t_dimbits             = $5;        
+          my $t_create              = $6;        
+          my $t_access              = $7;
+          my $t_has_read            = $8;
+          my $t_has_write           = $9;
+
+
+          my $reg_byte_lane           =     $t_numoffset   % $sys_byte_lanes  ;
+          my $reg_byte_lanes          =     $t_size   / ${byte_size}  ;
+          my $pad_size                =     $t_size  % $byte_size    ;
+
+
+    
+       if($pad_size)  {$padding = $byte_size - $pad_size;}
+       else        
+         {  
+         $padding = 0;
+         $pad_size = ${byte_size};
+         }
+   
+          $reg_byte_lanes   = ($padding +  $t_size)/ $byte_size;   
+
+
+     
+       my $REG_NAME =  uc($t_name);
+   
+
+
+
+   
+
+   
+   
+       if( $t_has_write eq "1" )
+         { 
+         if ( $sys_byte_lanes eq  $reg_byte_lanes )
+            {
+            print  OUTFILE "${t_name}_wr_${phy_byte_lane} = cs && wr && enable && byte_lanes[ $phy_byte_lane ] && ( addr[$addblk_numaddbits-1:${adr_base}]== ${REG_NAME}[$addblk_numaddbits-1:${adr_base}] ); //     \n";
+            }
+
+         elsif (  ($sys_byte_lanes eq "1") and  ( $reg_byte_lanes eq "2"))
+            {
+            if($opt_bigendian)             
+              {
+              print  OUTFILE "${t_name}_wr_0 = cs && wr && enable && byte_lanes[ 0 ] && ( addr[$addblk_numaddbits-1:0]== {${REG_NAME}[$addblk_numaddbits-1:1],1'b1} ); //     \n";
+              print  OUTFILE "${t_name}_wr_1 = cs && wr && enable && byte_lanes[ 0 ] && ( addr[$addblk_numaddbits-1:0]== {${REG_NAME}[$addblk_numaddbits-1:1],1'b0} ); //     \n";
+
+              }
+            else
+              {
+              print  OUTFILE "${t_name}_wr_0 = cs && wr && enable && byte_lanes[ 0 ] && ( addr[$addblk_numaddbits-1:0]== {${REG_NAME}[$addblk_numaddbits-1:1],1'b0} ); //     \n";
+              print  OUTFILE "${t_name}_wr_1 = cs && wr && enable && byte_lanes[ 0 ] && ( addr[$addblk_numaddbits-1:0]== {${REG_NAME}[$addblk_numaddbits-1:1],1'b1} ); //     \n";
+              }
+            }
+   
+         elsif (  ($sys_byte_lanes eq "1") and  ( $reg_byte_lanes eq "3"))
+            {
+            if($opt_bigendian)             
+              {
+              print  OUTFILE "${t_name}_wr_0 = cs && wr && enable && byte_lanes[ 0 ] && ( addr[$addblk_numaddbits-1:0]== {${REG_NAME}[$addblk_numaddbits-1:2],2'b11} ); //     \n";
+              print  OUTFILE "${t_name}_wr_1 = cs && wr && enable && byte_lanes[ 0 ] && ( addr[$addblk_numaddbits-1:0]== {${REG_NAME}[$addblk_numaddbits-1:2],2'b10} ); //     \n";
+              print  OUTFILE "${t_name}_wr_2 = cs && wr && enable && byte_lanes[ 0 ] && ( addr[$addblk_numaddbits-1:0]== {${REG_NAME}[$addblk_numaddbits-1:2],2'b01} ); //     \n";
+              }
+            else
+              {
+              print  OUTFILE "${t_name}_wr_0 = cs && wr && enable && byte_lanes[ 0 ] && ( addr[$addblk_numaddbits-1:0]== {${REG_NAME}[$addblk_numaddbits-1:2],2'b00} ); //     \n";
+              print  OUTFILE "${t_name}_wr_1 = cs && wr && enable && byte_lanes[ 0 ] && ( addr[$addblk_numaddbits-1:0]== {${REG_NAME}[$addblk_numaddbits-1:2],2'b01} ); //     \n";
+              print  OUTFILE "${t_name}_wr_2 = cs && wr && enable && byte_lanes[ 0 ] && ( addr[$addblk_numaddbits-1:0]== {${REG_NAME}[$addblk_numaddbits-1:2],2'b10} ); //     \n";
+              }
+           }
+   
+         elsif (  ($sys_byte_lanes eq "1") and  ( $reg_byte_lanes eq "4"))
+            {
+            if($opt_bigendian)             
+              {
+              print  OUTFILE "${t_name}_wr_0 = cs && wr && enable && byte_lanes[ 0 ] && ( addr[$addblk_numaddbits-1:0]== {${REG_NAME}[$addblk_numaddbits-1:2],2'b11} ); //     \n";
+              print  OUTFILE "${t_name}_wr_1 = cs && wr && enable && byte_lanes[ 0 ] && ( addr[$addblk_numaddbits-1:0]== {${REG_NAME}[$addblk_numaddbits-1:2],2'b10} ); //     \n";
+              print  OUTFILE "${t_name}_wr_2 = cs && wr && enable && byte_lanes[ 0 ] && ( addr[$addblk_numaddbits-1:0]== {${REG_NAME}[$addblk_numaddbits-1:2],2'b01} ); //     \n";
+              print  OUTFILE "${t_name}_wr_3 = cs && wr && enable && byte_lanes[ 0 ] && ( addr[$addblk_numaddbits-1:0]== {${REG_NAME}[$addblk_numaddbits-1:2],2'b00} ); //     \n";
+              }
+            else
+              {
+              print  OUTFILE "${t_name}_wr_0 = cs && wr && enable && byte_lanes[ 0 ] && ( addr[$addblk_numaddbits-1:0]== {${REG_NAME}[$addblk_numaddbits-1:2],2'b00} ); //     \n";
+              print  OUTFILE "${t_name}_wr_1 = cs && wr && enable && byte_lanes[ 0 ] && ( addr[$addblk_numaddbits-1:0]== {${REG_NAME}[$addblk_numaddbits-1:2],2'b01} ); //     \n";
+              print  OUTFILE "${t_name}_wr_2 = cs && wr && enable && byte_lanes[ 0 ] && ( addr[$addblk_numaddbits-1:0]== {${REG_NAME}[$addblk_numaddbits-1:2],2'b10} ); //     \n";
+              print  OUTFILE "${t_name}_wr_3 = cs && wr && enable && byte_lanes[ 0 ] && ( addr[$addblk_numaddbits-1:0]== {${REG_NAME}[$addblk_numaddbits-1:2],2'b11} ); //     \n";
+
+              }
+            }
+   
+         elsif (  ($sys_byte_lanes eq "2") and  ( $reg_byte_lanes eq "3") )
+            {
+              if ($log_byte_lane == 0 )  
+                 {
+                 print  OUTFILE "${t_name}_wr_0 = cs && wr && enable && byte_lanes[ $phy_byte_lane ] && ( addr[$addblk_numaddbits-1:1]== {${REG_NAME}[$addblk_numaddbits-1:2],1'b0} ); //     \n";
+                 print  OUTFILE "${t_name}_wr_2 = cs && wr && enable && byte_lanes[ $phy_byte_lane ] && ( addr[$addblk_numaddbits-1:1]== {${REG_NAME}[$addblk_numaddbits-1:2],1'b1} ); //     \n";
+                 }   
+              elsif ($log_byte_lane == 1 )  
+                 {
+                 print  OUTFILE "${t_name}_wr_1 = cs && wr && enable && byte_lanes[ $phy_byte_lane ] && ( addr[$addblk_numaddbits-1:1]== {${REG_NAME}[$addblk_numaddbits-1:2],1'b0} ); //     \n";
+                 }   
+            }
+
+
+
+         elsif (  ($sys_byte_lanes eq "2") and  ( $reg_byte_lanes eq "4") )
+            {
+              if ($log_byte_lane == 0 )  
+                 {
+                 print  OUTFILE "${t_name}_wr_0 = cs && wr && enable && byte_lanes[ $phy_byte_lane ] && ( addr[$addblk_numaddbits-1:1]== {${REG_NAME}[$addblk_numaddbits-1:2],1'b0} ); //     \n";
+                 print  OUTFILE "${t_name}_wr_2 = cs && wr && enable && byte_lanes[ $phy_byte_lane ] && ( addr[$addblk_numaddbits-1:1]== {${REG_NAME}[$addblk_numaddbits-1:2],1'b1} ); //     \n";
+                 }   
+              elsif ($log_byte_lane == 1 )  
+                 {
+                 print  OUTFILE "${t_name}_wr_1 = cs && wr && enable && byte_lanes[ $phy_byte_lane ] && ( addr[$addblk_numaddbits-1:1]== {${REG_NAME}[$addblk_numaddbits-1:2],1'b0} ); //     \n";
+                 print  OUTFILE "${t_name}_wr_3 = cs && wr && enable && byte_lanes[ $phy_byte_lane ] && ( addr[$addblk_numaddbits-1:1]== {${REG_NAME}[$addblk_numaddbits-1:2],1'b1} ); //     \n";
+                 }   
+            }
+
+
+
+               
+
+
+         elsif(( $sys_byte_lanes eq "2") and  ( $reg_byte_lanes eq "1") and ($reg_byte_lane eq $log_byte_lane)  )
+            {
+            print  OUTFILE "${t_name}_wr_0 = cs && wr && enable && byte_lanes[ $phy_byte_lane ] && ( addr[$addblk_numaddbits-1:${adr_base}]== ${REG_NAME}[$addblk_numaddbits-1:${adr_base}] );\n";
+            }
+
+         elsif(( $sys_byte_lanes eq "4") and  ( $reg_byte_lanes eq "1") and ($reg_byte_lane eq $log_byte_lane)  )
+            {
+            print  OUTFILE "${t_name}_wr_0 = cs && wr && enable && byte_lanes[ $phy_byte_lane ] && ( addr[$addblk_numaddbits-1:${adr_base}]== ${REG_NAME}[$addblk_numaddbits-1:${adr_base}] );\n";
+            }
+
+         elsif(( $sys_byte_lanes eq "4") and  ( $reg_byte_lanes eq "2") and ($reg_byte_lane eq $log_byte_lane)  )
+            {
+            print  OUTFILE "${t_name}_wr_0 = cs && wr && enable && byte_lanes[ $phy_byte_lane ] && ( addr[$addblk_numaddbits-1:${adr_base}]== ${REG_NAME}[$addblk_numaddbits-1:${adr_base}] );\n";
+            }
+
+         elsif(( $sys_byte_lanes eq "4") and  ( $reg_byte_lanes eq "2") and ($reg_byte_lane == ${log_byte_lane}-1 ))
+            {
+            print  OUTFILE "${t_name}_wr_1 = cs && wr && enable && byte_lanes[ $phy_byte_lane ] && ( addr[$addblk_numaddbits-1:${adr_base}]== ${REG_NAME}[$addblk_numaddbits-1:${adr_base}] );\n";
+            }
+
+         elsif(( $sys_byte_lanes eq "4") and  ( $reg_byte_lanes eq "3") and ($log_byte_lane  ne "3")  )
+            {
+             if(   ${reg_byte_lanes}-1   ==       $log_byte_lane )
+              {
+            print  OUTFILE "${t_name}_wr_${log_byte_lane} = cs && wr && enable && byte_lanes[ $phy_byte_lane ] && ( addr[$addblk_numaddbits-1:${adr_base}]== ${REG_NAME}[$addblk_numaddbits-1:${adr_base}] ); //     \n";
+              }
+            else
+              {
+            print  OUTFILE "${t_name}_wr_${log_byte_lane} = cs && wr && enable && byte_lanes[ $phy_byte_lane ] && ( addr[$addblk_numaddbits-1:${adr_base}]== ${REG_NAME}[$addblk_numaddbits-1:${adr_base}] ); //     \n";
+              }
+            }
+
+         }
+      }
+      
+
+}
+         print  OUTFILE "\n\n\n";
+         print  OUTFILE "    end\n\n";
+
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+     
+     
+    #/**********************************************************************/
+    #/*                                                                    */
+    #/* Print read strobes                                                 */
+    #/*                                                                    */
+    #/*                                                                    */
+    #/**********************************************************************/
+
+
+
+
+
+     foreach $line (@registers)  
+        { 
+        $_ = $line;
+        if(/:::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::/) 
+          { 
+          my $t_name                = $1;
+          my $t_numoffset           = $2;
+          my $t_size                = $3;
+          my $t_numdim              = $4;
+          my $t_dimbits             = $5;        
+          my $t_create              = $6;        
+          my $t_access              = $7;
+          my $t_has_read            = $8;
+          my $t_has_write           = $9;
+          my $reg_byte_lane           =     $t_numoffset   % $sys_byte_lanes  ;
+          my $reg_byte_lanes          =     $t_size   / ${byte_size}  ;
+          my $pad_size                =     $t_size  % $byte_size    ;
+
+
+       if($pad_size)  {$padding = $byte_size - $pad_size;}
+       else        
+         {  
+         $padding = 0;
+         $pad_size = ${byte_size};
+         }
+   
+
+         my $REG_NAME =  uc($t_name);
+   
+
+
+
+          $reg_byte_lanes   = ($padding + int($t_size))/ $byte_size;   
+
+
+     
+
+     
+
+            if(( $sys_byte_lanes == 1) and ($reg_byte_lanes == 1))
+              {
+
+              }
+
+            elsif(( $sys_byte_lanes == 1) and ($reg_byte_lanes == 2))
+              {
+
+              }
+
+            elsif(( $sys_byte_lanes == 1) and ($reg_byte_lanes == 3))
+              {
+
+              }
+            elsif(( $sys_byte_lanes == 1) and ($reg_byte_lanes == 4))
+              {
+
+              }
+            elsif (  ( $sys_byte_lanes == 2) and ($reg_byte_lanes == 1) and       ( $log_byte_lane == $reg_byte_lane)  )   
+               {
+               push  @add_decs, "        ${t_name}_dec = cs && byte_lanes[ $phy_byte_lane ] && ( addr[$addblk_numaddbits-1:${adr_base}]== ${REG_NAME}[$addblk_numaddbits-1:${adr_base}] );//. $sys_byte_lanes. $reg_byte_lanes.   5\n" 
+               }    
+              elsif (  ( $sys_byte_lanes == 4) and ($reg_byte_lanes == 1) and       ( $log_byte_lane == $reg_byte_lane)  )   
+               {
+               push  @add_decs, "        ${t_name}_dec = cs && byte_lanes[ $phy_byte_lane ] && ( addr[$addblk_numaddbits-1:${adr_base}]== ${REG_NAME}[$addblk_numaddbits-1:${adr_base}] );//. $sys_byte_lanes. $reg_byte_lanes.   5\n" 
+               }    
+            elsif (  ( $sys_byte_lanes == 4) and ($reg_byte_lanes == 2) and       ( $log_byte_lane == $reg_byte_lane)  )   
+               {
+               push  @add_decs, "        ${t_name}_dec = cs && byte_lanes[ $phy_byte_lane ] && ( addr[$addblk_numaddbits-1:${adr_base}]== ${REG_NAME}[$addblk_numaddbits-1:${adr_base}] );//. $sys_byte_lanes. $reg_byte_lanes.   5\n" 
+               }    
+          }     
+       }      
+
+}
+
+
+
+
+
+
+
+
+
+
+     foreach $line (@registers)  
+        { 
+        $_ = $line;
+        if(/:::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::/) 
+          { 
+          my $t_name                = $1;
+          my $t_numoffset           = $2;
+          my $t_size                = $3;
+          my $t_numdim              = $4;
+          my $t_dimbits             = $5;        
+          my $t_create              = $6;        
+          my $t_access              = $7;
+          my $t_has_read            = $8;
+          my $t_has_write           = $9;
+          my $reg_byte_lane           =     $t_numoffset   % $sys_byte_lanes  ;
+          my $reg_byte_lanes          =     $t_size   / ${byte_size}  ;
+          my $pad_size                =     $t_size  % $byte_size    ;
+
+
+       if($pad_size)  {$padding = $byte_size - $pad_size;}
+       else        
+         {  
+         $padding = 0;
+         $pad_size = ${byte_size};
+         }
+       my $REG_NAME =  uc($t_name);
+
+   
+          $reg_byte_lanes   = ($padding + int($t_size))/ $byte_size;   
+
+
+     
+
+     
+
+            if(( $sys_byte_lanes == 1) and ($reg_byte_lanes == 1))
+              {
+               push  @add_decs, "        ${t_name}_dec = cs && ( addr[$addblk_numaddbits-1:0]== ${REG_NAME}[$addblk_numaddbits-1:0] );//  1\n" 
+              }
+
+            elsif(( $sys_byte_lanes == 1) and ($reg_byte_lanes == 2))
+              {
+               push  @add_decs, "        ${t_name}_dec = cs && ( addr[$addblk_numaddbits-1:1]== ${REG_NAME}[$addblk_numaddbits-1:1] );//  2\n" 
+              }
+
+            elsif(( $sys_byte_lanes == 1) and ($reg_byte_lanes == 3))
+              {
+               push  @add_decs, "        ${t_name}_dec = cs && ( addr[$addblk_numaddbits-1:2]== ${REG_NAME}[$addblk_numaddbits-1:2] );//  3\n" 
+              }
+            elsif(( $sys_byte_lanes == 1) and ($reg_byte_lanes == 4))
+              {
+               push  @add_decs, "        ${t_name}_dec = cs && ( addr[$addblk_numaddbits-1:2]== ${REG_NAME}[$addblk_numaddbits-1:2] );//  4\n" 
+              }
+            elsif(( $sys_byte_lanes == 2) and ($reg_byte_lanes == 2))
+              {
+               push  @add_decs, "        ${t_name}_dec = cs && ( addr[$addblk_numaddbits-1:1]== ${REG_NAME}[$addblk_numaddbits-1:1] );//  4\n" 
+              }
+
+            elsif(( $sys_byte_lanes == 2) and ($reg_byte_lanes == 3))
+              {
+               push  @add_decs, "        ${t_name}_dec = cs && ( addr[$addblk_numaddbits-1:2]== ${REG_NAME}[$addblk_numaddbits-1:2] );//  4\n" 
+              }
+
+            elsif(( $sys_byte_lanes == 2) and ($reg_byte_lanes == 4))
+              {
+               push  @add_decs, "        ${t_name}_dec = cs && ( addr[$addblk_numaddbits-1:2]== ${REG_NAME}[$addblk_numaddbits-1:2] );//  4\n" 
+              }
+
+
+            elsif(( $sys_byte_lanes == 4) and ($reg_byte_lanes == 3))
+              {
+               push  @add_decs, "        ${t_name}_dec = cs && ( addr[$addblk_numaddbits-1:2]== ${REG_NAME}[$addblk_numaddbits-1:2] );//  4\n" 
+              }
+
+            elsif(( $sys_byte_lanes == 4) and ($reg_byte_lanes == 4))
+              {
+               push  @add_decs, "        ${t_name}_dec = cs && ( addr[$addblk_numaddbits-1:2]== ${REG_NAME}[$addblk_numaddbits-1:2] );//  4\n" 
+              }
+
+
+
+
+          }
+
+}
+
+         print  OUTFILE "\n\n always@(*)\n     begin\n";
+           foreach my $add_line (@add_decs)
+                {
+                 print  OUTFILE "${add_line}";
+                }
+
+            print  OUTFILE "\n     end\n\n";
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    #/**********************************************************************/
+    #/*                                                                    */
+    #/* Create Chip Selects                                                */
+    #/*                                                                    */
+    #/*                                                                    */
+    #/**********************************************************************/
+
+   print  OUTFILE "\n  /* verilator lint_off UNSIGNED */           \n";   
+
+     foreach $line (@registers)  
+        { 
+        $_ = $line;
+        if(/:::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::/) 
+          { 
+          my $t_name                = $1;
+          my $t_numoffset           = $2;
+          my $t_size                = $3;
+          my $t_numdim              = $4;
+          my $t_dimbits             = $5;        
+          my $t_create              = $6;        
+          my $t_access              = $7;
+          my $t_has_read            = $8;
+          my $t_has_write           = $9;
+          my $REG_NAME              =  uc($t_name);     
+          print  OUTFILE "assign   ${t_name}_cs = cs && ( addr[$addblk_numaddbits-1:${adr_base}] >= ${REG_NAME}[$addblk_numaddbits-1:${adr_base}] ) && ( addr[$addblk_numaddbits-1:${adr_base}] < ${REG_NAME}_END[$addblk_numaddbits-1:${adr_base}] );\n";   
+          }
+        }
+
+
+   print  OUTFILE "\n  /* verilator lint_on UNSIGNED */           \n";   
+
+
+
+
+
+
+    #/**********************************************************************/
+    #/*                                                                    */
+    #/* Create Registers                                                   */
+    #/*                                                                    */
+    #/*                                                                    */
+    #/**********************************************************************/
+
+     foreach $line (@registers)  
+        { 
+        $_ = $line;
+        if(/:::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::(\S+):::/) 
+          { 
+          my $t_name                = $1;
+          my $t_numoffset           = $2;
+          my $t_size                = $3;
+          my $t_numdim              = $4;
+          my $t_dimbits             = $5;        
+          my $t_create              = $6;        
+          my $t_access              = $7;
+          my $t_has_read            = $8;
+          my $t_has_write           = $9;
+
+
+          my $reg_byte_lane           =     $t_numoffset   % $sys_byte_lanes  ;
+          my $reg_byte_lanes          =     $t_size   / ${byte_size}  ;
+          my $pad_size                =     $t_size  % $byte_size    ;
+
+
+    
+       if($pad_size)  {$padding = $byte_size - $pad_size;}
+       else        
+         {  
+         $padding = 0;
+         $pad_size = ${byte_size};
+         }
+   
+          $reg_byte_lanes   = ($padding +  $t_size)/ $byte_size;   
+
+
+       if(( $t_has_write eq "1") and   ( $t_create eq "1")  )
+         {
+         print  OUTFILE "   always@(posedge clk)\n     if(reset)  $t_name <=  ";
+         print  OUTFILE uc($t_name);
+         print  OUTFILE "_RST;\n        else\n       begin\n";
+
+         if($reg_byte_lanes == 1)
+          {
+          if($pad_size ==1)
+           {
+           print  OUTFILE "    if(${t_name}_wr_0)    ${t_name}   <=  ${t_name}_wdata   ;\n";
+           print  OUTFILE "    else    ${t_name}                        <=    next_${t_name};\n\n";
+           }
+         else
+           {
+           print  OUTFILE "    if(${t_name}_wr_0)    ${t_name}[${pad_size}-1:0]  <=  ${t_name}_wdata[${pad_size}-1:0]  ;\n";
+           print  OUTFILE "    else    ${t_name}[${pad_size}-1:0]   <=    next_${t_name}[${pad_size}-1:0];\n\n";
+           }
+
+          }
+         elsif($reg_byte_lanes == 2)
+          {
+          print  OUTFILE "    if(${t_name}_wr_0)    ${t_name}[${byte_size}-1:0]  <=  ${t_name}_wdata[${byte_size}-1:0]  ;\n";
+          print  OUTFILE "    else    ${t_name}[${byte_size}-1:0]   <=    next_${t_name}[${byte_size}-1:0];\n\n";
+          print  OUTFILE "    if(${t_name}_wr_1)    ${t_name}[${pad_size}+${byte_size}-1:${byte_size}]  <=  ${t_name}_wdata[${pad_size}+${byte_size}-1:${byte_size}]  ;\n";
+          print  OUTFILE "    else    ${t_name}[${pad_size}+${byte_size}-1:${byte_size}]   <=    next_${t_name}[${pad_size}+${byte_size}-1:${byte_size}];\n\n";
+          }
+         elsif($reg_byte_lanes == 3)
+          {
+          print  OUTFILE "    if(${t_name}_wr_0)    ${t_name}[${byte_size}-1:0]  <=  ${t_name}_wdata[${byte_size}-1:0]  ;\n";
+          print  OUTFILE "    else    ${t_name}[${byte_size}-1:0]   <=    next_${t_name}[${byte_size}-1:0];\n\n";
+          print  OUTFILE "    if(${t_name}_wr_1)    ${t_name}[$(byte_size}-1:${byte_size}]  <=  ${t_name}_wdata[$(byte_size}-1:${byte_size}]  ;\n";
+          print  OUTFILE "    else    ${t_name}[$(byte_size}-1:${byte_size}]   <=    next_${t_name}[$(byte_size}-1:${byte_size}];\n\n";
+          print  OUTFILE "    if(${t_name}_wr_2)    ${t_name}[${pad_size}+$(byte_size}-1:(${byte_size}*2)]  <=  ${t_name}_wdata[${pad_size}+$(byte_size}-1:(${byte_size}*2)]  ;\n";
+          print  OUTFILE "    else    ${t_name}[${pad_size}+$(byte_size}-1:(${byte_size}*2)]   <=    next_${t_name}[${pad_size}+$(byte_size}-1:(${byte_size}*2)];\n\n";
+          }
+         elsif($reg_byte_lanes == 4)
+          {
+          print  OUTFILE "    if(${t_name}_wr_0)    ${t_name}[${byte_size}-1:0]  <=  ${t_name}_wdata[${byte_size}-1:0]  ;\n";
+          print  OUTFILE "    else    ${t_name}[${byte_size}-1:0]   <=    next_${t_name}[${byte_size}-1:0];\n\n";
+          print  OUTFILE "    if(${t_name}_wr_1)    ${t_name}[$(byte_size}-1:${byte_size}]  <=  ${t_name}_wdata[$(byte_size}-1:${byte_size}]  ;\n";
+          print  OUTFILE "    else    ${t_name}[$(byte_size}-1:${byte_size}]   <=    next_${t_name}[$(byte_size}-1:${byte_size}];\n\n";
+          print  OUTFILE "    if(${t_name}_wr_2)    ${t_name}[(${byte_size}*3)-1:(${byte_size}*2)]  <=  ${t_name}_wdata[(${byte_size}*3)-1:(${byte_size}*2)]  ;\n";
+          print  OUTFILE "    else    ${t_name}[(${byte_size}*3)-1:(${byte_size}*2)]   <=    next_${t_name}[(${byte_size}*3)-1:(${byte_size}*2)];\n\n";
+          print  OUTFILE "    if(${t_name}_wr_3)    ${t_name}[${pad_size}+(${byte_size}*3)-1:(${byte_size}*3)]  <=  ${t_name}_wdata[${pad_size}+(${byte_size}*3)-1:(${byte_size}*3)]  ;\n";
+          print  OUTFILE "    else    ${t_name}[${pad_size}+(${byte_size}*3)-1:(${byte_size}*3)]   <=    next_${t_name}[${pad_size}+(${byte_size}*3)-1:(${byte_size}*3)];\n\n";
+          }
+
+       print  OUTFILE "\n     end\n\n";
+        
+
+         }
+
+
+
+
+
+
+       }
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+   print  OUTFILE "\nendmodule \n";   
+
+
+
+
+
+
+
+close  OUTFILE ;   
+   
+   
+1
+   
+  

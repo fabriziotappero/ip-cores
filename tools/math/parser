@@ -1,0 +1,412 @@
+#!/usr/bin/env perl
+# simple-math-parser.pl - Simple math parser written in Perl 5
+# License: C.C. Attribution NonCommercial ShareAlike 3.0 Unported
+# Revision: 120705
+
+#---------------------------------------------------------------------
+# important note
+#---------------------------------------------------------------------
+
+# This software is provided on an AS IS basis with ABSOLUTELY NO WAR-
+# RANTY. The entire risk as to the quality and performance of the
+# software is with you. Should the software prove defective, you as-
+# sume the cost of all necessary servicing, repair or correction. In
+# no event will any of the developers, or any other party, be liable
+# to anyone for damages arising out of use of the software, or inabil-
+# ity to use the software.
+
+#---------------------------------------------------------------------
+# overview
+#---------------------------------------------------------------------
+
+my $USAGE_TEXT = << 'END_OF_USAGE_TEXT';
+Usage: simple-math-parser.pl "1.5+(2/3)*pi-sqrt(2)"
+
+This is a CLI calculator program that takes a single arithmetic ex-
+pression as an argument, evaluates it, and prints the result to stand-
+ard output.
+
+As a general rule, expressions should be quoted as shown here. Other-
+wise, "shell meta-character" problems may occur.
+
+The point of the program is to illustrate the structure of a simple
+math parser. A recursive-descent approach is used; the core consists
+of a single recursive routine (ParseMath).
+
+Numbers may be integers, ordinary real numbers, or real numbers in
+scientific notation. Examples of scientific notation: 1.3e+0 is equal
+to 1.3, 12e-1 is equal to 1.2, and 5e+1 is equal to 50. The "+" sign
+is optional in this context.
+
+Supported operators include + (add), - (subtract or unary minus), *
+(multiply), / (divide), and ** (exponentiate).
+
+Six functions are supported: sqrt (square root), cbrt (cube root), log
+(natural logarithm), sin, cos, and tan. The last three functions take
+angles in radians.
+
+Three standard constants may be used: e, phi (the Golden Ratio), and
+pi.
+
+This is the first public release of the program. Therefore, it should
+be considered alpha and bugs may exist.
+END_OF_USAGE_TEXT
+
+#---------------------------------------------------------------------
+# standard module setup
+#---------------------------------------------------------------------
+
+require 5.8.1;
+use strict;
+use Carp;
+use warnings;
+                                # Trap warnings
+$SIG{__WARN__} = sub { die @_; };
+
+#---------------------------------------------------------------------
+# basic constants
+#---------------------------------------------------------------------
+
+use constant ZERO => 0; # Zero
+use constant ONE => 1; # One
+use constant TWO => 2; # Two
+
+use constant FALSE => 0; # Boolean FALSE
+use constant TRUE => 1; # Boolean TRUE
+
+#---------------------------------------------------------------------
+# common math constants
+#---------------------------------------------------------------------
+
+# This table maps one or more symbol names to associated numeric val-
+# ues.
+
+# Note: Symbol names should consist of a letter followed by zero or
+# more alphanumeric characters. Letters should be specified in lower
+# case.
+
+my %MathConstants =
+(
+    'e' => '2.7182818284590452353603' ,
+    'phi' => '1.6180339887498948482046' ,
+    'pi' => '3.1415926535897932384626'
+);
+
+#---------------------------------------------------------------------
+# program parameters
+#---------------------------------------------------------------------
+
+# $IE = Internal-error message prefix
+# $MAXPRE = Maximum precedence level
+# $PURPOSE = Short description of purpose
+# $REVISION = Revision string
+# $USE_LESS = Flag: Use "less" for usage text
+
+my $IE = 'Internal error' ;
+my $MAXPRE = 9999 ;
+my $PURPOSE = 'Simple Perl math parser' ;
+my $REVISION = '120705' ;
+my $USE_LESS = TRUE ;
+
+#---------------------------------------------------------------------
+# token-related patterns
+#---------------------------------------------------------------------
+
+# $PatNumScience = Matches a non-negative number in scientific nota-
+# tion
+# $PatNumRegular = Matches an ordinary non-negative number
+# $PatSymbol = Matches a symbol
+# $PatOperator = Matches a parenthesis or an operator
+
+# Note: In this context, exponentiation is represented by the single-
+# character operator "~" as opposed to "**", which is used at a higher
+# level. This simplifies the code.
+
+my $PatNumScience = '\b\d+\.?\d*e[\+\-]?\d+' ;
+my $PatNumRegular = '\b\d+\.?\d*' ;
+my $PatSymbol = '\b[a-z]\w+\b' ;
+my $PatOperator = '[\(\)\+\-\*/~]' ;
+
+#---------------------------------------------------------------------
+
+# @TokenPatterns is a list of all of the patterns that are used to
+# match tokens.
+
+my @TokenPatterns =
+( # Note: Order is significant here
+    $PatNumScience , $PatNumRegular , $PatSymbol , $PatOperator
+);
+
+#---------------------------------------------------------------------
+
+# $TokenPatterns is a pattern that matches a token (of any supported
+# type). The pattern omits enclosing parentheses.
+
+my $TokenPatterns = join '|', @TokenPatterns;
+
+#---------------------------------------------------------------------
+# misc. global variables
+#---------------------------------------------------------------------
+
+my $PROGNAME; # Program name (without path)
+   $PROGNAME = $0;
+   $PROGNAME =~ s@.*/@@;
+
+#---------------------------------------------------------------------
+# support routines
+#---------------------------------------------------------------------
+
+# Routine: UsageError
+# Purpose: Prints program usage text and exits
+# Usage: &UsageError();
+
+# If the global parameter $USE_LESS is TRUE, and if standard output is
+# a terminal, usage text is piped through "less" (with some "less"-
+# related instructions added). Otherwise, usage text is simply sent to
+# standard output.
+
+#---------------------------------------------------------------------
+
+sub UsageError
+{
+    $USAGE_TEXT =~ s@^\s+@@s; # Remove leading white space
+
+    $USAGE_TEXT = << "END"; # "END" must be double-quoted here
+$PROGNAME $REVISION - $PURPOSE
+
+$USAGE_TEXT
+END
+                                # Adjust trailing white space
+    $USAGE_TEXT =~ s@\s*\z@\n@s;
+
+    if ($USE_LESS && (-t STDOUT) && open (OFD, "|/usr/bin/less"))
+    { # Handle output with "less"
+                                # "END" must be double-quoted here
+        $USAGE_TEXT = << "END";
+To exit this "help" text, press "q" or "Q". To scroll up or down, use
+PGUP, PGDN, or the arrow keys.
+
+$USAGE_TEXT
+END
+        print OFD $USAGE_TEXT;
+        close OFD;
+    }
+    else
+    { # Handle output without "less"
+        print "\n", $USAGE_TEXT, "\n";
+    }
+
+    exit ONE;
+}
+
+#---------------------------------------------------------------------
+# parser routine
+#---------------------------------------------------------------------
+
+# Routine: ParseMath
+# Purpose: Parses a list of math-related tokens
+
+# Usage:
+#
+# my @tokens = ( '1', '+', '2', '/', '3' );
+# my $result = &ParseMath (\@tokens, 0);
+
+# Note: "ParseMath" is recursive.
+
+# This routine takes two arguments: A reference (i.e., pointer) to a
+# list of tokens and an integer, which should be zero unless the rou-
+# tine happens to be calling itself (in which case it may use other
+# values internally).
+
+# Tokens may be non-negative integer or real numbers, plus or minus
+# signs, a multiplication or division or exponentiation operator
+# (*, /, or ~), parentheses, or the names of supported functions or
+# constants.
+
+# Note: "~" is used at this level instead of the more usual "**" as a
+# matter of convenience. Higher-level code may map "**" or other char-
+# acters or sequences to "~".
+
+# Six functions are supported: sqrt (square root), cbrt (cube root),
+# log (natural logarithm), sin, cos, and tan. The last three functions
+# take angles in radians.
+
+# Three standard constants may be used: e, phi (the Golden Ratio),
+# and pi.
+
+# Sub-expressions may be parenthesized. PEMDAS (i.e., standard prece-
+# dence) rules are supported.
+
+# For numbers, scientific notation is supported. Examples of scienti-
+# fic notation: 1.3e+0 is equal to 1.3, 12e-1 is equal to 1.2, and
+# 5e+1 is equal to 50. The "+" sign is optional in this context.
+
+# Minus signs, as in the unary minus operator, must be specified as
+# separate tokens.
+
+#---------------------------------------------------------------------
+
+sub ParseMath
+{
+                                # Argument list
+    my ($p_tokens, $plevel) = @_;
+    my $left; # Left operand (or token)
+    my $right; # Right operand
+    my $result; # Result
+    my $str; # Scratch
+
+#---------------------------------------------------------------------
+# Initial setup.
+
+    $left = shift (@$p_tokens); # Get first token
+                                # Consistency check
+    die "$IE #0001\n" unless defined $left;
+
+#---------------------------------------------------------------------
+# Various cases.
+
+# This block handles symbolic constants (such as pi), parenthesized
+# sub-expressions, the unary-minus operator, and functions such as
+# "cos" or "sqrt".
+
+    if (defined ($str = $MathConstants {$left}))
+        { $left = $str; }
+    elsif ($left eq '(')
+        { $left = &ParseMath ($p_tokens, ZERO ); }
+    elsif ($left eq '-')
+        { $left = &ParseMath ($p_tokens, $MAXPRE); $left = (-$left); }
+    elsif ($left =~ m@^(sqrt|cbrt|log|sin|cos|tan)\z@)
+    { # Function
+        $str = $left; # Name of function
+                                # Function argument
+        $left = &ParseMath ($p_tokens, TWO);
+
+        eval
+        { # "eval" traps most errors
+            $left = sqrt ($left) if $str eq 'sqrt' ;
+            $left = $left ** (1/3) if $str eq 'cbrt' ;
+            $left = log ($left) if $str eq 'log' ;
+            $left = sin ($left) if $str eq 'sin' ;
+            $left = cos ($left) if $str eq 'cos' ;
+            $left = sin ($left) / cos ($left) if $str eq 'tan' ;
+        };
+
+        die $@ if $@; # Handle trapped errors
+    }
+
+#---------------------------------------------------------------------
+# Adjust and/or check intermediate result.
+
+# This statement verifies that the current (left) operand has been re-
+# duced to a number.
+
+    die "Error: Invalid syntax\n"
+        unless $left =~ m@^-?($PatNumScience|$PatNumRegular)\z@;
+
+# This statement translates numbers that are still in scientific nota-
+# tion to ordinary values (if possible).
+
+    $left = $left + ZERO if $left =~ m@e@;
+
+#---------------------------------------------------------------------
+# Handle binary operators.
+
+    while (TRUE)
+    {
+                                # Get operator token
+        my $op = shift (@$p_tokens);
+                                # Are we there yet?
+        if (!defined ($op) || ($op eq ')')) { $result = $left; last; }
+                                # Consistency check
+        die "$IE #0002: $op\n" unless $op =~ m@[\+\-\*/~]\z@;
+
+        my $nlevel = ZERO; # Precedence level
+           $nlevel = ONE if ($op eq '*') || ($op eq '/');
+           $nlevel = TWO if ($op eq '~');
+
+                                # Stop here due to precedence?
+        if ($plevel && ($plevel >= $nlevel))
+        { # Yes
+            unshift (@$p_tokens, $op);
+            $result = $left;
+            last;
+        }
+
+        $plevel = $nlevel; # Step to new precedence level
+                                # Parse right side of sub-expression
+        $right = &ParseMath ($p_tokens, $plevel);
+
+        eval
+        { # Note: "eval" traps most errors
+            $result = $left + $right if $op eq '+';
+            $result = $left - $right if $op eq '-';
+            $result = $left * $right if $op eq '*';
+            $result = $left / $right if $op eq '/';
+$result = $left ** $right if $op eq '~';
+};
+
+die $@ if $@; # Handle trapped errors
+# Consistency check
+die "$IE #0003: $op\n" unless defined $result;
+
+# Are we there yet?
+last unless scalar @$p_tokens;
+
+$plevel = ZERO; # We've resolved the left operand
+        $left = $result; # Result is left side of another sub-
+                                # expression
+    }
+
+#---------------------------------------------------------------------
+# Wrap it up.
+
+    $result; # Return the result
+}
+
+#---------------------------------------------------------------------
+# main routine
+#---------------------------------------------------------------------
+
+sub Main
+{
+    my $data; # Input string
+    my @tokens; # Input tokens
+
+#---------------------------------------------------------------------
+# Initial setup.
+
+    select STDERR; $| = ONE; # Force STDERR flush on write
+    select STDOUT; $| = ONE; # Force STDOUT flush on write
+
+                                # Check the command line
+    &UsageError() unless scalar (@ARGV) == ONE;
+
+    $data = shift (@ARGV); # Input string
+    $data =~ s@\s+@ @gs; # Adjust white space
+                                # Check characters used
+    die "Invalid character in expression: $1\n"
+        if $data =~ m@([^a-z0-9\.\(\)\+\-\*/~ ])@i;
+
+#---------------------------------------------------------------------
+# Perform operations.
+
+    $data = lc ($data); # Map input to lower case
+    $data =~ s@\*\*@~@g; # Map "**" (exponentiation) to "~"
+                                # (this simplifies the code)
+                                # Put spaces around tokens
+    $data =~ s@($TokenPatterns)@ $1 @gi;
+                                # Split data into a tokens list
+    @tokens = split m@\s+@, $data;
+                                # Discard empty strings
+    @tokens = grep { length; } @tokens;
+                                # Parse tokens and print result
+    print &ParseMath (\@tokens, ZERO), "\n";
+    undef;
+}
+
+#---------------------------------------------------------------------
+# main program
+#---------------------------------------------------------------------
+
+&Main(); # Call the main routine
+exit ZERO; # Normal exit

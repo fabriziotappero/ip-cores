@@ -1,0 +1,203 @@
+
+
+module  `VARIANT`FSM
+
+
+#(parameter NUMBITS=11)
+
+(
+
+
+input  wire        ps2_idle,  
+input  wire        ps2_clk_fall,
+input  wire        clk,          
+input  wire        reset,          
+input  wire [3:0]  bit_count,
+input  wire        write,        
+input  wire        usec_delay_done,
+input  wire        force_startbit,
+
+output reg         load_tx_data,
+output reg         ps2_clk_oe,  
+output reg         busy,  
+output reg         shift_frame,  
+output reg         enable_usec_delay  
+             
+);
+
+
+
+`define fsm_idle                       4'b0000
+`define fsm_rx_clk                     4'b0001
+`define fsm_rx_clk_fall               4'b0010
+`define fsm_rx_data_ready              4'b0011
+
+`define fsm_tx_force_clk_low           4'b1000
+`define fsm_tx_force_startbit          4'b1001
+`define fsm_tx_startbit                4'b1010
+`define fsm_tx_clk_fall                4'b1011
+`define fsm_tx_wait_data               4'b1100
+`define fsm_tx_wait_ack                4'b1101
+`define fsm_tx_wait_idle               4'b1110
+
+
+
+   
+
+reg  [3:0]         state;   
+reg  [3:0]         next_state;      
+reg                next_ps2_clk_oe;
+
+
+
+   
+   
+always@(posedge clk)
+     begin
+      if(reset) 
+        begin
+         busy               <= 0;
+         state              <= `fsm_idle;
+         ps2_clk_oe         <= 0;
+         load_tx_data       <= 0;
+         shift_frame        <= 0;
+         enable_usec_delay  <= 0; 
+     end
+      else
+        begin
+         busy               <= !(next_state == `fsm_idle);  
+         state              <=   next_state;
+         ps2_clk_oe         <=   next_ps2_clk_oe;
+         load_tx_data       <= ( state == `fsm_tx_force_clk_low);   
+         shift_frame        <= ((next_state == `fsm_rx_clk_fall)|| (next_state == `fsm_tx_clk_fall));
+         enable_usec_delay  <= (!write && ((next_state == `fsm_tx_force_startbit) || (next_state == `fsm_tx_force_clk_low)));   
+     end
+    end
+
+
+
+
+always @(*)
+begin
+   next_state         = `fsm_idle;
+   next_ps2_clk_oe    = 0;
+   case (state)
+      
+   (`fsm_idle ):
+              begin
+              if(ps2_clk_fall )             next_state            = `fsm_rx_clk_fall;
+              else 
+              if(write)                     next_state            = `fsm_tx_force_clk_low;               
+              else                          next_state            = `fsm_idle;
+              end 
+   
+   (`fsm_rx_clk_fall):                      next_state            = `fsm_rx_clk;
+
+
+   (`fsm_rx_clk):
+               begin
+               if(bit_count == NUMBITS)     next_state            = `fsm_rx_data_ready;
+               else 
+               if(ps2_clk_fall)             next_state            = `fsm_rx_clk_fall;
+               else                         next_state            = `fsm_rx_clk;
+               end 
+   
+   
+
+   (`fsm_rx_data_ready):                    next_state            = `fsm_idle;
+             
+
+               
+
+
+
+
+   (`fsm_tx_force_clk_low):
+              begin
+                                            next_ps2_clk_oe       = 1;
+              if(force_startbit )           next_state            = `fsm_tx_force_startbit;
+              else                          next_state            = `fsm_tx_force_clk_low;
+              end
+   
+    
+   (`fsm_tx_force_startbit):
+              begin
+
+                                            next_ps2_clk_oe     = 1;
+              if(usec_delay_done)           next_state          = `fsm_tx_startbit;
+              else                          next_state          = `fsm_tx_force_startbit;
+              end 
+   
+
+   (`fsm_tx_startbit):
+               begin
+                                            next_ps2_clk_oe     = 0;
+               if(ps2_clk_fall)             next_state          = `fsm_tx_clk_fall;
+               else                         next_state          = `fsm_tx_startbit;
+               end
+   
+
+
+
+  (`fsm_tx_clk_fall):
+               begin
+                                           next_state           = `fsm_tx_wait_data;
+               end
+
+
+
+
+    
+  (`fsm_tx_wait_data):
+           begin
+                            
+               if(bit_count == NUMBITS-1)
+                         begin
+                                           next_state           = `fsm_tx_wait_ack;
+                         end
+               else                                             
+                         begin
+                         if(ps2_clk_fall)  next_state           = `fsm_tx_clk_fall;
+                         else              next_state           = `fsm_tx_wait_data;
+                         end
+	      
+           end 
+   
+
+
+
+     (`fsm_tx_wait_ack):
+               begin
+               if(ps2_clk_fall)            next_state     = `fsm_tx_wait_idle;  
+               else                        next_state     = `fsm_tx_wait_ack;
+               end
+   
+
+
+
+     (`fsm_tx_wait_idle):
+               begin
+               if(ps2_idle)                next_state      = `fsm_idle;
+               else                        next_state      = `fsm_tx_wait_idle;
+               end 
+   
+
+           default :                       next_state  = `fsm_idle;
+        
+          
+
+
+     endcase // case (state)
+
+    
+     end 
+
+
+
+
+
+
+
+endmodule 
+
+

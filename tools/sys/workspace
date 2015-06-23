@@ -1,0 +1,274 @@
+eval 'exec `which perl` -S $0 ${1+"$@"}'
+   if 0;
+
+#/**********************************************************************/
+#/*                                                                    */
+#/*             -------                                                */
+#/*            /   SOC  \                                              */
+#/*           /    GEN   \                                             */
+#/*          /    TOOL    \                                            */
+#/*          ==============                                            */
+#/*          |            |                                            */
+#/*          |____________|                                            */
+#/*                                                                    */
+#/*                                                                    */
+#/*                                                                    */
+#/*  Author(s):                                                        */
+#/*      - John Eaton, jt_eaton@opencores.org                          */
+#/*                                                                    */
+#/**********************************************************************/
+#/*                                                                    */
+#/*    Copyright (C) <2010-2011>  <Ouabache Design Works>              */
+#/*                                                                    */
+#/*  This source file may be used and distributed without              */
+#/*  restriction provided that this copyright statement is not         */
+#/*  removed from the file and that any derivative work contains       */
+#/*  the original copyright notice and the associated disclaimer.      */
+#/*                                                                    */
+#/*  This source file is free software; you can redistribute it        */
+#/*  and/or modify it under the terms of the GNU Lesser General        */
+#/*  Public License as published by the Free Software Foundation;      */
+#/*  either version 2.1 of the License, or (at your option) any        */
+#/*  later version.                                                    */
+#/*                                                                    */
+#/*  This source is distributed in the hope that it will be            */
+#/*  useful, but WITHOUT ANY WARRANTY; without even the implied        */
+#/*  warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR           */
+#/*  PURPOSE.  See the GNU Lesser General Public License for more      */
+#/*  details.                                                          */
+#/*                                                                    */
+#/*  You should have received a copy of the GNU Lesser General         */
+#/*  Public License along with this source; if not, download it        */
+#/*  from http://www.opencores.org/lgpl.shtml                          */
+#/*                                                                    */
+#/**********************************************************************/
+
+use Getopt::Long;
+use English;
+use File::Basename;
+use Cwd;
+use XML::LibXML;
+use lib './tools';
+use sys::lib;
+use yp::lib;
+
+$OUTPUT_AUTOFLUSH = 1; # set autoflush of stdout to TRUE.
+
+
+
+
+#/*********************************************************************************************/
+#/ We never generate files into a RCS database.                                               */
+#/                                                                                            */
+#/ A special work area is created that is the image of the database using symbolic links      */
+#/                                                                                            */
+#/*********************************************************************************************/
+
+my $home    = cwd();
+
+
+
+
+my $prefix   =  yp::lib::get_workspace();
+   $prefix   =  "/${prefix}";
+
+my $path = "${home}${prefix}";
+
+mkdir $path,0755          unless( -e $path );
+
+
+my    $vendor     = $ARGV[0];
+my    $library    = $ARGV[1];
+
+chomp($vendor);
+chomp($library);
+
+
+$_ = $vendor;
+
+if(/(\S+)\/(\S+)/) 
+     { 
+     $vendor         = $1;
+     $library        = $2;
+     }
+
+
+
+my $repo  = yp::lib::find_library_repo($vendor,$library);
+my $root  = ".${repo}/${vendor}/${library}/";
+
+
+unless ( -e $root )
+     { 
+     print "ERROR: Library   $vendor $library  does not exist \n";
+     exit(0);
+     }
+
+
+
+
+
+
+
+
+
+$path    = "${home}${prefix}/${vendor}__${library}";
+mkdir $path,0755          unless( -e $path );
+
+my $vendor_status    =  yp::lib::get_vendor_status($vendor);
+my $library_status   =  yp::lib::get_library_status($vendor,$library);
+
+
+print "Building Workspace ${prefix}/${vendor}__${library} from   .${repo}/${vendor}/${library}/  $vendor_status  $library_status      \n";
+
+
+
+
+$vendor_status   =  yp::lib::set_vendor_status($vendor,"active");
+$vendor_status   =  yp::lib::get_vendor_status($vendor);
+
+$library_status   =  yp::lib::set_library_status($vendor,$library,"active");
+$library_status   =  yp::lib::get_library_status($vendor,$library);
+
+
+print "Vendor $vendor_status  Library  $library_status        \n";
+
+&link_sub( $root,$root, ".${prefix}/${vendor}__${library}" );
+
+
+#/*********************************************************************************************/
+#/                                                                                            */
+#/ Each library is given access to the system tools by giving each of them a link to the      */
+#/ Master Makefiles in tools/bin                                                              */
+#/                                                                                            */
+#/                                                                                            */
+#/*********************************************************************************************/
+
+
+
+if (system("chmod 755    ${home}/${repo}/${vendor}/${library}/bin/* \n"   )) {}
+
+
+symlink( "${home}/tools/bin/Makefile.root", "${home}${prefix}/${vendor}__${library}/bin/Makefile.root");
+symlink( "${home}/tools/bin/Makefile",      "${home}${prefix}/${vendor}__${library}/bin/Makefile");
+
+
+
+my $path  = "${home}${prefix}/children";
+mkdir $path,0755          unless( -e $path );
+
+my @components =       yp::lib::find_components($vendor,$library);
+foreach my $component (@components) 
+   {
+   my $parser = XML::LibXML->new();
+   print " $vendor,$library,$component  \n";
+
+
+   my $socgen_filename     = yp::lib::find_componentConfiguration($vendor,$library,$component);
+   if($socgen_filename)
+   {
+
+   my $socgen_file     = $parser->parse_file(yp::lib::find_componentConfiguration($vendor,$library,$component));
+
+
+
+
+   my @versions =       yp::lib::find_component_versions($vendor,$library,$component);
+
+   foreach $comp_version (@versions)
+     {
+     $cmd ="./tools/sys/soc_link_child -prefix $prefix -vendor $vendor -library $library  -component $component -version $comp_version  \n";
+     if (system($cmd)) {}
+     }
+
+   print "Linking simulations for  $vendor  $library  $component      \n";
+
+   foreach  my   $i_name ($socgen_file->findnodes("//socgen:sim/socgen:testbenches/socgen:testbench/socgen:version"))
+      {
+
+      my($tb_version)  = $i_name ->findnodes('./text()')->to_literal ;
+
+      $cmd ="./tools/sys/soc_link_child -prefix $prefix -vendor ${vendor}  -library $library  -component $component       -version $tb_version    \n";
+      if (system($cmd)) {}
+      }
+
+   #/*********************************************************************************************/
+   #/   link chip files for synthesys                                                            */
+   #/                                                                                            */
+   #/                                                                                            */
+   #/                                                                                            */
+   #/                                                                                            */
+   #/                                                                                            */
+   #/*********************************************************************************************/
+   
+   print "Linking synthesys targets for  $vendor  $library  $component      \n";
+   my $lib_comp_sep    = yp::lib::find_lib_comp_sep($vendor,$library,$component);
+
+ 
+   foreach  my   $i_name ($socgen_file->findnodes("//socgen:syn/socgen:ise/socgen:chip/socgen:variant"))
+      {
+      my($chip_variant)  = $i_name ->findnodes('./text()')->to_literal ;
+      my($chip_target)  = $i_name ->findnodes('../socgen:target/socgen:library/text()')->to_literal ;
+      my($chip_part)  = $i_name ->findnodes('../socgen:target/socgen:part/text()')->to_literal ;
+      $outfile ="${home}${prefix}/${vendor}__${library}${lib_comp_sep}${component}/syn/ise/${chip_variant}/Makefile";
+      open  MAKSYNFILE,">$outfile" or die "unable to open $outfile";
+      print MAKSYNFILE  "include ${home}/tools/bin/Makefile.root\n";
+      print MAKSYNFILE  "Part=${chip_part}\n";
+      print MAKSYNFILE  "board=${chip_target}\n";
+      print MAKSYNFILE  "Design=${chip_variant}\n";
+      my $path  = "${home}${prefix}/${vendor}__${library}${lib_comp_sep}${component}/syn/ise/${chip_variant}/target";
+      mkdir $path,0755          unless( -e $path );
+      &sys::lib::link_dir( "${home}/tools/synthesys/targets/ip/${chip_target}", "${home}${prefix}/${vendor}__${library}${lib_comp_sep}${component}/syn/ise/${chip_variant}/target"  );
+      }
+   }
+
+   }
+   
+
+
+
+
+#/*********************************************************************************************/
+#/   recursively map directory information                                                    */
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/*********************************************************************************************/
+ 
+
+sub link_sub {
+    my $root = shift;
+    my $path = shift;
+    my $dest = shift;
+    return unless( -e $path );
+ 
+    my $dest_path = $path;
+      $dest_path =~ s/$root/$dest/;
+
+    if( -d $path ) 
+      {
+      mkdir $dest_path,0755;
+
+      my @contents = (  );
+      opendir( DIR, $path );
+      while( my $item = readdir( DIR )) 
+           {
+           next if( $item eq '.' or $item eq '..'   or $item eq '.svn'    );
+           push( @contents, $item );
+           }
+      closedir( DIR );
+ 
+      # recurse on items in the directory
+      foreach my $item ( @contents )          { &link_sub($root, "$path/$item", $dest );}
+ 
+
+      } 
+    else 
+      {
+       symlink( "${home}/${path}", $dest_path);
+      }
+}
+
+

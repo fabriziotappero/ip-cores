@@ -1,0 +1,390 @@
+eval 'exec `which perl` -S $0 ${1+"$@"}'
+   if 0;
+
+#/**********************************************************************/
+#/*                                                                    */
+#/*             -------                                                */
+#/*            /   SOC  \                                              */
+#/*           /    GEN   \                                             */
+#/*          /    TOOL    \                                            */
+#/*          ==============                                            */
+#/*          |            |                                            */
+#/*          |____________|                                            */
+#/*                                                                    */
+#/*                                                                    */
+#/*                                                                    */
+#/*  Author(s):                                                        */
+#/*      - John Eaton, jt_eaton@opencores.org                          */
+#/*                                                                    */
+#/**********************************************************************/
+#/*                                                                    */
+#/*    Copyright (C) <2010-2011>  <Ouabache Design Works>              */
+#/*                                                                    */
+#/*  This source file may be used and distributed without              */
+#/*  restriction provided that this copyright statement is not         */
+#/*  removed from the file and that any derivative work contains       */
+#/*  the original copyright notice and the associated disclaimer.      */
+#/*                                                                    */
+#/*  This source file is free software; you can redistribute it        */
+#/*  and/or modify it under the terms of the GNU Lesser General        */
+#/*  Public License as published by the Free Software Foundation;      */
+#/*  either version 2.1 of the License, or (at your option) any        */
+#/*  later version.                                                    */
+#/*                                                                    */
+#/*  This source is distributed in the hope that it will be            */
+#/*  useful, but WITHOUT ANY WARRANTY; without even the implied        */
+#/*  warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR           */
+#/*  PURPOSE.  See the GNU Lesser General Public License for more      */
+#/*  details.                                                          */
+#/*                                                                    */
+#/*  You should have received a copy of the GNU Lesser General         */
+#/*  Public License along with this source; if not, download it        */
+#/*  from http://www.opencores.org/lgpl.shtml                          */
+#/*                                                                    */
+#/**********************************************************************/
+
+
+
+
+############################################################################
+# General PERL config
+############################################################################
+use Getopt::Long;
+use English;
+use File::Basename;
+use Cwd;
+use XML::LibXML;
+use lib './tools';
+use sys::lib;
+use yp::lib;
+
+$OUTPUT_AUTOFLUSH = 1; # set autoflush of stdout to TRUE.
+
+
+############################################################################
+### Process the options
+############################################################################
+Getopt::Long::config("require_order", "prefix=-");
+GetOptions("h","help",
+           "work_site=s" => \$work_site,
+           "vendor=s" => \$vendor,
+           "library=s" => \$library,
+           "component=s" => \$component,
+           "version=s" => \$version
+) || die "(use '$program_name -h' for help)";
+
+
+
+##############################################################################
+## Help option
+##############################################################################
+if ( $opt_h  or $opt_help) 
+  { print "\n build_verilator_filelists -work_site /work  -vendor vendor_name  -library library_name  -component component_name   ";
+    print "\n";
+    exit 1;
+  }
+
+
+##############################################################################
+## 
+##############################################################################
+
+
+
+$home = cwd();
+
+my $variant = "";
+if($version) {$variant = "${component}_${version}"}
+else         {$variant = "${component}"}
+
+#############################################################################
+## 
+## 
+#############################################################################
+
+my $parser = XML::LibXML->new();
+
+
+
+
+
+
+
+
+
+#############################################################################
+## 
+## 
+#############################################################################
+
+print "Building SIM filelists for  $work_site  $vendor $library   $component $version $variant \n" ;
+
+my $spirit_component_file    = $parser->parse_file(yp::lib::find_ipxact_component($vendor,$library,$component,$version));
+my $socgen_file              = $parser->parse_file(yp::lib::find_componentConfiguration($vendor,$library,$component));
+my $sim_library_path ;
+my $lib_comp_sep             = yp::lib::find_lib_comp_sep($vendor,$library,$component);
+my $sim_comp_path            = $socgen_file->findnodes("//socgen:componentConfiguration/socgen:sim/socgen:comp_path/text()")->to_literal;
+
+   if ($sim_comp_path)
+      {
+      $sim_library_path            ="${lib_comp_sep}${sim_comp_path}";
+      }
+   else
+      {
+      $sim_library_path            = $socgen_file->findnodes("//socgen:componentConfiguration/socgen:sim/socgen:library_path/text()")->to_literal;
+      }
+
+
+
+
+
+#/*********************************************************************************************/
+#/                                                                                            */
+#/                                                                                            */
+#/  Read each variants parameters and defaults into an array and their order into an array    */
+#/  order must be preservered so that parameters can use the values of other parameters       */
+#/                                                                                            */
+#/*********************************************************************************************/
+
+my %default_parameters = ();
+my @parameter_order    = ();
+
+
+foreach  my   $i_name ($socgen_file->findnodes("//socgen:configurations/socgen:configuration[socgen:name/text() = '$variant']/socgen:parameters/socgen:parameter"))
+      {
+      my($parameter_name)     = $i_name ->findnodes('socgen:name/text()')->to_literal ;
+      my($parameter_default)  = $i_name ->findnodes('socgen:value/text()')->to_literal ;
+      $default_parameters{$parameter_name}  = $parameter_default;
+      push  @parameter_order ,$parameter_name ;  
+      }
+
+
+
+
+
+
+
+
+
+foreach my $comp ($spirit_component_file->findnodes('//spirit:component')) 
+   {
+   my($vendor)   = $comp->findnodes('./spirit:vendor/text()')->to_literal ;
+   my($library)  = $comp->findnodes('./spirit:library/text()')->to_literal ;
+   my($name)     = $comp->findnodes('./spirit:name/text()')->to_literal ;
+   my($version)  = $comp->findnodes('./spirit:version/text()')->to_literal ;
+   my $variant = "";
+   if($version) {$variant = "${name}_${version}"}
+   else         {$variant = "${name}"}
+   print "rtl/gen directories  for    $library - $component         VLNV        $vendor - $library -  $name -  $variant \n"; 
+   }
+
+   print "CREATING componentRef filelists for   $library   $component  $name $variant \n"; 
+
+
+   #/*********************************************************************************************/
+   #/                                                                                            */
+   #/                                                                                            */
+   #/                                                                                            */
+   #/                                                                                            */
+   #/                                                                                            */
+   #/                                                                                            */
+   #/*********************************************************************************************/
+
+
+foreach  my   $i_name ($socgen_file->findnodes("//socgen:testbench[socgen:variant/text() = '$variant']/socgen:code_coverage"))
+   {
+      
+   my $path ="${home}${work_site}/${vendor}__${library}${sim_library_path}/cov";
+   mkdir $path,0755          unless( -e $path );
+   $path ="${home}${work_site}/${vendor}__${library}${sim_library_path}/cov/${variant}";
+   mkdir $path,0755          unless( -e $path );
+
+   
+   my $outfile ="${home}${work_site}/${vendor}__${library}${sim_library_path}/cov/${variant}/TestBench";
+   open  DUTFILE,">$outfile" or die "unable to open $outfile";
+   print  DUTFILE  "`timescale    1ns/1ns   \n";
+   print  DUTFILE  " module TB();   \n";
+
+
+      print DUTFILE  "     $variant   \n";
+      my $first =1;
+      foreach  my  $parameter_name  (@parameter_order)
+         {
+         my($parameter_default)  =    $default_parameters{$parameter_name}; 
+         if($first)
+           {         
+           print DUTFILE  "   #(  .${parameter_name}(${parameter_default})";
+           $first = 0;
+           }
+         else
+           {         
+           print DUTFILE  ",\n       .${parameter_name}(${parameter_default})";
+           }
+         }
+         if($first)
+           {         
+           print DUTFILE  "  test \n (); \n\n\n\n";
+           }
+          else
+           {         
+           print DUTFILE  ") test \n (); \n\n\n\n";
+           }
+
+
+   print  DUTFILE  " endmodule   \n";
+
+
+
+
+
+
+
+
+
+   }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   #/*********************************************************************************************/
+   #/                                                                                            */
+   #/ Make simulation file set                                                                   */
+   #/                                                                                            */
+   #/                                                                                            */
+   #/                                                                                            */
+   #/                                                                                            */
+   #/*********************************************************************************************/
+
+   print "CREATING sim files for   $library  $component   $chip   $name  $variant \n"; 
+
+
+
+
+
+
+    foreach  my   $i_name ($socgen_file->findnodes("//socgen:componentConfiguration/socgen:sim/socgen:verilator/socgen:test[socgen:variant/text() = '$variant']"))
+      {
+      my($simulation)      = $i_name ->findnodes('socgen:name/text()')->to_literal ;
+      my($configuration)   = $i_name ->findnodes('socgen:configuration/text()')->to_literal ;
+      print " sim files for   $library  $component   $variant  $simulation $configuration          \n"; 
+
+      my $path ="${home}${work_site}/${vendor}__${library}${sim_library_path}/verilator";
+      mkdir $path,0755          unless( -e $path );
+      $path ="${home}${work_site}/${vendor}__${library}${sim_library_path}/verilator/${simulation}";
+      mkdir $path,0755          unless( -e $path );
+
+      my $outfile ="${home}${work_site}/${vendor}__${library}${sim_library_path}/verilator/${simulation}/Makefile";
+      open  MAKSIMFILE,">$outfile" or die "unable to open $outfile";
+
+
+      my $outfile ="${home}${work_site}/${vendor}__${library}${sim_library_path}/verilator/${simulation}/TestBench";
+      open SIM_PARM_FILE,">$outfile" or die "unable to open $outfile";
+        
+
+
+
+
+      my %local_parameters =  %default_parameters;
+      my @local_order      =  @parameter_order;
+
+
+
+      foreach  my   $i_name ($socgen_file->findnodes("//socgen:componentConfiguration/socgen:sim/socgen:testbenches/socgen:testbench[socgen:variant/text() = '$variant']/./socgen:parameters/socgen:parameter/socgen:name"))
+         {
+         my($par_name)   = $i_name ->findnodes('./text()')->to_literal ;
+         my($par_value)  = $i_name ->findnodes('../socgen:value/text()')->to_literal ;
+         if  ( $local_parameters{$par_name} eq '' )  { push @local_order , $par_name; }
+         $local_parameters{$par_name} = $par_value;    
+         }
+
+
+
+      foreach  my   $i_name ($socgen_file->findnodes("//socgen:configurations/socgen:configuration[socgen:name/text() = '$configuration']/./socgen:parameters/socgen:parameter/socgen:name"))
+         {
+         my($par_name)   = $i_name ->findnodes('./text()')->to_literal ;
+         my($par_value)  = $i_name ->findnodes('../socgen:value/text()')->to_literal ;
+         if($local_parameters{$par_name} eq '' )  { push @local_order , $par_name; }
+         $local_parameters{$par_name} = $par_value; 
+         }
+
+
+    
+      foreach  my   $i_name ($socgen_file->findnodes("//socgen:componentConfiguration/socgen:sim/socgen:verilator/socgen:test[socgen:name/text() = '$simulation']/./socgen:parameters/socgen:parameter/socgen:name"))
+         {
+         my($par_name)   = $i_name ->findnodes('./text()')->to_literal ;
+         my($par_value)  = $i_name ->findnodes('../socgen:value/text()')->to_literal ;
+         if  ( $local_parameters{$par_name} eq '' )  { push @local_order , $par_name; }
+         $local_parameters{$par_name} = $par_value;    
+         }
+
+     my $timeout = $local_parameters{"TIMEOUT"};
+
+      print MAKSIMFILE  "include ${home}/tools/bin/Makefile.root\n";
+      print MAKSIMFILE  "comp=${variant}\n";
+      print MAKSIMFILE  "test=${simulation}\n";
+      print MAKSIMFILE  "timeout=${timeout}\n";
+      print MAKSIMFILE  "simulator=verilator\n";
+
+
+
+
+      my $module_name = yp::lib::get_module_name($vendor,$library,$component,$version);     
+
+  
+
+
+      print SIM_PARM_FILE  "//  Testbench  for  $library    $component    $variant   $configuration    $simulation\n";
+      print SIM_PARM_FILE  "                \n";
+      print SIM_PARM_FILE  "module TB(input clk, input START,     output FINISH,output FAIL                 );                                \n";
+      print SIM_PARM_FILE  "                                \n";
+      print SIM_PARM_FILE  "     $module_name   \n";
+
+      my $first =1;
+
+      foreach  my  $parameter_name  (@local_order)
+         {
+         my($parameter_default)  =    $local_parameters{$parameter_name}; 
+         if($first)
+           {         
+           print SIM_PARM_FILE  "   #(  .${parameter_name}(${parameter_default})";
+           $first = 0;
+           }
+         else
+           {         
+           print SIM_PARM_FILE  ",\n       .${parameter_name}(${parameter_default})";
+           }
+         }
+      print SIM_PARM_FILE  ") test \n (.clk(clk),.START(START),.FAIL(FAIL),.FINISH(FINISH)); \n\n\n\n";
+      print SIM_PARM_FILE  "`include \"./test_define\"  \n";
+      print SIM_PARM_FILE  "endmodule                                \n";
+
+
+      }
+
+ 
+
+
+
+

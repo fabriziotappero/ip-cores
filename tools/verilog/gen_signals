@@ -1,0 +1,281 @@
+eval 'exec `which perl` -S $0 ${1+"$@"}'
+   if 0;
+#/**********************************************************************/
+#/*                                                                    */
+#/*             -------                                                */
+#/*            /   SOC  \                                              */
+#/*           /    GEN   \                                             */
+#/*          /    TOOL    \                                            */
+#/*          ==============                                            */
+#/*          |            |                                            */
+#/*          |____________|                                            */
+#/*                                                                    */
+#/*                                                                    */
+#/*                                                                    */
+#/*                                                                    */
+#/*  Author(s):                                                        */
+#/*      - John Eaton, jt_eaton@opencores.org                          */
+#/*                                                                    */
+#/**********************************************************************/
+#/*                                                                    */
+#/*    Copyright (C) <2010-2011>  <Ouabache Design Works>              */
+#/*                                                                    */
+#/*  This source file may be used and distributed without              */
+#/*  restriction provided that this copyright statement is not         */
+#/*  removed from the file and that any derivative work contains       */
+#/*  the original copyright notice and the associated disclaimer.      */
+#/*                                                                    */
+#/*  This source file is free software; you can redistribute it        */
+#/*  and/or modify it under the terms of the GNU Lesser General        */
+#/*  Public License as published by the Free Software Foundation;      */
+#/*  either version 2.1 of the License, or (at your option) any        */
+#/*  later version.                                                    */
+#/*                                                                    */
+#/*  This source is distributed in the hope that it will be            */
+#/*  useful, but WITHOUT ANY WARRANTY; without even the implied        */
+#/*  warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR           */
+#/*  PURPOSE.  See the GNU Lesser General Public License for more      */
+#/*  details.                                                          */
+#/*                                                                    */
+#/*  You should have received a copy of the GNU Lesser General         */
+#/*  Public License along with this source; if not, download it        */
+#/*  from http://www.opencores.org/lgpl.shtml                          */
+#/*                                                                    */
+#/**********************************************************************/
+
+
+############################################################################
+# General PERL config
+############################################################################
+use Getopt::Long;
+use English;
+use File::Basename;
+use Cwd;
+use Scalar::Util qw(looks_like_number);
+use XML::LibXML;
+use lib './tools';
+use sys::lib;
+use yp::lib;
+use BerkeleyDB;
+
+
+$OUTPUT_AUTOFLUSH = 1; # set autoflush of stdout to TRUE.
+
+
+############################################################################
+### Process the options
+############################################################################
+Getopt::Long::config("require_order", "prefix=-");
+GetOptions("h","help",
+           "vendor=s" => \$vendor,
+           "library=s" => \$library,
+           "version=s" => \$version,
+           "component=s" => \$component,
+           "verbose"
+) || die "(use '$program_name -h' for help)";
+
+
+##############################################################################
+## Help option
+##############################################################################
+if ( $opt_h  or $opt_help  ) 
+  { print "\n read_ports    -vendor vendor_name -library library_name  -component component_name  -version version_name \n";
+    exit 1;
+  }
+
+
+
+
+
+
+#############################################################################
+## 
+## 
+#############################################################################
+
+
+$home = cwd();
+
+
+my $variant;
+
+if($version)       {$variant   = "${component}_${version}";}
+else               {$variant   = "${component}";}
+
+
+my $main_module_name = yp::lib::get_module_name($vendor,$library,$component,$version) ;
+my $parser = XML::LibXML->new();
+
+
+my $spirit_component_file    = $parser->parse_file(yp::lib::find_ipxact_component($vendor,$library,$component,$version));
+
+if($opt_verbose) {print "\n READ_ports     $vendor $library $component $version         \n";}
+
+
+
+my $io_ports  = yp::lib::get_io_ports() ;
+
+   my $gen_port_outfile = yp::lib::get_io_ports_db_filename($vendor,$library,$component,$version);
+   $ports_db   = new BerkeleyDB::Hash( -Filename => $gen_port_outfile, -Flags => DB_CREATE ) or die "Cannot open ${gen_port_outfile}: $!";
+#   print "XXXXXXXX   $gen_port_outfile           READ PORTS  \n";
+
+
+   my $gen_bus_outfile = yp::lib::get_io_busses_db_filename($vendor,$library,$component,$version,"default");
+   $busses_db   = new BerkeleyDB::Hash( -Filename => $gen_bus_outfile, -Flags => DB_CREATE ) or die "Cannot open ${gen_bus_outfile}: $!";
+#   print "XXXXXXXX   $gen_bus_outfile           READ PORTS  \n";
+
+
+
+   my $key;
+   my $value;
+
+
+
+   my @bus_list;
+   my @adhoc_list;
+
+   my $cursor = $busses_db ->db_cursor() ;
+   while ($cursor->c_get($key, $value, DB_NEXT) == 0) 
+   {
+#   print "INPUT  $key,   $value  \n";
+                 ( ${key_type},${busref},${conn}) = split( /\./ , $key);
+                 ( ${log_name},${direction},${type},${vector},${left},${right},${phy_name}) = split ':', $value;
+                 if(($key_type eq "BusRef"))
+                    {
+                    push (@bus_list,  "${busref}_${conn}     ${phy_name}  ${log_name}   ${direction}  ${type}  ${vector}   ${left}:${right}    ");
+                    uplift_port(  ${phy_name}  , ${direction}, ${type} , ${vector}, ${left} , ${right} );
+                    }
+                 else
+                    {
+
+                    }
+
+   }
+
+   my $status = $cursor->c_close() ;
+
+
+
+   $cursor = $ports_db ->db_cursor() ;
+   while ($cursor->c_get($key, $value, DB_NEXT) == 0) 
+   {
+   ( ${key_type},${busref},${conn}) = split( /\./ , $key);
+   ( ${log_name},${direction},${type},${vector},${left},${right},${phy_name}) = split ':', $value;
+#   print "OUTPUT $key,   $value  \n";
+                 if(($key_type eq "BusRef"))
+                    {
+                    }
+                 else
+                    {
+                    push (@adhoc_list,"              ${log_name}   ${direction}   ${type}  ${vector}   ${left}:${right}  ");
+                    }
+   }
+
+   my $status = $cursor->c_close() ;
+
+
+   $ports_db   -> db_close();
+   $busses_db   -> db_close();
+
+
+
+   @bus_list      = sys::lib::trim_sort(@bus_list);
+   @adhoc_list    = sys::lib::trim_sort(@adhoc_list);
+my @busses  = yp::lib::get_busses($vendor,$library,$component,$version);
+
+if($opt_verbose)
+  {
+    foreach $list (@bus_list)   {  print   "${list}\n";  }
+    foreach $list (@adhoc_list) {  print   "${list}\n";  } 
+    foreach $list (@busses)     {  print   "${list}\n";  }
+  }
+
+
+
+#/*********************************************************************************************/
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/*********************************************************************************************/
+
+
+sub uplift_port
+   {
+   my @params     = @_;
+   my $right            = pop(@params);
+   my $left             = pop(@params);
+   my $vector           = pop(@params);
+   my $type             = pop(@params);
+   my $direction        = pop(@params);
+   my $log_name         = pop(@params);
+ 
+if($opt_verbose){   print "PORT_UPLIFT  $log_name  $direction  $type  $vector  $left  $right  \n";}
+   $ports_db->db_put( "kxcd","${log_name}:${direction}:${type}:${vector}:${left}:${right}:HIER_HOLD"  );
+
+
+   my $uplift_data;
+   my $uplift_log_name ;
+   my $uplift_direction ;
+   my $uplift_type;
+   my $uplift_vector;
+   my $uplift_left;
+   my $uplift_right;
+
+   $ports_db->db_get("$log_name", $uplift_data );
+   (${uplift_log_name},${uplift_direction},${uplift_type},${uplift_vector},${uplift_left},${uplift_right}  ) = split ':', $uplift_data;
+
+   $ports_db->db_get("kxcd", $uplift_data );
+   (${log_name},${direction},${type},${vector},${left},${right}  ) = split ':', $uplift_data;
+   $ports_db->db_del("kxcd");
+
+   if(${uplift_log_name})
+     {
+#     print "REPLACING    ${uplift_log_name}  ${uplift_direction}  ${uplift_type}  ${uplift_vector}  ${uplift_left}  ${uplift_right}  \n";
+     if(${uplift_direction} ne "node"   ) {        $direction =${uplift_direction};}
+
+     if(${type} eq "wire" )   { $type =${uplift_type};}
+
+     if(${uplift_vector} eq "vector") 
+          {
+          if( $vector eq "vector" )
+              {
+              if( looks_like_number($uplift_left))
+                  {
+                  if( looks_like_number($left) )
+                    {
+                    if($uplift_left  > $left ) {$left  = $uplift_left;}
+                    }
+          
+                  }
+              else  
+                 { 
+                 if( looks_like_number($left) ) {$left  = ${uplift_left}; }               
+                 unless(${direction} ne "node") {$left  = ${uplift_left}; }               
+                 }
+               if( looks_like_number($uplift_right) &&  looks_like_number($right) )  { if($uplift_right  < $right ) {$right  = $uplift_right;}}
+               }
+          else
+             {
+             $vector = "vector";
+             $left   = ${uplift_left};
+             $right  = ${uplift_right};
+             }
+          }
+      }
+#   print "WITH         $log_name  $direction  $type  $vector  $left  $right  \n";
+   $ports_db->db_put( "${log_name}","${log_name}:${direction}:${type}:${vector}:${left}:${right}"  );
+if($opt_verbose) {  print "XXXXXXXX   WROTE ${log_name}   ${log_name}:${direction}:${type}:${vector}:${left}:${right}  \n";}
+   }
+
+
+
+
+
+
+
+
+
+1

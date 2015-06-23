@@ -1,0 +1,74 @@
+
+
+
+
+   //
+   // Internal wires and regs
+   //
+
+reg ex_freeze_r;
+
+  always @( posedge clk)
+     if (reset) ex_freeze_r <= 1'b1;
+     else       ex_freeze_r <= ex_freeze;
+
+
+
+
+
+   wire [2*WIDTH-1:0] 			mul_prod;
+   reg [1:0] 				mul_stall_count;   
+
+
+`ifndef SYNTHESYS
+
+always@(posedge clk)
+
+if(mul_stall_count == 2'b10)
+begin
+   $display("%t %m mul (%x,%x,%x);",$realtime,a_in,b_in,mul_prod );
+
+
+end
+
+
+
+`endif
+
+
+
+
+
+
+   or1200_gmultp2_32x32 or1200_gmultp2_32x32(
+					     .X(a_in),
+					     .Y(b_in),
+					     .RST(reset),
+					     .CLK(clk),
+					     .P(mul_prod)
+					     );
+   
+
+   always @( posedge clk)
+     if (reset) begin
+	mul_prod_r <=  64'h0000_0000_0000_0000;
+     end
+     else begin
+	mul_prod_r <=  mul_prod[63:0];
+     end
+
+   //
+   // Generate stall signal during multiplication
+   //
+   always @( posedge clk)
+     if (reset)
+       mul_stall_count <= 0;
+     else if (!(|mul_stall_count))
+       mul_stall_count <= {mul_stall_count[0], alu_op_mul & !ex_freeze_r};
+     else 
+       mul_stall_count <= {mul_stall_count[0],1'b0};
+       
+   assign mul_stall = (|mul_stall_count) | 
+		      (!(|mul_stall_count) & alu_op_mul & !ex_freeze_r);
+   
+

@@ -1,0 +1,278 @@
+eval 'exec `which perl` -S $0 ${1+"$@"}'
+   if 0;
+
+#/**********************************************************************/
+#/*                                                                    */
+#/*             -------                                                */
+#/*            /   SOC  \                                              */
+#/*           /    GEN   \                                             */
+#/*          /    TOOL    \                                            */
+#/*          ==============                                            */
+#/*          |            |                                            */
+#/*          |____________|                                            */
+#/*                                                                    */
+#/*  convert verilog file(s) to a geda symbol                          */
+#/*                                                                    */
+#/*                                                                    */
+#/*  Author(s):                                                        */
+#/*      - John Eaton, jt_eaton@opencores.org                          */
+#/*                                                                    */
+#/**********************************************************************/
+#/*                                                                    */
+#/*    Copyright (C) <2010>  <Ouabache Design Works>                   */
+#/*                                                                    */
+#/*  This source file may be used and distributed without              */
+#/*  restriction provided that this copyright statement is not         */
+#/*  removed from the file and that any derivative work contains       */
+#/*  the original copyright notice and the associated disclaimer.      */
+#/*                                                                    */
+#/*  This source file is free software; you can redistribute it        */
+#/*  and/or modify it under the terms of the GNU Lesser General        */
+#/*  Public License as published by the Free Software Foundation;      */
+#/*  either version 2.1 of the License, or (at your option) any        */
+#/*  later version.                                                    */
+#/*                                                                    */
+#/*  This source is distributed in the hope that it will be            */
+#/*  useful, but WITHOUT ANY WARRANTY; without even the implied        */
+#/*  warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR           */
+#/*  PURPOSE.  See the GNU Lesser General Public License for more      */
+#/*  details.                                                          */
+#/*                                                                    */
+#/*  You should have received a copy of the GNU Lesser General         */
+#/*  Public License along with this source; if not, download it        */
+#/*  from http://www.opencores.org/lgpl.shtml                          */
+#/*                                                                    */
+#/**********************************************************************/
+
+#  ToDo:
+#  parse reg from output bus name
+#  parse bus and change pin type to bus
+
+use Verilog::Netlist;
+
+# Setup options so files can be found
+use Verilog::Getopt;
+my $opt = new Verilog::Getopt;
+$opt->parameter( "+incdir+verilog",
+                    "-y","verilog",
+               );
+
+
+@files            = @ARGV;
+
+
+# Prepare netlist
+my $nl = new Verilog::Netlist (options => $opt,);
+
+foreach $file (@files) {
+                        print "Parsing   $file\n";
+                        $nl->read_file (filename=>$file);
+} 
+
+
+
+
+
+
+
+# Read in any sub-modules
+$nl->link();
+$nl->exit_if_error();
+
+
+foreach my $mod ($nl->top_modules_sorted) {make_sch ($mod);}
+
+
+
+sub make_sch {
+        my $mod = shift;
+        my $mod_name  = $mod->name;
+
+        my $in_count   = 0;
+        my $out_count  = 0;
+        my $in_length  = 0;
+        my $out_length = 0;
+
+        my $color =  5;
+        my $size  = 10;
+
+
+        open(FILE,">sym/${mod_name}.sym") or die "No sym directory";
+
+        foreach my $sig ($mod->ports_sorted) {
+
+            my $dir       =  $sig->direction;
+            my $data_type =  $sig->data_type;
+            my $sig_name  =  $sig->name;
+            $data_type  =~ s/reg //;
+            $data_type  =~ s/reg//;
+
+
+            if($data_type)
+              {
+              $pin_name = "$sig_name"."$data_type";
+              if("in" eq  $dir)
+                {
+                push(@invads,$pin_name);
+                $in_count = $in_count+1;
+                if( length($pin_name) > $in_length) { $in_length =  length($pin_name)};
+                }
+              if("out" eq  $dir)
+                {
+                push(@outvads,$pin_name);
+                $out_count = $out_count+1;
+                if( length($pin_name) > $out_length){  $out_length =  length($pin_name)            }
+                }
+
+              if("inout" eq  $dir)
+                {
+                push(@inoutvads,$pin_name);
+                $out_count = $out_count+1;
+                if( length($pin_name) > $out_length){  $out_length =  length($pin_name)            }
+                }
+
+
+
+              }
+            else          
+              {
+              $pin_name = $sig_name;
+              if("in" eq  $dir)
+                {
+                push(@inpads,$pin_name);
+                $in_count = $in_count+1;
+                if( length($pin_name) > $in_length){  $in_length =  length($pin_name)            }
+                }
+              if("out" eq  $dir)
+                {
+                push(@outpads,$pin_name);
+                $out_count = $out_count+1;
+                if( length($pin_name) > $out_length){  $out_length =  length($pin_name)            }
+                }
+
+              if("inout" eq  $dir)
+                {
+                push(@inoutpads,$pin_name);
+                $out_count = $out_count+1;
+                if( length($pin_name) > $out_length){  $out_length =  length($pin_name)            }
+                }
+
+              };          
+
+
+        }
+
+        my $max_pins;
+
+        if($in_count > $out_count) {$max_pins = $in_count ;} else  {$max_pins = $out_count ;}
+
+        my $box_h   = ($max_pins * 200) +300;
+        my $box_w   = ($in_length +$out_length)*10*$size +400;
+        my $out_title = ($in_length +$out_length)*10*$size +600;
+        my $out_edg = ($in_length +$out_length)*10*$size +700;
+        my $out_pad = ($in_length +$out_length)*10*$size +1000;
+        my $title   = $box_h +150;
+        my $ref_des = $box_h +350;
+
+        printf FILE ("v 20100214 1\n");
+        printf FILE ("B 300 0  $box_w $box_h 3 60 0 0 -1 -1 0 -1 -1 -1 -1 -1\n");
+        printf FILE ("T 400 $title 5 10 1 1 0 0 1 1\ndevice=%s\n", $mod->name);
+        printf FILE ("T 400 $ref_des 8 10 1 1 0 0 1 1\n%srefdes=U?\n");
+
+        printf  ("%s\n", $mod->name);
+
+
+         my $pin_y = 200;
+         my $pin_seq = 1;
+
+         while( $name =pop(@invads))
+          {
+          printf FILE ("P 300 $pin_y 0 $pin_y 10 1 1 \n");
+          printf FILE ("{\nT 400 $pin_y $color $size 1 1 0 1 1 1\npinnumber=%s\n",$name);
+          printf FILE ("T 400 $pin_y $color $size 0 1 0 1 1 1\npinseq=%s\n}\n",$pin_seq);
+          $pin_seq = $pin_seq +1;
+          $pin_y = $pin_y +200;
+          }
+
+
+         while( $name =pop(@inpads))
+          {
+           printf FILE ("P 300 $pin_y 0 $pin_y 4 0 1  \n");
+           printf FILE ("{\nT 400 $pin_y $color $size 1 1 0 1 1 1 \npinnumber=%s\n",$name);
+           printf FILE ("T 400 $pin_y $color $size 0 1 0 1 1 1 \npinseq=%s\n}\n",$pin_seq);
+           $pin_seq = $pin_seq +1;
+           $pin_y = $pin_y +200;
+          }
+
+
+
+         $pin_y = 200;
+
+         while( $name =pop(@outvads))         
+          {
+           printf FILE ("P $out_edg $pin_y $out_pad $pin_y 10 1 1\n");
+           printf FILE ("{\nT $out_title $pin_y $color  $size 1 1 0 7 1 1 \npinnumber=%s\n",$name);
+           printf FILE ("T $out_title $pin_y $color  $size 0 1 0 7 1 1 \npinseq=%s\n}\n",$pin_seq);
+           $pin_seq = $pin_seq +1;
+           $pin_y = $pin_y +200;
+          }
+
+
+         while( $name =pop(@outpads))         
+          {
+           printf FILE ("P $out_edg $pin_y $out_pad $pin_y 4 0 1\n");
+           printf FILE ("{\nT $out_title $pin_y $color  $size 1 1 0 7 1 1\npinnumber=%s\n",$name);
+           printf FILE ("T $out_edg $pin_y $color  $size 0 1 0 7 1 1\npinseq=%s\n}\n",$pin_seq);
+           $pin_seq = $pin_seq +1;
+           $pin_y = $pin_y +200;
+          }
+
+
+
+
+         while( $name =pop(@inoutvads))         
+          {
+           printf FILE ("P $out_edg $pin_y $out_pad $pin_y 10 1 1\n");
+           printf FILE ("{\nT $out_title $pin_y $color  $size 1 1 0 7 1 1 \npinnumber=%s\n",$name);
+           printf FILE ("T $out_title $pin_y $color  $size 0 1 0 7 1 1 \npinseq=%s\n}\n",$pin_seq);
+           $pin_seq = $pin_seq +1;
+           $pin_y = $pin_y +200;
+          }
+
+
+         while( $name =pop(@inoutpads))         
+          {
+           printf FILE ("P $out_edg $pin_y $out_pad $pin_y 4 0 1\n");
+           printf FILE ("{\nT $out_title $pin_y $color  $size 1 1 0 7 1 1\npinnumber=%s\n",$name);
+           printf FILE ("T $out_edg $pin_y $color  $size 0 1 0 7 1 1\npinseq=%s\n}\n",$pin_seq);
+           $pin_seq = $pin_seq +1;
+           $pin_y = $pin_y +200;
+          }
+
+
+
+
+
+
+
+
+        foreach my $cell ($mod->cells_sorted) {
+            close(FILE);
+            make_sch ($cell->submod, $cell->name) if $cell->submod;
+        }
+    }
+
+
+
+
+
+
+
+1;
+
+
+
+
+
+
+

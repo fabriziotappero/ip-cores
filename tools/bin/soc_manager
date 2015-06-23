@@ -1,0 +1,412 @@
+#!/usr/bin/perl -w
+
+# Pod guarantees that the documentation is included with the program.
+
+=pod
+
+=head1 NAME
+
+soc_manager - 
+
+=head1 DESCRIPTION
+
+
+
+
+=head2 Operation
+
+
+
+=cut   
+
+
+use Tk;
+use Tk::HList;
+use Tk::BrowseEntry;
+use Cwd;
+
+use subs qw/accept get_filename  show_dir show_file/;
+use subs qw/tkc_exit/;
+
+
+######################## Constants   ######################
+		
+# Attempt at O/S independence
+use constant UPLEVEL  => '/../..';
+
+
+
+
+
+
+
+my $ROOTDIR  = cwd();
+my $level    = "projects";
+ $ROOTDIR    = "$ROOTDIR"."/$level";
+
+
+    push @INC, "./tools/icons";
+    print "Soc_manager \n";
+
+
+
+# Default initial state, overwritten by config file values
+# If config file gets messed up, delete it to return to defaults
+
+my %config=(Box_height    => 20,     # file box height
+	    Box_width     => 30,     # file box width
+	    Path_L        => $ROOTDIR,    # Left box path
+	    Show_hidden_L => 0,    # Show hidden files
+	    Dirs_first_L  => 0,    # show dirs before files
+	    Case_fold_L   => 0,    # mix U/lc
+	    Size_L        => 1,    # display size of files
+	    Sort_L        => 'a'  # alpha, date or size
+	     );
+
+
+# Viewer is last because it might overlap other filepats
+$apps{ 'Viewer' } = '%v %n';
+$filepat{ 'Viewer' } = '^READ';
+$icons{ 'Viewer' } = \$FILEIMG;
+
+
+# Widget variables used everywhere in the code
+my ($dir_L);
+my ($box_L);
+
+
+
+
+
+
+
+# Return just the filename from a full entry
+# Args:
+#   full entry
+# Removes trailing size or date
+sub get_filename {
+    my $text = shift;
+    $text =~ s| \(.*||;
+    return $text;
+}
+
+########################### Commands ######################
+
+# Process quit command
+sub tkc_exit {
+    exit;
+}
+
+# double-clicking acts only on the active element.
+# The action to be taken is already determined in the 'data' attribute
+#
+sub up_L {
+    my $sel = $dir_L->cget( "-text" );
+    accept($box_L, $dir_L, $sel);
+}
+
+
+sub accept_L {
+    my $sel = shift;
+    accept($box_L, $dir_L, $sel);
+}
+
+
+
+sub accept {
+    my $box = shift;
+    my $dir = shift;
+    my $sel = shift;
+    my $entry = $sel;  # entry left as-is
+    my $new_sel;
+    # convert to full pathname
+    $sel = get_filename($sel);
+    $sel =~ s|\*|/|;
+    $sel =~ s|//|/|;
+
+
+
+    print ".... $level  $sel \n";
+    if($level eq "projects")
+    {
+    $new_sel = "${sel}/ip";
+    $next_level="components";
+    }
+    elsif($level eq "components")
+    {
+    $new_sel = "${sel}/rtl/xml";
+    $next_level="variants";
+    }
+
+
+    my $current = $dir->cget( "-text" );
+
+    print "xxxx $level $sel $current \n";
+    #get file type
+    my $type = $box->info("data",$entry);
+    if ($type eq "DIR") {
+	# Go up
+	if ( $current eq $sel ) 
+           {
+	    if($level eq "projects")
+             {
+	     $new_sel = $sel; 
+             $next_level="projects";
+             }
+            elsif($level eq "components")
+             {
+	     $new_sel = $sel . "/../.."; 
+             $next_level="projects";
+             }
+            elsif($level eq "variants")
+             {
+	     $new_sel = $sel . "/../../..";
+             $next_level="components";
+             }
+          print "yyyy $next_level $new_sel \n";
+	   }
+	chdir $new_sel;
+        $level = $next_level;
+	$sel = cwd;
+	$dir->configure( -text => $sel );
+	show_dir($sel, $box);
+    } elsif ($type eq "FILE") {
+        # Default action is to show file info
+	# +++ should do menu: ren, move, etc. ?
+	show_file( $sel );
+    } 
+}
+
+# Print help to a dialog box.  Help is a tearoff menu and non-modal so
+# it can be kept on the screen while learning tkc.
+sub help_menu {
+    my $h = shift;
+    my $text;
+    if ($h eq 'about') {
+	$text = "SOCGEN Manager \nWritten 10/10/10\nby John Eaton\n"
+	    . "Perl/Tk version $Tk::VERSION\n";
+	$Mainwin->messageBox( -icon => 'info', -type => OK, -title => $h, 
+			      -message => $text );
+    }     
+}
+
+
+
+
+
+# Modified to only show one level
+# Selects file types for calling special apps.
+# +++ Should do something about filenames which actually contain '*'
+sub show_dir {
+    my ($entry_path, $h) = @_;
+    my ($Show_hidden, $Dirs_first, $Case, $Sort, $Size) = 
+	($config{Show_hidden_L}, $config{Dirs_first_L}, $config{Case_fold_L}, 
+	 $config{Sort_L}, $config{Size_L});
+    my $sortname;
+
+    chdir $entry_path;
+    $entry_path = cwd;
+    opendir H, $entry_path;
+    my(@dirent) = grep ! /^\.\.?$/, readdir H;
+    closedir H;
+    $h->delete( "all" );
+    $h->add($entry_path,  -text => "$level", -image => $FOLDIMG, -data => 'DIR');
+
+    # Put directory into sval to sort
+    my @sval;
+    my $ix=0;
+
+    foreach $_ (@dirent) {
+	my $name = $_;
+	if (( $_ =~ /^\./ ) && ( ! $Show_hidden )) {
+	} else {
+	    my ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size,
+		$atime,$mtime,$ctime,$blksize,$blocks)
+		= stat($name);
+
+	    $size = 0 if !defined($size);  # not set on symbolic links
+	    $ctime = 0 if !defined($ctime);  # not set on symbolic links
+
+	    # $sortval string is value followed by entry
+	    # Assumes '|' does not appear in name
+	    $sortname = $Case ? lc : $_;
+	    if ($Sort eq 's') {
+		if (-d $name) {  # dont show or sort on size for directories
+		    $sortval = "00000000$sortname |$_";
+		} else {
+		    $sortval = sprintf "%9d |%s (%d)",$size,$_,$size;
+		}
+	    } else {
+		if ($Size) {
+		    $sortval = sprintf "%s |%s (%d)",$sortname,$_,$size;
+		} else {
+		    $sortval = "$sortname |$_";
+		}
+	    }
+	    if( $Dirs_first && (-d $name)) {
+		$sortval = "\t".$sortval;    # Assumes \t less than any char
+	    }
+	    
+	    $sval[$ix] = $sortval;
+	    $ix++;
+	}
+
+    }
+    
+    # stringwise sort
+    my @sorted = sort @sval;
+
+    # Now add the files into the box
+    for ($b = 0; $b < $ix; $b++) {
+	my $found_app = 0;
+        my ($foo, $text);
+
+	# Extract the entry
+	($foo, $text) = split (/\|/, $sorted[$b]);
+
+
+	my $name = get_filename ($text);
+	$sortname = $Case ? lc $name : $name;
+	my $fname = "$entry_path/$name";
+	my $file = "$entry_path\*$name";
+
+	# Classify the file
+      SW: {
+	# Directory
+	  if (-d $name) {
+	      $h->add($file,  -text => $foo, -image => $FOLDIMG, -data => 'DIR');
+	      last SW;
+	  }
+	  # app in filepat
+	  foreach my $k ( keys %apps ) {
+	      if ( $sortname =~ /$filepat{$k}/ ) { 
+		  my $iref = \$FILEIMG; # default
+		  $iref = $icons{$k} if (defined($icons{$k}));
+		  $h->add($file,  -text => $text, -image => $$iref, -data => $k );
+		  last SW;
+	      }
+	  }
+	  # default action
+	  $h->add($file,  -text => $text, -image => $FILEIMG, -data => 'FILE');
+      }
+    }
+} # end show_dir
+
+# File information
+#   file info: name, size, owner/grp, perms, type, link, dates
+sub show_file {
+    my $name = shift;
+    if ($name eq '') { 
+	return; 
+    }
+    $name =~ /"*(.*)\/([^"]*)/;
+    my $dir = $1 ? $1 : $ROOTDIR;
+    my $file = $2;
+    my ($i, $who, $m, $c);
+    chdir $dir;
+    my @fstat = stat $file;
+    if (!defined($fstat[7])) {
+	$Mainwin->messageBox( -icon => 'error', -type => OK, -title => 'Error',
+			      -message => "Can\'t stat $file in $dir" );
+	return;
+    }
+    my @pl = (-side=>'top', -anchor=>'w', -fill=>'none' );
+    my $db = $Mainwin->Toplevel;
+    my $f1=$db->Frame;
+    $f1->Label(-text=>sprintf("Name:\t%s",$name))->pack(@pl);
+
+
+
+    
+    $f1->pack(-side=>"top", -expand=>0);
+
+
+
+    my $f2=$db->Frame;
+    my $ok = $f2->Button( -text => "OK", -width =>9,
+	        -command =>sub { $db->destroy; } )
+	->pack(-side=>"left", -fill=>"x");
+    $f2->pack(-side=>"bottom", -expand=>1);
+    $db->raise;                  # make viewable
+    $db->grab;                   # set local grab
+    $db->tkwait('window',$db);   # wait for window event
+}
+
+
+
+
+####################### Pixmaps ##########################
+
+
+    
+$Mainwin = MainWindow->new( -title => 'SOCGEN Design Manager' );
+
+# Executable file marker
+$UPIMG   = $Mainwin->Pixmap(-file => Tk->findINC('soc_up.xpm'));
+$HOMEIMG = $Mainwin->Pixmap(-file => Tk->findINC('soc_home.xpm'));
+$FILEIMG = $Mainwin->Pixmap(-file => Tk->findINC('soc_file.xpm'));
+$FOLDIMG = $Mainwin->Pixmap(-file => Tk->findINC('soc_folder.xpm'));
+
+
+
+
+###################### Draw the Application ########################
+
+# Top Menu frame
+$menubar = $Mainwin->Menu(-type => 'menubar')->pack(-fill=>'x', -side=>'top');
+
+$file_menu = $menubar->cascade(-label => '~File', -tearoff => 0);
+$file_menu->separator;
+$file_menu->command(-label => 'quit',    -command => [\&tkc_exit, '' ]);
+
+$help_menu = $menubar->cascade(-label => '~Help', -tearoff => 1);
+$help_menu->command(-label => 'About',  -command => [\&help_menu, 'about']);
+
+
+
+
+
+# HList directory box frame
+
+$f_L   = $Mainwin->Frame;
+
+$f2_L  = $f_L->Frame->pack(-side => 'top', -padx => 4, -fill=>'x', -expand =>0 );
+
+$dir_L = $f2_L->Label(-text => $config{Path_L}, -relief => 'sunken' )
+          ->pack(-side => 'left', -padx => 4, -fill=>'x', -expand =>1 );
+
+$f2_L->Button( -image=>$UPIMG,  
+                -command => [\&up_L ] )
+                ->pack(-side => 'right', -fill=>'none', -expand =>0 );
+
+$f2_L->Button( -image=>$HOMEIMG,  
+                -command => sub {
+                                 my $sel = $ROOTDIR;
+                                 $dir_L->configure( -text => $sel );
+                                 show_dir( $sel, $box_L); 
+                                 } ) 
+                ->pack(-side => 'right', -fill=>'none', -expand =>0 );
+
+
+
+$box_L = $f_L->Scrolled( HList, -separator => '*', -selectmode => "extended",
+         -background => "white", -width => $config{Box_width},
+	 -height => $config{Box_height},
+         -indent => 10, -scrollbars => "e", -itemtype => "imagetext" )
+         ->pack(-fill=>'both', -side=>'bottom', -expand=>1 );
+
+$f_L->pack(-fill=>'both', -side=>'left', -expand=>1 );
+
+
+
+
+
+# On press and release, turn off selection in other box
+# On double click, call accept
+$box_L->configure( -command => [\&accept_L ]  );
+show_dir ( $config{Path_L}, $box_L );
+
+
+################################ Now just do it ##########################
+
+MainLoop;

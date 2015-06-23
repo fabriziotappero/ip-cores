@@ -1,0 +1,304 @@
+   
+    localparam STATE_SIZE = 3;
+
+
+    wire    [7:0]   ir;                       // instruction register
+    wire    [1:0]   length;                   // instruction length
+
+    wire    [STATE_SIZE:0]   state;          // current and next state registers
+
+    wire    [2:0]   dest;
+    wire    [2:0]   ctrl;
+
+    wire   [7:0]   vector;     
+
+    wire    [7:0]   operand  ;    
+    wire    [7:0]   imm_data;     // 
+    reg     [7:0]   index;         // will be assigned with either X or Y
+    wire    [15:0]  offset;         
+   
+   wire     now_fetch_op;
+   
+    // wiring that simplifies the FSM logic by simplifying the addressing modes
+    wire absolute;
+    wire immediate;
+    wire implied;
+    wire indirectx;
+    wire indirecty;
+    wire relative;
+    wire zero_page;
+    wire stack;
+ 
+    wire fetch_op;
+  
+   
+    wire [1:0] ins_type; 
+   
+    wire jump;
+    wire jump_indirect;
+
+    // regs for the special instructions
+    wire brk;
+    wire rti;
+    wire rts;
+    wire jsr;
+
+    wire invalid;
+    wire core_reset;
+   
+
+    wire branch_inst;     // a simple reg that is asserted everytime a branch will be executed.            
+    wire [7:0] brn_value;
+    wire [7:0] brn_enable;
+    wire [4:0] alu_status_update;
+
+    wire [2:0]      alu_op_a_sel;
+    wire [1:0]      alu_op_b_sel;
+   
+    wire     alu_op_b_inv;
+    wire [1:0]     alu_op_c_sel;
+    wire [2:0]      alu_mode;    
+   
+    wire [1:0]     idx_sel;
+
+   
+    wire    [7:0]   alu_result;    // result from alu operation
+
+
+    wire    [7:0]   alu_a;         // alu accumulator
+    wire    [7:0]   alu_x;         // alu x index register
+    wire    [7:0]   alu_y;         // alu y index register
+
+     reg    [7:0]   alu_op_b;
+
+    wire            alu_enable;     // a flag that when high tells the alu when to perform the operations
+    wire            alu_enable_s;     
+    wire        Error;
+   
+    wire    [1:0]   cmd;
+   
+assign alu_enable =  ((alu_enable_s || implied || stack  ) && !((state == `INT_1)||  (state == `INT_2) )              );
+   
+
+
+`VARIANT`CONTROL
+#( .BOOT_VEC (BOOT_VEC),
+   .STATE_SIZE(STATE_SIZE)
+)
+control(
+   .clk               ( clk               ),
+   .reset             ( reset             ), 
+   .enable            ( enable            ),
+   .state             ( state             ),
+   .ir                ( ir                ),
+   .nmi               ( nmi               ),
+   .vec_int           ( vec_int           ),
+   .invalid           ( invalid           ),
+   .run_status        ( alu_status[5]     ), 
+   .irq_status        ( alu_status[2]     ),
+   .brk_status        ( alu_status[4]     ),
+   .cmd               ( cmd               ),
+   .ctrl              ( ctrl              ),
+   .address           ( addr          ),
+   .branch_inst       ( branch_inst       ),
+   .vector            ( vector            ),
+   .core_reset        ( core_reset        )
+);
+
+
+`VARIANT`STATE_FSM
+#(.STATE_SIZE(STATE_SIZE))
+state_fsm (
+   .clk               ( clk               ),         
+   .reset             ( core_reset        ),        
+   .enable            ( enable            ),                   
+   .cmd               ( cmd               ),
+   .now_fetch_op      ( now_fetch_op      ),
+   .run               ( alu_status[5]     ),
+   .length            ( length            ),
+   .immediate         ( immediate         ),
+   .absolute          ( absolute          ),
+   .stack             ( stack             ),
+   .relative          ( relative          ), 
+   .implied           ( implied           ),       
+   .indirectx         ( indirectx         ),
+   .indirecty         ( indirecty         ),
+   .brk               ( brk               ),
+   .rts               ( rts               ),
+   .jump_indirect     ( jump_indirect     ),
+   .jump              ( jump              ),
+   .jsr               ( jsr               ),
+   .rti               ( rti               ),
+   .branch_inst       ( branch_inst       ),
+   .ins_type          ( ins_type          ),
+   .invalid           ( invalid           ),
+   .state             ( state             )
+
+);
+   
+`VARIANT`INST_DECODE
+#(.STATE_SIZE(STATE_SIZE))
+inst_decode (
+   .clk               ( clk               ),         
+   .reset             ( reset             ),        
+   .enable            ( enable            ),
+   .disable_ir        ((state == `INT_1) || (state == `INT_2) ),     
+   .now_fetch_op      ( now_fetch_op      ),                   
+   .fetch_op          ( fetch_op          ),
+   .state             ( state             ),
+   .prog_data         ( prog_counter[0]? prog_data[15:8]:prog_data[7:0]),
+     
+   .length            ( length            ),
+   .ir                ( ir                ),          
+   .absolute          ( absolute          ),
+   .immediate         ( immediate         ),
+   .implied           ( implied           ),
+   .indirectx         ( indirectx         ),
+   .indirecty         ( indirecty         ),
+   .relative          ( relative          ),
+   .zero_page         ( zero_page         ),
+   .stack             ( stack             ),
+   .jump              ( jump              ),
+   .jump_indirect     ( jump_indirect     ),
+   .brk               ( brk               ),
+   .rti               ( rti               ),
+   .rts               ( rts               ),
+   .jsr               ( jsr               ),
+   .ins_type          ( ins_type          ),
+   .alu_mode          ( alu_mode          ),
+   .alu_op_a_sel      ( alu_op_a_sel      ),
+   .alu_op_b_sel      ( alu_op_b_sel      ),
+   .alu_op_b_inv      ( alu_op_b_inv      ),
+   .alu_op_c_sel      ( alu_op_c_sel      ),
+   .idx_sel           ( idx_sel           ),
+   .alu_status_update ( alu_status_update ),
+   .brn_value         ( brn_value         ),
+   .brn_enable        ( brn_enable        ),
+   .dest              ( dest              ),
+   .ctrl              ( ctrl              ),
+   .invalid           ( invalid           )
+ );
+   
+
+   reg     last_prg_cnt_0;
+
+   always@(posedge clk )
+          last_prg_cnt_0 <= prog_counter[0];
+
+`VARIANT`SEQUENCER
+#( .VEC_TABLE (VEC_TABLE),
+   .STATE_SIZE(STATE_SIZE))
+  
+sequencer (
+   .clk               ( clk               ),         
+   .reset             ( reset             ),        
+   .enable            ( enable            ),
+   .now_fetch_op      ( now_fetch_op      ),
+   .cmd               ( cmd               ),
+   .state             ( state             ),
+   .length            ( length            ),         
+   .vector            ( vector            ),
+   .alu_result        ( alu_result        ),    
+   .alu_a             ( alu_a             ),    
+   .alu_status        ( alu_status        ),    
+   .alu_enable        ( alu_enable_s      ),
+   .alu_op_a_sel      ( alu_op_a_sel      ),
+   .pg0_data          ( pg0_data          ),
+   .data_in           ( addr[0]? rdata[15:8]: rdata[7:0]),
+   .prog_data16       ( prog_data         ),
+   .index             ( index             ),   
+   .prog_data         ( last_prg_cnt_0? prog_data[15:8]:prog_data[7:0]),
+   .implied           ( implied           ),
+   .fetch_op          ( fetch_op          ),
+   .immediate         ( immediate         ),  
+   .relative          ( relative          ),
+   .absolute          ( absolute          ),
+   .zero_page         ( zero_page         ),
+   .stack             ( stack             ),
+   .indirectx         ( indirectx         ),
+   .indirecty         ( indirecty         ),
+   .jump_indirect     ( jump_indirect     ),
+   .jump              ( jump              ),   
+   .jsr               ( jsr               ),
+   .brk               ( brk               ),
+   .rti               ( rti               ),
+   .rts               ( rts               ),
+   .branch_inst       ( branch_inst       ), 
+   .ins_type          ( ins_type          ),
+   .prog_counter      ( prog_counter      ),            
+   .address           ( addr          ),       
+   .operand           ( operand           ),     
+   .imm_data          ( imm_data          ),     
+
+   .pg0_add           ( pg0_add           ), 
+   .pg0_rd            ( pg0_rd            ),        
+   .pg0_wr            ( pg0_wr            ),         
+
+
+
+   .rd            ( rd            ),
+   .wr            ( wr            ),
+   .data_out          ( wdata         ),      
+   .offset            ( offset            ),
+   .stk_push          ( stk_push          ),
+   .stk_push_data     ( stk_push_data     ),
+   .stk_pull          ( stk_pull          ),
+   .stk_pull_data     ( stk_pull_data     )
+
+
+);
+   
+
+always@(*)
+
+  case (idx_sel)
+    `idx_sel_00:          index  = 8'h00;
+    `idx_sel_x:           index  = alu_x;
+    `idx_sel_y:           index  = alu_y;
+     default:             index  = 8'bxxxxxxxx;
+  endcase
+
+
+reg [7:0]     mem_dat;
+   
+always@(*) mem_dat  = addr[0] ? rdata[15:8] : rdata[7:0];
+   
+   
+always@(*)
+
+  case (alu_op_b_sel)
+    `alu_op_b_00:         alu_op_b  = 8'h00;
+    `alu_op_b_imm:        alu_op_b  = imm_data;
+    `alu_op_b_stk:        alu_op_b  = stk_pull_data[7:0];
+    `alu_op_b_opnd:       alu_op_b  = mem_dat;
+  endcase
+
+
+`VARIANT`ALU  
+alu (
+    .clk                ( clk                 ),
+    .reset              ( reset               ),
+    .enable             ( enable              ),
+    .alu_enable         ( alu_enable          ),
+    .alu_result         ( alu_result          ),
+    .alu_status         ( alu_status          ),
+    .alu_op_b           ( alu_op_b            ),
+    .psp_res            ( stk_pull_data[15:8] ),
+    .alu_mode           ( alu_mode            ),
+    .alu_op_a_sel       ( alu_op_a_sel        ),
+    .alu_op_b_inv       ( alu_op_b_inv        ),
+    .alu_op_c_sel       ( alu_op_c_sel        ),
+    .alu_status_update  ( alu_status_update   ),
+    .branch_inst        ( branch_inst         ),
+    .relative           ( relative            ), 
+    .dest               ( dest                ),         
+    .brn_enable         ( brn_enable          ),
+    .brn_value          ( brn_value           ),
+    .alu_x              ( alu_x               ),
+    .alu_y              ( alu_y               ),
+    .alu_a              ( alu_a               )         
+    );
+
+
+
+

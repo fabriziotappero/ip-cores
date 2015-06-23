@@ -1,0 +1,151 @@
+#!/usr/bin/perl 
+use strict;
+use warnings;
+use Data::Dumper;
+# this code can be re-written without any regex/eval,their use is purely for shortening the code
+
+
+use constant BASE_PRIORITY => 
+{
+	NUMBER		=> 2,
+	OPEN_PARA	=> 8,
+	CLOSED_PARA => 8,
+	ADD			=> 4,
+	SUB			=> 4,
+	MUL			=> 7,
+	DIV			=> 7,
+	POW			=> 9,
+};
+
+use constant DEPTH_BONUS => 10;
+
+my $exp = $ARGV[0];
+
+#my $exp = "5*(12/(32+4))-10";
+#my $exp = "3**(6-1*4)**2";
+
+#my $exp = -3+(-1-2);
+#my $exp = (3-(4+6))/2;
+
+my $depth = 0;
+my @terms;
+
+
+
+sub delete_at { # delete the term at the index equal to the parameter given to this function
+	return shift @terms if $_[0] == 0;
+	return pop @terms if $_[0] == (@terms-1);
+	my $ret = $terms[ $_[0] ];
+	@terms = (
+		@terms[0..$_[0]-1],
+		@terms[$_[0]+1..@terms-1],
+	);
+	return $ret;
+}
+
+sub insert_at { # inserts a term exactly before the index given as parameter
+	@terms = (
+		@terms[0..$_[0]-1],
+		$_[1],
+		@terms[$_[0]..@terms-1],
+	);
+
+}
+
+
+sub firstPass {# this builds up the @terms for later use
+	while( $exp =~ s/^(\-?\d+|\*\*|\*|\/|\+|\-|\(|\))// ) {
+		my $type=$1;
+		my $term=$1;
+		if( @terms>0 &&  $terms[@terms - 1 ]->{type} eq 'NUMBER' && $term =~ /\-\d+/ ) {
+			#see if we currently have a negative number,see if before we had a number
+			#this means that we're on the wrong track and that - is actually an operator here
+			#and not the sign for a negative number
+			$exp=$term.$exp;
+			$exp=~s/^-//;
+			$type = "SUB";
+			$term = '-';
+	#		print "EXP $exp \n";
+		} else {
+			$type =~ s/\-?\d+/NUMBER/;
+		};
+		$type =~ s/\(/OPEN_PARA/;
+		$type =~ s/\)/CLOSED_PARA/;
+		$type =~ s/\+/ADD/;
+		$type =~ s/\*\*/POW/;
+		$type =~ s/\*/MUL/;
+		$type =~ s/\//DIV/;
+		$type =~ s/\-$/SUB/;
+		my ($is_term_para) = $type =~ /OPEN_PARA|CLOSED_PARA/; # this flag will tell us wether the term is or is not a paranthesis 
+		$depth++ if $type eq 'OPEN_PARA';  # if we encounter an open paranthesis we increase depth
+		$depth-- if $type eq 'CLOSED_PARA';# closed paranthesis we decrease it
+		push @terms,
+		{
+			type		=> $type,
+			term		=> $term,
+			priority	=> BASE_PRIORITY->{$type} + $depth*DEPTH_BONUS
+		}
+		unless $is_term_para; # we leave out the paranthesis because we no longer need them(their purpose
+							  # was to provide priority information for us)
+	};
+}
+
+
+sub getPrioritary { # gets most prioritary 3 elements in the current expression
+
+	my @sIndexes = sort { -1 * ( $terms[$a]->{priority} <=> $terms[$b]->{priority} ); } 0..(@terms-1) ;
+
+	my $i = 0; # the index in @sIndexes
+	my $middleMaxPrio = $sIndexes[$i];
+
+	while( $terms[$middleMaxPrio]->{type} eq 'NUMBER' ) { # if our selected maximum priority element is not a number search for the next most prioritized that is a number
+#		print "[DEBUG] $terms[$middleMaxPrio]->{type}";
+		$middleMaxPrio = $sIndexes[++$i];
+	};
+
+	my $leftNearMax	  = $middleMaxPrio -1; # we take the left of $middleMaxPrio
+	my $rightNearMax  = $middleMaxPrio +1; # and the right of it , becuase these two are surely operands
+
+	my @selectedTerms = map { delete_at $_  } ( $rightNearMax , $middleMaxPrio , $leftNearMax ); # we delete them in inverse order to not alter the stack badly
+
+	return {
+		selected	=> [ @selectedTerms ],
+		insertIndex	=> $leftNearMax,
+		maxPriority	=> $selectedTerms[1]->{priority}, # the middle element will be surely an operator so it will have maximum priority
+	};
+}
+
+
+#---------------------------------------------------------------------------------------------------------------------
+
+firstPass;
+
+while( @terms > 1 ) {
+#	print "DEBUG ".Dumper [@terms];
+
+	my $data = getPrioritary;
+	my @elems = map { $_->{term} } @{ $data->{selected} };
+	my $expr = sprintf "%s %s %s", reverse @elems;
+	my $result = eval($expr); # the eval here has just been used for shortening the code,it could have very well been a simple switch on $elems[1]
+
+#	print "DEBUG [$expr]\n";
+
+	insert_at 
+	$data->{insertIndex},
+	{
+		type	=> 'NUMBER',
+		term	=> $result,
+		priority=> $data->{maxPriority} - DEPTH_BONUS #we have calculated what was probably a paranthesis therefore we substrac a depth_bonus
+	};
+	
+};
+
+
+my $result_out =$terms[0]->{term};
+
+print "$result_out\n";
+
+
+
+
+1

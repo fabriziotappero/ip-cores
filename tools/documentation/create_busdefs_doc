@@ -1,0 +1,385 @@
+eval 'exec `which perl` -S $0 ${1+"$@"}'
+   if 0;
+
+#/**********************************************************************/
+#/*                                                                    */
+#/*             -------                                                */
+#/*            /   SOC  \                                              */
+#/*           /    GEN   \                                             */
+#/*          /    TOOL    \                                            */
+#/*          ==============                                            */
+#/*          |            |                                            */
+#/*          |____________|                                            */
+#/*                                                                    */
+#/*                                                                    */
+#/*                                                                    */
+#/*  Author(s):                                                        */
+#/*      - John Eaton, jt_eaton@opencores.org                          */
+#/*                                                                    */
+#/**********************************************************************/
+#/*                                                                    */
+#/*    Copyright (C) <2010-2011>  <Ouabache Design Works>              */
+#/*                                                                    */
+#/*  This source file may be used and distributed without              */
+#/*  restriction provided that this copyright statement is not         */
+#/*  removed from the file and that any derivative work contains       */
+#/*  the original copyright notice and the associated disclaimer.      */
+#/*                                                                    */
+#/*  This source file is free software; you can redistribute it        */
+#/*  and/or modify it under the terms of the GNU Lesser General        */
+#/*  Public License as published by the Free Software Foundation;      */
+#/*  either version 2.1 of the License, or (at your option) any        */
+#/*  later version.                                                    */
+#/*                                                                    */
+#/*  This source is distributed in the hope that it will be            */
+#/*  useful, but WITHOUT ANY WARRANTY; without even the implied        */
+#/*  warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR           */
+#/*  PURPOSE.  See the GNU Lesser General Public License for more      */
+#/*  details.                                                          */
+#/*                                                                    */
+#/*  You should have received a copy of the GNU Lesser General         */
+#/*  Public License along with this source; if not, download it        */
+#/*  from http://www.opencores.org/lgpl.shtml                          */
+#/*                                                                    */
+#/**********************************************************************/
+
+use Getopt::Long;
+use English;
+use File::Basename;
+use Cwd;
+use XML::LibXML;
+use lib './tools';
+use sys::lib;
+use yp::lib;
+
+$OUTPUT_AUTOFLUSH = 1; # set autoflush of stdout to TRUE.
+
+my $parser = XML::LibXML->new();
+
+
+#/*********************************************************************************************/
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/                                                                                            */
+#/*********************************************************************************************/
+
+my $home    = cwd();
+
+
+my $vendor_check    = $ARGV[0];
+
+
+chomp($vendor_check);
+
+
+
+
+my @vendors = yp::lib::find_vendors();
+
+
+print "Checking busDefinitions  \n";  
+
+
+foreach  my $vendor (@vendors)
+{
+if ( ($vendor_check eq "") or  ($vendor eq $vendor_check)  )
+   {
+
+
+   my @libraries = yp::lib::find_libraries($vendor);
+   foreach  my $library (@libraries)
+      {
+      my $repo = yp::lib::find_library_repo($vendor,$library);
+
+
+
+      my @components = yp::lib::find_components($vendor,$library);
+      foreach  my $component (@components)
+        {
+   print "V   $vendor $library $component     \n";
+
+     
+        my $socgen_file               = $parser->parse_file(yp::lib::find_componentConfiguration($vendor,$library,$component));
+        my $doc_library_path         = $socgen_file->findnodes("//socgen:componentConfiguration/socgen:doc/socgen:library_path/text()")->to_literal;
+        my $lib_comp_sep             = yp::lib::find_lib_comp_sep($vendor,$library,$component);           
+
+        my $path  = "${home}${repo}/${vendor}/${library}${doc_library_path}";
+        mkdir $path,0755             unless( -e $path );
+
+
+        $doc_library_path = "${doc_library_path}/Heda";
+
+        my $path  = "${home}${repo}/${vendor}/${library}${doc_library_path}";
+        mkdir $path,0755             unless( -e $path );
+
+
+        my $path  = "${home}${repo}/${vendor}/${library}${doc_library_path}/busDef";
+        mkdir $path,0755             unless( -e $path );
+
+
+
+
+
+
+
+        my @versions = yp::lib::find_busDefinition_versions($vendor,$library,$component); 
+
+
+
+
+        foreach  my $version (@versions)
+          {
+          my $path  = "${home}${repo}/${vendor}/${library}${doc_library_path}/busDef/${component}_${version}";
+          open(FILE,">${path}.txt") or die "No busDef directory";
+
+
+          print FILE  "${vendor}:${library}:${component}:${version}\n";
+          print FILE  "\t--------------------------------------------------------------------------------------------------------\n";
+
+          my $spirit_file       = yp::lib::find_ipxact_busDefinition($vendor,$library,$component,$version);
+
+          print FILE  "\tFilename:  ${spirit_file}\n";
+          unless ($spirit_file) {print "Error busDefinition file does not exist";}
+
+          my $spirit_busDef_file   = $parser->parse_file($spirit_file);
+          foreach my $busDef ($spirit_busDef_file->findnodes("//spirit:busDefinition/spirit:vendor")) 
+                {
+                   my($bt_vendor)         = $busDef->findnodes('./text()')->to_literal ;
+                   my($bt_library)        = $busDef->findnodes('../spirit:library/text()')->to_literal ;
+                   my($bt_name)           = $busDef->findnodes('../spirit:name/text()')->to_literal ;
+                   my($bt_version)        = $busDef->findnodes('../spirit:version/text()')->to_literal ;
+                   print FILE  "\tVLNV-bt     ${bt_vendor}_${bt_library}_${bt_name}_${bt_version}\n";
+                }
+
+           my %systemGroupNames = ();
+
+          foreach  my   $i_name ($spirit_busDef_file->findnodes("//spirit:busDefinition/spirit:systemGroupNames/spirit:systemGroupName"))
+                       {
+                       my($sysgroup_name)       = $i_name ->findnodes('./text()')->to_literal;
+                       print FILE  "\t     SystemGroup Name $sysgroup_name \n";
+                       $systemGroupNames{$sysgroup_name} = 1;
+                       }
+          print FILE  "\n";
+          }
+ 
+
+       }
+      }
+
+   if  ($vendor eq $vendor_check) {last;};
+   }
+print "\n";
+}
+
+
+
+
+
+
+my @vendors = yp::lib::find_vendors();
+
+print "Checking rtl abstractors   \n";  
+
+
+
+
+
+
+
+
+foreach  my $vendor (@vendors)
+{
+if ( ($vendor_check eq "") or  ($vendor eq $vendor_check)  )
+   {
+   my @libraries = yp::lib::find_libraries($vendor);
+   foreach  my $library (@libraries)
+      {
+
+      my @components = yp::lib::find_components($vendor,$library);
+      foreach  my $component (@components)
+        {
+        my $socgen_file               = $parser->parse_file(yp::lib::find_componentConfiguration($vendor,$library,$component));
+        my $doc_library_path         = $socgen_file->findnodes("//socgen:componentConfiguration/socgen:doc/socgen:library_path/text()")->to_literal;
+        my $lib_comp_sep             = yp::lib::find_lib_comp_sep($vendor,$library,$component);           
+
+        my $path  = "${home}${repo}/${vendor}/${library}${doc_library_path}";
+        mkdir $path,0755             unless( -e $path );
+
+
+        $doc_library_path = "${doc_library_path}/Heda";
+
+        my $path  = "${home}${repo}/${vendor}/${library}${doc_library_path}";
+        mkdir $path,0755             unless( -e $path );
+
+
+        my $path  = "${home}${repo}/${vendor}/${library}${doc_library_path}/absDef";
+        mkdir $path,0755             unless( -e $path );
+
+
+        my @versions = yp::lib::find_abstractionDefinition_versions($vendor,$library,$component); 
+
+        foreach  my $version (@versions)
+          {
+
+          my $path  = "${home}${repo}/${vendor}/${library}${doc_library_path}/absDef/${component}_${version}";
+          open(FILE,">${path}.txt") or die "No sch directory";
+
+
+          print FILE  "${vendor}:${library}:${component}:${version}\n";
+          print FILE "\t--------------------------------------------------------------------------------------------------------\n";
+
+          my $spirit_file       = yp::lib::find_ipxact_abstractionDefinition($vendor,$library,$component,$version);
+
+          print FILE  "\tFilename:  ${spirit_file}\n";
+          unless ($spirit_file) {print "Error absDef file does not exist";}
+
+          my $spirit_absDef_file   = $parser->parse_file($spirit_file);
+          foreach my $absDef ($spirit_absDef_file->findnodes("//spirit:abstractionDefinition/spirit:vendor")) 
+                {
+                my($bd_vendor)         = $absDef->findnodes('./text()')->to_literal ;
+                my($bd_library)        = $absDef->findnodes('../spirit:library/text()')->to_literal ;
+                my($bd_name)           = $absDef->findnodes('../spirit:name/text()')->to_literal ;
+                my($bd_version)        = $absDef->findnodes('../spirit:version/text()')->to_literal ;
+                print FILE "\tVLNV-ad     ${bd_vendor}_${bd_library}_${bd_name}_${bd_version}\n";
+
+                my %systemGroupNames = ();
+
+
+                foreach my $bus_type ($spirit_absDef_file->findnodes("//spirit:abstractionDefinition/spirit:busType")) 
+                   {
+                   my($bt_vendor)        = $bus_type->findnodes('./@spirit:vendor')->to_literal ;
+                   my($bt_library)       = $bus_type->findnodes('./@spirit:library')->to_literal ;
+                   my($bt_name)          = $bus_type->findnodes('./@spirit:name')->to_literal ;
+                   my($bt_version)       = $bus_type->findnodes('./@spirit:version')->to_literal ;
+                   print FILE "\tVLNV-bt     ${bt_vendor}_${bt_library}_${bt_name}_${bt_version}\n";
+
+                   my $spirit_file       = yp::lib::find_ipxact_busDefinition($bt_vendor,$bt_library,$bt_name,$bt_version);
+
+                   unless ($spirit_file) {print "ERROR: No bus definition\n";}
+                   else
+                     {
+                     my $spirit_busDef_file   = $parser->parse_file($spirit_file);
+                     foreach  my   $i_name ($spirit_busDef_file->findnodes("//spirit:busDefinition/spirit:systemGroupNames/spirit:systemGroupName"))
+                       {
+                       my($sysgroup_name)       = $i_name ->findnodes('./text()')->to_literal;
+                       print FILE   "\t     SystemGroup Name $sysgroup_name \n";
+                       $systemGroupNames{$sysgroup_name} = 1;
+                       }
+                     }
+                   } 
+
+                foreach my $absDef ($spirit_absDef_file->findnodes("//spirit:abstractionDefinition/spirit:ports/spirit:port/spirit:logicalName")) 
+                   {
+                   my($logical_name)         = $absDef->findnodes('./text()')->to_literal ;
+                   my($is_clock)             = $absDef->findnodes('../spirit:wire/spirit:qualifier/spirit:isClock/text()')->to_literal ;
+                   my($is_reset)             = $absDef->findnodes('../spirit:wire/spirit:qualifier/spirit:isReset/text()')->to_literal ;
+                   my($requires_driver)      = $absDef->findnodes('../spirit:wire/spirit:requiresDriver/text()')->to_literal ;
+                   my($driver_type)          = $absDef->findnodes('../spirit:wire/spirit:requiresDriver/@spirit:driverType')->to_literal ;
+                   my($default_value)        = $absDef->findnodes('../spirit:wire/spirit:defaultValue/text()')->to_literal ;
+
+                   print FILE   "\nPort:  ${logical_name} ";
+                   
+                   if($is_clock)    
+                     {
+                     if($is_reset)  { print FILE   "  BOTH CLOCK and RESET  ";}
+                     else           { print FILE   "  CLOCK ";}
+                     }
+                   elsif($is_reset) { print FILE   "  RESET ";}
+                   else             { print FILE   "  ";}
+
+                   if($requires_driver) {print FILE   " Requires Driver  $driver_type   ";}
+                   else                 {print FILE   "   ";}
+
+                   if($default_value)   {print FILE   " Default Value   $default_value  \n";}
+                   else                 {print FILE   " \n";}
+
+                   my $master_presence;
+                   my $master_width;
+                   my $master_direction;
+
+                   foreach my $onMaster ($spirit_absDef_file->findnodes("//spirit:abstractionDefinition/spirit:ports/spirit:port/spirit:logicalName[text() = '$logical_name']/../spirit:wire/spirit:onMaster/spirit:presence")) 
+                    {
+                    $master_presence    = $onMaster->findnodes('./text()')->to_literal ;
+                    $master_width       = $onMaster->findnodes('../spirit:width/text()')->to_literal ;
+                    $master_direction   = $onMaster->findnodes('../spirit:direction/text()')->to_literal ;
+                    print FILE   "  onMaster presence    $master_presence \n";
+                    unless($master_width)     {$master_width = 1;}
+                    print FILE   "  onMaster width       $master_width \n";
+                    if($master_direction) {print FILE   "  onMaster direction   $master_direction \n";}
+                    print FILE   "\n";
+                    }
+
+                   my $slave_presence;
+                   my $slave_width;
+                   my $slave_direction;
+
+                   foreach my $onSlave ($spirit_absDef_file->findnodes("//spirit:abstractionDefinition/spirit:ports/spirit:port/spirit:logicalName[text() = '$logical_name']/../spirit:wire/spirit:onSlave/spirit:presence")) 
+                    {
+                    $slave_presence   = $onSlave->findnodes('./text()')->to_literal ;
+                    $slave_width      = $onSlave->findnodes('../spirit:width/text()')->to_literal ;
+                    $slave_direction  = $onSlave->findnodes('../spirit:direction/text()')->to_literal ;
+                    print FILE   "  onSlave  presence    $slave_presence \n";
+                    unless($slave_width)     {$slave_width = 1;}
+                    print FILE   "  onSlave  width       $slave_width \n";
+                    if($slave_direction) {print FILE   "  onSlave  direction   $slave_direction \n";}
+                    print FILE   "\n";
+                    }
+
+
+                   my %systemGroupPresence= ();
+                   my %systemGroupWidth= ();
+                   my %systemGroupDirection= ();
+
+
+
+                   foreach my $onSystem  ($spirit_absDef_file->findnodes("//spirit:abstractionDefinition/spirit:ports/spirit:port/spirit:logicalName[text() = '$logical_name']/../spirit:wire/spirit:onSystem/spirit:group")) 
+                    {
+                    my($system_group)        = $onSystem->findnodes('./text()')->to_literal ;
+                    my($presence)            = $onSystem->findnodes('../spirit:presence/text()')->to_literal ;
+                    my($width)               = $onSystem->findnodes('../spirit:width/text()')->to_literal ;
+                    my($direction)           = $onSystem->findnodes('../spirit:direction/text()')->to_literal ;
+                    print FILE   "  onSystem Group       $system_group \n";
+                    print FILE   "  onSystem presence    $presence \n";
+                    unless($width)     {$width = 1;}
+                    if($width){print FILE   "  onSystem width       $width \n";}
+                    if($direction){print FILE   "  onSystem direction   $direction \n";}
+                    print FILE   "\n";
+                    $systemGroupPresence{$system_group} =$presence  ;
+                    $systemGroupWidth{$system_group} =$width  ;
+                    $systemGroupDirection{$system_group} =$direction  ;
+                    unless(   $systemGroupNames{$system_group}) {print FILE   "Group $system_group not defined in busDefinition \n"; }
+                    }
+# insert DRC checks here
+
+
+                   }
+                }
+
+
+          print FILE   "\n";
+          close(FILE);
+          }
+
+        }
+
+
+      }
+
+   if  ($vendor eq $vendor_check) {last;};
+   }
+print    "\n";
+}
+
+
+
+
+
+
+
+
+
+
+
+
+

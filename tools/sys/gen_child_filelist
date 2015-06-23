@@ -1,0 +1,321 @@
+eval 'exec `which perl` -S $0 ${1+"$@"}'
+   if 0;
+
+#/**********************************************************************/
+#/*                                                                    */
+#/*             -------                                                */
+#/*            /   SOC  \                                              */
+#/*           /    GEN   \                                             */
+#/*          /    TOOL    \                                            */
+#/*          ==============                                            */
+#/*          |            |                                            */
+#/*          |____________|                                            */
+#/*                                                                    */
+#/*                                                                    */
+#/*                                                                    */
+#/*  Author(s):                                                        */
+#/*      - John Eaton, jt_eaton@opencores.org                          */
+#/*                                                                    */
+#/**********************************************************************/
+#/*                                                                    */
+#/*    Copyright (C) <2010-2011>  <Ouabache Design Works>              */
+#/*                                                                    */
+#/*  This source file may be used and distributed without              */
+#/*  restriction provided that this copyright statement is not         */
+#/*  removed from the file and that any derivative work contains       */
+#/*  the original copyright notice and the associated disclaimer.      */
+#/*                                                                    */
+#/*  This source file is free software; you can redistribute it        */
+#/*  and/or modify it under the terms of the GNU Lesser General        */
+#/*  Public License as published by the Free Software Foundation;      */
+#/*  either version 2.1 of the License, or (at your option) any        */
+#/*  later version.                                                    */
+#/*                                                                    */
+#/*  This source is distributed in the hope that it will be            */
+#/*  useful, but WITHOUT ANY WARRANTY; without even the implied        */
+#/*  warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR           */
+#/*  PURPOSE.  See the GNU Lesser General Public License for more      */
+#/*  details.                                                          */
+#/*                                                                    */
+#/*  You should have received a copy of the GNU Lesser General         */
+#/*  Public License along with this source; if not, download it        */
+#/*  from http://www.opencores.org/lgpl.shtml                          */
+#/*                                                                    */
+#/**********************************************************************/
+
+
+
+
+############################################################################
+# General PERL config
+############################################################################
+use Getopt::Long;
+use English;
+use File::Basename;
+use Cwd;
+use XML::LibXML;
+use lib './tools';
+use sys::lib;
+use yp::lib;
+
+$OUTPUT_AUTOFLUSH = 1; # set autoflush of stdout to TRUE.
+
+
+############################################################################
+### Process the options
+############################################################################
+Getopt::Long::config("require_order", "prefix=-");
+GetOptions("h","help",
+           "envidentifier=s" => \$envidentifier,
+           "prefix=s" => \$prefix,
+           "vendor=s" => \$vendor,
+           "library=s" => \$library,
+           "component=s" => \$component,
+           "version=s" => \$version,
+           "top_file=s" => \$top_file,
+           "suffix=s" => \$suffix,
+           "leader=s" => \$leader,
+           "overlay_src_ven=s" => \$overlay_src_ven,
+           "overlay_src_lib=s" => \$overlay_src_lib,
+           "overlay_des_ven=s" => \$overlay_des_ven,
+           "overlay_des_lib=s" => \$overlay_des_lib,
+           "top","top_lib"
+) || die "(use '$program_name -h' for help)";
+
+
+
+##############################################################################
+## Help option
+##############################################################################
+if ( $opt_h  or $opt_help) 
+  { print "\n gen_child_filelist -prefix /work -envidentifier *simulation*  -vendor vendor_name  -library library_name  -component component_name -version version_name   ";
+    print "\n";
+    exit 1;
+  }
+
+
+##############################################################################
+## 
+##############################################################################
+
+$home = cwd();
+my $variant;
+my $view;
+my $filesetref_name;
+
+if($version)       {$variant   = "${component}_${version}";}
+else               {$variant   = "${component}";}
+
+my $parser = XML::LibXML->new();
+my $spirit_component_file  = $parser->parse_file(yp::lib::find_ipxact_component($vendor,$library,$component,$version));
+my $comp_xml_sep           = yp::lib::find_comp_xml_sep($vendor,$library,$component,$version);
+my $lib_comp_sep           = yp::lib::find_lib_comp_sep($vendor,$library,$component);
+
+
+#print "XXXXXS   $vendor,$library,$component,$version \n";
+
+foreach my $X_view ($spirit_component_file->findnodes('//spirit:component/spirit:model/spirit:views/spirit:view')) 
+         {
+         my($Xview_name)            = $X_view->findnodes('./spirit:name/text()')->to_literal ;
+         my($Xview_envidentifier)   = $X_view->findnodes('./spirit:envIdentifier/text()')->to_literal ;
+         my($Xview_filesetref_name)  = $X_view->findnodes('./spirit:fileSetRef/spirit:localName/text()')->to_literal ;
+
+#print  "XXXXX   $Xview_name || $Xview_envidentifier || $Xview_filesetref_name  \n";
+
+         if($envidentifier eq $Xview_envidentifier ) 
+              { 
+              $view = $Xview_name;
+              $filesetref_name = $Xview_filesetref_name;
+              }            
+         }
+
+#print  "XXXXZ   $view || view_filesetref_name  \n";
+
+
+
+
+unless($suffix) { $suffix = $view };
+
+
+
+if($suffix)
+{
+
+$path ="${home}${prefix}/${vendor}__${library}${lib_comp_sep}${component}${comp_xml_sep}/../filelists";
+mkdir $path,0755          unless( -e $path );
+my $outfile ="${home}${prefix}/${vendor}__${library}${lib_comp_sep}${component}${comp_xml_sep}/../filelists/${variant}.${suffix}\n";
+open SIMFILE,">$outfile" or die "unable to open $outfile";
+#print "OUT  $outfile  \n";
+if($top_file) {print SIMFILE  "$top_file  \n";}
+
+#/*********************************************************************************************/
+#/                                                                                            */
+#/  Create filelists for simulation, synthesis and linting                                    */
+#/                                                                                            */
+#/                                                                                            */
+#/*********************************************************************************************/
+
+@filelist_sim = (  );
+
+my  @filelist =       yp::lib::parse_component_file("$vendor","$library","$component","$version");
+
+
+
+
+foreach $line (@filelist) 
+   {
+   $_ = $line;
+   if(/::(\S+)::(\S+)::(\S+)::(\S+)::/) 
+     { 
+     $new_proj      = $2;
+     $new_comp      = $3;
+     $new_vendor    = $1;
+     $new_version   = $4;                
+     }
+     #############################################################################
+     ## Read destination from source xml file
+     ## 
+     #############################################################################
+
+     my $spirit_component_file    = $parser->parse_file(yp::lib::find_ipxact_component($new_vendor,$new_proj,$new_comp,$new_version));
+
+     if($new_version){$new_variant   = "${new_comp}_${new_version}"}
+     else             {$new_variant   = $new_comp}
+
+       if($opt_top_lib)
+     {
+            my $fileXX =       find_filename($filesetref_name  ,$new_vendor,$new_proj,$new_comp,$new_version);
+            if($fileXX){push(@filelist_sim,"${home}${prefix}/${fileXX}\n")};
+     }
+     else
+     {
+     if(($new_vendor eq $vendor ) &&  ($new_proj eq $library ) &&  ($new_comp eq $component )  &&  ($new_version eq $version )        )
+       {
+       if($opt_top)
+            {
+            my $fileXX =       find_filename($filesetref_name  ,$new_vendor,$new_proj,$new_comp,$new_version);
+            if($fileXX){push(@filelist_sim,"${home}${prefix}/${fileXX}\n")};
+            }
+        }     
+     else    
+        {
+        if(($new_proj eq $overlay_src_lib ) & ($new_vendor eq $overlay_src_ven))
+                   {
+                       if(yp::lib::find_ipxact_component($overlay_des_ven,$overlay_des_lib,$new_comp,$new_version  ) )
+                         {
+                         $new_vendor = $overlay_des_ven;
+                         $new_proj   = $overlay_des_lib;
+
+                         }
+                    }
+
+
+           my $fileXX =       find_filename($filesetref_name  ,$new_vendor,$new_proj,$new_comp,$new_version);
+           if($fileXX){push(@filelist_sim,"${home}${prefix}/children/${fileXX}\n");}
+        }
+       }
+
+
+
+
+
+
+
+
+
+
+
+
+     }
+
+#############################################################################
+## 
+## 
+#############################################################################
+
+print "Building ALL filelists for  $prefix  $vendor $library   $component $version $variant \n" ;
+     @filelist_sim  =       sys::lib::trim_sort(@filelist_sim);
+     foreach  my   $i_line (@filelist_sim)  
+         { 
+#print "$i_line  \n";
+
+
+         if($leader)
+           {
+           print SIMFILE  "${leader}${i_line}";
+           }
+         else
+           {
+           print SIMFILE  "$i_line";
+           }
+
+
+
+         } 
+}
+
+
+
+#/*********************************************************************************************/
+#/  find filename                                                                             */
+#/                                                                                            */
+#/  returns gloabal  name of the file                                                         */
+#/                                                                                            */
+#/                                                                                            */
+#/*********************************************************************************************/
+
+sub find_filename 
+   {
+   my @params             = @_;
+   my $version            = pop(@params);
+   my $component          = pop(@params);
+   my $library            = pop(@params);
+   my $vendor             = pop(@params);
+   my $filesetref_name    = pop(@params);
+
+   my $variant;
+   if($version)       {$variant   = "${component}_${version}";}
+   else               {$variant   = "${component}";}
+
+   my  @filelist =       yp::lib::parse_component_brothers("$vendor","$library","$component","$version");
+   my $comp_xml_sep    = yp::lib::find_comp_xml_sep($vendor,$library,$component,$version);
+   my $lib_comp_sep    = yp::lib::find_lib_comp_sep($vendor,$library,$component);
+   my $library_path    = "${lib_comp_sep}${component}${comp_xml_sep}";
+
+
+
+foreach $line (@filelist) 
+   {
+   $_ = $line;
+   if(/::(\S+)::(\S+)::(\S+)::(\S+)::/) 
+     { 
+     $new_library        = $2;
+     $new_component      = $3;
+     $new_vendor         = $1;
+     $new_version        = $4;
+
+     my $spirit_component_file    = $parser->parse_file(yp::lib::find_ipxact_component($new_vendor,$new_library,$new_component,$new_version));
+
+
+           foreach  my   $i_name ($spirit_component_file->findnodes("//spirit:fileSets/spirit:fileSet/spirit:file/spirit:name"))
+              {    
+              my($file_name)      = $i_name ->findnodes('./text()')->to_literal ;
+              my($file_type)      = $i_name ->findnodes('../spirit:userFileType/text()')->to_literal ;
+              my($logical_name)   = $i_name ->findnodes('../spirit:logicalName/text()')->to_literal ;
+              my($view_file)      = $i_name ->findnodes('../../spirit:name/text()')->to_literal ;
+              if(($file_type eq "libraryDir") &&  ($logical_name eq "dest_dir")  )
+                 { 
+
+                 if( $view_file eq  $filesetref_name )
+                   { 
+                   return ("${vendor}__${library}${library_path}/${file_name}${variant}.v");
+                   };
+                 }     
+              }
+    }
+}
+}
+
+
+1
+

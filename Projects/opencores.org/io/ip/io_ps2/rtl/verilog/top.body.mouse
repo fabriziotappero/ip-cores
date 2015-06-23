@@ -1,0 +1,143 @@
+parameter PS2_DATA      = 4'h0;
+parameter STATUS        = 4'h2;
+parameter CNTRL         = 4'h4;
+parameter X_POS         = 4'h6;   
+parameter Y_POS         = 4'h8;
+
+
+
+
+`VARIANT`MICRO_REG 
+ps2_micro_reg
+( 
+   .clk                ( clk              ),
+   .reset              ( reset            ),
+   .enable             ( enable           ),		      
+   .cs                 ( cs               ),		      
+   .wr                 ( wr               ), 
+   .rd                 ( rd               ),
+   .byte_lanes         ( 1'b1             ),
+   .addr               ( addr[3:0]        ),
+   .wdata              ( wdata[7:0]       ),
+   .rdata              ( rdata            ),
+
+   .ps2_data_cs    (),
+   .wdata_buf_cs (),
+   .wdata_buf_dec (),
+   .wdata_buf_wr_0 (),
+   .status_cs (),
+   .status_dec (),
+   .cntrl_cs (),
+   .cntrl_dec (),
+   .cntrl_wr_0 (),
+
+   .x_pos_cs (),
+   .x_pos_dec (),
+
+   .y_pos_cs (),
+   .y_pos_dec (),
+
+
+
+
+   .ps2_data_rdata     ( rcv_data         ),
+   .ps2_data_dec       ( ps2_data_rd      ),
+   .status_rdata       ({!buffer_empty   ,
+                          rcv_data_avail ,
+                          busy           ,
+                          rx_parity_error,
+                          rx_parity_rcv  ,
+                          rx_parity_cal  ,
+                          rx_frame_error ,
+                          tx_ack_error }  ),
+   .x_pos_rdata        ( x_pos[7:0]       ),
+   .y_pos_rdata        ( y_pos[7:0]       ),
+   .cntrl              ( cntrl            ),
+   .cntrl_rdata        ( cntrl            ),
+   .next_cntrl         ( cntrl            ),
+   .wdata_buf          ( wdata_buf        ), 
+   .next_wdata_buf     ( wdata_buf        )
+);
+
+
+assign   ps2_rx_clear      = cntrl[0] ? read :rd && cs && enable && ps2_data_rd;
+assign        poll_enable  =   cntrl[0];
+
+always@(posedge clk)
+if (reset) 
+  begin
+    ps2_data_read_stb <= 1'b0;
+   end
+else 
+  begin
+   ps2_data_read_stb  <= (  enable &&  ps2_data_rd && rd );
+  end
+
+            
+
+  
+   always@(posedge clk )
+     if(reset || (!poll_enable)) 
+       begin     
+       byt_cntr       <= 2'b00;
+       new_packet     <= 1'b0;
+       end
+     else
+     if(read)  
+       begin
+     byt_cntr       <= byt_cntr + 2'b01;
+     new_packet     <= 1'b0;
+     end
+     else      
+     if (byt_cntr == 2'b11)
+       begin
+         byt_cntr       <= 2'b00;
+         new_packet     <= 1'b1;
+       end  
+     else
+       begin
+       byt_cntr       <= byt_cntr;
+       new_packet     <= 1'b0;
+       end
+   
+
+
+   
+     always@(posedge  clk)
+     if( reset  || (!poll_enable) ) 
+           begin
+           ms_y_ovf   <= 1'b0;
+           ms_x_ovf   <= 1'b0;
+           ms_y_sign  <= 1'b0;
+           ms_x_sign  <= 1'b0;
+           ms_one     <= 1'b1;
+           ms_mid     <= 1'b0;
+           ms_right   <= 1'b0;
+           ms_left    <= 1'b0;
+           x_pos      <= 10'h000;
+           y_pos      <= 10'h000;
+        end
+     else                  
+         if( read) 
+           begin
+                if (byt_cntr == 2'b00)  {ms_y_ovf,ms_x_ovf,ms_y_sign,ms_x_sign,ms_one,ms_mid,ms_right,ms_left} <= rcv_data;
+                else
+        if (byt_cntr == 2'b01)   x_pos            <= x_pos +   {ms_x_sign,ms_x_sign,rcv_data};
+                else
+        if (byt_cntr == 2'b10)   y_pos            <= y_pos -   {ms_y_sign,ms_y_sign,rcv_data};
+                else                     
+                 begin
+                    x_pos  <= x_pos;
+                    y_pos  <= y_pos;
+                 end
+
+           end   
+         else     
+                    begin
+                    x_pos  <= x_pos;
+                    y_pos  <= y_pos;
+                 end
+
+
+
+
