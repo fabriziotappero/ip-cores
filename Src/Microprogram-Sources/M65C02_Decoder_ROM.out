@@ -1,0 +1,366 @@
+---------------------- 12/15/2012 8:12:12 PM ------------------------
+ 
+-- Instructions --
+0x0000 STP   STP         .asm    0       -- Stop Processor Instruction
+0x0001 INV   INV         .asm    1       -- Invalid Instruction
+0x0002 BRK   BRK         .asm    2       -- BRK Instruction/Trap/Interrupt
+0x0003 JMP   JMP         .asm    3       -- Bcc/JMP/JSR/RTS/RTI Instruction
+0x0004 STK   STK         .asm    4       -- Stack Operation Instruction (PLx/PHx)
+0x0005 INT   INT         .asm    5       -- Internal Operation Instruction
+0x0006 MEM   MEM         .asm    6       -- Memory Operation Instruction
+0x0007 WAI   WAI         .asm    7       -- Waiting for Interrupt Instruction (NMI/IRQ)
+ 
+-- Equates --
+0x0000 XFR         .equ    0   -- ALU <= {OSel: 0, A, X, Y, P, S, M}
+0x0001 AND         .equ    1   -- ALU <= A & M;      N <= ALU[7]; Z <= ~|ALU;
+0x0002 ORA         .equ    2   -- ALU <= A | M;      N <= ALU[7]; Z <= ~|ALU;
+0x0003 EOR         .equ    3   -- ALU <= A ^ M;      N <= ALU[7]; Z <= ~|ALU;
+0x0004 ADC         .equ    4   -- ALU <= Q +  M + C; N <= ALU[7]; Z <= ~|ALU;
+0x0005 SBC         .equ    5   -- ALU <= Q + ~M + C; N <= ALU[7]; Z <= ~|ALU;
+0x0006 INC         .equ    6   -- ALU <= Q +  1 + 0; N <= ALU[7]; Z <= ~|ALU;
+0x0007 DEC         .equ    7   -- ALU <= Q + ~1 + 1; N <= ALU[7]; Z <= ~|ALU;
+0x0008 ASL         .equ    8   -- ALU <= R << 1;     N <= ALU[6]; Z <= ~|ALU; C <= R[7]
+0x0009 LSR         .equ    9   -- ALU <= R >> 1;     N <= 0;      Z <= ~|ALU; C <= R[0]
+0x000A ROL         .equ    10  -- ALU <= {R[6:0], C} N <= ALU[7]; Z <= ~|ALU; C <= R[7]
+0x000B ROR         .equ    11  -- ALU <= {C, R[7:1]} N <= ALU[7]; Z <= ~|ALU; C <= R[0]
+0x000C BIT         .equ    12  -- ALU <= (A & M);    N <= M[7];   Z <= ~|(A & M);
+0x000D TRB         .equ    13  -- ALU <= M & ~A;                  Z <= ~|(A & M);
+0x000E TSB         .equ    14  -- ALU <= M |  A;                  Z <= ~|(A & M);
+0x000F CMP         .equ    15  -- ALU <= Q + ~M + 1  N <= ALU[7]; Z <= ~|ALU; C <= COut
+0x0000 QS_A      .equ    0   -- Select A (default)
+0x0001 QS_M      .equ    1   -- Select M
+0x0002 QS_X      .equ    2   -- Select X
+0x0003 QS_Y      .equ    3   -- Select Y
+0x0001 WS_A        .equ    1   -- Write Accumulator (Binary)
+0x0002 WS_X        .equ    2   -- Write X (Pre-Index Register)
+0x0003 WS_Y        .equ    3   -- Write Y (Post-Index Register)
+0x0005 WS_S        .equ    5   -- Write S (Stack Pointer)
+0x0006 WS_P        .equ    6   -- Write P (Processor Status Word)
+0x0001 OS_A        .equ    1   -- Output Accumulator
+0x0002 OS_X        .equ    2   -- Output X
+0x0003 OS_Y        .equ    3   -- Output Y
+0x0004 OS_Z        .equ    4   -- Output Zero (0)
+0x0005 OS_S        .equ    5   -- Output S (Stack Pointer)
+0x0006 OS_P        .equ    6   -- Output P (Processor Status Word)
+0x0007 OS_M        .equ    7   -- Output M (Transfer)
+0x0004 SMBx        .equ    4   -- Rockwell SMBx
+0x0005 RMBx        .equ    5   -- Rockwell RMBx
+0x0006 BBSx        .equ    6   -- Rockwell BBSx
+0x0007 BBRx        .equ    7   -- Rockwell BBRx
+0x0008 CC          .equ    8   -- CC_Out = ~C;
+0x0009 CS          .equ    9   -- CC_Out =  C;
+0x000A NE          .equ    10  -- CC_Out = ~Z;
+0x000B EQ          .equ    11  -- CC_Out =  Z;
+0x000C VC          .equ    12  -- CC_Out = ~V;
+0x000D VS          .equ    13  -- CC_Out =  V;
+0x000E PL          .equ    14  -- CC_OUT = ~N;
+0x000F MI          .equ    15  -- CC_Out =  N;
+0x0010 CLC         .equ    16  -- C <= 0;
+0x0011 SEC         .equ    17  -- C <= 1;
+0x0012 CLI         .equ    18  -- I <= 0;
+0x0013 SEI         .equ    19  -- I <= 1;
+0x0014 CLD         .equ    20  -- D <= 0;
+0x0015 SED         .equ    21  -- D <= 1;
+0x0016 CLV         .equ    22  -- V <= 0;
+0x0017 BRK         .equ    23  -- B <= 1;
+0x0018 Z           .equ    24  -- Z <= ~|(A & M);
+0x0019 NZ          .equ    25  -- N <= ALU[7]; Z <= ~|ALU;
+0x001A NZC         .equ    26  -- N <= ALU[7]; Z <= ~|ALU; C <= COut
+0x001B NVZ         .equ    27  -- N <= M[7];   Z <= ~|(A & M); V <= M[6];
+0x001C NVZC        .equ    28  -- N <= ALU[7]; Z <= ~|ALU; V <= OVF;  C <= COut;
+0x001F PSW         .equ    31  -- P <= M;
+ 
+-- Defines --
+0x0003 Inst        .def    3       -- Instruction (Addressing Mode)
+0x0001 RMW         .def    1       -- Read-Modify-Write Instruction Type Field
+0x0004 ALU_OP      .def    4       -- ALU Operation
+0x0002 QSel        .def    2       -- ALU Q Operand Select
+0x0001 RSel        .def    1       -- ALU R Operand Select
+0x0001 AU_Mode     .def    1       -- ALU Arithmetic Unit Mode (1 : Subtraction)
+0x0001 CSel        .def    1       -- ALU Arithmetic Unit Carry Input Select
+0x0003 WSel        .def    3       -- ALU Register Write Select
+0x0003 OSel        .def    3       -- ALU Register Output Select
+0x0005 CCSel       .def    5       -- ALU Condition Code Operation
+0x0008 Opcode      .def    8       -- Instruction Opcode
+ 
+-- Labels --
+0x0000 _start
+0x0100 _end
+ 
+File  Prog     
+Line  Line   Opcode                                Line
+0269 0x0000 _start: .org 0
+0271  --------------------------------------------------------------------------------
+0273 0x0000  40061700 BRK 0,XFR,QS_A,0,0,0,WS_P, ,BRK ,0x00 -- 00: BRK #imm
+0274 0x0001  C2011901 MEM 0,ORA,QS_A,0,0,0,WS_A, ,NZ ,0x01 -- 01: ORA (dp,X)
+0275 0x0002  20000002 INV 0,XFR,QS_A,0,0,0, , , ,0x02 -- 02: NOP
+0276 0x0003  20000003 INV 0,XFR,QS_A,0,0,0, , , ,0x03 -- 03: NOP
+0277 0x0004  DE061804 MEM 1,TSB,QS_A,0,0,0,WS_P, ,Z ,0x04 -- 04: TSB dp
+0278 0x0005  C2011905 MEM 0,ORA,QS_A,0,0,0,WS_A, ,NZ ,0x05 -- 05: ORA dp
+0279 0x0006  D8461A06 MEM 1,ASL,QS_M,0,0,0,WS_P, ,NZC ,0x06 -- 06: ASL dp
+0280 0x0007  D04005FE MEM 1,XFR,QS_M,0,0,0, , ,RMBx,0xFE -- 07: RMB0 dp
+0281 0x0008  8000C008 STK 0,XFR,QS_A,0,0,0, ,OS_P, ,0x08 -- 08: PHP
+0282 0x0009  C2011909 MEM 0,ORA,QS_A,0,0,0,WS_A, ,NZ ,0x09 -- 09: ORA #imm
+0283 0x000A  A8011A0A INT 0,ASL,QS_A,0,0,0,WS_A, ,NZC ,0x0A -- 0A: ASL A
+0284 0x000B  2000000B INV 0,XFR,QS_A,0,0,0, , , ,0x0B -- 0B: NOP
+0285 0x000C  DE06180C MEM 1,TSB,QS_A,0,0,0,WS_P, ,Z ,0x0C -- 0C: TSB abs
+0286 0x000D  C201190D MEM 0,ORA,QS_A,0,0,0,WS_A, ,NZ ,0x0D -- 0D: ORA abs
+0287 0x000E  D8461A0E MEM 1,ASL,QS_M,0,0,0,WS_P, ,NZC ,0x0E -- OE: ASL abs
+0288 0x000F  60400701 JMP 0,XFR,QS_M,0,0,0, , ,BBRx,0x01 -- 0F: BBR0 dp,rel
+0290  --------------------------------------------------------------------------------
+0292 0x0010  60000E10 JMP 0,XFR,QS_A,0,0,0, , ,PL ,0x10 -- 10: BPL rel
+0293 0x0011  C2011911 MEM 0,ORA,QS_A,0,0,0,WS_A, ,NZ ,0x11 -- 11: ORA (dp),Y
+0294 0x0012  C2011912 MEM 0,ORA,QS_A,0,0,0,WS_A, ,NZ ,0x12 -- 12: ORA (dp)
+0295 0x0013  20000013 INV 0,XFR,QS_A,0,0,0, , , ,0x13 -- 13: NOP
+0296 0x0014  DD461814 MEM 1,TRB,QS_M,0,0,0,WS_P, ,Z ,0x14 -- 14: TRB dp
+0297 0x0015  C2011915 MEM 0,ORA,QS_A,0,0,0,WS_A, ,NZ ,0x15 -- 15: ORA dp,X
+0298 0x0016  D8461A16 MEM 1,ASL,QS_M,0,0,0,WS_P, ,NZC ,0x16 -- 16: ASL dp,X
+0299 0x0017  D04005FD MEM 1,XFR,QS_M,0,0,0, , ,RMBx,0xFD -- 17: RMB1 dp
+0300 0x0018  A0061018 INT 0,XFR,QS_A,0,0,0,WS_P, ,CLC ,0x18 -- 18: CLC
+0301 0x0019  C2011919 MEM 0,ORA,QS_A,0,0,0,WS_A, ,NZ ,0x19 -- 19: ORA abs,Y
+0302 0x001A  A629191A INT 0,INC,QS_A,1,0,1,WS_A, ,NZ ,0x1A -- 1A: INC A
+0303 0x001B  2000001B INV 0,XFR,QS_A,0,0,0, , , ,0x1B -- 1B: NOP
+0304 0x001C  DD06181C MEM 1,TRB,QS_A,0,0,0,WS_P, ,Z ,0x1C -- 1C: TRB abs
+0305 0x001D  C201191D MEM 0,ORA,QS_A,0,0,0,WS_A, ,NZ ,0x1D -- 1D: ORA abs,X
+0306 0x001E  D8461A1E MEM 1,ASL,QS_M,0,0,0,WS_P, ,NZC ,0x1E -- 1E: ASL abs,X
+0307 0x001F  60400702 JMP 0,XFR,QS_M,0,0,0, , ,BBRx,0x02 -- 1F: BBR1 dp,rel
+0309  --------------------------------------------------------------------------------
+0311 0x0020  60000020 JMP 0,XFR,QS_A,0,0,0, , , ,0x20 -- 20: JSR abs
+0312 0x0021  C1011921 MEM 0,AND,QS_A,0,0,0,WS_A, ,NZ ,0x21 -- 21: AND (dp,X)
+0313 0x0022  20000022 INV 0,XFR,QS_A,0,0,0, , , ,0x22 -- 22: NOP
+0314 0x0023  20000023 INV 0,XFR,QS_A,0,0,0, , , ,0x23 -- 23: NOP
+0315 0x0024  CC061B24 MEM 0,BIT,QS_A,0,0,0,WS_P, ,NVZ ,0x24 -- 24: BIT dp
+0316 0x0025  C1011925 MEM 0,AND,QS_A,0,0,0,WS_A, ,NZ ,0x25 -- 25: AND dp
+0317 0x0026  DA461A26 MEM 1,ROL,QS_M,0,0,0,WS_P, ,NZC ,0x26 -- 26: ROL dp
+0318 0x0027  D04005FB MEM 1,XFR,QS_M,0,0,0, , ,RMBx,0xFB -- 27: RMB2 dp
+0319 0x0028  80061F28 STK 0,XFR,QS_A,0,0,0,WS_P, ,PSW ,0x28 -- 28: PLP
+0320 0x0029  C1011929 MEM 0,AND,QS_A,0,0,0,WS_A, ,NZ ,0x29 -- 29: AND #imm
+0321 0x002A  AA011A2A INT 0,ROL,QS_A,0,0,0,WS_A, ,NZC ,0x2A -- 2A: ROL A
+0322 0x002B  2000002B INV 0,XFR,QS_A,0,0,0, , , ,0x2B -- 2B: NOP
+0323 0x002C  CC061B2C MEM 0,BIT,QS_A,0,0,0,WS_P, ,NVZ ,0x2C -- 2C: BIT abs
+0324 0x002D  C101192D MEM 0,AND,QS_A,0,0,0,WS_A, ,NZ ,0x2D -- 2D: AND abs
+0325 0x002E  DA461A2E MEM 1,ROL,QS_M,0,0,0,WS_P, ,NZC ,0x2E -- 2E: ROL abs
+0326 0x002F  60400704 JMP 0,XFR,QS_M,0,0,0, , ,BBRx,0x04 -- 2F: BBR2 db,rel
+0328  --------------------------------------------------------------------------------
+0330 0x0030  60000F30 JMP 0,XFR,QS_A,0,0,0, , ,MI ,0x30 -- 30: BMI rel
+0331 0x0031  C1011931 MEM 0,AND,QS_A,0,0,0,WS_A, ,NZ ,0x31 -- 31: AND (dp),Y
+0332 0x0032  C1011932 MEM 0,AND,QS_A,0,0,0,WS_A, ,NZ ,0x32 -- 32: AND (dp)
+0333 0x0033  20000033 INV 0,XFR,QS_A,0,0,0, , , ,0x33 -- 33: NOP
+0334 0x0034  CC061B34 MEM 0,BIT,QS_A,0,0,0,WS_P, ,NVZ ,0x34 -- 34: BIT dp,X
+0335 0x0035  C1011935 MEM 0,AND,QS_A,0,0,0,WS_A, ,NZ ,0x35 -- 35: AND dp,X
+0336 0x0036  DA461A36 MEM 1,ROL,QS_M,0,0,0,WS_P, ,NZC ,0x36 -- 36: ROL dp,X
+0337 0x0037  D04005F7 MEM 1,XFR,QS_M,0,0,0, , ,RMBx,0xF7 -- 37: RMB3 dp
+0338 0x0038  A1061138 INT 0,AND,QS_A,0,0,0,WS_P, ,SEC ,0x38 -- 38: SEC
+0339 0x0039  C1011939 MEM 0,AND,QS_A,0,0,0,WS_A, ,NZ ,0x39 -- 39: AND abs,Y
+0340 0x003A  A739193A INT 0,DEC,QS_A,1,1,1,WS_A, ,NZ ,0x3A -- 3A: DEC A
+0341 0x003B  2000003B INV 0,XFR,QS_A,0,0,0, , , ,0x3B -- 3B: NOP
+0342 0x003C  CC061B3C MEM 0,BIT,QS_A,0,0,0,WS_P, ,NVZ ,0x3C -- 3C: BIT abs,X
+0343 0x003D  C101193D MEM 0,AND,QS_A,0,0,0,WS_A, ,NZ ,0x3D -- 3D: AND abs,X
+0344 0x003E  DA461A3E MEM 1,ROL,QS_M,0,0,0,WS_P, ,NZC ,0x3E -- 3E: ROL abs,X
+0345 0x003F  60400708 JMP 0,XFR,QS_M,0,0,0, , ,BBRx,0x08 -- 3F: BBR3 dp,rel
+0347  --------------------------------------------------------------------------------
+0349 0x0040  60061F40 JMP 0,XFR,QS_A,0,0,0,WS_P, ,PSW ,0x40 -- 40: RTI
+0350 0x0041  C3011941 MEM 0,EOR,QS_A,0,0,0,WS_A, ,NZ ,0x41 -- 41: EOR (dp,X)
+0351 0x0042  20000042 INV 0,XFR,QS_A,0,0,0, , , ,0x42 -- 42: NOP
+0352 0x0043  20000043 INV 0,XFR,QS_A,0,0,0, , , ,0x43 -- 43: NOP
+0353 0x0044  20000044 INV 0,XFR,QS_A,0,0,0, , , ,0x44 -- 44: NOP
+0354 0x0045  C3011945 MEM 0,EOR,QS_A,0,0,0,WS_A, ,NZ ,0x45 -- 45: EOR dp
+0355 0x0046  D9461A46 MEM 1,LSR,QS_M,0,0,0,WS_P, ,NZC ,0x46 -- 46: LSR dp
+0356 0x0047  D04005EF MEM 1,XFR,QS_M,0,0,0, , ,RMBx,0xEF -- 47: RMB4 dp
+0357 0x0048  80002048 STK 0,XFR,QS_A,0,0,0, ,OS_A, ,0x48 -- 48: PHA
+0358 0x0049  C3011949 MEM 0,EOR,QS_A,0,0,0,WS_A, ,NZ ,0x49 -- 49: EOR #imm
+0359 0x004A  A9011A4A INT 0,LSR,QS_A,0,0,0,WS_A, ,NZC ,0x4A -- 4A: LSR A
+0360 0x004B  2000004B INV 0,XFR,QS_A,0,0,0, , , ,0x4B -- 4B: NOP
+0361 0x004C  6000004C JMP 0,XFR,QS_A,0,0,0, , , ,0x4C -- 4C: JMP abs
+0362 0x004D  C301194D MEM 0,EOR,QS_A,0,0,0,WS_A, ,NZ ,0x4D -- 4D: EOR abs
+0363 0x004E  D9461A4E MEM 1,LSR,QS_M,0,0,0,WS_P, ,NZC ,0x4E -- 4E: LSR abs
+0364 0x004F  60400710 JMP 0,XFR,QS_M,0,0,0, , ,BBRx,0x10 -- 4F: BBR4 dp,rel
+0366  --------------------------------------------------------------------------------
+0368 0x0050  60000C50 JMP 0,XFR,QS_A,0,0,0, , ,VC ,0x50 -- 50: BVC rel
+0369 0x0051  C3011951 MEM 0,EOR,QS_A,0,0,0,WS_A, ,NZ ,0x51 -- 51: EOR (dp),Y
+0370 0x0052  C3011952 MEM 0,EOR,QS_A,0,0,0,WS_A, ,NZ ,0x52 -- 52: EOR (dp)
+0371 0x0053  20000053 INV 0,XFR,QS_A,0,0,0, , , ,0x53 -- 53: NOP
+0372 0x0054  20000054 INV 0,XFR,QS_A,0,0,0, , , ,0x54 -- 54: NOP
+0373 0x0055  C3011955 MEM 0,EOR,QS_A,0,0,0,WS_A, ,NZ ,0x55 -- 55: EOR dp,X
+0374 0x0056  D9461A56 MEM 1,LSR,QS_M,0,0,0,WS_P, ,NZC ,0x56 -- 56: LSR dp,X
+0375 0x0057  D04005DF MEM 1,XFR,QS_M,0,0,0, , ,RMBx,0xDF -- 57: RMB5 dp
+0376 0x0058  A0061258 INT 0,XFR,QS_A,0,0,0,WS_P, ,CLI ,0x58 -- 58: CLI
+0377 0x0059  C3011959 MEM 0,EOR,QS_A,0,0,0,WS_A, ,NZ ,0x59 -- 59: EOR abs,Y
+0378 0x005A  8000605A STK 0,XFR,QS_A,0,0,0, ,OS_Y, ,0x5A -- 5A: PHY
+0379 0x005B  2000005B INV 0,XFR,QS_A,0,0,0, , , ,0x5B -- 5B: NOP
+0380 0x005C  2000005C INV 0,XFR,QS_A,0,0,0, , , ,0x5C -- 5C: NOP
+0381 0x005D  C301195D MEM 0,EOR,QS_A,0,0,0,WS_A, ,NZ ,0x5D -- 5D: EOR abs,X
+0382 0x005E  D9461A5E MEM 1,LSR,QS_M,0,0,0,WS_P, ,NZC ,0x5E -- 5E: LSR abs,X
+0383 0x005F  60400720 JMP 0,XFR,QS_M,0,0,0, , ,BBRx,0x20 -- 5F: BBR5 dp,rel
+0385  --------------------------------------------------------------------------------
+0387 0x0060  60000060 JMP 0,XFR,QS_A,0,0,0, , , ,0x60 -- 60: RTS
+0388 0x0061  C4011C61 MEM 0,ADC,QS_A,0,0,0,WS_A, ,NVZC,0x61 -- 61: ADC (dp,X)
+0389 0x0062  20000062 INV 0,XFR,QS_A,0,0,0, , , ,0x62 -- 62: NOP
+0390 0x0063  20000063 INV 0,XFR,QS_A,0,0,0, , , ,0x63 -- 63: NOP
+0391 0x0064  C0008064 MEM 0,XFR,QS_A,0,0,0, ,OS_Z, ,0x64 -- 64: STZ dp
+0392 0x0065  C4011C65 MEM 0,ADC,QS_A,0,0,0,WS_A, ,NVZC,0x65 -- 65: ADC dp
+0393 0x0066  DB461A66 MEM 1,ROR,QS_M,0,0,0,WS_P, ,NZC ,0x66 -- 66: ROR dp
+0394 0x0067  304005BF INV 1,XFR,QS_M,0,0,0, , ,RMBx,0xBF -- 67: RMB6 dp
+0395 0x0068  80011968 STK 0,XFR,QS_A,0,0,0,WS_A, ,NZ ,0x68 -- 68: PLA
+0396 0x0069  C4011C69 MEM 0,ADC,QS_A,0,0,0,WS_A, ,NVZC,0x69 -- 69: ADC #imm
+0397 0x006A  CB011A6A MEM 0,ROR,QS_A,0,0,0,WS_A, ,NZC ,0x6A -- 6A: ROR A
+0398 0x006B  2000006B INV 0,XFR,QS_A,0,0,0, , , ,0x6B -- 6B: NOP
+0399 0x006C  6000006C JMP 0,XFR,QS_A,0,0,0, , , ,0x6C -- 6C: JMP (abs)
+0400 0x006D  C4011C6D MEM 0,ADC,QS_A,0,0,0,WS_A, ,NVZC,0x6D -- 6D: ADC abs
+0401 0x006E  DB461A6E MEM 1,ROR,QS_M,0,0,0,WS_P, ,NZC ,0x6E -- 6E: ROR abs
+0402 0x006F  60400740 JMP 0,XFR,QS_M,0,0,0, , ,BBRx,0x40 -- 6F: BBR6 dp,rel
+0404  --------------------------------------------------------------------------------
+0406 0x0070  60000D70 JMP 0,XFR,QS_A,0,0,0, , ,VS ,0x70 -- 70: BVS rel
+0407 0x0071  C4011C71 MEM 0,ADC,QS_A,0,0,0,WS_A, ,NVZC,0x71 -- 71: ADC (dp),Y
+0408 0x0072  C4011C72 MEM 0,ADC,QS_A,0,0,0,WS_A, ,NVZC,0x72 -- 72: ADC (dp)
+0409 0x0073  20000073 INV 0,XFR,QS_A,0,0,0, , , ,0x73 -- 73: NOP
+0410 0x0074  C0008074 MEM 0,XFR,QS_A,0,0,0, ,OS_Z, ,0x74 -- 74: STZ dp,X
+0411 0x0075  C4011C75 MEM 0,ADC,QS_A,0,0,0,WS_A, ,NVZC,0x75 -- 75: ADC dp,X
+0412 0x0076  DB461A76 MEM 1,ROR,QS_M,0,0,0,WS_P, ,NZC ,0x76 -- 76: ROR dp,X
+0413 0x0077  D040057F MEM 1,XFR,QS_M,0,0,0, , ,RMBx,0x7F -- 77: RMB7 dp
+0414 0x0078  A0061378 INT 0,XFR,QS_A,0,0,0,WS_P, ,SEI ,0x78 -- 78: SEI
+0415 0x0079  C4011C79 MEM 0,ADC,QS_A,0,0,0,WS_A, ,NVZC,0x79 -- 79: ADC abs,Y
+0416 0x007A  8043197A STK 0,XFR,QS_M,0,0,0,WS_Y, ,NZ ,0x7A -- 7A: PLY
+0417 0x007B  2000007B INV 0,XFR,QS_A,0,0,0, , , ,0x7B -- 7B: NOP
+0418 0x007C  6000007C JMP 0,XFR,QS_A,0,0,0, , , ,0x7C -- 7C: JMP (abs,X)
+0419 0x007D  C4011C7D MEM 0,ADC,QS_A,0,0,0,WS_A, ,NVZC,0x7D -- 7D: ADC abs,X
+0420 0x007E  DB461A7E MEM 1,ROR,QS_M,0,0,0,WS_P, ,NZC ,0x7E -- 7E: ROR abs,X
+0421 0x007F  60400780 JMP 0,XFR,QS_M,0,0,0, , ,BBRx,0x80 -- 7F: BBR7 dp,rel
+0423  --------------------------------------------------------------------------------
+0425 0x0080  60000080 JMP 0,XFR,QS_A,0,0,0, , , ,0x80 -- 80: BRA rel
+0426 0x0081  C0002081 MEM 0,XFR,QS_A,0,0,0, ,OS_A, ,0x81 -- 81: STA (dp,X)
+0427 0x0082  20000082 INV 0,XFR,QS_A,0,0,0, , , ,0x82 -- 82: NOP
+0428 0x0083  20000083 INV 0,XFR,QS_A,0,0,0, , , ,0x83 -- 83: NOP
+0429 0x0084  C0006084 MEM 0,XFR,QS_A,0,0,0, ,OS_Y, ,0x84 -- 84: STY dp
+0430 0x0085  C0002085 MEM 0,XFR,QS_A,0,0,0, ,OS_A, ,0x85 -- 85: STA dp
+0431 0x0086  C0004086 MEM 0,XFR,QS_A,0,0,0, ,OS_X, ,0x86 -- 86: STX dp
+0432 0x0087  D0400401 MEM 1,XFR,QS_M,0,0,0, , ,SMBx,0x01 -- 87: SMB0 dp
+0433 0x0088  A7FB7988 INT 0,DEC,QS_Y,1,1,1,WS_Y,OS_Y,NZ ,0x88 -- 88: DEY
+0434 0x0089  CC061889 MEM 0,BIT,QS_A,0,0,0,WS_P, ,Z ,0x89 -- 89: BIT #imm
+0435 0x008A  A001598A INT 0,XFR,QS_A,0,0,0,WS_A,OS_X,NZ ,0x8A -- 8A: TXA
+0436 0x008B  2000008B INV 0,XFR,QS_A,0,0,0, , , ,0x8B -- 8B: NOP
+0437 0x008C  C000608C MEM 0,XFR,QS_A,0,0,0, ,OS_Y, ,0x8C -- 8C: STY abs
+0438 0x008D  C000208D MEM 0,XFR,QS_A,0,0,0, ,OS_A, ,0x8D -- 8D: STA abs
+0439 0x008E  C000408E MEM 0,XFR,QS_A,0,0,0, ,OS_X, ,0x8E -- 8E: STX abs
+0440 0x008F  60400601 JMP 0,XFR,QS_M,0,0,0, , ,BBSx,0x01 -- 8F: BBS0 dp,rel
+0442  --------------------------------------------------------------------------------
+0444 0x0090  60000890 JMP 0,XFR,QS_A,0,0,0, , ,CC ,0x90 -- 90: BCC rel
+0445 0x0091  C0002091 MEM 0,XFR,QS_A,0,0,0, ,OS_A, ,0x91 -- 91: STA (dp),Y
+0446 0x0092  C0002092 MEM 0,XFR,QS_A,0,0,0, ,OS_A, ,0x92 -- 92: STA (dp)
+0447 0x0093  20000093 INV 0,XFR,QS_A,0,0,0, , , ,0x93 -- 93: NOP
+0448 0x0094  C0006094 MEM 0,XFR,QS_A,0,0,0, ,OS_Y, ,0x94 -- 94: STY dp,X
+0449 0x0095  C0002095 MEM 0,XFR,QS_A,0,0,0, ,OS_A, ,0x95 -- 95: STA dp,X
+0450 0x0096  C0004096 MEM 0,XFR,QS_A,0,0,0, ,OS_X, ,0x96 -- 96: STX dp,Y
+0451 0x0097  D0400402 MEM 1,XFR,QS_M,0,0,0, , ,SMBx,0x02 -- 97: SMB1 dp
+0452 0x0098  A0017998 INT 0,XFR,QS_A,0,0,0,WS_A,OS_Y,NZ ,0x98 -- 98: TYA
+0453 0x0099  C0002099 MEM 0,XFR,QS_A,0,0,0, ,OS_A, ,0x99 -- 99: STA abs,Y
+0454 0x009A  A005409A INT 0,XFR,QS_A,0,0,0,WS_S,OS_X, ,0x9A -- 9A: TXS
+0455 0x009B  2000009B INV 0,XFR,QS_A,0,0,0, , , ,0x9B -- 9B: NOP
+0456 0x009C  C000809C MEM 0,XFR,QS_A,0,0,0, ,OS_Z, ,0x9C -- 9C: STZ abs
+0457 0x009D  C000209D MEM 0,XFR,QS_A,0,0,0, ,OS_A, ,0x9D -- 9D: STA abs,X
+0458 0x009E  C000809E MEM 0,XFR,QS_A,0,0,0, ,OS_Z, ,0x9E -- 9E: STZ abs,X
+0459 0x009F  60400602 JMP 0,XFR,QS_M,0,0,0, , ,BBSx,0x02 -- 9F: BBS1 dp,rel
+0461  --------------------------------------------------------------------------------
+0463 0x00A0  C00319A0 MEM 0,XFR,QS_A,0,0,0,WS_Y, ,NZ ,0xA0 -- A0: LDY #imm
+0464 0x00A1  C00119A1 MEM 0,XFR,QS_A,0,0,0,WS_A, ,NZ ,0xA1 -- A1: LDA (dp,X)
+0465 0x00A2  C00219A2 MEM 0,XFR,QS_A,0,0,0,WS_X, ,NZ ,0xA2 -- A2: LDX #imm
+0466 0x00A3  200000A3 INV 0,XFR,QS_A,0,0,0, , , ,0xA3 -- A3: NOP
+0467 0x00A4  C00319A4 MEM 0,XFR,QS_A,0,0,0,WS_Y, ,NZ ,0xA4 -- A4: LDY dp
+0468 0x00A5  C00119A5 MEM 0,XFR,QS_A,0,0,0,WS_A, ,NZ ,0xA5 -- A5: LDA dp
+0469 0x00A6  C00219A6 MEM 0,XFR,QS_A,0,0,0,WS_X, ,NZ ,0xA6 -- A6: LDX dp
+0470 0x00A7  D0400404 MEM 1,XFR,QS_M,0,0,0, , ,SMBx,0x04 -- A7: SMB2 dp
+0471 0x00A8  A00339A8 INT 0,XFR,QS_A,0,0,0,WS_Y,OS_A,NZ ,0xA8 -- A8: TAY
+0472 0x00A9  C00119A9 MEM 0,XFR,QS_A,0,0,0,WS_A, ,NZ ,0xA9 -- A9: LDA #imm
+0473 0x00AA  A00239AA INT 0,XFR,QS_A,0,0,0,WS_X,OS_A,NZ ,0xAA -- AA: TAX
+0474 0x00AB  200000AB INV 0,XFR,QS_A,0,0,0, , , ,0xAB -- AB: NOP
+0475 0x00AC  C00319AC MEM 0,XFR,QS_A,0,0,0,WS_Y, ,NZ ,0xAC -- AC: LDY abs
+0476 0x00AD  C00119AD MEM 0,XFR,QS_A,0,0,0,WS_A, ,NZ ,0xAD -- AD: LDA abs
+0477 0x00AE  C00219AE MEM 0,XFR,QS_A,0,0,0,WS_X, ,NZ ,0xAE -- AE: LDX abs
+0478 0x00AF  60400604 JMP 0,XFR,QS_M,0,0,0, , ,BBSx,0x04 -- AF: BBS2 dp,rel
+0480  --------------------------------------------------------------------------------
+0482 0x00B0  600009B0 JMP 0,XFR,QS_A,0,0,0, , ,CS ,0xB0 -- B0: BCS rel
+0483 0x00B1  C00119B1 MEM 0,XFR,QS_A,0,0,0,WS_A, ,NZ ,0xB1 -- B1: LDA (dp),Y
+0484 0x00B2  C00119B2 MEM 0,XFR,QS_A,0,0,0,WS_A, ,NZ ,0xB2 -- B2: LDA (dp)
+0485 0x00B3  200000B3 INV 0,XFR,QS_A,0,0,0, , , ,0xB3 -- B3: NOP
+0486 0x00B4  C00319B4 MEM 0,XFR,QS_A,0,0,0,WS_Y, ,NZ ,0xB4 -- B4: LDY dp,X
+0487 0x00B5  C00119B5 MEM 0,XFR,QS_A,0,0,0,WS_A, ,NZ ,0xB5 -- B5: LDA dp,X
+0488 0x00B6  C00219B6 MEM 0,XFR,QS_A,0,0,0,WS_X, ,NZ ,0xB6 -- B6: LDX dp,Y
+0489 0x00B7  D0400408 MEM 1,XFR,QS_M,0,0,0, , ,SMBx,0x08 -- B7: SMB3 dp
+0490 0x00B8  A00616B8 INT 0,XFR,QS_A,0,0,0,WS_P, ,CLV ,0xB8 -- B8: CLV
+0491 0x00B9  C00119B9 MEM 0,XFR,QS_A,0,0,0,WS_A, ,NZ ,0xB9 -- B9: LDA abs,Y
+0492 0x00BA  A002B9BA INT 0,XFR,QS_A,0,0,0,WS_X,OS_S,NZ ,0xBA -- BA: TSX
+0493 0x00BB  200000BB INV 0,XFR,QS_A,0,0,0, , , ,0xBB -- BB: NOP
+0494 0x00BC  C00319BC MEM 0,XFR,QS_A,0,0,0,WS_Y, ,NZ ,0xBC -- BC: LDY abs,X
+0495 0x00BD  C00119BD MEM 0,XFR,QS_A,0,0,0,WS_A, ,NZ ,0xBD -- BD: LDA abs,X
+0496 0x00BE  C00219BE MEM 0,XFR,QS_A,0,0,0,WS_X, ,NZ ,0xBE -- BE: LDX abs,Y
+0497 0x00BF  60400608 JMP 0,XFR,QS_M,0,0,0, , ,BBSx,0x08 -- BF: BBS3 dp,rel
+0499  --------------------------------------------------------------------------------
+0501 0x00C0  CFDE1AC0 MEM 0,CMP,QS_Y,0,1,1,WS_P, ,NZC ,0xC0 -- C0: CPY #imm
+0502 0x00C1  CF1E1AC1 MEM 0,CMP,QS_A,0,1,1,WS_P, ,NZC ,0xC1 -- C1: CMP (dp,X)
+0503 0x00C2  200000C2 INV 0,XFR,QS_A,0,0,0, , , ,0xC2 -- C2: NOP
+0504 0x00C3  200000C3 INV 0,XFR,QS_A,0,0,0, , , ,0xC3 -- C3: NOP
+0505 0x00C4  CFDE1AC4 MEM 0,CMP,QS_Y,0,1,1,WS_P, ,NZC ,0xC4 -- C4: CPY dp
+0506 0x00C5  CF1E1AC5 MEM 0,CMP,QS_A,0,1,1,WS_P, ,NZC ,0xC5 -- C5: CMP dp
+0507 0x00C6  D77E19C6 MEM 1,DEC,QS_M,1,1,1,WS_P, ,NZ ,0xC6 -- C6: DEC dp
+0508 0x00C7  D0400410 MEM 1,XFR,QS_M,0,0,0, , ,SMBx,0x10 -- C7: SMB4 dp
+0509 0x00C8  A6EB19C8 INT 0,INC,QS_Y,1,0,1,WS_Y, ,NZ ,0xC8 -- C8: INY
+0510 0x00C9  CF1E1AC9 MEM 0,CMP,QS_A,0,1,1,WS_P, ,NZC ,0xC9 -- C9: CMP #imm
+0511 0x00CA  A7BA19CA INT 0,DEC,QS_X,1,1,1,WS_X, ,NZ ,0xCA -- CA: DEX
+0512 0x00CB  E00000CB WAI 0,XFR,QS_A,0,0,0, , , ,0xCB -- CB: WAI
+0513 0x00CC  CFDE1ACC MEM 0,CMP,QS_Y,0,1,1,WS_P, ,NZC ,0xCC -- CC: CPY abs
+0514 0x00CD  CF1E1ACD MEM 0,CMP,QS_A,0,1,1,WS_P, ,NZC ,0xCD -- CD: CMP abs
+0515 0x00CE  D77E19CE MEM 1,DEC,QS_M,1,1,1,WS_P, ,NZ ,0xCE -- CE: DEC abs
+0516 0x00CF  60400610 JMP 0,XFR,QS_M,0,0,0, , ,BBSx,0x10 -- CF: BBS4 dp,rel
+0518  --------------------------------------------------------------------------------
+0520 0x00D0  60000AD0 JMP 0,XFR,QS_A,0,0,0, , ,NE ,0xD0 -- D0: BNE rel
+0521 0x00D1  CF1E1AD1 MEM 0,CMP,QS_A,0,1,1,WS_P, ,NZC ,0xD1 -- D1: CMP (dp),Y
+0522 0x00D2  CF1E1AD2 MEM 0,CMP,QS_A,0,1,1,WS_P, ,NZC ,0xD2 -- D2: CMP (dp)
+0523 0x00D3  200000D3 INV 0,XFR,QS_A,0,0,0, , , ,0xD3 -- D3: NOP
+0524 0x00D4  200000D4 INV 0,XFR,QS_A,0,0,0, , , ,0xD4 -- D4: NOP
+0525 0x00D5  CF1E1AD5 MEM 0,CMP,QS_A,0,1,1,WS_P, ,NZC ,0xD5 -- D5: CMP dp,X
+0526 0x00D6  D77E19D6 MEM 1,DEC,QS_M,1,1,1,WS_P, ,NZ ,0xD6 -- D6: DEC dp,X
+0527 0x00D7  D0400420 MEM 1,XFR,QS_M,0,0,0, , ,SMBx,0x20 -- D7: SMB5 dp
+0528 0x00D8  A00614D8 INT 0,XFR,QS_A,0,0,0,WS_P, ,CLD ,0xD8 -- D8: CLD
+0529 0x00D9  CF1E1AD9 MEM 0,CMP,QS_A,0,1,1,WS_P, ,NZC ,0xD9 -- D9: CMP abs,Y
+0530 0x00DA  800040DA STK 0,XFR,QS_A,0,0,0, ,OS_X, ,0xDA -- DA: PHX
+0531 0x00DB  000000DB STP 0,XFR,QS_A,0,0,0, , , ,0xDB -- DB: STP
+0532 0x00DC  200000DC INV 0,XFR,QS_A,0,0,0, , , ,0xDC -- DC: NOP
+0533 0x00DD  CF1E1ADD MEM 0,CMP,QS_A,0,1,1,WS_P, ,NZC ,0xDD -- DD: CMP abs,X
+0534 0x00DE  D77E19DE MEM 1,DEC,QS_M,1,1,1,WS_P, ,NZ ,0xDE -- DE: DEC abs,X
+0535 0x00DF  60400620 JMP 0,XFR,QS_M,0,0,0, , ,BBSx,0x20 -- DF: BBS5 dp,rel
+0537  --------------------------------------------------------------------------------
+0539 0x00E0  CF9E1AE0 MEM 0,CMP,QS_X,0,1,1,WS_P, ,NZC ,0xE0 -- E0: CPX #imm
+0540 0x00E1  C5111CE1 MEM 0,SBC,QS_A,0,1,0,WS_A, ,NVZC,0xE1 -- E1: SBC (dp,X)
+0541 0x00E2  200000E2 INV 0,XFR,QS_A,0,0,0, , , ,0xE2 -- E2: NOP
+0542 0x00E3  200000E3 INV 0,XFR,QS_A,0,0,0, , , ,0xE3 -- E3: NOP
+0543 0x00E4  CF9E1AE4 MEM 0,CMP,QS_X,0,1,1,WS_P, ,NZC ,0xE4 -- E4: CPX dp
+0544 0x00E5  C5111CE5 MEM 0,SBC,QS_A,0,1,0,WS_A, ,NVZC,0xE5 -- E5: SBC dp
+0545 0x00E6  D66E19E6 MEM 1,INC,QS_M,1,0,1,WS_P, ,NZ ,0xE6 -- E6: INC dp
+0546 0x00E7  D0400440 MEM 1,XFR,QS_M,0,0,0, , ,SMBx,0x40 -- E7: SMB6 dp
+0547 0x00E8  A6AA19E8 INT 0,INC,QS_X,1,0,1,WS_X, ,NZ ,0xE8 -- E8: INX
+0548 0x00E9  C5111CE9 MEM 0,SBC,QS_A,0,1,0,WS_A, ,NVZC,0xE9 -- E9: SBC #imm
+0549 0x00EA  A00000EA INT 0,XFR,QS_A,0,0,0, , , ,0xEA -- EA: NOP
+0550 0x00EB  200000EB INV 0,XFR,QS_A,0,0,0, , , ,0xEB -- EB: NOP
+0551 0x00EC  CF9E1AEC MEM 0,CMP,QS_X,0,1,1,WS_P, ,NZC ,0xEC -- EC: CPX abs
+0552 0x00ED  C5111CED MEM 0,SBC,QS_A,0,1,0,WS_A, ,NVZC,0xED -- ED: SBC abs
+0553 0x00EE  D66E19EE MEM 1,INC,QS_M,1,0,1,WS_P, ,NZ ,0xEE -- EE: INC abs
+0554 0x00EF  60400640 JMP 0,XFR,QS_M,0,0,0, , ,BBSx,0x40 -- EF: BBS6 dp,rel
+0556  --------------------------------------------------------------------------------
+0558 0x00F0  60000BF0 JMP 0,XFR,QS_A,0,0,0, , ,EQ ,0xF0 -- F0: BEQ rel
+0559 0x00F1  C5111CF1 MEM 0,SBC,QS_A,0,1,0,WS_A, ,NVZC,0xF1 -- F1: SBC (dp),Y
+0560 0x00F2  C5111CF2 MEM 0,SBC,QS_A,0,1,0,WS_A, ,NVZC,0xF2 -- F2: SBC (dp)
+0561 0x00F3  200000F3 INV 0,XFR,QS_A,0,0,0, , , ,0xF3 -- F3: NOP
+0562 0x00F4  200000F4 INV 0,XFR,QS_A,0,0,0, , , ,0xF4 -- F4: NOP
+0563 0x00F5  C5111CF5 MEM 0,SBC,QS_A,0,1,0,WS_A, ,NVZC,0xF5 -- F5: SBC dp,X
+0564 0x00F6  D66E19F6 MEM 1,INC,QS_M,1,0,1,WS_P, ,NZ ,0xF6 -- F6: INC dp,X
+0565 0x00F7  D0400480 MEM 1,XFR,QS_M,0,0,0, , ,SMBx,0x80 -- F7: SMB7 dp
+0566 0x00F8  A00615F8 INT 0,XFR,QS_A,0,0,0,WS_P, ,SED ,0xF8 -- F8: SED
+0567 0x00F9  C5111CF9 MEM 0,SBC,QS_A,0,1,0,WS_A, ,NVZC,0xF9 -- F9: SBC abs,Y
+0568 0x00FA  804219FA STK 0,XFR,QS_M,0,0,0,WS_X, ,NZ ,0xFA -- FA: PLX
+0569 0x00FB  200000FB INV 0,XFR,QS_A,0,0,0, , , ,0xFB -- FB: NOP
+0570 0x00FC  200000FC INV 0,XFR,QS_A,0,0,0, , , ,0xFC -- FC: NOP
+0571 0x00FD  C5111CFD MEM 0,SBC,QS_A,0,1,0,WS_A, ,NVZC,0xFD -- FD: SBC abs,X
+0572 0x00FE  D66E19FE MEM 1,INC,QS_M,1,0,1,WS_P, ,NZ ,0xFE -- FE: INC abs,X
+0573 0x00FF  60400680 JMP 0,XFR,QS_M,0,0,0, , ,BBSx,0x80 -- FF: BBS7 dp,rel
+0575  --------------------------------------------------------------------------------
+0577 0x0100 _end:

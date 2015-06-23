@@ -1,0 +1,1010 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  Copyright 2012 by Michael A. Morris, dba M. A. Morris & Associates
+;;
+;;  All rights reserved. The source code contained herein is publicly released
+;;  under the terms and conditions of the GNU Lesser Public License. No part of
+;;  this source code may be reproduced or transmitted in any form or by any
+;;  means, electronic or mechanical, including photocopying, recording, or any
+;;  information storage and retrieval system in violation of the license under
+;;  which the source code is released.
+;;
+;;  The souce code contained herein is free; it may be redistributed and/or 
+;;  modified in accordance with the terms of the GNU Lesser General Public
+;;  License as published by the Free Software Foundation; either version 2.1 of
+;;  the GNU Lesser General Public License, or any later version.
+;;
+;;  The souce code contained herein is freely released WITHOUT ANY WARRANTY;
+;;  without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+;;  PARTICULAR PURPOSE. (Refer to the GNU Lesser General Public License for
+;;  more details.)
+;;
+;;  A copy of the GNU Lesser General Public License should have been received
+;;  along with the source code contained herein; if not, a copy can be obtained
+;;  by writing to:
+;;
+;;  Free Software Foundation, Inc.
+;;  51 Franklin Street, Fifth Floor
+;;  Boston, MA  02110-1301 USA
+;;
+;;  Further, no use of this source code is permitted in any form or means
+;;  without inclusion of this banner prominently in any derived works. 
+;;
+;;  Michael A. Morris
+;;  Huntsville, AL
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+; #------------------------------------------------------------------------#
+; |                                                                        |
+; |   M65C02_Tst2.A65                                                      |
+; |                                                                        |
+; |   Test program for M65C02_Core.v                                       |
+; |                                                                        |
+; |   Copyright 2012, Michael A. Morris                                    |
+; |                                                                        |
+; #------------------------------------------------------------------------#
+;
+; File created 11-Feb-2012
+;
+;   Modified 09-Dec-2012    mam     Changed to a "ROM" type of test program
+;                                   where the program is at the top of memory
+;                                   and includes the three vectors. Intent is to
+;                                   convert core so it indirectly jump through
+;                                   the normal processor vectors when an excep-
+;                                   is performed: Reset, NMI, or IRQ/BRK.
+;
+;                                   To make this change need to add code to
+;                                   initialize page 0, 1, and 2 RAM locations.
+;
+;   Modified 15-Dec-2012    mam     Modified to remove Rockwell instruction op-
+;                                   codes from the NOP/Invalid instruction list.
+;
+            title   "M65C02_Core Test Program - all instructions"
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  Define macros for the Rockwell instructions
+;;
+RMBx        macro   BitNum, ZP
+            db      ((BitNum+0)*16)+7
+            db      ZP
+            endm
+;;
+SMBx        macro   BitNum, ZP
+            db      ((BitNum+8)*16)+7
+            db      ZP
+            endm
+;;          
+BBRx        macro   BitNum, ZP, Dst
+LBL\?       db      ((BitNum+0)*16)+15
+            db      ZP
+            if(Dst < LBL\?+3)
+            db      -(Dst-LBL\?+1)
+            else
+            db      (Dst-LBL\?-3)
+            endif
+            endm
+;;
+BBSx        macro   BitNum, ZP, Dst
+LBL\?       db      ((BitNum+8)*16)+15
+            db      ZP
+            if(Dst < LBL\?+3)
+            db      -(Dst-LBL\?+1)
+            else
+            db      (Dst-LBL\?-3)
+            endif
+            endm
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  Define macros for the W65802/65816 instructions implemented in W65C02S
+;;
+STP         macro
+            db      $DB
+            endm
+;;
+WAI         macro
+            db      $CB
+            endm
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+ROM_Start   equ     $F800       ;; Boot "ROM" Start Address
+;;
+NMI_Vector  equ     $FFFA       ;; Normal Non-maskable Interrupt Vector
+RST_Vector  equ     $FFFC       ;; Normal Reset Vector
+IRQ_Vector  equ     $FFFE       ;; Normal Maskable Interrupt or BRK Vector
+;;
+IRQ_On      equ     $FFF8       ;; Set External Interrupt Request
+IRQ_Off     equ     $FFF9       ;; Clr External Interrupt Request
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+            bss
+            org     $0000
+;;
+Hi_Return   ds      1
+Neg_Return  ds      2
+;;
+            org     $0008             
+;;
+pDPI        ds      2           ;; DP  = (pDPI)
+pDPXI       ds      2           ;; DPX = (pDPI,X) {X = 2}
+pDPIY       ds      2           ;; DPY = (pDPI),Y {Y = 2}
+;;
+            org     $0010
+;;
+DP          ds      1           ;; DP;  DP,X (X = 0); DP,Y (Y = 0)
+DPX         ds      1           ;; DPX; DP,X (X = 1); DP,Y (Y = 1)
+DPY         ds      1           ;; DPY; DP,X (X = 2); DP,Y (Y = 2)
+;;
+            org     $00FF
+;;
+Lo_Return   ds      1
+;;
+            bss
+Stack_Page  org     $0100
+;;
+RAM_Start   org     $0200
+;;
+Abs         ds      1
+AbsX        ds      1
+AbsY        ds      1
+;;
+            code
+            org     ROM_Start
+Start       jmp     Abs_Dst
+;;
+Jmp_AbsI    dw      AbsI_Dst
+Jmp_AbsXI   dw      AbsXI_Dst
+;;
+            ds      1
+;;
+Interrupt   pha                 ;; preserve Acc
+            php                 ;; push current PSW, on entry D cleared and 
+            pla                 ;; I should be set
+            bit     #$08        ;; check if BCD mode not set
+            bne     *           ;; if <> 0, error
+            bit     #$04        ;; check is Interrupt Mask set
+            beq     *           ;; if == 0, error
+            pla                 ;; restore Acc
+ISR_End     rti                 ;; Exit ISR
+;;
+Init_RAM    lda     #(lo Return)
+            sta     Lo_Return
+            lda     #(hi Return)
+            sta     Hi_Return
+;;
+            lda     #(lo -Return)
+            sta     Hi_Return+1
+            lda     #(hi -Return)
+            sta     Hi_Return+2
+;;
+            lda     #(lo DP)
+            sta     pDPI
+            stz     pDPI+1
+;;
+            lda     #(lo DPX)
+            sta     pDPXI
+            stz     pDPXI+1
+;;
+            lda     #(lo DPY)
+            sta     pDPIY
+            stz     pDPIY+1
+;;
+Return      rts
+;;
+Abs_Dst     jmp     (Jmp_AbsI)
+            nop
+AbsI_Dst    jmp     (Jmp_AbsXI, x)
+            nop
+;;
+AbsXI_Dst   jsr     Return
+            nop
+Test_Main   bra     Fwd         ;; Rel, P = {N, V, 1'b1, B, D, I, Z, C}
+Tst_BPL     lda     #$80        ;; Imm, A = 0x80, P = 0xA4
+Err_BPL     bpl     Err_BPL     ;; Rel, P = {N, V, 1'b1, B, D, I, Z, C}
+            eor     #$80        ;; Imm, A = 0x00, P = 0x26
+Err_BMI     bmi     Err_BMI     ;; Rel, P = {N, V, 1'b1, B, D, I, Z, C}
+            sec                 ;; Imp, A = 0x00, P = 0x27
+Err_BCC     bcc     Err_BCC     ;; Rel, P = {N, V, 1'b1, B, D, I, Z, C}
+            sbc     #$80        ;; Imm, A = 0x80, P = 0xE4
+Err_BVC     bvc     Err_BVC     ;; Rel, P = {N, V, 1'b1, B, D, I, Z, C}
+Err_BCS     bcs     Err_BCS     ;; Rel, P = {N, V, 1'b1, B, D, I, Z, C}
+Err_BEQ     beq     Err_BEQ     ;; Rel, P = {N, V, 1'b1, B, D, I, Z, C}
+            sbc     #$7F        ;; Imm, A = 0x00, P = 0x67
+            clv                 ;; Imp, A = 0x00, P = 0x27
+Err_BVS     bvs     Err_BVS     ;; Rel, P = {N, V, 1'b1, B, D, I, Z, C}
+Err_BNE     bne     Err_BNE     ;; Rel, P = {N, V, 1'b1, B, D, I, Z, C}
+            clc                 ;; Imp, A = 0x00, P = 0x26
+Err_BCS2    bcs     Err_BCS2    ;; Rel, P = {N, V, 1'b1, B, D, I, Z, C}
+            bra     Continue
+Fwd         bra     Tst_BPL     ;; Test Conditional Branch Instructions
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  Implicit/Accumulator/Immediate Address Instructions
+;;
+Continue    nop                 ;; Imp, A   = 0x00, P = 0x26
+;;
+            cli                 ;; Imp, A   = 0x00, P = 0x22
+            php                 ;; Psh, (S) = 0x22, P = 0x22
+            pla                 ;; Pop, A   = 0x22, P = 0x20
+            and     #$04        ;; Imm, A   = 0x00, P = 0x22
+            bne     *           ;; Rel, A   = 0x00, P = 0x22
+            nop                 ;; Imp, A   = 0x00, P = 0x22
+;;
+            sei                 ;; Imp, A   = 0x00, P = 0x26
+            php                 ;; Psh, (S) = 0x26, P = 0x26
+            pla                 ;; Pop, A   = 0x26, P = 0x24
+            and     #$04        ;; Imm, A   = 0x04, P = 0x24
+            beq     *           ;; Rel, A   = 0x04, P = 0x24
+            nop                 ;; Imp, A   = 0x04, P = 0x24
+;;
+            sed                 ;; Imp, A   = 0x04, P = 0x2C
+            php                 ;; Psh, (S) = 0x2C, P = 0x2C
+            pla                 ;; Pop, A   = 0x2C, P = 0x2C
+            and     #$08        ;; Imm, A   = 0x08, P = 0x2C
+            beq     *           ;; Rel, A   = 0x08, P = 0x2C
+            nop                 ;; Imp, A   = 0x08, P = 0x2C
+;;
+            cld                 ;; Imp, A   = 0x08, P = 0x24
+            php                 ;; Psh, A   = 0x08, P = 0x24
+            pla                 ;; Pop, A   = 0x24, P = 0x24
+            and     #$08        ;; Imm, A   = 0x00, P = 0x26
+            bne     *           ;; Rel, P   = {N, V, 1'b1, B, D, I, Z, C}
+            nop                 ;; Imp, A   = 0x00, P = 0x26
+;;
+            lda     #$55        ;; Imm, A   = 0x55, P = 0x24
+            ora     #$AA        ;; Imm, A   = 0xFF, P = 0xA4
+            pha                 ;; Psh, A   = 0xFF, P = 0xA4
+            plp                 ;; Pop, A   = 0xFF, P = 0xEF
+            bvc     *           ;; Stop if ~V
+            bne     *           ;; Stop if ~Z
+            bcc     *           ;; Stop if ~C
+            bpl     *           ;; Stop if ~N
+;;
+            cmp     #$FF        ;; Imm, A   = 0xFF, P = 0x6F Make sure A is -1
+            bne     *           ;; Rel, A   = 0xFF, P = 0x6F
+            bmi     *           ;; Rel, A   = 0xFF, P = 0x6F
+            bcc     *           ;; Rel, A   = 0xFF, P = 0x6F
+;;
+            clc                 ;; Imp, A   = 0xFF, P = 0x6E
+            cld                 ;; Imp, A   = 0xFF, P = 0x66
+            clv                 ;; Imm, A   = 0xFF, P = 0x66
+            adc     #$01        ;; Imm, A   = 0x00, P = 0x27
+            ora     #$04        ;; Imm, A   = 0x04, P = 0x25
+            pha                 ;; Psh, A   = 0x04, P = 0x25
+            plp                 ;; Pop, A   = 0x04, P = 0x24
+;;
+            ldy     #$AA        ;; Imm, Y   = 0xAA, P = 0xA4
+            cpy     #$AA        ;; Imm, Y   = 0xAA, P = 0x27
+            bne     *           ;; Rel, Y   = 0xAA, P = 0x27
+            bmi     *           ;; Rel, Y   = 0xAA, P = 0x27
+            bcc     *           ;; Rel, Y   = 0xAA, P = 0x27
+            phy
+;;
+            ldx     #$55        ;; Imm, X   = 0x55, P = 0x25
+            cpx     #$55        ;; Imm, X   = 0x55, P = 0x27
+            bne     *           ;; Rel, X   = 0x55, P = 0x27
+            bmi     *           ;; Rel, X   = 0x55, P = 0x27
+            bcc     *           ;; Rel, X   = 0x55, P = 0x27
+            phx
+;;
+            ply                 ;; Imm, Y   = 0x55, P = 0x25
+            cpy     #$55        ;; Imm, Y   = 0x55, P = 0x27
+            bne     *           ;; Rel, Y   = 0x55, P = 0x27
+            bmi     *           ;; Rel, Y   = 0x55, P = 0x27
+            bcc     *           ;; Rel, Y   = 0x55, P = 0x27
+;;
+            plx                 ;; Imm, X   = 0xAA, P = 0xA5
+            cpx     #$AA        ;; Imm, X   = 0xAA, P = 0x27
+            bne     *           ;; Rel, X   = 0xAA, P = 0x27
+            bmi     *           ;; Rel, X   = 0xAA, P = 0x27
+            bcc     *           ;; Rel, X   = 0xAA, P = 0x27
+;;
+            bit     #$04        ;; Imm, A   = 0x04, P = 0x25
+            beq     *           ;; Rel, A   = 0x04, P = 0x25
+            bit     #$00        ;; Imm, A   = 0x04, P = 0x27
+            bne     *           ;; Rel, A   = 0x04, P = 0x27
+;;
+            tya                 ;; Imm, A   = 0x55, P = 0x25
+            cmp     #$55        ;; Imm, A   = 0x55, P = 0x27
+            bne     *           ;; Rel, A   = 0x55, P = 0x27
+            bmi     *           ;; Rel, A   = 0x55, P = 0x27
+            bcc     *           ;; Rel, A   = 0x55, P = 0x27
+;;
+            tay                 ;; Imm, Y   = 0x55, P = 0x25
+            cpy     #$55        ;; Imm, Y   = 0x55, P = 0x27
+            bne     *           ;; Rel, Y   = 0x55, P = 0x27
+            bmi     *           ;; Rel, Y   = 0x55, P = 0x27
+            bcc     *           ;; Rel, Y   = 0x55, P = 0x27
+;;
+            txa                 ;; Imm, A   = 0xAA, P = 0xA5
+            cmp     #$AA        ;; Imm, A   = 0xAA, P = 0x27
+            bne     *           ;; Rel, A   = 0xAA, P = 0x27
+            bmi     *           ;; Rel, A   = 0xAA, P = 0x27
+            bcc     *           ;; Rel, A   = 0xAA, P = 0x27
+;;
+            tax                 ;; Imm, X   = 0xAA, P = 0xA5
+            cpx     #$AA        ;; Imm, X   = 0xAA, P = 0x27
+            bne     *           ;; Rel, X   = 0xAA, P = 0x27
+            bmi     *           ;; Rel, X   = 0xAA, P = 0x27
+            bcc     *           ;; Rel, X   = 0xAA, P = 0x27
+;;
+            tsx                 ;; Imm, X   = 0xFF, P = 0xA5
+            txs                 ;; Imm, S   = 0xFF, P = 0xA5
+            cpx     #$FF        ;; Imm, X   = 0xFF, P = 0x27
+            bne     *           ;; Rel, X   = 0xFF, P = 0x27
+            bmi     *           ;; Rel, X   = 0xFF, P = 0x27
+            bcc     *           ;; Rel, X   = 0xFF, P = 0x27
+;;
+            asl     a           ;; Acc, A   = 0x54, P = 0x25
+            bmi     *           ;; Rel, A   = 0x54, P = 0x25
+            bcc     *           ;; Rel, A   = 0x54, P = 0x25
+            cmp     #$54        ;; Imm, A   = 0x54, P = 0x27
+            bne     *           ;; Rel, A   = 0x54, P = 0x27
+;;
+            rol     a           ;; Acc, A   = 0xA9, P = 0xA5
+            bpl     *           ;; Rel, A   = 0xA9, P = 0xA4
+            bcs     *           ;; Rel, A   = 0xA9, P = 0xA4
+            cmp     #$A9        ;; Imm, A   = 0xA9, P = 0x26
+            bne     *           ;; Rel, A   = 0xA9, P = 0x26
+;;
+            lsr     a           ;; Acc, A   = 0x54, P = 0x25
+            bmi     *           ;; Rel, A   = 0x54, P = 0x25
+            bcc     *           ;; Rel, A   = 0x54, P = 0x25
+            cmp     #$54        ;; Imm, A   = 0x54, P = 0x27
+            bne     *           ;; Rel, A   = 0x54, P = 0x27
+;;
+            ror     a           ;; Acc, A   = 0xAA, P = 0xA4
+            bpl     *           ;; Rel, A   = 0xA9, P = 0xA4
+            bcs     *           ;; Rel, A   = 0xA9, P = 0xA4
+            cmp     #$AA        ;; Imm, A   = 0xAA, P = 0x27
+            bne     *           ;; Rel, A   = 0xAA, P = 0x27
+;;
+            inc     a           ;; Acc, A   = 0xAB, P = 0xA5
+            cmp     #$AB        ;; Imm, A   = 0xAB, P = 0x27
+            bne     *           ;; Rel, A   = 0xAB, P = 0x27
+            bmi     *           ;; Rel, A   = 0xAB, P = 0x27
+            bcc     *           ;; Rel, A   = 0xAB, P = 0x27
+;;
+            inx                 ;; Imp, X   = 0x00, P = 0x27
+            cpx     #$00        ;; Imm, X   = 0x00, P = 0x27
+            bne     *           ;; Rel, X   = 0x00, P = 0x27
+            bmi     *           ;; Rel, X   = 0x00, P = 0x27
+            bcc     *           ;; Rel, X   = 0x00, P = 0x27
+;;
+            iny                 ;; Imp, Y   = 0x56, P = 0x25
+            cpy     #$56        ;; Imm, Y   = 0x56, P = 0x27
+            bne     *           ;; Rel, Y   = 0x56, P = 0x27
+            bmi     *           ;; Rel, Y   = 0x56, P = 0x27
+            bcc     *           ;; Rel, Y   = 0x56, P = 0x27
+;;
+            dec     a           ;; Acc, A   = 0xAA, P = 0xA5
+            cmp     #$AA        ;; Imm, A   = 0xAA, P = 0x27
+            bne     *           ;; Rel, A   = 0xAA, P = 0x27
+            bmi     *           ;; Rel, A   = 0xAA, P = 0x27
+            bcc     *           ;; Rel, A   = 0xAA, P = 0x27
+;;
+            dex                 ;; Imp, X   = 0xFF, P = 0xA5
+            cpx     #$FF        ;; Imm, X   = 0xFF, P = 0x27
+            bne     *           ;; Rel, X   = 0xFF, P = 0x27
+            bmi     *           ;; Rel, X   = 0xFF, P = 0x27
+            bcc     *           ;; Rel, X   = 0xFF, P = 0x27
+;;
+            dey                 ;; Imp, Y   = 0x55, P = 0x25
+            cpy     #$55        ;; Imm, Y   = 0x55, P = 0x27
+            bne     *           ;; Rel, Y   = 0x55, P = 0x27
+            bmi     *           ;; Rel, Y   = 0x55, P = 0x27
+            bcc     *           ;; Rel, Y   = 0x55, P = 0x27
+;;
+            lda     #$00        ;; Imm, A   = 0x00, P = 0x27
+            tax                 ;; Imp, X   = 0x00, P = 0x27
+            tay                 ;; Imp, Y   = 0x00, P = 0x27
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  Direct/Zero Page Instructions
+;;
+            dec     a           ;; Acc,   A   = 0xFF, P = 0xA5
+            sta     DP          ;; WO_DP, DP  = 0xFF, P = 0xA5
+            rol     a           ;; Acc,   A   = 0xFF, P = 0xA5
+            ora     DP          ;; RO_DP, A   = 0xFF, P = 0xA5
+            cmp     #$FF        ;; Imm,   A   = 0xFF, P = 0x27
+            bne     *           ;; Rel,   A   = 0xFF, P = 0x27
+;;
+            stz     DP          ;; WO_DP, DP  = 0x00, P = 0x27
+            dec     a           ;; Acc,   A   = 0xFE, P = 0xA5
+            lda     DP          ;; RO_DP, A   = 0x00, P = 0x27
+            bne     *           ;; Rel,   A   = 0x00, P = 0x27
+            cmp     DP          ;; RO_DP, A   = 0x00, P = 0x27
+            bne     *           ;; Rel,   A   = 0x00, P = 0x27
+;;
+            stz     DP          ;; WO_DP, DP  = 0x00, p = 0x27
+            dey                 ;; Imp,   Y   = 0xFF, P = 0xA5
+            sty     DP          ;; RO_DP, Y   = 0xFF, P = 0xA5
+            iny                 ;; Imp,   Y   = 0x00, P = 0x27
+            ldy     DP          ;; RO_DP, Y   = 0xFF, P = 0xA5
+            cpy     #$FF        ;; Imm,   Y   = 0xFF, P = 0x27
+            bne     *
+            cpy     DP          ;; RO_DP, Y   = 0xFF, P = 0x27
+            bne     *
+;;
+            stz     DP          ;; WO_DP, DP  = 0x00, p = 0x27
+            dex                 ;; Imp,   X   = 0xFF, P = 0xA5
+            stx     DP          ;; RO_DP, DP  = 0xFF, P = 0xA5
+            inx                 ;; Imp,   X   = 0x00, P = 0x27
+            ldx     DP          ;; RO_DP, X   = 0xFF, P = 0xA5
+            cpx     #$FF        ;; Imm,   X   = 0xFF, P = 0x27
+            bne     *
+            cpx     DP          ;; RO_DP, X   = 0xFF, P = 0x27
+            bne     *
+;;
+            txa                 ;; Imp,   A   = 0xFF, P = 0xA5
+            eor     DP          ;; RO_DP, A   = 0x00, P = 0x27
+            bne     *
+;;
+            lda     #$55        ;; Imm,   A   = 0x55, P = 0x25
+            sta     DP          ;; WO_DO, DP  = 0x55, P = 0x25
+            lda     #$FF        ;; Imm,   A   = 0xFF, P = 0xA5
+            and     DP          ;; RO_DP, A   = 0x55, P = 0x25
+            cmp     #$55        ;; Imm,   A   = 0x55, P = 0x27
+            bne     *
+;;
+            adc     DP          ;; RO_DP, A   = 0xAB, P = 0xE4
+            cmp     #$AB        ;; Imm,   A   = 0xAB, P = 0x67
+            bne     *
+            sbc     DP          ;; RO_DP, A   = 0x55, P = 0x65
+            cmp     #$56        ;; Imm,   A   = 0x56, P = 0x67
+            bne     *
+            lda     #$82        ;; Imm,   A   = 0x82, P = 0xE5
+            bit     DP          ;; RO_DP  A   = 0x82, P = 0x67
+            bmi     *
+            bvc     *
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  Direct/Zero Page Indexed Instructions
+;;
+            lda     #$24        ;; Imm,    A   = 0x24, P = 0x65
+            pha                 ;; Imp,    A   = 0x24, P = 0x65
+            plp                 ;; Imp,    A   = 0x24, P = 0x24
+;;
+            stz     DP          ;; DP,     DP  = 0x00, P = 0x24
+            stz     DP+1        ;; DP,     DPX = 0x00, P = 0x24
+            stz     DP+2        ;; DP,     DPY = 0x00, P = 0x24
+;;
+            lda     #$55        ;; Imm,    A   = 0x55, P = 0x24
+            sta     DPY         ;; DP,     DPY = 0x55, P = 0x24
+            asl     a           ;; Acc,    A   = 0xAA, P = 0xA4
+            ldx     DPX         ;; DP,     X   = 0x00, P = 0x26
+            ldy     DPY         ;; DP,     Y   = 0x55, P = 0x26
+;;
+            inx                 ;; Imp,    X   = 0x01, P = 0x24
+            sta     DP,x        ;; WO_DPX, DPX = 0xAA, P = 0x24
+            lsr     a           ;; Acc,    A   = 0x55, P = 0x24
+            inx                 ;; Imp,    X   = 0x02, P = 0x24
+            sta     DP,x        ;; WO_DPX, DPY = 0x55, P = 0x24
+            dex                 ;; Imp,    X   = 0x01, P = 0x24
+            ora     DP,x        ;; RO_DPX, A   = 0xFF, P = 0xA4
+            and     DP,x        ;; RO_DPX, A   = 0xAA, P = 0xA4
+            eor     DP,x        ;; RO_DPX, A   = 0x00, P = 0x26
+            bne     *           ;; Rel,    A   = 0x00, P = 0x26
+            stz     DP,x        ;; WO_DPX, DPX = 0x00, P = 0x26
+            cmp     DP,x        ;; RO_DPX, A   = 0x00, P = 0x27
+            bne     *           ;; Rel,    A   = 0x00, P = 0x27
+            bcc     *           ;; Rel,    A   = 0x00, P = 0x27
+            inx                 ;; Imp,    X   = 0x02, P = 0x25
+            ldy     DP,x        ;; RO_DPX, Y   = 0x55, P = 0x25
+            tya                 ;; Imp,    A   = 0x55, P = 0x25
+            asl     a           ;; Acc,    A   = 0xAA, P = 0xA4
+            bit     DP,x        ;; RO_DPX, A   = 0xAA, M = 0x55, P = 0x66
+            bmi     *           ;; Rel,    A   = 0xAA, P = 0x66
+            bvc     *           ;; Rel,    A   = 0xAA, P = 0x66
+            bne     *           ;; Rel,    A   = 0xAA, P = 0x66
+            clv                 ;; Imp,    A   = 0xAA, P = 0x26
+            sec                 ;; Imp,    A   = 0xAA, P = 0x27
+            adc     DP,x        ;; RO_DPX, A   = 0x00, P = 0x27
+            clc
+            sbc     DP,x        ;; RO_DPX, A   = 0xAA, P = 0xA4
+            bpl     *           ;; Rel,    A   = 0xAA, P = 0xA4
+            bvs     *           ;; Rel,    A   = 0xAA, P = 0xA4
+            beq     *           ;; Rel,    A   = 0xAA, P = 0xA4
+            bcs     *           ;; Rel,    A   = 0xAA, P = 0xA4
+;;
+            lda     DP-2,x      ;; RO_DPX, A   = 0x00, P = 0x26
+            tay                 ;; Imp,    Y   = 0x00, P = 0x26
+            sty     DP,x        ;; WO_DPX, DPY = 0x00, P = 0x26
+;;
+            ldx     DP,y        ;; RO_DPY, X   = 0x00, P = 0x26
+            iny                 ;; Imp,    Y   = 0x01, P = 0x24
+            stx     DP,y        ;; WO_DPY, DPX = 0x00, P = 0x24
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  Absolute Address Instructions
+;;
+            lda     #$24        ;; Imm,    A    = 0x24, P = 0x67
+            pha                 ;; Imp,    A    = 0x24, P = 0x67
+            plp                 ;; Imp,    A    = 0x24, P = 0x24
+;;
+            stz     Abs         ;; WO_Abs, Abs  = 0x00, P = 0x24
+            stz     Abs+1       ;; WO_Abs, AbsX = 0x00, P = 0x24
+            stz     Abs+2       ;; WO_Abs, AbsY = 0x00, P = 0x24
+;;
+            lda     #$55        ;; Imm,    A    = 0x55, P = 0x24
+            sta     AbsY        ;; WO_Abs, AbsY = 0x55, P = 0x24
+            asl     a           ;; Acc,    A    = 0xAA, P = 0xA4
+            ldx     AbsX        ;; RO_Abs, X    = 0x00, P = 0x26
+            ldy     AbsY        ;; RO_Abs, Y    = 0x55, P = 0x26
+;;
+            sta     AbsX        ;; WO_Abs, AbsX = 0xAA, P = 0x24
+            lsr     a           ;; Acc,    A    = 0x55, P = 0x24
+            sta     AbsY        ;; WO_Abs, AbsY = 0x55, P = 0x24
+;;
+            ora     AbsX        ;; RO_Abs, A    = 0xFF, P = 0xA4
+            and     AbsX        ;; RO_Abs, A    = 0xAA, P = 0xA4
+            eor     AbsX        ;; RO_Abs, A    = 0x00, P = 0x26
+            bne     *           ;; Rel,    A    = 0x00, P = 0x26
+            stz     AbsX        ;; WO_Abs, AbsX = 0x00, P = 0x26
+            cmp     AbsX        ;; RO_Abs, A    = 0x00, P = 0x27
+            bne     *           ;; Rel,    A    = 0x00, P = 0x27
+            bcc     *           ;; Rel,    A    = 0x00, P = 0x27
+            ldy     AbsY        ;; RO_Abs, Y    = 0x55, P = 0x25
+            tya                 ;; Imp,    A    = 0x55, P = 0x25
+            asl     a           ;; Acc,    A    = 0xAA, P = 0xA4
+            bit     AbsY        ;; RO_Abs, A    = 0xAA, M = 0x55, P = 0x66
+            bmi     *           ;; Rel,    A    = 0xAA, P = 0x66
+            bvc     *           ;; Rel,    A    = 0xAA, P = 0x66
+            bne     *           ;; Rel,    A    = 0xAA, P = 0x66
+            clv                 ;; Imp,    A    = 0xAA, P = 0x26
+            sec                 ;; Imp,    A    = 0xAA, P = 0x27
+            adc     AbsY        ;; RO_Abs, A    = 0x00, P = 0x27
+            clc
+            sbc     AbsY        ;; RO_Abs, A    = 0xAA, P = 0xA4
+            bpl     *           ;; Rel,    A    = 0xAA, P = 0xA4
+            bvs     *           ;; Rel,    A    = 0xAA, P = 0xA4
+            beq     *           ;; Rel,    A    = 0xAA, P = 0xA4
+            bcs     *           ;; Rel,    A    = 0xAA, P = 0xA4
+;;
+            lda     Abs         ;; RO_Abs, A    = 0x00, P = 0x26
+            tay                 ;; Imp,    Y    = 0x00, P = 0x26
+            sty     AbsY        ;; WO_Abs, AbsY = 0x00, P = 0x26
+            cpy     Abs         ;; RO_Abs, Y = 0x00, Abs = 0x00, P = 0x26
+            bne     *           ;; Rel,    A    = 0xAA, P = 0x66
+;;
+            ldx     Abs         ;; RO_Abs, X    = 0x00, P = 0x26
+            stx     AbsX        ;; WO_Abs, AbsX = 0x00, P = 0x26
+            cpx     Abs         ;; RO_Abs, X = 0x00, Abs = 0x00, P = 0x26
+            bne     *           ;; Rel,    A    = 0xAA, P = 0x26
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  Absolute Indexed Address Instructions
+;;
+            lda     #$24        ;; Imm,     A    = 0x24, P = 0x67
+            pha                 ;; Imp,     A    = 0x24, P = 0x67
+            plp                 ;; Imp,     A    = 0x24, P = 0x24
+;;
+            stz     Abs         ;; Abs,     Abs  = 0x00, P = 0x24
+            stz     Abs+1       ;; Abs,     AbsX = 0x00, P = 0x24
+            stz     Abs+2       ;; Abs,     AbsY = 0x00, P = 0x24
+;;
+            lda     #$55        ;; Imm,     A    = 0x55, P = 0x24
+            sta     AbsY        ;; Abs,     AbsY = 0x55, P = 0x24
+            asl     a           ;; Acc,     A    = 0xAA, P = 0xA4
+            ldx     AbsX        ;; Abs,     X    = 0x00, P = 0x26
+            ldy     AbsY        ;; Abs,     Y    = 0x55, P = 0x26
+;;
+            inx                 ;; Imp,     X    = 0x01, P = 0x24
+            sta     Abs,x       ;; WO_AbsX, AbsX = 0xAA, P = 0x24
+            lsr     a           ;; Acc,     A    = 0x55, P = 0x24
+            inx                 ;; Imp,     X    = 0x02, P = 0x24
+            sta     Abs,x       ;; WO_AbsX, AbsX = 0x55, P = 0x24
+            dex                 ;; Imp,     X    = 0x01, P = 0x24
+            ora     Abs,x       ;; RO_AbsX, A    = 0xFF, P = 0xA4
+            and     Abs,x       ;; RO_AbsX, A    = 0xAA, P = 0xA4
+            eor     Abs,x       ;; RO_AbsX, A    = 0x00, P = 0x26
+            bne     *           ;; Rel,     A    = 0x00, P = 0x26
+            stz     Abs,x       ;; WO_AbsX, AbsX = 0x00, P = 0x26
+            cmp     Abs,x       ;; RO_AbsX, A    = 0x00, P = 0x27
+            bne     *           ;; Rel,     A    = 0x00, P = 0x27
+            bcc     *           ;; Rel,     A    = 0x00, P = 0x27
+            inx                 ;; Imp,     X    = 0x02, P = 0x25
+            ldy     Abs,x       ;; RO_AbsX, Y    = 0x55, P = 0x25
+            tya                 ;; Imp,     A    = 0x55, P = 0x25
+            asl     a           ;; Acc,     A    = 0xAA, P = 0xA4
+            bit     Abs,x       ;; RO_AbsX, A    = 0xAA, M = 0x55, P = 0x66
+            bmi     *           ;; Rel,     A    = 0xAA, P = 0x66
+            bvc     *           ;; Rel,     A    = 0xAA, P = 0x66
+            bne     *           ;; Rel,     A    = 0xAA, P = 0x66
+            clv                 ;; Imp,     A    = 0xAA, P = 0x26
+            sec                 ;; Imp,     A    = 0xAA, P = 0x27
+            adc     Abs,x       ;; RO_AbsX, A    = 0x00, P = 0x27
+            clc
+            sbc     Abs,x       ;; RO_AbsX, A    = 0xAA, P = 0xA4
+            bpl     *           ;; Rel,     A    = 0xAA, P = 0xA4
+            bvs     *           ;; Rel,     A    = 0xAA, P = 0xA4
+            beq     *           ;; Rel,     A    = 0xAA, P = 0xA4
+            bcs     *           ;; Rel,     A    = 0xAA, P = 0xA4
+;;
+            lda     Abs-2,x     ;; RO_AbsX, A    = 0x00, P = 0x26
+            tay                 ;; Imp,     Y    = 0x00, P = 0x26
+            sty     AbsY        ;; WO_Abs,  AbsY = 0x00, P = 0x26
+;;
+            ldx     Abs,y       ;; RO_AbsY, X    = 0x00, P = 0x26
+            stx     AbsX        ;; WO_Abs,  AbsX = 0x00, P = 0x24
+;;
+            ldy     #$02        ;; Imm,     Y    = 0x02, P = 0x24
+            lda     #$AA        ;; Imm,     A    = 0xAA, P = 0xA4
+;;
+            sta     Abs,y       ;; WO_AbsY, AbsY = 0xAA, P = 0xA4
+            eor     Abs,y       ;; RO_AbsY, A    = 0x00, P = 0x26
+            lda     Abs,y       ;; RO_AbsY, A    = 0xAA, P = 0xA4
+            lsr     a           ;; Acc,     A    = 0x55, P = 0x24
+            ora     Abs,y       ;; RO_AbsY, A    = 0xFF, P = 0xA4
+            and     Abs,y       ;; RO_AbsY, A    = 0xAA, P = 0xA4
+            cmp     Abs,y       ;; RO_AbsY, A    = 0xAA, P = 0x27
+;;
+            sbc     Abs,y       ;; RO_AbsY, A    = 0x00, P = 0x27
+            clc                 ;; Imp,     A    = 0x00, P = 0x26
+            adc     Abs,y       ;; RO_AbsY, A    = 0xAA, P = 0xA4
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  Direct/Zero Page RMW Instructions
+;;
+            lda     #$24        ;; Imm,     A    = 0x24, P = 0xXX
+            pha                 ;; Imp,     A    = 0x24, P = 0xXX
+            plp                 ;; Imp,     A    = 0x24, P = 0x24
+;;
+            lda     #$AA        ;; Imm,     A    = 0xAA, P = 0xA4
+            sta     DP          ;; WO_DP,   DP   = 0xAA, P = 0xA4
+;;
+            asl     DP          ;; RMW_DP,  DP   = 0x54, P = 0x25
+            rol     DP          ;; RMW_DP,  DP   = 0xA9, P = 0xA4
+            lsr     DP          ;; RMW_DP,  DP   = 0x54, P = 0x25
+            ror     DP          ;; RMW_DP,  DP   = 0xAA, P = 0xA4
+;;
+            dec     DP          ;; RMW_DP,  DP   = 0xA9, P = 0xA4
+            inc     DP          ;; RMW_DP,  DP   = 0xAA, P = 0xA4
+;;
+            lsr     a           ;; Acc,     A    = 0x55, P = 0x24
+;;
+            tsb     DP          ;; RMW_DP,  DP   = 0xFF, P = 0x26
+            trb     DP          ;; RMW_DP,  DP   = 0xAA, P = 0x24
+;;
+            ldx     #$01        ;; Imm,     X    = 0x01, P = 0x24
+            asl     a           ;; Acc,     A    = 0xAA, P = 0x24
+            sta     DP,x        ;; WO_DPX,  DPX  = 0xAA, P = 0x24
+;;
+            asl     DP,x        ;; RMW_DPX, DPX  = 0x54, P = 0x25
+            rol     DP,x        ;; RMW_DPX, DPX  = 0xA9, P = 0xA4
+            lsr     DP,x        ;; RMW_DPX, DPX  = 0x54, P = 0x25
+            ror     DP,x        ;; RMW_DPX, DPX  = 0xAA, P = 0xA4
+;;
+            dec     DP,x        ;; RMW_DPX, DPX  = 0xA9, P = 0xA4
+            inc     DP,x        ;; RMW_DPX, DPX  = 0xAA, P = 0xA4
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  Absolute Address RMW Instructions
+;;
+            lda     #$24        ;; Imm,     A    = 0x24, P = 0xXX
+            pha                 ;; Imp,     A    = 0x24, P = 0xXX
+            plp                 ;; Imp,     A    = 0x24, P = 0x24
+;;
+            lda     #$AA        ;; Imm,     A    = 0xAA, P = 0xA4
+            sta     Abs         ;; WO_Abs,  Abs  = 0xAA, P = 0xA4
+;;
+            asl     Abs         ;; RMW_Abs, Abs  = 0x54, P = 0x25
+            rol     Abs         ;; RMW_Abs, Abs  = 0xA9, P = 0xA4
+            lsr     Abs         ;; RMW_Abs, Abs  = 0x54, P = 0x25
+            ror     Abs         ;; RMW_Abs, Abs  = 0xAA, P = 0xA4
+;;
+            dec     Abs         ;; RMW_Abs, Abs  = 0xA9, P = 0xA5
+            inc     Abs         ;; RMW_Abs, Abs  = 0xAA, P = 0xA4
+;;
+            lsr     a           ;; Acc,     A    = 0x55, P = 0x24
+;;
+            tsb     Abs         ;; RMW_Abs, Abs  = 0xFF, P = 0x26
+            trb     Abs         ;; RMW_Abs, Abs  = 0xAA, P = 0x24
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  Absolute Address Indexed RMW Instructions
+;;
+            ldx     #$01        ;; Imm,      X    = 0x01, P = 0x24
+            asl     a           ;; Acc,      A    = 0xAA, P = 0xA4
+            sta     Abs,x       ;; WO_AbsX,  AbsX = 0xAA, P = 0xA4
+;;
+            asl     Abs,x       ;; RMW_AbsX, AbsX = 0x54, P = 0x25
+            rol     Abs,x       ;; RMW_AbsX, AbsX = 0xA9, P = 0xA4
+            lsr     Abs,x       ;; RMW_AbsX, AbsX = 0x54, P = 0x25
+            ror     Abs,x       ;; RMW_AbsX, AbsX = 0xAA, P = 0xA4
+;;
+            dec     Abs,x       ;; RMW_AbsX, AbsX = 0xA9, P = 0xA4
+            inc     Abs,x       ;; RMW_AbsX, AbsX = 0xAA, P = 0xA4
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  Direct/Zero Page Indirect Instructions
+;;
+            jsr     Init_RAM    ;; Initialize RAM used for pointers
+;;
+            lda     #$24        ;; Imm,     A    = 0x24, P = 0xXX
+            pha                 ;; Imp,     A    = 0x24, P = 0xXX
+            plp                 ;; Imp,     A    = 0x24, P = 0x24
+;;
+            lda     #$AA        ;; Imm,     A    = 0xAA, P = 0xA4
+            sta     DP          ;; WO_DP,   DP   = 0xAA, P = 0xA4
+            lda     #$00        ;; Imm,     A    = 0x00, P = 0x26
+;;
+            ora     (pDPI)      ;; RO_DPI   A    = 0xAA, P = 0xA4
+            lsr     a           ;; Acc,     A    = 0x55, P = 0x24
+            eor     (pDPI)      ;; RO_DPI,  A    = 0xFF, P = 0xA4
+            sec                 ;; Imp,     A    = 0xFF, P = 0xA5
+            adc     (pDPI)      ;; RO_DPI,  A    = 0xAA, P = 0xA5
+            clc                 ;; Imp,     A    = 0xAA, P = 0xA4
+            sbc     (pDPI)      ;; RO_DPI,  A    = 0xFF, P = 0xA4
+            and     (pDPI)      ;; RO_DPI,  A    = 0xAA, P = 0xA4
+            cmp     (pDPI)      ;; RO_DPI,  A    = 0xAA, P = 0x27
+;;
+            lda     (pDPI)      ;; RO_DPI,  A    = 0xAA, P = 0xA5
+            lsr     a           ;; Acc,     A    = 0x55, P = 0x24
+            sta     (pDPI)      ;; WO_DPI   DP   = 0x55, P = 0x24
+            cmp     DP          ;; RO_DP    A    = 0x55, P = 0x27
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  Direct/Zero Page Pre-Indexed Indirect Instructions
+;;
+            ldx     #$02        ;; Imm,     X    = 0x02, P = 0x25
+            ora     (pDPI,x)    ;; RO_DPXI, A    = 0xFF, P = 0xA5
+            and     (pDPI,x)    ;; RO_DPXI, A    = 0xAA, P = 0xA5
+            eor     (pDPI,x)    ;; RO_DPXI, A    = 0x00, P = 0x27
+            clc                 ;; Imp,     A    = 0x00, P = 0x26
+            adc     (pDPI,x)    ;; RO_DPXI, A    = 0xAA, P = 0xA4
+            cmp     (pDPI,x)    ;; RO_DPXI, A    = 0xAA, P = 0x27
+            sbc     (pDPI,x)    ;; RO_DPXI, A    = 0x00, P = 0x27
+            lda     (pDPI,x)    ;; RO_DPXI, A    = 0xAA, P = 0xA5
+            ldx     #$04        ;; Imm,     X    = 0x04, P = 0x25
+            sta     (pDPI,x)    ;; WO_DPXI, DPY  = 0xAA, P = 0x25
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  Direct/Zero Page Post-Indexed Indirect Instructions
+;;
+            ldy     #$00        ;; Imm,     Y    = 0x00, P = 0x27
+;;
+            ora     (pDPI),y    ;; RO_DPIY, A    = 0xFF, P = 0xA5
+            iny                 ;; Imp,     Y    = 0x01, P = 0x25
+            and     (pDPI),y    ;; RO_DPIY, A    = 0xAA, P = 0xA5
+            dey                 ;; Imp,     Y    = 0x00, P = 0x27
+            eor     (pDPI),y    ;; RO_DPIY, A    = 0xFF, P = 0xA5
+            adc     (pDPI),y    ;; RO_DPIY, A    = 0x55, P = 0x25
+            cmp     (pDPI),y    ;; RO_DPIY, A    = 0x55, P = 0x27
+            sbc     (pDPI),y    ;; RO_DPIY, A    = 0x00, P = 0x27
+            iny                 ;; Imp,     Y    = 0x01, P = 0x25
+            sta     (pDPI),y    ;; WO_DPIY, DPX  = 0x00, P = 0x25
+            dey                 ;; Imp,     Y    = 0x00, P = 0x26
+            lda     (pDPI),y    ;; RO_DPIY, A    = 0x55, P = 0x24
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  All Unused Op-codes - Expected to execute in single cycle as NOPs.
+;;
+
+            db      $02, $22, $42, $62, $82, $C2, $E2
+            db      $03, $13, $23, $33, $43, $53, $63, $73
+            db      $83, $93, $A3, $B3, $C3, $D3, $E3, $F3
+            db      $44, $54, $D4, $F4
+;;            db      $07, $17, $27, $37, $47, $57, $67, $77  ;; RMBx dp
+;;            db      $87, $97, $A7, $B7, $C7, $D7, $E7, $F7  ;; SMBx dp
+            db      $0B, $1B, $2B, $3B, $4B, $5B, $6B, $7B
+            db      $8B, $9B, $AB, $BB, $EB, $FB
+            db      $5C, $DC, $FC
+;;            db      $0F, $1F, $2F, $3F, $4F, $5F, $6F, $7F  ;; BBRx dp,rel
+;;            db      $8F, $9F, $AF, $BF, $CF, $DF, $EF, $FF  ;; BBSx dp,rel
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  BRK Instruction
+;;
+            sed                 ;; Set Decimal Mode Flag
+            cli                 ;; Clear Interrupt Mask
+;;
+            brk                 ;; Single Cycle, Nxt
+            db      $FF         ;; Simple tag so ISR does not need to return PC
+;;
+            sei
+;;
+BCD_Tst:    clc
+            lda     #$99
+            adc     #$01
+            bcc     *
+            bne     *
+            sbc     #$01
+            beq     *
+            bcs     *
+            cmp     #$99
+            bne     *
+            clc
+;;
+            stz     IRQ_On
+;;
+IRQ_Tst:    sed
+            cli
+            nop
+            sec
+            lda     #$00
+            bne     IRQ_Tst3
+IRQ_Tst2:   sbc     #$01
+            jsr     Return
+            bra     IRQ_Tst4
+IRQ_Tst3:   jmp     IRQ_Tst2
+IRQ_Tst4:   sei
+            cld
+;;
+            stz     IRQ_Off
+;;
+;;  Test zp,x and zp,y page zero wrapping
+;;
+            lda     #$00        ;; clear Accumulator
+            ldx     #$01        ;; Set X to test first page 0 index operation
+            ldy     #$02        ;; Set Y to test second index operation
+;;            tax                 ;; clear X
+;;            tay                 ;; clear Y
+;;            inx                 ;; increment X to test first index operation
+;;            iny                 ;; increment Y twice to force it to point to
+;;            iny                 ;; wrapped negative of the wrapped pointer.
+;;
+            clc                 ;; clear carry before summation
+            lda     $FE,x       ;; load low byte of the
+            adc     $FFFF,y     ;; add low bytes of Return and -Return
+;;
+            bne     *           ;; halt here if sum is not zero
+;;
+            inx                 ;; point to wrapped high bytes
+            iny
+            lda     $FE,x       ;; load high byte of Return
+            adc     $FFFF,y     ;; add high bytes of Return and -Return
+;;
+            bne     *           ;; halt here if the sum is not zero
+;;
+            dey                     ;; point back to lsb
+            ldx     $ff,y           ;; load lsb of -Return value
+            cpx     #(lo -Return)   ;; compare
+;;
+            bne     *               ;; halt here if the values are not equal
+;;
+            txa                     ;; complement value and store back
+            eor     #$ff            ;; pointer will point to location Return-1
+            tax                     ;; because of 1's complement math
+            stx     $ff,y
+;;
+            iny                     ;; point to msb
+            ldx     $ff,y           ;; load msb of -Return value
+            cpx     #(hi -Return)   ;; compare
+;;
+            bne     *               ;; halt here if the values are not equal
+;;
+            txa                     ;; complement value and store back
+            eor     #$ff            ;; pointer will point to location Return-1
+            tax                     ;; because of 1's complement math
+            stx     $ff,y
+;;
+;;  Test (dp), (dp,x), and (dp,y) address mode page 0 wrapping
+;;
+            lda     ($ff)           ;; load value stored in Return
+            ldy     #$01            ;; ptr stored at $0001 points to Return-1
+            cmp     ($01),y         ;; compare
+;;
+            bne     *               ;; halt here if the *($ff) <> *(*($01)+1)
+;;
+            ldx     #$02            ;; increment pointer at $0001
+            clc
+            lda     $FF,x           ;; load lsb from $0001
+            adc     #$01            ;; increment
+            sta     $FF,x           ;; store lsb
+            inx                     ;; point to msb 
+            lda     $FF,x           ;; load lsb from $0002
+            adc     #$00            ;; increment msb if carry out of lsb
+            sta     $FF,x
+;;
+            dex                     ;; point back to lsb
+            lda     ($ff,x)         ;; load opcode at Return
+            dec     $ff             ;; change pointer to point to Return-1
+            cmp     ($ff),y         ;; both pointers (after indexing) -> Return
+;;
+            bne     *
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  Test Rockwell Instructions
+;;
+            stz     $80             ;; ZP location for Rockwell Instruction Test
+;;
+            SMBx    0,$80
+            BBRx    0,$80,$
+            RMBx    0,$80
+            BBSx    0,$80,$
+;;
+            SMBx    1,$80
+            BBRx    1,$80,$
+            RMBx    1,$80
+            BBSx    1,$80,$
+;;
+            SMBx    2,$80
+            BBRx    2,$80,$
+            RMBx    2,$80
+            BBSx    2,$80,$
+;;
+            SMBx    3,$80
+            BBRx    3,$80,$
+            RMBx    3,$80
+            BBSx    3,$80,$
+;;
+            SMBx    4,$80
+            BBRx    4,$80,$
+            RMBx    4,$80
+            BBSx    4,$80,$
+;;
+            SMBx    5,$80
+            BBRx    5,$80,$
+            RMBx    5,$80
+            BBSx    5,$80,$
+;;
+            SMBx    6,$80
+            BBRx    6,$80,$
+            RMBx    6,$80
+            BBSx    6,$80,$
+;;
+            SMBx    7,$80
+            BBRx    7,$80,$
+            RMBx    7,$80
+            BBSx    7,$80,$
+;;
+            lda     #$ff
+            sta     $80
+;;
+            BBSx    7,$80,MSB_Set
+Clr_MSB:
+            RMBx    7,$80
+            BBRx    7,$80,MSB_Clr
+MSB_Set     bra     Clr_MSB
+MSB_Clr:
+            WAI
+            nop     4
+            stz     IRQ_On
+            nop     4
+            cli
+            WAI
+            sei  
+            stz     IRQ_Off
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  Prepare Registers for looping to start of the test program
+;;
+            lda     #$00        ;; Imm, A = 0x00, P = 0x26
+            tax                 ;; Imp, X = 0x00, P = 0x26
+            tay                 ;; Imp, Y = 0x00, P = 0x26
+;;
+            jmp     Start       ;; Imp, A = X = Y = 0x00, P = 0x26
+;;
+Last_Addrs:
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;;  Vector Table
+;;
+Vect_Table  org     $FFFA
+;;
+            dw      Start       ;; NMI Interrupt Vector
+            dw      Start       ;; Reset Vector
+            dw      Interrupt   ;; IRQ/BRK Interrupt Vector
+;;
+            end     Start

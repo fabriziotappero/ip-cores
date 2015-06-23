@@ -1,0 +1,4199 @@
+---------------------- 12/15/2012 8:12:20 PM ------------------------
+ 
+-- Instructions --
+0x0000  RTS   RTS         .asm    0       -- Return from Subroutine
+0x0001  BSR   BSR         .asm    1       -- Branch to subroutine
+0x0002 FTCH   FTCH        .asm    2       -- Fetch next instruction
+0x0003  BMW   BMW         .asm    3       -- Branch multi-way
+0x0004 BRV0   BRV0        .asm    4       -- Branch via 0
+0x0005 BRV1   BRV1        .asm    5       -- Branch via 1
+0x0006 BRV2   BRV2        .asm    6       -- Branch via 2
+0x0007 BRV3   BRV3        .asm    7       -- Branch via 3
+0x0008 BTH0   BTH0        .asm    8       -- Branch if T0 is high
+0x0009 BTH1   BTH1        .asm    9       -- Branch if T1 is high
+0x000A BTH2   BTH2        .asm    10      -- Branch if T2 is high
+0x000B BTH3   BTH3        .asm    11      -- Branch if T3 is high
+0x000C BTL0   BTL0        .asm    12      -- Branch if T0 is low
+0x000D BTL1   BTL1        .asm    13      -- Branch if T1 is low
+0x000E BTL2   BTL2        .asm    14      -- Branch if T2 is low
+0x000F BTL3   BTL3        .asm    15      -- Branch if T3 is low
+ 
+-- Equates --
+0x0000 PC          .equ    0       -- NA <= PC (default)
+0x0001 Inc         .equ    1       -- NA <= PC + 1
+0x0002 MAR         .equ    2       -- NA <= MAR + 0
+0x0003 Nxt         .equ    3       -- NA <= MAR + 1
+0x0004 Stk         .equ    4       -- NA <= SP + 0
+0x0005 DPN         .equ    5       -- NA <= {0, OP1} + 0
+0x0006 DPX         .equ    6       -- NA <= {0, OP1} + {0, X}
+0x0007 DPY         .equ    7       -- NA <= {0, OP1} + {0, Y}
+0x0008 LDA         .equ    8       -- NA <= {OP2, OP1} + 0
+0x000E LDAX        .equ    14      -- NA <= {OP2, OP1} + {0, X}
+0x000F LDAY        .equ    15      -- NA <= {OP2, OP1} + {0, Y}
+0x0001 Pls         .equ    1       -- PC <= PC + 1
+0x0002 Jmp         .equ    2       -- PC <= NA
+0x0003 Rel         .equ    3       -- PC <= PC + (CC ? {{8{DI[7]}}, DI} : 1)
+0x0001 WR          .equ    1       -- Bus Operand Write
+0x0002 RD          .equ    2       -- Bus Operand Read
+0x0003 IF          .equ    3       -- Bus Insruction Fetch
+0x0000 ALU         .equ    0       -- M   <= DI
+0x0001 OP2         .equ    1       -- OP2 <= DI
+0x0002 OP1         .equ    2       -- OP1 <= DI
+0x0003 IR          .equ    3       -- IR  <= DI
+0x0001 PCH         .equ    1       -- DO  <= PCH
+0x0002 PCL         .equ    2       -- DO  <= PCL
+0x0003 PSW         .equ    3       -- DO  <= PSW (P)
+0x0002 Psh         .equ    2       -- S <= S - 1
+0x0003 Pop         .equ    3       -- S <= S + 1
+0x0001 WE_A        .equ    1       -- Write Enable A
+0x0002 WE_X        .equ    2       -- Write Enable X
+0x0003 WE_Y        .equ    3       -- Write Enable Y
+0x0004 WE_R        .equ    4       -- Write Enable Register - write selected register
+0x0005 WE_S        .equ    5       -- Write Enable S
+0x0006 WE_P        .equ    6       -- Write Enable P
+0x0007 WE_M        .equ    7       -- Write Enable M(emory)
+0x0001 ISR         .equ    1       -- Assert ISR: Clear D, Set I
+ 
+-- Defines --
+0x0004 Inst        .def    4       -- Instruction
+0x0009 BA          .def    9       -- Branch Address
+0x0001 Wait        .def    1       -- Conditional Execution Required
+0x0002 En          .def    2       -- Enable ALU, and Sample Interrupts
+0x0004 NA_Cntl     .def    4       -- Next Address Control Field
+0x0002 PC_Cntl     .def    2       -- Program Counter Control Field
+0x0002 IO_Cntl     .def    2       -- I/O Cycle Control Field
+0x0002 DIO_Cntl    .def    2       -- Data Input/Output Demux/Mux Control Field
+0x0002 Stk_Cntl    .def    2       -- ALU Stack Pointer Control Field
+0x0003 RegWE_Cntl  .def    3       -- Register Write Enable (A, X, Y, S, P)
+0x0001 PSW_Cntl    .def    1       -- Asserted to Clear D and Set I in PSW
+ 
+-- Labels --
+0x0000 _Start
+0x0001 _Rst
+0x0020 _Nxt
+0x0020 _Psh
+0x0020 _Pop
+0x0020 _Rel
+0x0020 _Imm
+0x0021 _Int
+0x0022 _Brk
+0x0027 _JSR
+0x002A _RTI
+0x002D _RTS
+0x002E _Jmp
+0x002F _JmpI
+0x0032 _JmpXI
+0x0035 _RO_DP
+0x0036 _RO_DPX
+0x0037 _RO_DPY
+0x0038 _RO_DPI
+0x003B _RO_DPXI
+0x003E _RO_DPIY
+0x0041 _RO_Abs
+0x0043 _RO_AbsX
+0x0045 _RO_AbsY
+0x0047 _WO_DP
+0x0048 _WO_DPX
+0x0049 _WO_DPY
+0x004A _WO_DPI
+0x004D _WO_DPXI
+0x0050 _WO_DPIY
+0x0053 _WO_Abs
+0x0055 _WO_AbsX
+0x0057 _WO_AbsY
+0x0060 _RMW
+0x0062 _RMW_DP
+0x0064 _RMW_DPX
+0x0066 _RMW_DPY
+0x0068 _RMW_Abs
+0x006B _RMW_AbsX
+0x006E _RMW_AbsY
+0x0071 _BByx_dp_rel
+0x0073 _End_uPgm
+0x00FC _WAI
+0x0100 _IDEC_Start
+0x0100 _BRK_imm
+0x0101 _BPL_rel
+0x0102 _JSR_abs
+0x0103 _BMI_rel
+0x0104 _RTI_imp
+0x0105 _BVC_rel
+0x0106 _RTS_imp
+0x0107 _BVS_rel
+0x0108 _BRA_rel
+0x0109 _BCC_re
+0x010A _LDY_imm
+0x010B _BCS_rel
+0x010C _CPY_imm
+0x010D _BNE_rel
+0x010E _CPX_imm
+0x010F _BEQ_rel
+0x0110 _ORA_dpXi
+0x0111 _ORA_dpiY
+0x0112 _AND_dpXi
+0x0113 _AND_dpiY
+0x0114 _EOR_dpXi
+0x0115 _EOR_dpiY
+0x0116 _ADC_dpXi
+0x0117 _ADC_dpiY
+0x0118 _STA_dpXi
+0x0119 _STA_dpiY
+0x011A _LDA_dpXi
+0x011B _LDA_dpiY
+0x011C _CMP_dpXi
+0x011D _CMP_dpiY
+0x011E _SBC_dpXi
+0x011F _SBC_dpiY
+0x0120 _NOP_02
+0x0121 _ORA_dpi
+0x0122 _NOP_22
+0x0123 _AND_dpi
+0x0124 _NOP_42
+0x0125 _EOR_dpi
+0x0126 _NOP_62
+0x0127 _ADC_dpi
+0x0128 _NOP_82
+0x0129 _STA_dpi
+0x012A _LDX_imm
+0x012B _LDA_dpi
+0x012C _NOP_C2
+0x012D _CMP_dpi
+0x012E _NOP_E2
+0x012F _SBC_dpi
+0x0130 _NOP_03
+0x0131 _NOP_13
+0x0132 _NOP_23
+0x0133 _NOP_33
+0x0134 _NOP_43
+0x0135 _NOP_53
+0x0136 _NOP_63
+0x0137 _NOP_73
+0x0138 _NOP_83
+0x0139 _NOP_93
+0x013A _NOP_A3
+0x013B _NOP_B3
+0x013C _NOP_C3
+0x013D _NOP_D3
+0x013E _NOP_E3
+0x013F _NOP_F3
+0x0140 _TSB_dp
+0x0141 _TRB_dp
+0x0142 _BIT_dp
+0x0143 _BIT_dpX
+0x0144 _NOP_44
+0x0145 _NOP_54
+0x0146 _STZ_dp
+0x0147 _STZ_dpX
+0x0148 _STY_dp
+0x0149 _STY_dpX
+0x014A _LDY_dp
+0x014B _LDY_dpX
+0x014C _CPY_dp
+0x014D _NOP_D4
+0x014E _CPX_dp
+0x014F _NOP_F4
+0x0150 _ORA_dp
+0x0151 _ORA_dpX
+0x0152 _AND_dp
+0x0153 _AND_dpX
+0x0154 _EOR_dp
+0x0155 _EOR_dpX
+0x0156 _ADC_dp
+0x0157 _ADC_dpX
+0x0158 _STA_dp
+0x0159 _STA_dpX
+0x015A _LDA_dp
+0x015B _LDA_dpX
+0x015C _CMP_dp
+0x015D _CMP_dpX
+0x015E _SBC_dp
+0x015F _SBC_dpX
+0x0160 _ASL_dp
+0x0161 _ASL_dpX
+0x0162 _ROL_dp
+0x0163 _ROL_dpX
+0x0164 _LSR_dp
+0x0165 _LSR_dpX
+0x0166 _ROR_dp
+0x0167 _ROR_dpX
+0x0168 _STX_dp
+0x0169 _STX_dpY
+0x016A _LDX_dp
+0x016B _LDX_dpY
+0x016C _DEC_dp
+0x016D _DEC_dpX
+0x016E _INC_dp
+0x016F _INC_dpX
+0x0170 _RMB0_dp
+0x0171 _RMB1_dp
+0x0172 _RMB2_dp
+0x0173 _RMB3_dp
+0x0174 _RMB4_dp
+0x0175 _RMB5_dp
+0x0176 _RMB6_dp
+0x0177 _RMB7_dp
+0x0178 _SMB0_dp
+0x0179 _SMB1_dp
+0x017A _SMB2_dp
+0x017B _SMB3_dp
+0x017C _SMB4_dp
+0x017D _SMB5_dp
+0x017E _SMB6_dp
+0x017F _SMB7_dp
+0x0180 _PHP
+0x0181 _CLC
+0x0182 _PLP
+0x0183 _SEC
+0x0184 _PHA
+0x0185 _CLI
+0x0186 _PLA
+0x0187 _SEI
+0x0188 _DEY
+0x0189 _TYA
+0x018A _TAY
+0x018B _CLV
+0x018C _INY
+0x018D _CLD
+0x018E _INX
+0x018F _SED
+0x0190 _ORA_imm
+0x0191 _ORA_absY
+0x0192 _AND_imm
+0x0193 _AND_absY
+0x0194 _EOR_imm
+0x0195 _EOR_absY
+0x0196 _ADC_imm
+0x0197 _ADC_absY
+0x0198 _BIT_imm
+0x0199 _STA_absY
+0x019A _LDA_imm
+0x019B _LDA_absY
+0x019C _CMP_imm
+0x019D _CMP_absY
+0x019E _SBC_imm
+0x019F _SBC_absY
+0x01A0 _ASL_A
+0x01A1 _INC_A
+0x01A2 _ROL_A
+0x01A3 _DEC_A
+0x01A4 _LSR_A
+0x01A5 _PHY
+0x01A6 _ROR_A
+0x01A7 _PLY
+0x01A8 _TXA
+0x01A9 _TXS
+0x01AA _TAX
+0x01AB _TSX
+0x01AC _DEX
+0x01AD _PHX
+0x01AE _NOP
+0x01AF _PLX
+0x01B0 _NOP_0B
+0x01B1 _NOP_1B
+0x01B2 _NOP_2B
+0x01B3 _NOP_3B
+0x01B4 _NOP_4B
+0x01B5 _NOP_5B
+0x01B6 _NOP_6B
+0x01B7 _NOP_7B
+0x01B8 _NOP_8B
+0x01B9 _NOP_9B
+0x01BA _NOP_AB
+0x01BB _NOP_BB
+0x01BC _WAI_CB
+0x01BD _STP_DB
+0x01BE _NOP_EB
+0x01BF _NOP_FB
+0x01C0 _TSB_abs
+0x01C1 _TRB_abs
+0x01C2 _BIT_abs
+0x01C3 _BIT_absX
+0x01C4 _JMP_abs
+0x01C5 _NOP_5C
+0x01C6 _JMP_absi
+0x01C7 _JMP_absXi
+0x01C8 _STY_abs
+0x01C9 _STZ_abs
+0x01CA _LDY_abs
+0x01CB _LDY_absX
+0x01CC _CPY_abs
+0x01CD _NOP_DC
+0x01CE _CPX_abs
+0x01CF _NOP_FC
+0x01D0 _ORA_abs
+0x01D1 _ORA_absX
+0x01D2 _AND_abs
+0x01D3 _AND_absX
+0x01D4 _EOR_abs
+0x01D5 _EOR_absX
+0x01D6 _ADC_abs
+0x01D7 _ADC_absX
+0x01D8 _STA_abs
+0x01D9 _STA_absX
+0x01DA _LDA_abs
+0x01DB _LDA_absX
+0x01DC _CMP_abs
+0x01DD _CMP_absX
+0x01DE _SBC_abs
+0x01DF _SBC_absX
+0x01E0 _ASL_abs
+0x01E1 _ASL_absX
+0x01E2 _ROL_abs
+0x01E3 _ROL_absX
+0x01E4 _LSR_abs
+0x01E5 _LSR_absX
+0x01E6 _ROR_abs
+0x01E7 _ROR_absX
+0x01E8 _STX_abs
+0x01E9 _STZ_absX
+0x01EA _LDX_abs
+0x01EB _LDX_absY
+0x01EC _DEC_abs
+0x01ED _DEC_absX
+0x01EE _INC_abs
+0x01EF _INC_absX
+0x01F0 _BBR0_dp_rel
+0x01F1 _BBR1_dp_rel
+0x01F2 _BBR2_dp_rel
+0x01F3 _BBR3_dp_rel
+0x01F4 _BBR4_dp_rel
+0x01F5 _BBR5_dp_rel
+0x01F6 _BBR6_dp_rel
+0x01F7 _BBR7_dp_rel
+0x01F8 _BBS0_dp_rel
+0x01F9 _BBS1_dp_rel
+0x01FA _BBS2_dp_rel
+0x01FB _BBS3_dp_rel
+0x01FC _BBS4_dp_rel
+0x01FD _BBS5_dp_rel
+0x01FE _BBS6_dp_rel
+0x01FF _BBS7_dp_rel
+0x0200 _Last
+0x0200 _end
+ 
+File  Prog     
+Line  Line   Opcode                                Line
+0611 0x0000 _Start: .org 0
+0612 0x0000  600D0000 BRV2 _Rst,1,1 -- Load {OP2, OP1} with Vector
+0613 0x0001 _Rst:
+0614 0x0001  200C0280 FTCH $,1,0,,, RD, OP1 -- Read Indirect Dst Ptr Lo
+0615 0x0002  20143A40 FTCH $,1,0, Nxt, Jmp, RD, OP2 -- Read Indirect Dst Ptr Hi
+0616  --
+0617 0x0003  501D07C0 BRV1 $,1,1,, Pls, IF, IR -- Instruction Fetch
+0619  -- this space reserved for future use - boot loader for the microprogram ROMs
+0621  --------------------------------------------------------------------------------
+0622  --------------------------------------------------------------------------------
+0623  -- 2-Way Jump Table: _Nxt and _Int
+0624  --------------------------------------------------------------------------------
+0625  --------------------------------------------------------------------------------
+0626  -- Instruction Fetch and Execute Microstate
+0627  --------------------------------------------------------------------------------
+0000 0x0004  00000000 added by program
+0000 0x0005  00000000 added by program
+0000 0x0006  00000000 added by program
+0000 0x0007  00000000 added by program
+0000 0x0008  00000000 added by program
+0000 0x0009  00000000 added by program
+0000 0x000A  00000000 added by program
+0000 0x000B  00000000 added by program
+0000 0x000C  00000000 added by program
+0000 0x000D  00000000 added by program
+0000 0x000E  00000000 added by program
+0000 0x000F  00000000 added by program
+0000 0x0010  00000000 added by program
+0000 0x0011  00000000 added by program
+0000 0x0012  00000000 added by program
+0000 0x0013  00000000 added by program
+0000 0x0014  00000000 added by program
+0000 0x0015  00000000 added by program
+0000 0x0016  00000000 added by program
+0000 0x0017  00000000 added by program
+0000 0x0018  00000000 added by program
+0000 0x0019  00000000 added by program
+0000 0x001A  00000000 added by program
+0000 0x001B  00000000 added by program
+0000 0x001C  00000000 added by program
+0000 0x001D  00000000 added by program
+0000 0x001E  00000000 added by program
+0000 0x001F  00000000 added by program
+0628 0x0020 _Nxt: .org 32
+0629 0x0020 _Psh:
+0630 0x0020 _Pop:
+0631 0x0020 _Rel:
+0632 0x0020 _Imm:
+0633 0x0020  510507C8 BRV1 _Nxt,1,1,, Pls, IF, IR,, WE_R -- Instruction Fetch/Execute
+0635  --------------------------------------------------------------------------------
+0636  -- Interrupt Entry - NMI, (unmasked) IRQ (falls through to _BRK)
+0637  --------------------------------------------------------------------------------
+0639 0x0021 _Int:
+0640 0x0021  61154168 BRV2 _Brk,1,1, Stk,, WR, PCH, Psh, WE_R -- Push PCH, capture Vector
+0642  --------------------------------------------------------------------------------
+0643  -- BRK Entry - BRK #imm (_Int falls through to _Brk, see comment above)
+0644  --------------------------------------------------------------------------------
+0646 0x0022 _Brk:
+0647 0x0022  211441A0 FTCH $,1,0, Stk,, WR, PCL, Psh -- Push PCL
+0648 0x0023  211C49E1 FTCH $,1,0, Stk, Jmp, WR, PSW, Psh,, ISR -- Push P; Clr D, Set I
+0649  --
+0650 0x0024  21248280 FTCH $,1,0, LDA,, RD, OP1 -- Read Indirect Dst Ptr Lo
+0651 0x0025  212C3A40 FTCH $,1,0, Nxt, Jmp, RD, OP2 -- Read Indirect Dst Ptr Hi
+0652  --
+0653 0x0026  513507C0 BRV1 $,1,1,, Pls, IF, IR -- Instruction Fetch
+0655  --------------------------------------------------------------------------------
+0656  -- Jump To Subroutine - JSR Abs (Not interruptable)
+0657  --------------------------------------------------------------------------------
+0659 0x0027 _JSR:
+0660 0x0027  213C0340 FTCH $,1,0,,, IF, OP2 -- Load Indirect Dst Ptr Lo
+0661 0x0028  21444160 FTCH $,1,0, Stk,, WR, PCH, Psh -- Push PC Hi
+0662 0x0029  410449A0 BRV0 _Nxt,1,0, Stk, Jmp, WR, PCL, Psh -- Push PC Lo
+0664  --------------------------------------------------------------------------------
+0665  -- Return from Interrupt - RTI (Not interruptable)
+0666  --------------------------------------------------------------------------------
+0668 0x002A _RTI:
+0669 0x002A  215442BC FTCH $,1,0, Stk,, RD, OP1, Pop, WE_P -- Pop PCL
+0670 0x002B  215C4A70 FTCH $,1,0, Stk, Jmp, RD, OP2, Pop -- Pop PCH
+0671  --
+0672 0x002C  516507C0 BRV1 $,1,1,, Pls, IF, IR -- Next, no Reg_WE, P okay
+0674  --------------------------------------------------------------------------------
+0675  -- Return From Subroutine - RTS (Not interruptable)
+0676  --------------------------------------------------------------------------------
+0678 0x002D _RTS:
+0679 0x002D  41044A70 BRV0 _Nxt,1,0, Stk, Jmp, RD, OP2, Pop -- Pop PCH
+0681  --------------------------------------------------------------------------------
+0682  -- Jump Absolute - JMP Abs (Not interruptable)
+0683  --------------------------------------------------------------------------------
+0685 0x002E _Jmp:
+0686 0x002E  41040B40 BRV0 _Nxt,1,0,, Jmp, IF, OP2
+0688  --------------------------------------------------------------------------------
+0689  -- Jump Indirect - JMP (Abs) (Not interruptable)
+0690  --------------------------------------------------------------------------------
+0692 0x002F _JmpI:
+0693 0x002F  217C0740 FTCH $,1,0,, Pls, IF, OP2 -- Load Indirect Dst Ptr Lo
+0694 0x0030  21848280 FTCH $,1,0, LDA,, RD, OP1 -- Read Indirect Dst Ptr Hi
+0695 0x0031  41043A40 BRV0 _Nxt,1,0, Nxt, Jmp, RD, OP2 -- Goto Next
+0697  --------------------------------------------------------------------------------
+0698  -- Jump Pre-Indexed Indirect - JMP (Abs, X) (Not interruptable)
+0699  --------------------------------------------------------------------------------
+0701 0x0032 _JmpXI:
+0702 0x0032  21940740 FTCH $,1,0,, Pls, IF, OP2 -- Load Indirect Dst Ptr Lo
+0703 0x0033  219CE280 FTCH $,1,0, LDAX,, RD, OP1 -- Read Indirect Dst Ptr Hi
+0704 0x0034  41043A40 BRV0 _Nxt,1,0, Nxt, Jmp, RD, OP2 -- Goto Next
+0706  --------------------------------------------------------------------------------
+0707  -- Memory Read-Only Data Page Direct - xxx DP
+0708  --------------------------------------------------------------------------------
+0710 0x0035 _RO_DP:
+0711 0x0035  31045280 BMW _Nxt,1,0, DPN,, RD, OP1 -- Read DP Mem
+0713  -----------------------------------------------------------------------------
+0714  -- Memory Read-Only Pre-Indexed Data Page Direct - xxx DP, X
+0715  --------------------------------------------------------------------------------
+0717 0x0036 _RO_DPX:
+0718 0x0036  31046280 BMW _Nxt,1,0, DPX,, RD, OP1 -- Read DP Mem
+0720  --------------------------------------------------------------------------------
+0721  -- Memory Read-Only Post-Indexed Data Page Direct - xxx DP, Y
+0722  --------------------------------------------------------------------------------
+0724 0x0037 _RO_DPY:
+0725 0x0037  31047280 BMW _Nxt,1,0, DPY,, RD, OP1 -- Read DP Mem
+0727  ------------------------------------------------------------------------------
+0728  -- Memory Read-Only Data Page Indirect - xxx (DP)
+0729  --------------------------------------------------------------------------------
+0731 0x0038 _RO_DPI:
+0732 0x0038  21C45280 FTCH $,1,0, DPN,, RD, OP1 -- Read DP Mem Ptr Lo
+0733 0x0039  21CC3240 FTCH $,1,0, Nxt,, RD, OP2 -- Read DP Mem Ptr Hi
+0734 0x003A  31048280 BMW _Nxt,1,0, LDA,, RD, OP1 -- Read Operand
+0736  --------------------------------------------------------------------------------
+0737  -- Memory Read-Only Pre-Indexed Data Page Indirect - xxx (DP, X)
+0738  --------------------------------------------------------------------------------
+0740 0x003B _RO_DPXI:
+0741 0x003B  21DC6280 FTCH $,1,0, DPX,, RD, OP1 -- Read DP Mem Ptr Lo (DP,X)
+0742 0x003C  21E43240 FTCH $,1,0, Nxt,, RD, OP2 -- Read DP Mem Ptr Hi
+0743 0x003D  31048280 BMW _Nxt,1,0, LDA,, RD, OP1 -- Read Operand
+0745  --------------------------------------------------------------------------------
+0746  -- Memory Read-Only Post-Indexed Data Page Indirect - xxx (DP), Y
+0747  --------------------------------------------------------------------------------
+0749 0x003E _RO_DPIY:
+0750 0x003E  21F45280 FTCH $,1,0, DPN,, RD, OP1 -- Read DP Mem Ptr Lo
+0751 0x003F  21FC3240 FTCH $,1,0, Nxt,, RD, OP2 -- Read DP Mem Ptr Hi
+0752 0x0040  3104F280 BMW _Nxt,1,0, LDAY,, RD, OP1 -- Read Operand (DP),Y
+0754  --------------------------------------------------------------------------------
+0755  -- Memory Read-Only Absolute - xxx Abs
+0756  --------------------------------------------------------------------------------
+0758 0x0041 _RO_Abs:
+0759 0x0041  220C0740 FTCH $,1,0,, Pls, IF, OP2 -- Read Mem Ptr Hi
+0760 0x0042  31048280 BMW _Nxt,1,0, LDA,, RD, OP1 -- Read Operand
+0762  --------------------------------------------------------------------------------
+0763  -- Memory Read-Only Pre-Indexed Absolute - xxx Abs, X
+0764  --------------------------------------------------------------------------------
+0766 0x0043 _RO_AbsX:
+0767 0x0043  221C0740 FTCH $,1,0,, Pls, IF, OP2 -- Read Mem Ptr Hi
+0768 0x0044  3104E280 BMW _Nxt,1,0, LDAX,, RD, OP1 -- Read Operand Abs,X
+0770  --------------------------------------------------------------------------------
+0771  -- Memory Read-Only Post-Indexed Absolute - xxx Abs, Y
+0772  --------------------------------------------------------------------------------
+0774 0x0045 _RO_AbsY:
+0775 0x0045  222C0740 FTCH $,1,0,, Pls, IF, OP2 -- Read Mem Ptr Hi
+0776 0x0046  3104F280 BMW _Nxt,1,0, LDAY,, RD, OP1 -- Read Operand Abs,Y
+0778  --------------------------------------------------------------------------------
+0779  -- Memory Write-Only Data Page Direct - xxx DP
+0780  --------------------------------------------------------------------------------
+0782 0x0047 _WO_DP:
+0783 0x0047  31045100 BMW _Nxt,1,0, DPN,, WR -- Write to DP
+0785  -----------------------------------------------------------------------------
+0786  -- Memory Write-Only Pre-Indexed Data Page Direct - xxx DP, X
+0787  --------------------------------------------------------------------------------
+0789 0x0048 _WO_DPX:
+0790 0x0048  31046100 BMW _Nxt,1,0, DPX,, WR -- Write to DP,X
+0792  -----------------------------------------------------------------------------
+0793  -- Memory Write-Only Post-Indexed Data Page Direct - xxx DP, Y
+0794  --------------------------------------------------------------------------------
+0796 0x0049 _WO_DPY:
+0797 0x0049  31047100 BMW _Nxt,1,0, DPY,, WR -- Write to DP,Y
+0799  --------------------------------------------------------------------------------
+0800  -- Memory Write-Only Data Page Indirect - xxx (DP)
+0801  --------------------------------------------------------------------------------
+0803 0x004A _WO_DPI:
+0804 0x004A  22545280 FTCH $,1,0, DPN,, RD, OP1 -- Read DP Mem Ptr Lo
+0805 0x004B  225C3240 FTCH $,1,0, Nxt,, RD, OP2 -- Read DP Mem Ptr Hi
+0806 0x004C  31048100 BMW _Nxt,1,0, LDA,, WR -- Write to (DP)
+0808  --------------------------------------------------------------------------------
+0809  -- Memory Write-Only Data Page Indirect - xxx (DP, X)
+0810  --------------------------------------------------------------------------------
+0812 0x004D _WO_DPXI:
+0813 0x004D  226C6280 FTCH $,1,0, DPX,, RD, OP1 -- Read DP Mem Ptr Lo
+0814 0x004E  22743240 FTCH $,1,0, Nxt,, RD, OP2 -- Read DP Mem Ptr Hi
+0815 0x004F  31048100 BMW _Nxt,1,0, LDA,, WR -- Write to (DP)
+0817  --------------------------------------------------------------------------------
+0818  -- Memory Write-Only Post-Indexed Data Page Indirect - xxx (DP), Y
+0819  --------------------------------------------------------------------------------
+0821 0x0050 _WO_DPIY:
+0822 0x0050  22845280 FTCH $,1,0, DPN,, RD, OP1 -- Read DP Mem Ptr Lo
+0823 0x0051  228C3240 FTCH $,1,0, Nxt,, RD, OP2 -- Read DP Mem Ptr Hi
+0824 0x0052  3104F100 BMW _Nxt,1,0, LDAY,, WR -- Write to (DP)
+0826  --------------------------------------------------------------------------------
+0827  -- Memory Write-Only Absolute - xxx Abs
+0828  --------------------------------------------------------------------------------
+0830 0x0053 _WO_Abs:
+0831 0x0053  229C0740 FTCH $,1,0,, Pls, IF, OP2 -- Read Mem Ptr Hi
+0832 0x0054  31048100 BMW _Nxt,1,0, LDA,, WR -- Write to Abs
+0834  --------------------------------------------------------------------------------
+0835  -- Memory Write-Only Pre-Indexed Absolute - xxx Abs, X
+0836  --------------------------------------------------------------------------------
+0838 0x0055 _WO_AbsX:
+0839 0x0055  22AC0740 FTCH $,1,0,, Pls, IF, OP2 -- Read Mem Ptr Hi
+0840 0x0056  3104E100 BMW _Nxt,1,0, LDAX,, WR -- Write to Abs,X
+0842  --------------------------------------------------------------------------------
+0843  -- Memory Write-Only Post-Indexed Absolute - xxx Abs, Y
+0844  --------------------------------------------------------------------------------
+0846 0x0057 _WO_AbsY:
+0847 0x0057  22BC0740 FTCH $,1,0,, Pls, IF, OP2 -- Read Mem Ptr Hi
+0848 0x0058  3104F100 BMW _Nxt,1,0, LDAY,, WR -- Write to Abs,Y
+0850  --------------------------------------------------------------------------------
+0851  -- 2-way Read-Modify-Write Instruction/Interrupt Jump Table
+0852  --------------------------------------------------------------------------------
+0000 0x0059  00000000 added by program
+0000 0x005A  00000000 added by program
+0000 0x005B  00000000 added by program
+0000 0x005C  00000000 added by program
+0000 0x005D  00000000 added by program
+0000 0x005E  00000000 added by program
+0000 0x005F  00000000 added by program
+0854 0x0060 _RMW: .org 96
+0855 0x0060  530507C0 BRV1 _RMW,1,1,, Pls, IF, IR -- Instruction Fetch/Execute
+0856 0x0061  61154160 BRV2 _Brk,1,1, Stk, , WR, PCH, Psh -- Push PCH, capture Vector
+0858  --------------------------------------------------------------------------------
+0859  -- Memory Read-Modify-Write Data Page Direct - xxx DP
+0860  --------------------------------------------------------------------------------
+0862 0x0062 _RMW_DP:
+0863 0x0062  23145280 FTCH $,1,0, DPN,, RD, OP1 -- Read from DP
+0864 0x0063  33042108 BMW _RMW,1,0, MAR,, WR,,,WE_R -- Write to DP
+0866  --------------------------------------------------------------------------------
+0867  -- Memory Read-Modify-Write Pre-Indexed Data Page Direct - xxx DP, X
+0868  --------------------------------------------------------------------------------
+0870 0x0064 _RMW_DPX:
+0871 0x0064  23246280 FTCH $,1,0, DPX,, RD, OP1 -- Read from DP,X
+0872 0x0065  33042108 BMW _RMW,1,0, MAR,, WR,,,WE_R -- Write to DP,X
+0874  --------------------------------------------------------------------------------
+0875  -- Memory Read-Modify-Write Post-Indexed Data Page Direct - xxx DP, Y
+0876  --------------------------------------------------------------------------------
+0878 0x0066 _RMW_DPY:
+0879 0x0066  23347280 FTCH $,1,0, DPY,, RD, OP1 -- Read from DP,Y
+0880 0x0067  33042108 BMW _RMW,1,0, MAR,, WR,,,WE_R -- Write to DP,Y
+0882  --------------------------------------------------------------------------------
+0883  -- Memory Read-Modify-Write Absolute - xxx Abs
+0884  --------------------------------------------------------------------------------
+0886 0x0068 _RMW_Abs:
+0887 0x0068  23440740 FTCH $,1,0,, Pls, IF, OP2 -- Read Mem Ptr Hi
+0888 0x0069  234C8280 FTCH $,1,0, LDA,, RD, OP1 -- Read from Abs
+0889 0x006A  33042108 BMW _RMW,1,0, MAR,, WR,,,WE_R -- Write to Abs
+0891  --------------------------------------------------------------------------------
+0892  -- Memory Read-Modify-Write Pre-Indexed Absolute - xxx Abs, X
+0893  --------------------------------------------------------------------------------
+0895 0x006B _RMW_AbsX:
+0896 0x006B  235C0740 FTCH $,1,0,, Pls, IF, OP2 -- Read Mem Ptr Hi
+0897 0x006C  2364E280 FTCH $,1,0, LDAX,, RD, OP1 -- Read from Abs,X
+0898 0x006D  33042108 BMW _RMW,1,0, MAR,, WR,,,WE_R -- Write to Abs,X
+0900  --------------------------------------------------------------------------------
+0901  -- Memory Read-Modify-Write Post-Indexed Absolute - xxx Abs, Y
+0902  --------------------------------------------------------------------------------
+0904 0x006E _RMW_AbsY:
+0905 0x006E  23740740 FTCH $,1,0,, Pls, IF, OP2 -- Read Mem Ptr Hi
+0906 0x006F  237CF280 FTCH $,1,0, LDAY,, RD, OP1 -- Read from Abs,Y
+0907 0x0070  33042108 BMW _RMW,1,0, MAR,, WR,,,WE_R -- Write to Abs,Y
+0909  --------------------------------------------------------------------------------
+0910  -- Rockwell BBRx/BBSx dp,rel instructions
+0911  --------------------------------------------------------------------------------
+0913 0x0071 _BByx_dp_rel:
+0914 0x0071  238C5280 FTCH $,1,0, DPN,, RD, OP1 -- Read from DP
+0915 0x0072  41040F80 BRV0 _Nxt,1,0,, Rel, IF, OP1 -- Read rel value
+0917  --------------------------------------------------------------------------------
+0918  -- End of Microprogram Routines for Normal Instructions
+0919  --------------------------------------------------------------------------------
+0921 0x0073 _End_uPgm:
+0923  --------------------------------------------------------------------------------
+0924  -- WAI - Wait for Interrupt
+0925  --------------------------------------------------------------------------------
+0000 0x0073  00000000 added by program
+0000 0x0074  00000000 added by program
+0000 0x0075  00000000 added by program
+0000 0x0076  00000000 added by program
+0000 0x0077  00000000 added by program
+0000 0x0078  00000000 added by program
+0000 0x0079  00000000 added by program
+0000 0x007A  00000000 added by program
+0000 0x007B  00000000 added by program
+0000 0x007C  00000000 added by program
+0000 0x007D  00000000 added by program
+0000 0x007E  00000000 added by program
+0000 0x007F  00000000 added by program
+0000 0x0080  00000000 added by program
+0000 0x0081  00000000 added by program
+0000 0x0082  00000000 added by program
+0000 0x0083  00000000 added by program
+0000 0x0084  00000000 added by program
+0000 0x0085  00000000 added by program
+0000 0x0086  00000000 added by program
+0000 0x0087  00000000 added by program
+0000 0x0088  00000000 added by program
+0000 0x0089  00000000 added by program
+0000 0x008A  00000000 added by program
+0000 0x008B  00000000 added by program
+0000 0x008C  00000000 added by program
+0000 0x008D  00000000 added by program
+0000 0x008E  00000000 added by program
+0000 0x008F  00000000 added by program
+0000 0x0090  00000000 added by program
+0000 0x0091  00000000 added by program
+0000 0x0092  00000000 added by program
+0000 0x0093  00000000 added by program
+0000 0x0094  00000000 added by program
+0000 0x0095  00000000 added by program
+0000 0x0096  00000000 added by program
+0000 0x0097  00000000 added by program
+0000 0x0098  00000000 added by program
+0000 0x0099  00000000 added by program
+0000 0x009A  00000000 added by program
+0000 0x009B  00000000 added by program
+0000 0x009C  00000000 added by program
+0000 0x009D  00000000 added by program
+0000 0x009E  00000000 added by program
+0000 0x009F  00000000 added by program
+0000 0x00A0  00000000 added by program
+0000 0x00A1  00000000 added by program
+0000 0x00A2  00000000 added by program
+0000 0x00A3  00000000 added by program
+0000 0x00A4  00000000 added by program
+0000 0x00A5  00000000 added by program
+0000 0x00A6  00000000 added by program
+0000 0x00A7  00000000 added by program
+0000 0x00A8  00000000 added by program
+0000 0x00A9  00000000 added by program
+0000 0x00AA  00000000 added by program
+0000 0x00AB  00000000 added by program
+0000 0x00AC  00000000 added by program
+0000 0x00AD  00000000 added by program
+0000 0x00AE  00000000 added by program
+0000 0x00AF  00000000 added by program
+0000 0x00B0  00000000 added by program
+0000 0x00B1  00000000 added by program
+0000 0x00B2  00000000 added by program
+0000 0x00B3  00000000 added by program
+0000 0x00B4  00000000 added by program
+0000 0x00B5  00000000 added by program
+0000 0x00B6  00000000 added by program
+0000 0x00B7  00000000 added by program
+0000 0x00B8  00000000 added by program
+0000 0x00B9  00000000 added by program
+0000 0x00BA  00000000 added by program
+0000 0x00BB  00000000 added by program
+0000 0x00BC  00000000 added by program
+0000 0x00BD  00000000 added by program
+0000 0x00BE  00000000 added by program
+0000 0x00BF  00000000 added by program
+0000 0x00C0  00000000 added by program
+0000 0x00C1  00000000 added by program
+0000 0x00C2  00000000 added by program
+0000 0x00C3  00000000 added by program
+0000 0x00C4  00000000 added by program
+0000 0x00C5  00000000 added by program
+0000 0x00C6  00000000 added by program
+0000 0x00C7  00000000 added by program
+0000 0x00C8  00000000 added by program
+0000 0x00C9  00000000 added by program
+0000 0x00CA  00000000 added by program
+0000 0x00CB  00000000 added by program
+0000 0x00CC  00000000 added by program
+0000 0x00CD  00000000 added by program
+0000 0x00CE  00000000 added by program
+0000 0x00CF  00000000 added by program
+0000 0x00D0  00000000 added by program
+0000 0x00D1  00000000 added by program
+0000 0x00D2  00000000 added by program
+0000 0x00D3  00000000 added by program
+0000 0x00D4  00000000 added by program
+0000 0x00D5  00000000 added by program
+0000 0x00D6  00000000 added by program
+0000 0x00D7  00000000 added by program
+0000 0x00D8  00000000 added by program
+0000 0x00D9  00000000 added by program
+0000 0x00DA  00000000 added by program
+0000 0x00DB  00000000 added by program
+0000 0x00DC  00000000 added by program
+0000 0x00DD  00000000 added by program
+0000 0x00DE  00000000 added by program
+0000 0x00DF  00000000 added by program
+0000 0x00E0  00000000 added by program
+0000 0x00E1  00000000 added by program
+0000 0x00E2  00000000 added by program
+0000 0x00E3  00000000 added by program
+0000 0x00E4  00000000 added by program
+0000 0x00E5  00000000 added by program
+0000 0x00E6  00000000 added by program
+0000 0x00E7  00000000 added by program
+0000 0x00E8  00000000 added by program
+0000 0x00E9  00000000 added by program
+0000 0x00EA  00000000 added by program
+0000 0x00EB  00000000 added by program
+0000 0x00EC  00000000 added by program
+0000 0x00ED  00000000 added by program
+0000 0x00EE  00000000 added by program
+0000 0x00EF  00000000 added by program
+0000 0x00F0  00000000 added by program
+0000 0x00F1  00000000 added by program
+0000 0x00F2  00000000 added by program
+0000 0x00F3  00000000 added by program
+0000 0x00F4  00000000 added by program
+0000 0x00F5  00000000 added by program
+0000 0x00F6  00000000 added by program
+0000 0x00F7  00000000 added by program
+0000 0x00F8  00000000 added by program
+0000 0x00F9  00000000 added by program
+0000 0x00FA  00000000 added by program
+0000 0x00FB  00000000 added by program
+0927 0x00FC _WAI: .org 252 -- Set up 4-way table for WAI instruction
+0928 0x00FC  37E00000 BMW _WAI,0,0 -- No external interrupts asserted
+0929 0x00FD  41080000 BRV0 _Int,0,0 -- Int asserted by NMI, do NMI interrupt
+0930 0x00FE  41000000 BRV0 _Nxt,0,0 -- xIRQ asserted with IRQ_Msk asserted, continue
+0931 0x00FF  41080000 BRV0 _Int,0,0 -- Int asserted by xIRQ, do IRQ interrupt
+0933 0x0100 _IDEC_Start: .org 256
+0935  --------------------------------------------------------------------------------
+0936  -- Start of Instruction Decode Table (Entry for each Opcode)
+0937  --
+0938  -- Instead of being organized in numerical order, the table is organized by
+0939  -- rows: the least significant nibble and the most significant nibble of the
+0940  -- opcode are swapped. This organization more clearly shows the arrangement of
+0941  -- the addressing modes of the WDC W65C02 microprocessor being emulated. It al-
+0942  -- so more clearly shows the regularity of the ALU instructions that are imple-
+0943  -- mented. The implementation of the microprogram is first based on the addres-
+0944  -- sing mode, and then on the ALU function. Single cycle instructions will be
+0945  -- easily recognized in the following table because their table entry use the
+0946  -- BRV3 MPC instruction. Multi-cycle instructions use the BRV0 MPC instruction
+0947  -- to vector a microroutine in the lower 256 words of the microprogram ROM/RAM.
+0948  -- Single byte instructions such as BRK, RTS, RTI, and register push/pull in-
+0949  -- structions (PHA, PLA, PHP, PLP, PHX, PLX, PHY, PLY), and multi-byte instruc-
+0950  -- tions like JSR abs are implemented with special microroutines that perform
+0951  -- the necessary stack accesses. The remainder of the microroutines are orga-
+0952  -- nized by addressing mode, and whether the mode is used in a RO, WO, or RMW
+0953  -- manner.
+0954  --
+0955  -- Microprogram Word Format:
+0956  --
+0957  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+0958  --
+0959  --------------------------------------------------------------------------------
+0961  --------------------------------------------------------------------------------
+0962  -- Row 0 : 0x00-0xF0 (All branches/JMPs/JSR implemented as uninterruptable)
+0963  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+0964  --------------------------------------------------------------------------------
+0965 0x0100 _BRK_imm:
+0966 0x0100  6115416C BRV2 _Brk,1,1, Stk,, WR, PCH, Psh, WE_P -- Start Break Handler
+0967 0x0101 _BPL_rel:
+0968 0x0101  41040F80 BRV0 _Rel,1,0,, Rel, IF, OP1 -- Read rel Value
+0969 0x0102 _JSR_abs:
+0970 0x0102  413C0780 BRV0 _JSR,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+0971 0x0103 _BMI_rel:
+0972 0x0103  41040F80 BRV0 _Rel,1,0,, Rel, IF, OP1 -- Read rel Value
+0973 0x0104 _RTI_imp:
+0974 0x0104  415442B0 BRV0 _RTI,1,0, Stk,, RD, OP1, Pop -- Read PSW from Stack
+0975 0x0105 _BVC_rel:
+0976 0x0105  41040F80 BRV0 _Rel,1,0,, Rel, IF, OP1 -- Read rel Value
+0977 0x0106 _RTS_imp:
+0978 0x0106  416C42B0 BRV0 _RTS,1,0, Stk,, RD, OP1, Pop -- Read PCL from Stack
+0979 0x0107 _BVS_rel:
+0980 0x0107  41040F80 BRV0 _Rel,1,0,, Rel, IF, OP1 -- Read rel Value
+0981 0x0108 _BRA_rel:
+0982 0x0108  41040F80 BRV0 _Rel,1,0,, Rel, IF, OP1 -- Read rel Value
+0983 0x0109 _BCC_rel
+0984 0x0109  41040F80 BRV0 _Rel,1,0,, Rel, IF, OP1 -- Read rel Value
+0985 0x010A _LDY_imm:
+0986 0x010A  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read #imm Value
+0987 0x010B _BCS_rel:
+0988 0x010B  41040F80 BRV0 _Rel,1,0,, Rel, IF, OP1 -- Read rel Value
+0989 0x010C _CPY_imm:
+0990 0x010C  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read #imm Value
+0991 0x010D _BNE_rel:
+0992 0x010D  41040F80 BRV0 _Rel,1,0,, Rel, IF, OP1 -- Read rel Value
+0993 0x010E _CPX_imm:
+0994 0x010E  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read #imm Value
+0995 0x010F _BEQ_rel:
+0996 0x010F  41040F80 BRV0 _Rel,1,0,, Rel, IF, OP1 -- Read rel Value
+0997  --------------------------------------------------------------------------------
+0998  -- Row 1 : 0x01-0xF1
+0999  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1000  --------------------------------------------------------------------------------
+1001 0x0110 _ORA_dpXi:
+1002 0x0110  41DC0780 BRV0 _RO_DPXI,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1003 0x0111 _ORA_dpiY:
+1004 0x0111  41F40780 BRV0 _RO_DPIY,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1005 0x0112 _AND_dpXi:
+1006 0x0112  41DC0780 BRV0 _RO_DPXI,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1007 0x0113 _AND_dpiY:
+1008 0x0113  41F40780 BRV0 _RO_DPIY,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1009 0x0114 _EOR_dpXi:
+1010 0x0114  41DC0780 BRV0 _RO_DPXI,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1011 0x0115 _EOR_dpiY:
+1012 0x0115  41F40780 BRV0 _RO_DPIY,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1013 0x0116 _ADC_dpXi:
+1014 0x0116  41DC0780 BRV0 _RO_DPXI,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1015 0x0117 _ADC_dpiY:
+1016 0x0117  41F40780 BRV0 _RO_DPIY,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1017 0x0118 _STA_dpXi:
+1018 0x0118  426C0780 BRV0 _WO_DPXI,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1019 0x0119 _STA_dpiY:
+1020 0x0119  42840780 BRV0 _WO_DPIY,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1021 0x011A _LDA_dpXi:
+1022 0x011A  41DC0780 BRV0 _RO_DPXI,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1023 0x011B _LDA_dpiY:
+1024 0x011B  41F40780 BRV0 _RO_DPIY,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1025 0x011C _CMP_dpXi:
+1026 0x011C  41DC0780 BRV0 _RO_DPXI,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1027 0x011D _CMP_dpiY:
+1028 0x011D  41F40780 BRV0 _RO_DPIY,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1029 0x011E _SBC_dpXi:
+1030 0x011E  41DC0780 BRV0 _RO_DPXI,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1031 0x011F _SBC_dpiY:
+1032 0x011F  41F40780 BRV0 _RO_DPIY,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1033  --------------------------------------------------------------------------------
+1034  -- Row 2 : 0x02-0xF2
+1035  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1036  --------------------------------------------------------------------------------
+1037 0x0120 _NOP_02:
+1038 0x0120  790707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1039 0x0121 _ORA_dpi:
+1040 0x0121  41C40780 BRV0 _RO_DPI,1,0,, Pls, IF, OP1 -- Read DP
+1041 0x0122 _NOP_22:
+1042 0x0122  791707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1043 0x0123 _AND_dpi:
+1044 0x0123  41C40780 BRV0 _RO_DPI,1,0,, Pls, IF, OP1 -- Read DP
+1045 0x0124 _NOP_42:
+1046 0x0124  792707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1047 0x0125 _EOR_dpi:
+1048 0x0125  41C40780 BRV0 _RO_DPI,1,0,, Pls, IF, OP1 -- Read DP
+1049 0x0126 _NOP_62:
+1050 0x0126  793707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1051 0x0127 _ADC_dpi:
+1052 0x0127  41C40780 BRV0 _RO_DPI,1,0,, Pls, IF, OP1 -- Read DP
+1053 0x0128 _NOP_82:
+1054 0x0128  794707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1055 0x0129 _STA_dpi:
+1056 0x0129  42540780 BRV0 _WO_DPI,1,0,, Pls, IF, OP1 -- Read DP
+1057 0x012A _LDX_imm:
+1058 0x012A  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read #imm Value
+1059 0x012B _LDA_dpi:
+1060 0x012B  41C40780 BRV0 _RO_DPI,1,0,, Pls, IF, OP1 -- Read DP
+1061 0x012C _NOP_C2:
+1062 0x012C  796707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1063 0x012D _CMP_dpi:
+1064 0x012D  41C40780 BRV0 _RO_DPI,1,0,, Pls, IF, OP1 -- Read DP
+1065 0x012E _NOP_E2:
+1066 0x012E  797707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1067 0x012F _SBC_dpi:
+1068 0x012F  41C40780 BRV0 _RO_DPI,1,0,, Pls, IF, OP1 -- Read DP
+1069  --------------------------------------------------------------------------------
+1070  -- Row 3 : 0x03-0xF3
+1071  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1072  --------------------------------------------------------------------------------
+1073 0x0130 _NOP_03:
+1074 0x0130  798707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1075 0x0131 _NOP_13:
+1076 0x0131  798F07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1077 0x0132 _NOP_23:
+1078 0x0132  799707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1079 0x0133 _NOP_33:
+1080 0x0133  799F07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1081 0x0134 _NOP_43:
+1082 0x0134  79A707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1083 0x0135 _NOP_53:
+1084 0x0135  79AF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1085 0x0136 _NOP_63:
+1086 0x0136  79B707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1087 0x0137 _NOP_73:
+1088 0x0137  79BF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1089 0x0138 _NOP_83:
+1090 0x0138  79C707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1091 0x0139 _NOP_93:
+1092 0x0139  79CF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1093 0x013A _NOP_A3:
+1094 0x013A  79D707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1095 0x013B _NOP_B3:
+1096 0x013B  79DF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1097 0x013C _NOP_C3:
+1098 0x013C  79E707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1099 0x013D _NOP_D3:
+1100 0x013D  79EF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1101 0x013E _NOP_E3:
+1102 0x013E  79F707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1103 0x013F _NOP_F3:
+1104 0x013F  79FF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1105  --------------------------------------------------------------------------------
+1106  -- Row 4 : 0x04-0xF4
+1107  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1108  --------------------------------------------------------------------------------
+1109 0x0140 _TSB_dp:
+1110 0x0140  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1111 0x0141 _TRB_dp:
+1112 0x0141  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1113 0x0142 _BIT_dp:
+1114 0x0142  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1115 0x0143 _BIT_dpX:
+1116 0x0143  41B40780 BRV0 _RO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1117 0x0144 _NOP_44:
+1118 0x0144  7A2707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1119 0x0145 _NOP_54:
+1120 0x0145  7A2F07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1121 0x0146 _STZ_dp:
+1122 0x0146  423C0780 BRV0 _WO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1123 0x0147 _STZ_dpX:
+1124 0x0147  42440780 BRV0 _WO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1125 0x0148 _STY_dp:
+1126 0x0148  423C0780 BRV0 _WO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1127 0x0149 _STY_dpX:
+1128 0x0149  42440780 BRV0 _WO_DPX,1,0,, Pls, IR, OP1 -- Read DP
+1129 0x014A _LDY_dp:
+1130 0x014A  41AC0780 BRV0 _RO_DP,1,0,, Pls, IR, OP1 -- Read DP
+1131 0x014B _LDY_dpX:
+1132 0x014B  41B40780 BRV0 _RO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1133 0x014C _CPY_dp:
+1134 0x014C  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1135 0x014D _NOP_D4:
+1136 0x014D  7A6F07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1137 0x014E _CPX_dp:
+1138 0x014E  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1139 0x014F _NOP_F4:
+1140 0x014F  7A7F07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1141  --------------------------------------------------------------------------------
+1142  -- Row 5 : 0x05-0xF5
+1143  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1144  --------------------------------------------------------------------------------
+1145 0x0150 _ORA_dp:
+1146 0x0150  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1147 0x0151 _ORA_dpX:
+1148 0x0151  41B40780 BRV0 _RO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1149 0x0152 _AND_dp:
+1150 0x0152  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1151 0x0153 _AND_dpX:
+1152 0x0153  41B40780 BRV0 _RO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1153 0x0154 _EOR_dp:
+1154 0x0154  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1155 0x0155 _EOR_dpX:
+1156 0x0155  41B40780 BRV0 _RO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1157 0x0156 _ADC_dp:
+1158 0x0156  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1159 0x0157 _ADC_dpX:
+1160 0x0157  41B40780 BRV0 _RO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1161 0x0158 _STA_dp:
+1162 0x0158  423C0780 BRV0 _WO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1163 0x0159 _STA_dpX:
+1164 0x0159  42440780 BRV0 _WO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1165 0x015A _LDA_dp:
+1166 0x015A  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1167 0x015B _LDA_dpX:
+1168 0x015B  41B40780 BRV0 _RO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1169 0x015C _CMP_dp:
+1170 0x015C  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1171 0x015D _CMP_dpX:
+1172 0x015D  41B40780 BRV0 _RO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1173 0x015E _SBC_dp:
+1174 0x015E  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1175 0x015F _SBC_dpX:
+1176 0x015F  41B40780 BRV0 _RO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1177  --------------------------------------------------------------------------------
+1178  -- Row 6 : 0x06-0xF6
+1179  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1180  --------------------------------------------------------------------------------
+1181 0x0160 _ASL_dp:
+1182 0x0160  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1183 0x0161 _ASL_dpX:
+1184 0x0161  43240780 BRV0 _RMW_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1185 0x0162 _ROL_dp:
+1186 0x0162  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1187 0x0163 _ROL_dpX:
+1188 0x0163  43240780 BRV0 _RMW_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1189 0x0164 _LSR_dp:
+1190 0x0164  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1191 0x0165 _LSR_dpX:
+1192 0x0165  43240780 BRV0 _RMW_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1193 0x0166 _ROR_dp:
+1194 0x0166  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1195 0x0167 _ROR_dpX:
+1196 0x0167  43240780 BRV0 _RMW_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1197 0x0168 _STX_dp:
+1198 0x0168  423C0780 BRV0 _WO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1199 0x0169 _STX_dpY:
+1200 0x0169  424C0780 BRV0 _WO_DPY,1,0,, Pls, IF, OP1 -- Read DP
+1201 0x016A _LDX_dp:
+1202 0x016A  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1203 0x016B _LDX_dpY:
+1204 0x016B  41BC0780 BRV0 _RO_DPY,1,0,, Pls, IF, OP1 -- Read DP
+1205 0x016C _DEC_dp:
+1206 0x016C  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1207 0x016D _DEC_dpX:
+1208 0x016D  43240780 BRV0 _RMW_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1209 0x016E _INC_dp:
+1210 0x016E  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1211 0x016F _INC_dpX:
+1212 0x016F  43240780 BRV0 _RMW_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1213  --------------------------------------------------------------------------------
+1214  -- Row 7 : 0x07-0xF7 (Rockwell Instructions: RMBx/SMBx dp)
+1215  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1216  --------------------------------------------------------------------------------
+1217 0x0170 _RMB0_dp:
+1218 0x0170  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1219 0x0171 _RMB1_dp:
+1220 0x0171  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1221 0x0172 _RMB2_dp:
+1222 0x0172  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1223 0x0173 _RMB3_dp:
+1224 0x0173  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1225 0x0174 _RMB4_dp:
+1226 0x0174  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1227 0x0175 _RMB5_dp:
+1228 0x0175  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1229 0x0176 _RMB6_dp:
+1230 0x0176  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1231 0x0177 _RMB7_dp:
+1232 0x0177  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1233 0x0178 _SMB0_dp:
+1234 0x0178  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1235 0x0179 _SMB1_dp:
+1236 0x0179  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1237 0x017A _SMB2_dp:
+1238 0x017A  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1239 0x017B _SMB3_dp:
+1240 0x017B  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1241 0x017C _SMB4_dp:
+1242 0x017C  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1243 0x017D _SMB5_dp:
+1244 0x017D  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1245 0x017E _SMB6_dp:
+1246 0x017E  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1247 0x017F _SMB7_dp:
+1248 0x017F  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1249  --------------------------------------------------------------------------------
+1250  -- Row 8 : 0x08-0xF8
+1251  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1252  --------------------------------------------------------------------------------
+1253 0x0180 _PHP:
+1254 0x0180  41044120 BRV0 _Psh,1,0, Stk,, WR,, Psh -- Push P
+1255 0x0181 _CLC:
+1256 0x0181  7C0F07CC BRV3 $,1,3,, Pls, IF, IR,, WE_P -- Clear Carry Flag
+1257 0x0182 _PLP:
+1258 0x0182  410442B0 BRV0 _Pop,1,0, Stk,, RD, OP1, Pop -- Pop P
+1259 0x0183 _SEC:
+1260 0x0183  7C1F07CC BRV3 $,1,3,, Pls, IF, IR,, WE_P -- Set Carry Flag
+1261 0x0184 _PHA:
+1262 0x0184  41044120 BRV0 _Psh,1,0, Stk,, WR,, Psh -- Push A
+1263 0x0185 _CLI:
+1264 0x0185  5C2D07CC BRV1 $,1,1,, Pls, IF, IR,, WE_P -- Clear Interrupt Mask Flg
+1265 0x0186 _PLA:
+1266 0x0186  410442B0 BRV0 _Pop,1,0, Stk,, RD, OP1, Pop -- Pop A
+1267 0x0187 _SEI:
+1268 0x0187  5C3D07CC BRV1 $,1,1,, Pls, IF, IR,, WE_P -- Set Interrupt Mask Flag
+1269 0x0188 _DEY:
+1270 0x0188  7C4707C6 BRV3 $,1,3,, Pls, IF, IR,, WE_Y -- Decrement Y
+1271 0x0189 _TYA:
+1272 0x0189  7C4F07C2 BRV3 $,1,3,, Pls, IF, IR,, WE_A -- Transfer Y to A
+1273 0x018A _TAY:
+1274 0x018A  7C5707C6 BRV3 $,1,3,, Pls, IF, IR,, WE_Y -- Transfer A to Y
+1275 0x018B _CLV:
+1276 0x018B  7C5F07CC BRV3 $,1,3,, Pls, IF, IR,, WE_P -- Clear oVerflow Flag
+1277 0x018C _INY:
+1278 0x018C  7C6707C6 BRV3 $,1,3,, Pls, IF, IR,, WE_Y -- Increment Y
+1279 0x018D _CLD:
+1280 0x018D  7C6F07CC BRV3 $,1,3,, Pls, IF, IR,, WE_P -- Clear Decimal Mode Flag
+1281 0x018E _INX:
+1282 0x018E  7C7707C4 BRV3 $,1,3,, Pls, IF, IR,, WE_X -- Increment X
+1283 0x018F _SED:
+1284 0x018F  7C7F07CC BRV3 $,1,3,, Pls, IF, IR,, WE_P -- Set Decimal Mode Flag
+1285  --------------------------------------------------------------------------------
+1286  -- Row 9 : 0x09-0xF9
+1287  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1288  --------------------------------------------------------------------------------
+1289 0x0190 _ORA_imm:
+1290 0x0190  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read Immediate Operand
+1291 0x0191 _ORA_absY:
+1292 0x0191  422C0780 BRV0 _RO_AbsY,1,0,, Pls, IF, OP1 -- Read Mem Ptr Lo
+1293 0x0192 _AND_imm:
+1294 0x0192  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read Immediate Operand
+1295 0x0193 _AND_absY:
+1296 0x0193  422C0780 BRV0 _RO_AbsY,1,0,, Pls, IF, OP1 -- Read Mem Ptr Lo
+1297 0x0194 _EOR_imm:
+1298 0x0194  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read Immediate Operand
+1299 0x0195 _EOR_absY:
+1300 0x0195  422C0780 BRV0 _RO_AbsY,1,0,, Pls, IF, OP1 -- Read Mem Ptr Lo
+1301 0x0196 _ADC_imm:
+1302 0x0196  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read Immediate Operand
+1303 0x0197 _ADC_absY:
+1304 0x0197  422C0780 BRV0 _RO_AbsY,1,0,, Pls, IF, OP1 -- Read Mem Ptr Lo
+1305 0x0198 _BIT_imm:
+1306 0x0198  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read Immediate Operand
+1307 0x0199 _STA_absY:
+1308 0x0199  42BC0780 BRV0 _WO_AbsY,1,0,, Pls, IF, OP1 -- Read Mem Ptr Lo
+1309 0x019A _LDA_imm:
+1310 0x019A  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read Immediate Operand
+1311 0x019B _LDA_absY:
+1312 0x019B  422C0780 BRV0 _RO_AbsY,1,0,, Pls, IF, OP1 -- Read Mem Ptr Lo
+1313 0x019C _CMP_imm:
+1314 0x019C  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read Immediate Operand
+1315 0x019D _CMP_absY:
+1316 0x019D  422C0780 BRV0 _RO_AbsY,1,0,, Pls, IF, OP1 -- Read Mem Ptr Lo
+1317 0x019E _SBC_imm:
+1318 0x019E  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read Immediate Operand
+1319 0x019F _SBC_absY:
+1320 0x019F  422C0780 BRV0 _RO_AbsY,1,0,, Pls, IF, OP1 -- Read Mem Ptr Lo
+1321  --------------------------------------------------------------------------------
+1322  -- Row A : 0x0A-0xFA
+1323  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1324  --------------------------------------------------------------------------------
+1325 0x01A0 _ASL_A:
+1326 0x01A0  7D0707C2 BRV3 $,1,3,, Pls, IF, IR,, WE_A -- Arithmetic Shift A Left
+1327 0x01A1 _INC_A:
+1328 0x01A1  7D0F07C2 BRV3 $,1,3,, Pls, IF, IR,, WE_A -- Increment A
+1329 0x01A2 _ROL_A:
+1330 0x01A2  7D1707C2 BRV3 $,1,3,, Pls, IF, IR,, WE_A -- Rotate A Left
+1331 0x01A3 _DEC_A:
+1332 0x01A3  7D1F07C2 BRV3 $,1,3,, Pls, IF, IR,, WE_A -- Decrement A
+1333 0x01A4 _LSR_A:
+1334 0x01A4  7D2707C2 BRV3 $,1,3,, Pls, IF, IR,, WE_A -- Logical Shift A Right
+1335 0x01A5 _PHY:
+1336 0x01A5  41044120 BRV0 _Psh,1,0, Stk,, WR,, Psh -- Push Y
+1337 0x01A6 _ROR_A:
+1338 0x01A6  7D3707C2 BRV3 $,1,3,, Pls, IF, IR,, WE_A -- Rotate A Right
+1339 0x01A7 _PLY:
+1340 0x01A7  410442B0 BRV0 _Pop,1,0, Stk,, RD, OP1, Pop -- Pop Y
+1341 0x01A8 _TXA:
+1342 0x01A8  7D4707C2 BRV3 $,1,3,, Pls, IF, IR,, WE_A -- Transfer X to A
+1343 0x01A9 _TXS:
+1344 0x01A9  7D4F07CA BRV3 $,1,3,, Pls, IF, IR,, WE_S -- Transfer X to S
+1345 0x01AA _TAX:
+1346 0x01AA  7D5707C4 BRV3 $,1,3,, Pls, IF, IR,, WE_X -- Transfer A to X
+1347 0x01AB _TSX:
+1348 0x01AB  7D5F07C4 BRV3 $,1,3,, Pls, IF, IR,, WE_X -- Transfer S to X
+1349 0x01AC _DEX:
+1350 0x01AC  7D6707C4 BRV3 $,1,3,, Pls, IF, IR,, WE_X -- Decrement X
+1351 0x01AD _PHX:
+1352 0x01AD  41044120 BRV0 _Psh,1,0, Stk,, WR,, Psh -- Push X
+1353 0x01AE _NOP: -- the real NOP
+1354 0x01AE  7D7707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip True NOP Instruction
+1355 0x01AF _PLX:
+1356 0x01AF  410442B0 BRV0 _Pop,1,0, Stk,, RD, OP1, Pop -- Pop X
+1357  --------------------------------------------------------------------------------
+1358  -- Row B : 0x0B-0xFB
+1359  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1360  --------------------------------------------------------------------------------
+1361 0x01B0 _NOP_0B:
+1362 0x01B0  7D8707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1363 0x01B1 _NOP_1B:
+1364 0x01B1  7D8F07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1365 0x01B2 _NOP_2B:
+1366 0x01B2  7D9707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1367 0x01B3 _NOP_3B:
+1368 0x01B3  7D9F07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1369 0x01B4 _NOP_4B:
+1370 0x01B4  7DA707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1371 0x01B5 _NOP_5B:
+1372 0x01B5  7DAF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1373 0x01B6 _NOP_6B:
+1374 0x01B6  7DB707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1375 0x01B7 _NOP_7B:
+1376 0x01B7  7DBF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1377 0x01B8 _NOP_8B:
+1378 0x01B8  7DC707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1379 0x01B9 _NOP_9B:
+1380 0x01B9  7DCF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1381 0x01BA _NOP_AB:
+1382 0x01BA  7DD707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1383 0x01BB _NOP_BB:
+1384 0x01BB  7DDF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1385 0x01BC _WAI_CB:
+1386 0x01BC  47E00000 BRV0 _WAI,0,0 -- Wait for Interrupt
+1387 0x01BD _STP_DB:
+1388 0x01BD  4DE80000 BRV0 $,0,0 -- Stop execution
+1389 0x01BE _NOP_EB:
+1390 0x01BE  7DF707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1391 0x01BF _NOP_FB:
+1392 0x01BF  7DFF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1393  --------------------------------------------------------------------------------
+1394  -- Row C : 0x0C-0xFC
+1395  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1396  --------------------------------------------------------------------------------
+1397 0x01C0 _TSB_abs:
+1398 0x01C0  43440780 BRV0 _RMW_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1399 0x01C1 _TRB_abs:
+1400 0x01C1  43440780 BRV0 _RMW_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1401 0x01C2 _BIT_abs:
+1402 0x01C2  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1403 0x01C3 _BIT_absX:
+1404 0x01C3  421C0780 BRV0 _RO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1405 0x01C4 _JMP_abs:
+1406 0x01C4  41740780 BRV0 _Jmp,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1407 0x01C5 _NOP_5C:
+1408 0x01C5  7E2F07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1409 0x01C6 _JMP_absi:
+1410 0x01C6  417C0780 BRV0 _JmpI,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1411 0x01C7 _JMP_absXi:
+1412 0x01C7  41940780 BRV0 _JmpXI,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1413 0x01C8 _STY_abs:
+1414 0x01C8  429C0780 BRV0 _WO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1415 0x01C9 _STZ_abs:
+1416 0x01C9  429C0780 BRV0 _WO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1417 0x01CA _LDY_abs:
+1418 0x01CA  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1419 0x01CB _LDY_absX:
+1420 0x01CB  421C0780 BRV0 _RO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1421 0x01CC _CPY_abs:
+1422 0x01CC  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1423 0x01CD _NOP_DC:
+1424 0x01CD  7E6F07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1425 0x01CE _CPX_abs:
+1426 0x01CE  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1427 0x01CF _NOP_FC:
+1428 0x01CF  7E7F07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1429  --------------------------------------------------------------------------------
+1430  -- Row D : 0x0D-0xFD
+1431  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1432  --------------------------------------------------------------------------------
+1433 0x01D0 _ORA_abs:
+1434 0x01D0  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1435 0x01D1 _ORA_absX:
+1436 0x01D1  421C0780 BRV0 _RO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1437 0x01D2 _AND_abs:
+1438 0x01D2  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1439 0x01D3 _AND_absX:
+1440 0x01D3  421C0780 BRV0 _RO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1441 0x01D4 _EOR_abs:
+1442 0x01D4  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1443 0x01D5 _EOR_absX:
+1444 0x01D5  421C0780 BRV0 _RO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1445 0x01D6 _ADC_abs:
+1446 0x01D6  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1447 0x01D7 _ADC_absX:
+1448 0x01D7  421C0780 BRV0 _RO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1449 0x01D8 _STA_abs:
+1450 0x01D8  429C0780 BRV0 _WO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1451 0x01D9 _STA_absX:
+1452 0x01D9  42AC0780 BRV0 _WO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1453 0x01DA _LDA_abs:
+1454 0x01DA  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1455 0x01DB _LDA_absX:
+1456 0x01DB  421C0780 BRV0 _RO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1457 0x01DC _CMP_abs:
+1458 0x01DC  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1459 0x01DD _CMP_absX:
+1460 0x01DD  421C0780 BRV0 _RO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1461 0x01DE _SBC_abs:
+1462 0x01DE  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1463 0x01DF _SBC_absX:
+1464 0x01DF  421C0780 BRV0 _RO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1465  --------------------------------------------------------------------------------
+1466  -- Row E : 0x0E-0xFE
+1467  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1468  --------------------------------------------------------------------------------
+1469 0x01E0 _ASL_abs:
+1470 0x01E0  43440780 BRV0 _RMW_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1471 0x01E1 _ASL_absX:
+1472 0x01E1  435C0780 BRV0 _RMW_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1473 0x01E2 _ROL_abs:
+1474 0x01E2  43440780 BRV0 _RMW_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1475 0x01E3 _ROL_absX:
+1476 0x01E3  435C0780 BRV0 _RMW_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1477 0x01E4 _LSR_abs:
+1478 0x01E4  43440780 BRV0 _RMW_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1479 0x01E5 _LSR_absX:
+1480 0x01E5  435C0780 BRV0 _RMW_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1481 0x01E6 _ROR_abs:
+1482 0x01E6  43440780 BRV0 _RMW_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1483 0x01E7 _ROR_absX:
+1484 0x01E7  435C0780 BRV0 _RMW_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1485 0x01E8 _STX_abs:
+1486 0x01E8  429C0780 BRV0 _WO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1487 0x01E9 _STZ_absX:
+1488 0x01E9  42AC0780 BRV0 _WO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1489 0x01EA _LDX_abs:
+1490 0x01EA  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1491 0x01EB _LDX_absY:
+1492 0x01EB  422C0780 BRV0 _RO_AbsY,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1493 0x01EC _DEC_abs:
+1494 0x01EC  43440780 BRV0 _RMW_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1495 0x01ED _DEC_absX:
+1496 0x01ED  435C0780 BRV0 _RMW_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1497 0x01EE _INC_abs:
+1498 0x01EE  43440780 BRV0 _RMW_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1499 0x01EF _INC_absX:
+1500 0x01EF  435C0780 BRV0 _RMW_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1501  --------------------------------------------------------------------------------
+1502  -- Row F : 0x0F-0xFF (Rockwell Instructions: BBRx/BBSx dp,rel)
+1503  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1504  --------------------------------------------------------------------------------
+1505 0x01F0 _BBR0_dp_rel:
+1506 0x01F0  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1507 0x01F1 _BBR1_dp_rel:
+1508 0x01F1  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1509 0x01F2 _BBR2_dp_rel:
+1510 0x01F2  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1511 0x01F3 _BBR3_dp_rel:
+1512 0x01F3  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1513 0x01F4 _BBR4_dp_rel:
+1514 0x01F4  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1515 0x01F5 _BBR5_dp_rel:
+1516 0x01F5  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1517 0x01F6 _BBR6_dp_rel:
+1518 0x01F6  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1519 0x01F7 _BBR7_dp_rel:
+1520 0x01F7  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1521 0x01F8 _BBS0_dp_rel:
+1522 0x01F8  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1523 0x01F9 _BBS1_dp_rel:
+1524 0x01F9  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1525 0x01FA _BBS2_dp_rel:
+1526 0x01FA  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1527 0x01FB _BBS3_dp_rel:
+1528 0x01FB  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1529 0x01FC _BBS4_dp_rel:
+1530 0x01FC  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1531 0x01FD _BBS5_dp_rel:
+1532 0x01FD  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1533 0x01FE _BBS6_dp_rel:
+1534 0x01FE  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1535 0x01FF _BBS7_dp_rel:
+1536 0x01FF  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1537  --------------------------------------------------------------------------------
+1538  -- End of Instruction Decode Table
+1539  --------------------------------------------------------------------------------
+1541 0x0200 _Last: .org 512
+1543 0x0200 _end:
+-- Instructions --
+0x0000  RTS   RTS         .asm    0       -- Return from Subroutine
+0x0001  BSR   BSR         .asm    1       -- Branch to subroutine
+0x0002 FTCH   FTCH        .asm    2       -- Fetch next instruction
+0x0003  BMW   BMW         .asm    3       -- Branch multi-way
+0x0004 BRV0   BRV0        .asm    4       -- Branch via 0
+0x0005 BRV1   BRV1        .asm    5       -- Branch via 1
+0x0006 BRV2   BRV2        .asm    6       -- Branch via 2
+0x0007 BRV3   BRV3        .asm    7       -- Branch via 3
+0x0008 BTH0   BTH0        .asm    8       -- Branch if T0 is high
+0x0009 BTH1   BTH1        .asm    9       -- Branch if T1 is high
+0x000A BTH2   BTH2        .asm    10      -- Branch if T2 is high
+0x000B BTH3   BTH3        .asm    11      -- Branch if T3 is high
+0x000C BTL0   BTL0        .asm    12      -- Branch if T0 is low
+0x000D BTL1   BTL1        .asm    13      -- Branch if T1 is low
+0x000E BTL2   BTL2        .asm    14      -- Branch if T2 is low
+0x000F BTL3   BTL3        .asm    15      -- Branch if T3 is low
+ 
+-- Equates --
+0x0000 PC          .equ    0       -- NA <= PC (default)
+0x0001 Inc         .equ    1       -- NA <= PC + 1
+0x0002 MAR         .equ    2       -- NA <= MAR + 0
+0x0003 Nxt         .equ    3       -- NA <= MAR + 1
+0x0004 Stk         .equ    4       -- NA <= SP + 0
+0x0005 DPN         .equ    5       -- NA <= {0, OP1} + 0
+0x0006 DPX         .equ    6       -- NA <= {0, OP1} + {0, X}
+0x0007 DPY         .equ    7       -- NA <= {0, OP1} + {0, Y}
+0x0008 LDA         .equ    8       -- NA <= {OP2, OP1} + 0
+0x000E LDAX        .equ    14      -- NA <= {OP2, OP1} + {0, X}
+0x000F LDAY        .equ    15      -- NA <= {OP2, OP1} + {0, Y}
+0x0001 Pls         .equ    1       -- PC <= PC + 1
+0x0002 Jmp         .equ    2       -- PC <= NA
+0x0003 Rel         .equ    3       -- PC <= PC + (CC ? {{8{DI[7]}}, DI} : 1)
+0x0001 WR          .equ    1       -- Bus Operand Write
+0x0002 RD          .equ    2       -- Bus Operand Read
+0x0003 IF          .equ    3       -- Bus Insruction Fetch
+0x0000 ALU         .equ    0       -- M   <= DI
+0x0001 OP2         .equ    1       -- OP2 <= DI
+0x0002 OP1         .equ    2       -- OP1 <= DI
+0x0003 IR          .equ    3       -- IR  <= DI
+0x0001 PCH         .equ    1       -- DO  <= PCH
+0x0002 PCL         .equ    2       -- DO  <= PCL
+0x0003 PSW         .equ    3       -- DO  <= PSW (P)
+0x0002 Psh         .equ    2       -- S <= S - 1
+0x0003 Pop         .equ    3       -- S <= S + 1
+0x0001 WE_A        .equ    1       -- Write Enable A
+0x0002 WE_X        .equ    2       -- Write Enable X
+0x0003 WE_Y        .equ    3       -- Write Enable Y
+0x0004 WE_R        .equ    4       -- Write Enable Register - write selected register
+0x0005 WE_S        .equ    5       -- Write Enable S
+0x0006 WE_P        .equ    6       -- Write Enable P
+0x0007 WE_M        .equ    7       -- Write Enable M(emory)
+0x0001 ISR         .equ    1       -- Assert ISR: Clear D, Set I
+ 
+-- Defines --
+0x0004 Inst        .def    4       -- Instruction
+0x0009 BA          .def    9       -- Branch Address
+0x0001 Wait        .def    1       -- Conditional Execution Required
+0x0002 En          .def    2       -- Enable ALU, and Sample Interrupts
+0x0004 NA_Cntl     .def    4       -- Next Address Control Field
+0x0002 PC_Cntl     .def    2       -- Program Counter Control Field
+0x0002 IO_Cntl     .def    2       -- I/O Cycle Control Field
+0x0002 DIO_Cntl    .def    2       -- Data Input/Output Demux/Mux Control Field
+0x0002 Stk_Cntl    .def    2       -- ALU Stack Pointer Control Field
+0x0003 RegWE_Cntl  .def    3       -- Register Write Enable (A, X, Y, S, P)
+0x0001 PSW_Cntl    .def    1       -- Asserted to Clear D and Set I in PSW
+ 
+-- Labels --
+0x0000 _Start
+0x0001 _Rst
+0x0020 _Nxt
+0x0020 _Psh
+0x0020 _Pop
+0x0020 _Rel
+0x0020 _Imm
+0x0021 _Int
+0x0022 _Brk
+0x0027 _JSR
+0x002A _RTI
+0x002D _RTS
+0x002E _Jmp
+0x002F _JmpI
+0x0032 _JmpXI
+0x0035 _RO_DP
+0x0036 _RO_DPX
+0x0037 _RO_DPY
+0x0038 _RO_DPI
+0x003B _RO_DPXI
+0x003E _RO_DPIY
+0x0041 _RO_Abs
+0x0043 _RO_AbsX
+0x0045 _RO_AbsY
+0x0047 _WO_DP
+0x0048 _WO_DPX
+0x0049 _WO_DPY
+0x004A _WO_DPI
+0x004D _WO_DPXI
+0x0050 _WO_DPIY
+0x0053 _WO_Abs
+0x0055 _WO_AbsX
+0x0057 _WO_AbsY
+0x0060 _RMW
+0x0062 _RMW_DP
+0x0064 _RMW_DPX
+0x0066 _RMW_DPY
+0x0068 _RMW_Abs
+0x006B _RMW_AbsX
+0x006E _RMW_AbsY
+0x0071 _BByx_dp_rel
+0x0073 _End_uPgm
+0x00FC _WAI
+0x0100 _IDEC_Start
+0x0100 _BRK_imm
+0x0101 _BPL_rel
+0x0102 _JSR_abs
+0x0103 _BMI_rel
+0x0104 _RTI_imp
+0x0105 _BVC_rel
+0x0106 _RTS_imp
+0x0107 _BVS_rel
+0x0108 _BRA_rel
+0x0109 _BCC_re
+0x010A _LDY_imm
+0x010B _BCS_rel
+0x010C _CPY_imm
+0x010D _BNE_rel
+0x010E _CPX_imm
+0x010F _BEQ_rel
+0x0110 _ORA_dpXi
+0x0111 _ORA_dpiY
+0x0112 _AND_dpXi
+0x0113 _AND_dpiY
+0x0114 _EOR_dpXi
+0x0115 _EOR_dpiY
+0x0116 _ADC_dpXi
+0x0117 _ADC_dpiY
+0x0118 _STA_dpXi
+0x0119 _STA_dpiY
+0x011A _LDA_dpXi
+0x011B _LDA_dpiY
+0x011C _CMP_dpXi
+0x011D _CMP_dpiY
+0x011E _SBC_dpXi
+0x011F _SBC_dpiY
+0x0120 _NOP_02
+0x0121 _ORA_dpi
+0x0122 _NOP_22
+0x0123 _AND_dpi
+0x0124 _NOP_42
+0x0125 _EOR_dpi
+0x0126 _NOP_62
+0x0127 _ADC_dpi
+0x0128 _NOP_82
+0x0129 _STA_dpi
+0x012A _LDX_imm
+0x012B _LDA_dpi
+0x012C _NOP_C2
+0x012D _CMP_dpi
+0x012E _NOP_E2
+0x012F _SBC_dpi
+0x0130 _NOP_03
+0x0131 _NOP_13
+0x0132 _NOP_23
+0x0133 _NOP_33
+0x0134 _NOP_43
+0x0135 _NOP_53
+0x0136 _NOP_63
+0x0137 _NOP_73
+0x0138 _NOP_83
+0x0139 _NOP_93
+0x013A _NOP_A3
+0x013B _NOP_B3
+0x013C _NOP_C3
+0x013D _NOP_D3
+0x013E _NOP_E3
+0x013F _NOP_F3
+0x0140 _TSB_dp
+0x0141 _TRB_dp
+0x0142 _BIT_dp
+0x0143 _BIT_dpX
+0x0144 _NOP_44
+0x0145 _NOP_54
+0x0146 _STZ_dp
+0x0147 _STZ_dpX
+0x0148 _STY_dp
+0x0149 _STY_dpX
+0x014A _LDY_dp
+0x014B _LDY_dpX
+0x014C _CPY_dp
+0x014D _NOP_D4
+0x014E _CPX_dp
+0x014F _NOP_F4
+0x0150 _ORA_dp
+0x0151 _ORA_dpX
+0x0152 _AND_dp
+0x0153 _AND_dpX
+0x0154 _EOR_dp
+0x0155 _EOR_dpX
+0x0156 _ADC_dp
+0x0157 _ADC_dpX
+0x0158 _STA_dp
+0x0159 _STA_dpX
+0x015A _LDA_dp
+0x015B _LDA_dpX
+0x015C _CMP_dp
+0x015D _CMP_dpX
+0x015E _SBC_dp
+0x015F _SBC_dpX
+0x0160 _ASL_dp
+0x0161 _ASL_dpX
+0x0162 _ROL_dp
+0x0163 _ROL_dpX
+0x0164 _LSR_dp
+0x0165 _LSR_dpX
+0x0166 _ROR_dp
+0x0167 _ROR_dpX
+0x0168 _STX_dp
+0x0169 _STX_dpY
+0x016A _LDX_dp
+0x016B _LDX_dpY
+0x016C _DEC_dp
+0x016D _DEC_dpX
+0x016E _INC_dp
+0x016F _INC_dpX
+0x0170 _RMB0_dp
+0x0171 _RMB1_dp
+0x0172 _RMB2_dp
+0x0173 _RMB3_dp
+0x0174 _RMB4_dp
+0x0175 _RMB5_dp
+0x0176 _RMB6_dp
+0x0177 _RMB7_dp
+0x0178 _SMB0_dp
+0x0179 _SMB1_dp
+0x017A _SMB2_dp
+0x017B _SMB3_dp
+0x017C _SMB4_dp
+0x017D _SMB5_dp
+0x017E _SMB6_dp
+0x017F _SMB7_dp
+0x0180 _PHP
+0x0181 _CLC
+0x0182 _PLP
+0x0183 _SEC
+0x0184 _PHA
+0x0185 _CLI
+0x0186 _PLA
+0x0187 _SEI
+0x0188 _DEY
+0x0189 _TYA
+0x018A _TAY
+0x018B _CLV
+0x018C _INY
+0x018D _CLD
+0x018E _INX
+0x018F _SED
+0x0190 _ORA_imm
+0x0191 _ORA_absY
+0x0192 _AND_imm
+0x0193 _AND_absY
+0x0194 _EOR_imm
+0x0195 _EOR_absY
+0x0196 _ADC_imm
+0x0197 _ADC_absY
+0x0198 _BIT_imm
+0x0199 _STA_absY
+0x019A _LDA_imm
+0x019B _LDA_absY
+0x019C _CMP_imm
+0x019D _CMP_absY
+0x019E _SBC_imm
+0x019F _SBC_absY
+0x01A0 _ASL_A
+0x01A1 _INC_A
+0x01A2 _ROL_A
+0x01A3 _DEC_A
+0x01A4 _LSR_A
+0x01A5 _PHY
+0x01A6 _ROR_A
+0x01A7 _PLY
+0x01A8 _TXA
+0x01A9 _TXS
+0x01AA _TAX
+0x01AB _TSX
+0x01AC _DEX
+0x01AD _PHX
+0x01AE _NOP
+0x01AF _PLX
+0x01B0 _NOP_0B
+0x01B1 _NOP_1B
+0x01B2 _NOP_2B
+0x01B3 _NOP_3B
+0x01B4 _NOP_4B
+0x01B5 _NOP_5B
+0x01B6 _NOP_6B
+0x01B7 _NOP_7B
+0x01B8 _NOP_8B
+0x01B9 _NOP_9B
+0x01BA _NOP_AB
+0x01BB _NOP_BB
+0x01BC _WAI_CB
+0x01BD _STP_DB
+0x01BE _NOP_EB
+0x01BF _NOP_FB
+0x01C0 _TSB_abs
+0x01C1 _TRB_abs
+0x01C2 _BIT_abs
+0x01C3 _BIT_absX
+0x01C4 _JMP_abs
+0x01C5 _NOP_5C
+0x01C6 _JMP_absi
+0x01C7 _JMP_absXi
+0x01C8 _STY_abs
+0x01C9 _STZ_abs
+0x01CA _LDY_abs
+0x01CB _LDY_absX
+0x01CC _CPY_abs
+0x01CD _NOP_DC
+0x01CE _CPX_abs
+0x01CF _NOP_FC
+0x01D0 _ORA_abs
+0x01D1 _ORA_absX
+0x01D2 _AND_abs
+0x01D3 _AND_absX
+0x01D4 _EOR_abs
+0x01D5 _EOR_absX
+0x01D6 _ADC_abs
+0x01D7 _ADC_absX
+0x01D8 _STA_abs
+0x01D9 _STA_absX
+0x01DA _LDA_abs
+0x01DB _LDA_absX
+0x01DC _CMP_abs
+0x01DD _CMP_absX
+0x01DE _SBC_abs
+0x01DF _SBC_absX
+0x01E0 _ASL_abs
+0x01E1 _ASL_absX
+0x01E2 _ROL_abs
+0x01E3 _ROL_absX
+0x01E4 _LSR_abs
+0x01E5 _LSR_absX
+0x01E6 _ROR_abs
+0x01E7 _ROR_absX
+0x01E8 _STX_abs
+0x01E9 _STZ_absX
+0x01EA _LDX_abs
+0x01EB _LDX_absY
+0x01EC _DEC_abs
+0x01ED _DEC_absX
+0x01EE _INC_abs
+0x01EF _INC_absX
+0x01F0 _BBR0_dp_rel
+0x01F1 _BBR1_dp_rel
+0x01F2 _BBR2_dp_rel
+0x01F3 _BBR3_dp_rel
+0x01F4 _BBR4_dp_rel
+0x01F5 _BBR5_dp_rel
+0x01F6 _BBR6_dp_rel
+0x01F7 _BBR7_dp_rel
+0x01F8 _BBS0_dp_rel
+0x01F9 _BBS1_dp_rel
+0x01FA _BBS2_dp_rel
+0x01FB _BBS3_dp_rel
+0x01FC _BBS4_dp_rel
+0x01FD _BBS5_dp_rel
+0x01FE _BBS6_dp_rel
+0x01FF _BBS7_dp_rel
+0x0200 _Last
+0x0200 _end
+ 
+File  Prog     
+Line  Line   Opcode                                Line
+0613 0x0000 _Start: .org 0
+0614 0x0000  600D0000 BRV2 _Rst,1,1 -- Load {OP2, OP1} with Vector
+0615 0x0001 _Rst:
+0616 0x0001  200C0280 FTCH $,1,0,,, RD, OP1 -- Read Indirect Dst Ptr Lo
+0617 0x0002  20143A40 FTCH $,1,0, Nxt, Jmp, RD, OP2 -- Read Indirect Dst Ptr Hi
+0618  --
+0619 0x0003  501D07C0 BRV1 $,1,1,, Pls, IF, IR -- Instruction Fetch
+0621  -- this space reserved for future use - boot loader for the microprogram ROMs
+0623  --------------------------------------------------------------------------------
+0624  --------------------------------------------------------------------------------
+0625  -- 2-Way Jump Table: _Nxt and _Int
+0626  --------------------------------------------------------------------------------
+0627  --------------------------------------------------------------------------------
+0628  -- Instruction Fetch and Execute Microstate
+0629  --------------------------------------------------------------------------------
+0000 0x0004  00000000 added by program
+0000 0x0005  00000000 added by program
+0000 0x0006  00000000 added by program
+0000 0x0007  00000000 added by program
+0000 0x0008  00000000 added by program
+0000 0x0009  00000000 added by program
+0000 0x000A  00000000 added by program
+0000 0x000B  00000000 added by program
+0000 0x000C  00000000 added by program
+0000 0x000D  00000000 added by program
+0000 0x000E  00000000 added by program
+0000 0x000F  00000000 added by program
+0000 0x0010  00000000 added by program
+0000 0x0011  00000000 added by program
+0000 0x0012  00000000 added by program
+0000 0x0013  00000000 added by program
+0000 0x0014  00000000 added by program
+0000 0x0015  00000000 added by program
+0000 0x0016  00000000 added by program
+0000 0x0017  00000000 added by program
+0000 0x0018  00000000 added by program
+0000 0x0019  00000000 added by program
+0000 0x001A  00000000 added by program
+0000 0x001B  00000000 added by program
+0000 0x001C  00000000 added by program
+0000 0x001D  00000000 added by program
+0000 0x001E  00000000 added by program
+0000 0x001F  00000000 added by program
+0630 0x0020 _Nxt: .org 32
+0631 0x0020 _Psh:
+0632 0x0020 _Pop:
+0633 0x0020 _Rel:
+0634 0x0020 _Imm:
+0635 0x0020  510507C8 BRV1 _Nxt,1,1,, Pls, IF, IR,, WE_R -- Instruction Fetch/Execute
+0637  --------------------------------------------------------------------------------
+0638  -- Interrupt Entry - NMI, (unmasked) IRQ (falls through to _BRK)
+0639  --------------------------------------------------------------------------------
+0641 0x0021 _Int:
+0642 0x0021  61154168 BRV2 _Brk,1,1, Stk,, WR, PCH, Psh, WE_R -- Push PCH, capture Vector
+0644  --------------------------------------------------------------------------------
+0645  -- BRK Entry - BRK #imm (_Int falls through to _Brk, see comment above)
+0646  --------------------------------------------------------------------------------
+0648 0x0022 _Brk:
+0649 0x0022  211441A0 FTCH $,1,0, Stk,, WR, PCL, Psh -- Push PCL
+0650 0x0023  211C49E1 FTCH $,1,0, Stk, Jmp, WR, PSW, Psh,, ISR -- Push P; Clr D, Set I
+0651  --
+0652 0x0024  21248280 FTCH $,1,0, LDA,, RD, OP1 -- Read Indirect Dst Ptr Lo
+0653 0x0025  212C3A40 FTCH $,1,0, Nxt, Jmp, RD, OP2 -- Read Indirect Dst Ptr Hi
+0654  --
+0655 0x0026  513507C0 BRV1 $,1,1,, Pls, IF, IR -- Instruction Fetch
+0657  --------------------------------------------------------------------------------
+0658  -- Jump To Subroutine - JSR Abs (Not interruptable)
+0659  --------------------------------------------------------------------------------
+0661 0x0027 _JSR:
+0662 0x0027  213C0340 FTCH $,1,0,,, IF, OP2 -- Load Indirect Dst Ptr Lo
+0663 0x0028  21444160 FTCH $,1,0, Stk,, WR, PCH, Psh -- Push PC Hi
+0664 0x0029  410449A0 BRV0 _Nxt,1,0, Stk, Jmp, WR, PCL, Psh -- Push PC Lo
+0666  --------------------------------------------------------------------------------
+0667  -- Return from Interrupt - RTI (Not interruptable)
+0668  --------------------------------------------------------------------------------
+0670 0x002A _RTI:
+0671 0x002A  215442BC FTCH $,1,0, Stk,, RD, OP1, Pop, WE_P -- Pop PCL
+0672 0x002B  215C4A70 FTCH $,1,0, Stk, Jmp, RD, OP2, Pop -- Pop PCH
+0673  --
+0674 0x002C  516507C0 BRV1 $,1,1,, Pls, IF, IR -- Next, no Reg_WE, P okay
+0676  --------------------------------------------------------------------------------
+0677  -- Return From Subroutine - RTS (Not interruptable)
+0678  --------------------------------------------------------------------------------
+0680 0x002D _RTS:
+0681 0x002D  41044A70 BRV0 _Nxt,1,0, Stk, Jmp, RD, OP2, Pop -- Pop PCH
+0683  --------------------------------------------------------------------------------
+0684  -- Jump Absolute - JMP Abs (Not interruptable)
+0685  --------------------------------------------------------------------------------
+0687 0x002E _Jmp:
+0688 0x002E  41040B40 BRV0 _Nxt,1,0,, Jmp, IF, OP2
+0690  --------------------------------------------------------------------------------
+0691  -- Jump Indirect - JMP (Abs) (Not interruptable)
+0692  --------------------------------------------------------------------------------
+0694 0x002F _JmpI:
+0695 0x002F  217C0740 FTCH $,1,0,, Pls, IF, OP2 -- Load Indirect Dst Ptr Lo
+0696 0x0030  21848280 FTCH $,1,0, LDA,, RD, OP1 -- Read Indirect Dst Ptr Hi
+0697 0x0031  41043A40 BRV0 _Nxt,1,0, Nxt, Jmp, RD, OP2 -- Goto Next
+0699  --------------------------------------------------------------------------------
+0700  -- Jump Pre-Indexed Indirect - JMP (Abs, X) (Not interruptable)
+0701  --------------------------------------------------------------------------------
+0703 0x0032 _JmpXI:
+0704 0x0032  21940740 FTCH $,1,0,, Pls, IF, OP2 -- Load Indirect Dst Ptr Lo
+0705 0x0033  219CE280 FTCH $,1,0, LDAX,, RD, OP1 -- Read Indirect Dst Ptr Hi
+0706 0x0034  41043A40 BRV0 _Nxt,1,0, Nxt, Jmp, RD, OP2 -- Goto Next
+0708  --------------------------------------------------------------------------------
+0709  -- Memory Read-Only Data Page Direct - xxx DP
+0710  --------------------------------------------------------------------------------
+0712 0x0035 _RO_DP:
+0713 0x0035  31045280 BMW _Nxt,1,0, DPN,, RD, OP1 -- Read DP Mem
+0715  -----------------------------------------------------------------------------
+0716  -- Memory Read-Only Pre-Indexed Data Page Direct - xxx DP, X
+0717  --------------------------------------------------------------------------------
+0719 0x0036 _RO_DPX:
+0720 0x0036  31046280 BMW _Nxt,1,0, DPX,, RD, OP1 -- Read DP Mem
+0722  --------------------------------------------------------------------------------
+0723  -- Memory Read-Only Post-Indexed Data Page Direct - xxx DP, Y
+0724  --------------------------------------------------------------------------------
+0726 0x0037 _RO_DPY:
+0727 0x0037  31047280 BMW _Nxt,1,0, DPY,, RD, OP1 -- Read DP Mem
+0729  ------------------------------------------------------------------------------
+0730  -- Memory Read-Only Data Page Indirect - xxx (DP)
+0731  --------------------------------------------------------------------------------
+0733 0x0038 _RO_DPI:
+0734 0x0038  21C45280 FTCH $,1,0, DPN,, RD, OP1 -- Read DP Mem Ptr Lo
+0735 0x0039  21CC3240 FTCH $,1,0, Nxt,, RD, OP2 -- Read DP Mem Ptr Hi
+0736 0x003A  31048280 BMW _Nxt,1,0, LDA,, RD, OP1 -- Read Operand
+0738  --------------------------------------------------------------------------------
+0739  -- Memory Read-Only Pre-Indexed Data Page Indirect - xxx (DP, X)
+0740  --------------------------------------------------------------------------------
+0742 0x003B _RO_DPXI:
+0743 0x003B  21DC6280 FTCH $,1,0, DPX,, RD, OP1 -- Read DP Mem Ptr Lo (DP,X)
+0744 0x003C  21E43240 FTCH $,1,0, Nxt,, RD, OP2 -- Read DP Mem Ptr Hi
+0745 0x003D  31048280 BMW _Nxt,1,0, LDA,, RD, OP1 -- Read Operand
+0747  --------------------------------------------------------------------------------
+0748  -- Memory Read-Only Post-Indexed Data Page Indirect - xxx (DP), Y
+0749  --------------------------------------------------------------------------------
+0751 0x003E _RO_DPIY:
+0752 0x003E  21F45280 FTCH $,1,0, DPN,, RD, OP1 -- Read DP Mem Ptr Lo
+0753 0x003F  21FC3240 FTCH $,1,0, Nxt,, RD, OP2 -- Read DP Mem Ptr Hi
+0754 0x0040  3104F280 BMW _Nxt,1,0, LDAY,, RD, OP1 -- Read Operand (DP),Y
+0756  --------------------------------------------------------------------------------
+0757  -- Memory Read-Only Absolute - xxx Abs
+0758  --------------------------------------------------------------------------------
+0760 0x0041 _RO_Abs:
+0761 0x0041  220C0740 FTCH $,1,0,, Pls, IF, OP2 -- Read Mem Ptr Hi
+0762 0x0042  31048280 BMW _Nxt,1,0, LDA,, RD, OP1 -- Read Operand
+0764  --------------------------------------------------------------------------------
+0765  -- Memory Read-Only Pre-Indexed Absolute - xxx Abs, X
+0766  --------------------------------------------------------------------------------
+0768 0x0043 _RO_AbsX:
+0769 0x0043  221C0740 FTCH $,1,0,, Pls, IF, OP2 -- Read Mem Ptr Hi
+0770 0x0044  3104E280 BMW _Nxt,1,0, LDAX,, RD, OP1 -- Read Operand Abs,X
+0772  --------------------------------------------------------------------------------
+0773  -- Memory Read-Only Post-Indexed Absolute - xxx Abs, Y
+0774  --------------------------------------------------------------------------------
+0776 0x0045 _RO_AbsY:
+0777 0x0045  222C0740 FTCH $,1,0,, Pls, IF, OP2 -- Read Mem Ptr Hi
+0778 0x0046  3104F280 BMW _Nxt,1,0, LDAY,, RD, OP1 -- Read Operand Abs,Y
+0780  --------------------------------------------------------------------------------
+0781  -- Memory Write-Only Data Page Direct - xxx DP
+0782  --------------------------------------------------------------------------------
+0784 0x0047 _WO_DP:
+0785 0x0047  31045100 BMW _Nxt,1,0, DPN,, WR -- Write to DP
+0787  -----------------------------------------------------------------------------
+0788  -- Memory Write-Only Pre-Indexed Data Page Direct - xxx DP, X
+0789  --------------------------------------------------------------------------------
+0791 0x0048 _WO_DPX:
+0792 0x0048  31046100 BMW _Nxt,1,0, DPX,, WR -- Write to DP,X
+0794  -----------------------------------------------------------------------------
+0795  -- Memory Write-Only Post-Indexed Data Page Direct - xxx DP, Y
+0796  --------------------------------------------------------------------------------
+0798 0x0049 _WO_DPY:
+0799 0x0049  31047100 BMW _Nxt,1,0, DPY,, WR -- Write to DP,Y
+0801  --------------------------------------------------------------------------------
+0802  -- Memory Write-Only Data Page Indirect - xxx (DP)
+0803  --------------------------------------------------------------------------------
+0805 0x004A _WO_DPI:
+0806 0x004A  22545280 FTCH $,1,0, DPN,, RD, OP1 -- Read DP Mem Ptr Lo
+0807 0x004B  225C3240 FTCH $,1,0, Nxt,, RD, OP2 -- Read DP Mem Ptr Hi
+0808 0x004C  31048100 BMW _Nxt,1,0, LDA,, WR -- Write to (DP)
+0810  --------------------------------------------------------------------------------
+0811  -- Memory Write-Only Data Page Indirect - xxx (DP, X)
+0812  --------------------------------------------------------------------------------
+0814 0x004D _WO_DPXI:
+0815 0x004D  226C6280 FTCH $,1,0, DPX,, RD, OP1 -- Read DP Mem Ptr Lo
+0816 0x004E  22743240 FTCH $,1,0, Nxt,, RD, OP2 -- Read DP Mem Ptr Hi
+0817 0x004F  31048100 BMW _Nxt,1,0, LDA,, WR -- Write to (DP)
+0819  --------------------------------------------------------------------------------
+0820  -- Memory Write-Only Post-Indexed Data Page Indirect - xxx (DP), Y
+0821  --------------------------------------------------------------------------------
+0823 0x0050 _WO_DPIY:
+0824 0x0050  22845280 FTCH $,1,0, DPN,, RD, OP1 -- Read DP Mem Ptr Lo
+0825 0x0051  228C3240 FTCH $,1,0, Nxt,, RD, OP2 -- Read DP Mem Ptr Hi
+0826 0x0052  3104F100 BMW _Nxt,1,0, LDAY,, WR -- Write to (DP)
+0828  --------------------------------------------------------------------------------
+0829  -- Memory Write-Only Absolute - xxx Abs
+0830  --------------------------------------------------------------------------------
+0832 0x0053 _WO_Abs:
+0833 0x0053  229C0740 FTCH $,1,0,, Pls, IF, OP2 -- Read Mem Ptr Hi
+0834 0x0054  31048100 BMW _Nxt,1,0, LDA,, WR -- Write to Abs
+0836  --------------------------------------------------------------------------------
+0837  -- Memory Write-Only Pre-Indexed Absolute - xxx Abs, X
+0838  --------------------------------------------------------------------------------
+0840 0x0055 _WO_AbsX:
+0841 0x0055  22AC0740 FTCH $,1,0,, Pls, IF, OP2 -- Read Mem Ptr Hi
+0842 0x0056  3104E100 BMW _Nxt,1,0, LDAX,, WR -- Write to Abs,X
+0844  --------------------------------------------------------------------------------
+0845  -- Memory Write-Only Post-Indexed Absolute - xxx Abs, Y
+0846  --------------------------------------------------------------------------------
+0848 0x0057 _WO_AbsY:
+0849 0x0057  22BC0740 FTCH $,1,0,, Pls, IF, OP2 -- Read Mem Ptr Hi
+0850 0x0058  3104F100 BMW _Nxt,1,0, LDAY,, WR -- Write to Abs,Y
+0852  --------------------------------------------------------------------------------
+0853  -- 2-way Read-Modify-Write Instruction/Interrupt Jump Table
+0854  --------------------------------------------------------------------------------
+0000 0x0059  00000000 added by program
+0000 0x005A  00000000 added by program
+0000 0x005B  00000000 added by program
+0000 0x005C  00000000 added by program
+0000 0x005D  00000000 added by program
+0000 0x005E  00000000 added by program
+0000 0x005F  00000000 added by program
+0856 0x0060 _RMW: .org 96
+0857 0x0060  530507C0 BRV1 _RMW,1,1,, Pls, IF, IR -- Instruction Fetch/Execute
+0858 0x0061  61154160 BRV2 _Brk,1,1, Stk, , WR, PCH, Psh -- Push PCH, capture Vector
+0860  --------------------------------------------------------------------------------
+0861  -- Memory Read-Modify-Write Data Page Direct - xxx DP
+0862  --------------------------------------------------------------------------------
+0864 0x0062 _RMW_DP:
+0865 0x0062  23145280 FTCH $,1,0, DPN,, RD, OP1 -- Read from DP
+0866 0x0063  33042108 BMW _RMW,1,0, MAR,, WR,,,WE_R -- Write to DP
+0868  --------------------------------------------------------------------------------
+0869  -- Memory Read-Modify-Write Pre-Indexed Data Page Direct - xxx DP, X
+0870  --------------------------------------------------------------------------------
+0872 0x0064 _RMW_DPX:
+0873 0x0064  23246280 FTCH $,1,0, DPX,, RD, OP1 -- Read from DP,X
+0874 0x0065  33042108 BMW _RMW,1,0, MAR,, WR,,,WE_R -- Write to DP,X
+0876  --------------------------------------------------------------------------------
+0877  -- Memory Read-Modify-Write Post-Indexed Data Page Direct - xxx DP, Y
+0878  --------------------------------------------------------------------------------
+0880 0x0066 _RMW_DPY:
+0881 0x0066  23347280 FTCH $,1,0, DPY,, RD, OP1 -- Read from DP,Y
+0882 0x0067  33042108 BMW _RMW,1,0, MAR,, WR,,,WE_R -- Write to DP,Y
+0884  --------------------------------------------------------------------------------
+0885  -- Memory Read-Modify-Write Absolute - xxx Abs
+0886  --------------------------------------------------------------------------------
+0888 0x0068 _RMW_Abs:
+0889 0x0068  23440740 FTCH $,1,0,, Pls, IF, OP2 -- Read Mem Ptr Hi
+0890 0x0069  234C8280 FTCH $,1,0, LDA,, RD, OP1 -- Read from Abs
+0891 0x006A  33042108 BMW _RMW,1,0, MAR,, WR,,,WE_R -- Write to Abs
+0893  --------------------------------------------------------------------------------
+0894  -- Memory Read-Modify-Write Pre-Indexed Absolute - xxx Abs, X
+0895  --------------------------------------------------------------------------------
+0897 0x006B _RMW_AbsX:
+0898 0x006B  235C0740 FTCH $,1,0,, Pls, IF, OP2 -- Read Mem Ptr Hi
+0899 0x006C  2364E280 FTCH $,1,0, LDAX,, RD, OP1 -- Read from Abs,X
+0900 0x006D  33042108 BMW _RMW,1,0, MAR,, WR,,,WE_R -- Write to Abs,X
+0902  --------------------------------------------------------------------------------
+0903  -- Memory Read-Modify-Write Post-Indexed Absolute - xxx Abs, Y
+0904  --------------------------------------------------------------------------------
+0906 0x006E _RMW_AbsY:
+0907 0x006E  23740740 FTCH $,1,0,, Pls, IF, OP2 -- Read Mem Ptr Hi
+0908 0x006F  237CF280 FTCH $,1,0, LDAY,, RD, OP1 -- Read from Abs,Y
+0909 0x0070  33042108 BMW _RMW,1,0, MAR,, WR,,,WE_R -- Write to Abs,Y
+0911  --------------------------------------------------------------------------------
+0912  -- Rockwell BBRx/BBSx dp,rel instructions
+0913  --------------------------------------------------------------------------------
+0915 0x0071 _BByx_dp_rel:
+0916 0x0071  238C5280 FTCH $,1,0, DPN,, RD, OP1 -- Read from DP
+0917 0x0072  41040F80 BRV0 _Nxt,1,0,, Rel, IF, OP1 -- Read rel value
+0919  --------------------------------------------------------------------------------
+0920  -- End of Microprogram Routines for Normal Instructions
+0921  --------------------------------------------------------------------------------
+0923 0x0073 _End_uPgm:
+0925  --------------------------------------------------------------------------------
+0926  -- WAI - Wait for Interrupt
+0927  --------------------------------------------------------------------------------
+0000 0x0073  00000000 added by program
+0000 0x0074  00000000 added by program
+0000 0x0075  00000000 added by program
+0000 0x0076  00000000 added by program
+0000 0x0077  00000000 added by program
+0000 0x0078  00000000 added by program
+0000 0x0079  00000000 added by program
+0000 0x007A  00000000 added by program
+0000 0x007B  00000000 added by program
+0000 0x007C  00000000 added by program
+0000 0x007D  00000000 added by program
+0000 0x007E  00000000 added by program
+0000 0x007F  00000000 added by program
+0000 0x0080  00000000 added by program
+0000 0x0081  00000000 added by program
+0000 0x0082  00000000 added by program
+0000 0x0083  00000000 added by program
+0000 0x0084  00000000 added by program
+0000 0x0085  00000000 added by program
+0000 0x0086  00000000 added by program
+0000 0x0087  00000000 added by program
+0000 0x0088  00000000 added by program
+0000 0x0089  00000000 added by program
+0000 0x008A  00000000 added by program
+0000 0x008B  00000000 added by program
+0000 0x008C  00000000 added by program
+0000 0x008D  00000000 added by program
+0000 0x008E  00000000 added by program
+0000 0x008F  00000000 added by program
+0000 0x0090  00000000 added by program
+0000 0x0091  00000000 added by program
+0000 0x0092  00000000 added by program
+0000 0x0093  00000000 added by program
+0000 0x0094  00000000 added by program
+0000 0x0095  00000000 added by program
+0000 0x0096  00000000 added by program
+0000 0x0097  00000000 added by program
+0000 0x0098  00000000 added by program
+0000 0x0099  00000000 added by program
+0000 0x009A  00000000 added by program
+0000 0x009B  00000000 added by program
+0000 0x009C  00000000 added by program
+0000 0x009D  00000000 added by program
+0000 0x009E  00000000 added by program
+0000 0x009F  00000000 added by program
+0000 0x00A0  00000000 added by program
+0000 0x00A1  00000000 added by program
+0000 0x00A2  00000000 added by program
+0000 0x00A3  00000000 added by program
+0000 0x00A4  00000000 added by program
+0000 0x00A5  00000000 added by program
+0000 0x00A6  00000000 added by program
+0000 0x00A7  00000000 added by program
+0000 0x00A8  00000000 added by program
+0000 0x00A9  00000000 added by program
+0000 0x00AA  00000000 added by program
+0000 0x00AB  00000000 added by program
+0000 0x00AC  00000000 added by program
+0000 0x00AD  00000000 added by program
+0000 0x00AE  00000000 added by program
+0000 0x00AF  00000000 added by program
+0000 0x00B0  00000000 added by program
+0000 0x00B1  00000000 added by program
+0000 0x00B2  00000000 added by program
+0000 0x00B3  00000000 added by program
+0000 0x00B4  00000000 added by program
+0000 0x00B5  00000000 added by program
+0000 0x00B6  00000000 added by program
+0000 0x00B7  00000000 added by program
+0000 0x00B8  00000000 added by program
+0000 0x00B9  00000000 added by program
+0000 0x00BA  00000000 added by program
+0000 0x00BB  00000000 added by program
+0000 0x00BC  00000000 added by program
+0000 0x00BD  00000000 added by program
+0000 0x00BE  00000000 added by program
+0000 0x00BF  00000000 added by program
+0000 0x00C0  00000000 added by program
+0000 0x00C1  00000000 added by program
+0000 0x00C2  00000000 added by program
+0000 0x00C3  00000000 added by program
+0000 0x00C4  00000000 added by program
+0000 0x00C5  00000000 added by program
+0000 0x00C6  00000000 added by program
+0000 0x00C7  00000000 added by program
+0000 0x00C8  00000000 added by program
+0000 0x00C9  00000000 added by program
+0000 0x00CA  00000000 added by program
+0000 0x00CB  00000000 added by program
+0000 0x00CC  00000000 added by program
+0000 0x00CD  00000000 added by program
+0000 0x00CE  00000000 added by program
+0000 0x00CF  00000000 added by program
+0000 0x00D0  00000000 added by program
+0000 0x00D1  00000000 added by program
+0000 0x00D2  00000000 added by program
+0000 0x00D3  00000000 added by program
+0000 0x00D4  00000000 added by program
+0000 0x00D5  00000000 added by program
+0000 0x00D6  00000000 added by program
+0000 0x00D7  00000000 added by program
+0000 0x00D8  00000000 added by program
+0000 0x00D9  00000000 added by program
+0000 0x00DA  00000000 added by program
+0000 0x00DB  00000000 added by program
+0000 0x00DC  00000000 added by program
+0000 0x00DD  00000000 added by program
+0000 0x00DE  00000000 added by program
+0000 0x00DF  00000000 added by program
+0000 0x00E0  00000000 added by program
+0000 0x00E1  00000000 added by program
+0000 0x00E2  00000000 added by program
+0000 0x00E3  00000000 added by program
+0000 0x00E4  00000000 added by program
+0000 0x00E5  00000000 added by program
+0000 0x00E6  00000000 added by program
+0000 0x00E7  00000000 added by program
+0000 0x00E8  00000000 added by program
+0000 0x00E9  00000000 added by program
+0000 0x00EA  00000000 added by program
+0000 0x00EB  00000000 added by program
+0000 0x00EC  00000000 added by program
+0000 0x00ED  00000000 added by program
+0000 0x00EE  00000000 added by program
+0000 0x00EF  00000000 added by program
+0000 0x00F0  00000000 added by program
+0000 0x00F1  00000000 added by program
+0000 0x00F2  00000000 added by program
+0000 0x00F3  00000000 added by program
+0000 0x00F4  00000000 added by program
+0000 0x00F5  00000000 added by program
+0000 0x00F6  00000000 added by program
+0000 0x00F7  00000000 added by program
+0000 0x00F8  00000000 added by program
+0000 0x00F9  00000000 added by program
+0000 0x00FA  00000000 added by program
+0000 0x00FB  00000000 added by program
+0929 0x00FC _WAI: .org 252 -- Set up 4-way table for WAI instruction
+0930 0x00FC  37E40000 BMW _WAI,1,0 -- No external interrupts asserted
+0931 0x00FD  410C0000 BRV0 _Int,1,0 -- Int asserted by NMI, do NMI interrupt
+0932 0x00FE  41040000 BRV0 _Nxt,1,0 -- xIRQ asserted with IRQ_Msk asserted, continue
+0933 0x00FF  410C0000 BRV0 _Int,1,0 -- Int asserted by xIRQ, do IRQ interrupt
+0935 0x0100 _IDEC_Start: .org 256
+0937  --------------------------------------------------------------------------------
+0938  -- Start of Instruction Decode Table (Entry for each Opcode)
+0939  --
+0940  -- Instead of being organized in numerical order, the table is organized by
+0941  -- rows: the least significant nibble and the most significant nibble of the
+0942  -- opcode are swapped. This organization more clearly shows the arrangement of
+0943  -- the addressing modes of the WDC W65C02 microprocessor being emulated. It al-
+0944  -- so more clearly shows the regularity of the ALU instructions that are imple-
+0945  -- mented. The implementation of the microprogram is first based on the addres-
+0946  -- sing mode, and then on the ALU function. Single cycle instructions will be
+0947  -- easily recognized in the following table because their table entry use the
+0948  -- BRV3 MPC instruction. Multi-cycle instructions use the BRV0 MPC instruction
+0949  -- to vector a microroutine in the lower 256 words of the microprogram ROM/RAM.
+0950  -- Single byte instructions such as BRK, RTS, RTI, and register push/pull in-
+0951  -- structions (PHA, PLA, PHP, PLP, PHX, PLX, PHY, PLY), and multi-byte instruc-
+0952  -- tions like JSR abs are implemented with special microroutines that perform
+0953  -- the necessary stack accesses. The remainder of the microroutines are orga-
+0954  -- nized by addressing mode, and whether the mode is used in a RO, WO, or RMW
+0955  -- manner.
+0956  --
+0957  -- Microprogram Word Format:
+0958  --
+0959  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+0960  --
+0961  --------------------------------------------------------------------------------
+0963  --------------------------------------------------------------------------------
+0964  -- Row 0 : 0x00-0xF0 (All branches/JMPs/JSR implemented as uninterruptable)
+0965  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+0966  --------------------------------------------------------------------------------
+0967 0x0100 _BRK_imm:
+0968 0x0100  6115416C BRV2 _Brk,1,1, Stk,, WR, PCH, Psh, WE_P -- Start Break Handler
+0969 0x0101 _BPL_rel:
+0970 0x0101  41040F80 BRV0 _Rel,1,0,, Rel, IF, OP1 -- Read rel Value
+0971 0x0102 _JSR_abs:
+0972 0x0102  413C0780 BRV0 _JSR,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+0973 0x0103 _BMI_rel:
+0974 0x0103  41040F80 BRV0 _Rel,1,0,, Rel, IF, OP1 -- Read rel Value
+0975 0x0104 _RTI_imp:
+0976 0x0104  415442B0 BRV0 _RTI,1,0, Stk,, RD, OP1, Pop -- Read PSW from Stack
+0977 0x0105 _BVC_rel:
+0978 0x0105  41040F80 BRV0 _Rel,1,0,, Rel, IF, OP1 -- Read rel Value
+0979 0x0106 _RTS_imp:
+0980 0x0106  416C42B0 BRV0 _RTS,1,0, Stk,, RD, OP1, Pop -- Read PCL from Stack
+0981 0x0107 _BVS_rel:
+0982 0x0107  41040F80 BRV0 _Rel,1,0,, Rel, IF, OP1 -- Read rel Value
+0983 0x0108 _BRA_rel:
+0984 0x0108  41040F80 BRV0 _Rel,1,0,, Rel, IF, OP1 -- Read rel Value
+0985 0x0109 _BCC_rel
+0986 0x0109  41040F80 BRV0 _Rel,1,0,, Rel, IF, OP1 -- Read rel Value
+0987 0x010A _LDY_imm:
+0988 0x010A  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read #imm Value
+0989 0x010B _BCS_rel:
+0990 0x010B  41040F80 BRV0 _Rel,1,0,, Rel, IF, OP1 -- Read rel Value
+0991 0x010C _CPY_imm:
+0992 0x010C  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read #imm Value
+0993 0x010D _BNE_rel:
+0994 0x010D  41040F80 BRV0 _Rel,1,0,, Rel, IF, OP1 -- Read rel Value
+0995 0x010E _CPX_imm:
+0996 0x010E  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read #imm Value
+0997 0x010F _BEQ_rel:
+0998 0x010F  41040F80 BRV0 _Rel,1,0,, Rel, IF, OP1 -- Read rel Value
+0999  --------------------------------------------------------------------------------
+1000  -- Row 1 : 0x01-0xF1
+1001  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1002  --------------------------------------------------------------------------------
+1003 0x0110 _ORA_dpXi:
+1004 0x0110  41DC0780 BRV0 _RO_DPXI,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1005 0x0111 _ORA_dpiY:
+1006 0x0111  41F40780 BRV0 _RO_DPIY,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1007 0x0112 _AND_dpXi:
+1008 0x0112  41DC0780 BRV0 _RO_DPXI,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1009 0x0113 _AND_dpiY:
+1010 0x0113  41F40780 BRV0 _RO_DPIY,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1011 0x0114 _EOR_dpXi:
+1012 0x0114  41DC0780 BRV0 _RO_DPXI,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1013 0x0115 _EOR_dpiY:
+1014 0x0115  41F40780 BRV0 _RO_DPIY,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1015 0x0116 _ADC_dpXi:
+1016 0x0116  41DC0780 BRV0 _RO_DPXI,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1017 0x0117 _ADC_dpiY:
+1018 0x0117  41F40780 BRV0 _RO_DPIY,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1019 0x0118 _STA_dpXi:
+1020 0x0118  426C0780 BRV0 _WO_DPXI,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1021 0x0119 _STA_dpiY:
+1022 0x0119  42840780 BRV0 _WO_DPIY,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1023 0x011A _LDA_dpXi:
+1024 0x011A  41DC0780 BRV0 _RO_DPXI,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1025 0x011B _LDA_dpiY:
+1026 0x011B  41F40780 BRV0 _RO_DPIY,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1027 0x011C _CMP_dpXi:
+1028 0x011C  41DC0780 BRV0 _RO_DPXI,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1029 0x011D _CMP_dpiY:
+1030 0x011D  41F40780 BRV0 _RO_DPIY,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1031 0x011E _SBC_dpXi:
+1032 0x011E  41DC0780 BRV0 _RO_DPXI,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1033 0x011F _SBC_dpiY:
+1034 0x011F  41F40780 BRV0 _RO_DPIY,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1035  --------------------------------------------------------------------------------
+1036  -- Row 2 : 0x02-0xF2
+1037  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1038  --------------------------------------------------------------------------------
+1039 0x0120 _NOP_02:
+1040 0x0120  790707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1041 0x0121 _ORA_dpi:
+1042 0x0121  41C40780 BRV0 _RO_DPI,1,0,, Pls, IF, OP1 -- Read DP
+1043 0x0122 _NOP_22:
+1044 0x0122  791707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1045 0x0123 _AND_dpi:
+1046 0x0123  41C40780 BRV0 _RO_DPI,1,0,, Pls, IF, OP1 -- Read DP
+1047 0x0124 _NOP_42:
+1048 0x0124  792707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1049 0x0125 _EOR_dpi:
+1050 0x0125  41C40780 BRV0 _RO_DPI,1,0,, Pls, IF, OP1 -- Read DP
+1051 0x0126 _NOP_62:
+1052 0x0126  793707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1053 0x0127 _ADC_dpi:
+1054 0x0127  41C40780 BRV0 _RO_DPI,1,0,, Pls, IF, OP1 -- Read DP
+1055 0x0128 _NOP_82:
+1056 0x0128  794707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1057 0x0129 _STA_dpi:
+1058 0x0129  42540780 BRV0 _WO_DPI,1,0,, Pls, IF, OP1 -- Read DP
+1059 0x012A _LDX_imm:
+1060 0x012A  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read #imm Value
+1061 0x012B _LDA_dpi:
+1062 0x012B  41C40780 BRV0 _RO_DPI,1,0,, Pls, IF, OP1 -- Read DP
+1063 0x012C _NOP_C2:
+1064 0x012C  796707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1065 0x012D _CMP_dpi:
+1066 0x012D  41C40780 BRV0 _RO_DPI,1,0,, Pls, IF, OP1 -- Read DP
+1067 0x012E _NOP_E2:
+1068 0x012E  797707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1069 0x012F _SBC_dpi:
+1070 0x012F  41C40780 BRV0 _RO_DPI,1,0,, Pls, IF, OP1 -- Read DP
+1071  --------------------------------------------------------------------------------
+1072  -- Row 3 : 0x03-0xF3
+1073  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1074  --------------------------------------------------------------------------------
+1075 0x0130 _NOP_03:
+1076 0x0130  798707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1077 0x0131 _NOP_13:
+1078 0x0131  798F07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1079 0x0132 _NOP_23:
+1080 0x0132  799707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1081 0x0133 _NOP_33:
+1082 0x0133  799F07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1083 0x0134 _NOP_43:
+1084 0x0134  79A707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1085 0x0135 _NOP_53:
+1086 0x0135  79AF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1087 0x0136 _NOP_63:
+1088 0x0136  79B707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1089 0x0137 _NOP_73:
+1090 0x0137  79BF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1091 0x0138 _NOP_83:
+1092 0x0138  79C707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1093 0x0139 _NOP_93:
+1094 0x0139  79CF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1095 0x013A _NOP_A3:
+1096 0x013A  79D707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1097 0x013B _NOP_B3:
+1098 0x013B  79DF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1099 0x013C _NOP_C3:
+1100 0x013C  79E707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1101 0x013D _NOP_D3:
+1102 0x013D  79EF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1103 0x013E _NOP_E3:
+1104 0x013E  79F707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1105 0x013F _NOP_F3:
+1106 0x013F  79FF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1107  --------------------------------------------------------------------------------
+1108  -- Row 4 : 0x04-0xF4
+1109  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1110  --------------------------------------------------------------------------------
+1111 0x0140 _TSB_dp:
+1112 0x0140  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1113 0x0141 _TRB_dp:
+1114 0x0141  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1115 0x0142 _BIT_dp:
+1116 0x0142  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1117 0x0143 _BIT_dpX:
+1118 0x0143  41B40780 BRV0 _RO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1119 0x0144 _NOP_44:
+1120 0x0144  7A2707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1121 0x0145 _NOP_54:
+1122 0x0145  7A2F07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1123 0x0146 _STZ_dp:
+1124 0x0146  423C0780 BRV0 _WO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1125 0x0147 _STZ_dpX:
+1126 0x0147  42440780 BRV0 _WO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1127 0x0148 _STY_dp:
+1128 0x0148  423C0780 BRV0 _WO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1129 0x0149 _STY_dpX:
+1130 0x0149  42440780 BRV0 _WO_DPX,1,0,, Pls, IR, OP1 -- Read DP
+1131 0x014A _LDY_dp:
+1132 0x014A  41AC0780 BRV0 _RO_DP,1,0,, Pls, IR, OP1 -- Read DP
+1133 0x014B _LDY_dpX:
+1134 0x014B  41B40780 BRV0 _RO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1135 0x014C _CPY_dp:
+1136 0x014C  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1137 0x014D _NOP_D4:
+1138 0x014D  7A6F07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1139 0x014E _CPX_dp:
+1140 0x014E  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1141 0x014F _NOP_F4:
+1142 0x014F  7A7F07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1143  --------------------------------------------------------------------------------
+1144  -- Row 5 : 0x05-0xF5
+1145  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1146  --------------------------------------------------------------------------------
+1147 0x0150 _ORA_dp:
+1148 0x0150  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1149 0x0151 _ORA_dpX:
+1150 0x0151  41B40780 BRV0 _RO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1151 0x0152 _AND_dp:
+1152 0x0152  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1153 0x0153 _AND_dpX:
+1154 0x0153  41B40780 BRV0 _RO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1155 0x0154 _EOR_dp:
+1156 0x0154  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1157 0x0155 _EOR_dpX:
+1158 0x0155  41B40780 BRV0 _RO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1159 0x0156 _ADC_dp:
+1160 0x0156  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1161 0x0157 _ADC_dpX:
+1162 0x0157  41B40780 BRV0 _RO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1163 0x0158 _STA_dp:
+1164 0x0158  423C0780 BRV0 _WO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1165 0x0159 _STA_dpX:
+1166 0x0159  42440780 BRV0 _WO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1167 0x015A _LDA_dp:
+1168 0x015A  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1169 0x015B _LDA_dpX:
+1170 0x015B  41B40780 BRV0 _RO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1171 0x015C _CMP_dp:
+1172 0x015C  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1173 0x015D _CMP_dpX:
+1174 0x015D  41B40780 BRV0 _RO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1175 0x015E _SBC_dp:
+1176 0x015E  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1177 0x015F _SBC_dpX:
+1178 0x015F  41B40780 BRV0 _RO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1179  --------------------------------------------------------------------------------
+1180  -- Row 6 : 0x06-0xF6
+1181  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1182  --------------------------------------------------------------------------------
+1183 0x0160 _ASL_dp:
+1184 0x0160  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1185 0x0161 _ASL_dpX:
+1186 0x0161  43240780 BRV0 _RMW_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1187 0x0162 _ROL_dp:
+1188 0x0162  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1189 0x0163 _ROL_dpX:
+1190 0x0163  43240780 BRV0 _RMW_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1191 0x0164 _LSR_dp:
+1192 0x0164  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1193 0x0165 _LSR_dpX:
+1194 0x0165  43240780 BRV0 _RMW_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1195 0x0166 _ROR_dp:
+1196 0x0166  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1197 0x0167 _ROR_dpX:
+1198 0x0167  43240780 BRV0 _RMW_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1199 0x0168 _STX_dp:
+1200 0x0168  423C0780 BRV0 _WO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1201 0x0169 _STX_dpY:
+1202 0x0169  424C0780 BRV0 _WO_DPY,1,0,, Pls, IF, OP1 -- Read DP
+1203 0x016A _LDX_dp:
+1204 0x016A  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1205 0x016B _LDX_dpY:
+1206 0x016B  41BC0780 BRV0 _RO_DPY,1,0,, Pls, IF, OP1 -- Read DP
+1207 0x016C _DEC_dp:
+1208 0x016C  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1209 0x016D _DEC_dpX:
+1210 0x016D  43240780 BRV0 _RMW_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1211 0x016E _INC_dp:
+1212 0x016E  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1213 0x016F _INC_dpX:
+1214 0x016F  43240780 BRV0 _RMW_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1215  --------------------------------------------------------------------------------
+1216  -- Row 7 : 0x07-0xF7 (Rockwell Instructions: RMBx/SMBx dp)
+1217  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1218  --------------------------------------------------------------------------------
+1219 0x0170 _RMB0_dp:
+1220 0x0170  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1221 0x0171 _RMB1_dp:
+1222 0x0171  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1223 0x0172 _RMB2_dp:
+1224 0x0172  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1225 0x0173 _RMB3_dp:
+1226 0x0173  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1227 0x0174 _RMB4_dp:
+1228 0x0174  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1229 0x0175 _RMB5_dp:
+1230 0x0175  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1231 0x0176 _RMB6_dp:
+1232 0x0176  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1233 0x0177 _RMB7_dp:
+1234 0x0177  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1235 0x0178 _SMB0_dp:
+1236 0x0178  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1237 0x0179 _SMB1_dp:
+1238 0x0179  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1239 0x017A _SMB2_dp:
+1240 0x017A  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1241 0x017B _SMB3_dp:
+1242 0x017B  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1243 0x017C _SMB4_dp:
+1244 0x017C  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1245 0x017D _SMB5_dp:
+1246 0x017D  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1247 0x017E _SMB6_dp:
+1248 0x017E  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1249 0x017F _SMB7_dp:
+1250 0x017F  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1251  --------------------------------------------------------------------------------
+1252  -- Row 8 : 0x08-0xF8
+1253  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1254  --------------------------------------------------------------------------------
+1255 0x0180 _PHP:
+1256 0x0180  41044120 BRV0 _Psh,1,0, Stk,, WR,, Psh -- Push P
+1257 0x0181 _CLC:
+1258 0x0181  7C0F07CC BRV3 $,1,3,, Pls, IF, IR,, WE_P -- Clear Carry Flag
+1259 0x0182 _PLP:
+1260 0x0182  410442B0 BRV0 _Pop,1,0, Stk,, RD, OP1, Pop -- Pop P
+1261 0x0183 _SEC:
+1262 0x0183  7C1F07CC BRV3 $,1,3,, Pls, IF, IR,, WE_P -- Set Carry Flag
+1263 0x0184 _PHA:
+1264 0x0184  41044120 BRV0 _Psh,1,0, Stk,, WR,, Psh -- Push A
+1265 0x0185 _CLI:
+1266 0x0185  5C2D07CC BRV1 $,1,1,, Pls, IF, IR,, WE_P -- Clear Interrupt Mask Flg
+1267 0x0186 _PLA:
+1268 0x0186  410442B0 BRV0 _Pop,1,0, Stk,, RD, OP1, Pop -- Pop A
+1269 0x0187 _SEI:
+1270 0x0187  5C3D07CC BRV1 $,1,1,, Pls, IF, IR,, WE_P -- Set Interrupt Mask Flag
+1271 0x0188 _DEY:
+1272 0x0188  7C4707C6 BRV3 $,1,3,, Pls, IF, IR,, WE_Y -- Decrement Y
+1273 0x0189 _TYA:
+1274 0x0189  7C4F07C2 BRV3 $,1,3,, Pls, IF, IR,, WE_A -- Transfer Y to A
+1275 0x018A _TAY:
+1276 0x018A  7C5707C6 BRV3 $,1,3,, Pls, IF, IR,, WE_Y -- Transfer A to Y
+1277 0x018B _CLV:
+1278 0x018B  7C5F07CC BRV3 $,1,3,, Pls, IF, IR,, WE_P -- Clear oVerflow Flag
+1279 0x018C _INY:
+1280 0x018C  7C6707C6 BRV3 $,1,3,, Pls, IF, IR,, WE_Y -- Increment Y
+1281 0x018D _CLD:
+1282 0x018D  7C6F07CC BRV3 $,1,3,, Pls, IF, IR,, WE_P -- Clear Decimal Mode Flag
+1283 0x018E _INX:
+1284 0x018E  7C7707C4 BRV3 $,1,3,, Pls, IF, IR,, WE_X -- Increment X
+1285 0x018F _SED:
+1286 0x018F  7C7F07CC BRV3 $,1,3,, Pls, IF, IR,, WE_P -- Set Decimal Mode Flag
+1287  --------------------------------------------------------------------------------
+1288  -- Row 9 : 0x09-0xF9
+1289  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1290  --------------------------------------------------------------------------------
+1291 0x0190 _ORA_imm:
+1292 0x0190  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read Immediate Operand
+1293 0x0191 _ORA_absY:
+1294 0x0191  422C0780 BRV0 _RO_AbsY,1,0,, Pls, IF, OP1 -- Read Mem Ptr Lo
+1295 0x0192 _AND_imm:
+1296 0x0192  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read Immediate Operand
+1297 0x0193 _AND_absY:
+1298 0x0193  422C0780 BRV0 _RO_AbsY,1,0,, Pls, IF, OP1 -- Read Mem Ptr Lo
+1299 0x0194 _EOR_imm:
+1300 0x0194  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read Immediate Operand
+1301 0x0195 _EOR_absY:
+1302 0x0195  422C0780 BRV0 _RO_AbsY,1,0,, Pls, IF, OP1 -- Read Mem Ptr Lo
+1303 0x0196 _ADC_imm:
+1304 0x0196  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read Immediate Operand
+1305 0x0197 _ADC_absY:
+1306 0x0197  422C0780 BRV0 _RO_AbsY,1,0,, Pls, IF, OP1 -- Read Mem Ptr Lo
+1307 0x0198 _BIT_imm:
+1308 0x0198  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read Immediate Operand
+1309 0x0199 _STA_absY:
+1310 0x0199  42BC0780 BRV0 _WO_AbsY,1,0,, Pls, IF, OP1 -- Read Mem Ptr Lo
+1311 0x019A _LDA_imm:
+1312 0x019A  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read Immediate Operand
+1313 0x019B _LDA_absY:
+1314 0x019B  422C0780 BRV0 _RO_AbsY,1,0,, Pls, IF, OP1 -- Read Mem Ptr Lo
+1315 0x019C _CMP_imm:
+1316 0x019C  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read Immediate Operand
+1317 0x019D _CMP_absY:
+1318 0x019D  422C0780 BRV0 _RO_AbsY,1,0,, Pls, IF, OP1 -- Read Mem Ptr Lo
+1319 0x019E _SBC_imm:
+1320 0x019E  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read Immediate Operand
+1321 0x019F _SBC_absY:
+1322 0x019F  422C0780 BRV0 _RO_AbsY,1,0,, Pls, IF, OP1 -- Read Mem Ptr Lo
+1323  --------------------------------------------------------------------------------
+1324  -- Row A : 0x0A-0xFA
+1325  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1326  --------------------------------------------------------------------------------
+1327 0x01A0 _ASL_A:
+1328 0x01A0  7D0707C2 BRV3 $,1,3,, Pls, IF, IR,, WE_A -- Arithmetic Shift A Left
+1329 0x01A1 _INC_A:
+1330 0x01A1  7D0F07C2 BRV3 $,1,3,, Pls, IF, IR,, WE_A -- Increment A
+1331 0x01A2 _ROL_A:
+1332 0x01A2  7D1707C2 BRV3 $,1,3,, Pls, IF, IR,, WE_A -- Rotate A Left
+1333 0x01A3 _DEC_A:
+1334 0x01A3  7D1F07C2 BRV3 $,1,3,, Pls, IF, IR,, WE_A -- Decrement A
+1335 0x01A4 _LSR_A:
+1336 0x01A4  7D2707C2 BRV3 $,1,3,, Pls, IF, IR,, WE_A -- Logical Shift A Right
+1337 0x01A5 _PHY:
+1338 0x01A5  41044120 BRV0 _Psh,1,0, Stk,, WR,, Psh -- Push Y
+1339 0x01A6 _ROR_A:
+1340 0x01A6  7D3707C2 BRV3 $,1,3,, Pls, IF, IR,, WE_A -- Rotate A Right
+1341 0x01A7 _PLY:
+1342 0x01A7  410442B0 BRV0 _Pop,1,0, Stk,, RD, OP1, Pop -- Pop Y
+1343 0x01A8 _TXA:
+1344 0x01A8  7D4707C2 BRV3 $,1,3,, Pls, IF, IR,, WE_A -- Transfer X to A
+1345 0x01A9 _TXS:
+1346 0x01A9  7D4F07CA BRV3 $,1,3,, Pls, IF, IR,, WE_S -- Transfer X to S
+1347 0x01AA _TAX:
+1348 0x01AA  7D5707C4 BRV3 $,1,3,, Pls, IF, IR,, WE_X -- Transfer A to X
+1349 0x01AB _TSX:
+1350 0x01AB  7D5F07C4 BRV3 $,1,3,, Pls, IF, IR,, WE_X -- Transfer S to X
+1351 0x01AC _DEX:
+1352 0x01AC  7D6707C4 BRV3 $,1,3,, Pls, IF, IR,, WE_X -- Decrement X
+1353 0x01AD _PHX:
+1354 0x01AD  41044120 BRV0 _Psh,1,0, Stk,, WR,, Psh -- Push X
+1355 0x01AE _NOP: -- the real NOP
+1356 0x01AE  7D7707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip True NOP Instruction
+1357 0x01AF _PLX:
+1358 0x01AF  410442B0 BRV0 _Pop,1,0, Stk,, RD, OP1, Pop -- Pop X
+1359  --------------------------------------------------------------------------------
+1360  -- Row B : 0x0B-0xFB
+1361  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1362  --------------------------------------------------------------------------------
+1363 0x01B0 _NOP_0B:
+1364 0x01B0  7D8707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1365 0x01B1 _NOP_1B:
+1366 0x01B1  7D8F07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1367 0x01B2 _NOP_2B:
+1368 0x01B2  7D9707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1369 0x01B3 _NOP_3B:
+1370 0x01B3  7D9F07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1371 0x01B4 _NOP_4B:
+1372 0x01B4  7DA707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1373 0x01B5 _NOP_5B:
+1374 0x01B5  7DAF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1375 0x01B6 _NOP_6B:
+1376 0x01B6  7DB707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1377 0x01B7 _NOP_7B:
+1378 0x01B7  7DBF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1379 0x01B8 _NOP_8B:
+1380 0x01B8  7DC707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1381 0x01B9 _NOP_9B:
+1382 0x01B9  7DCF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1383 0x01BA _NOP_AB:
+1384 0x01BA  7DD707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1385 0x01BB _NOP_BB:
+1386 0x01BB  7DDF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1387 0x01BC _WAI_CB:
+1388 0x01BC  47E40000 BRV0 _WAI,1,0 -- Wait for Interrupt
+1389 0x01BD _STP_DB:
+1390 0x01BD  4DE80000 BRV0 $,0,0 -- Stop execution
+1391 0x01BE _NOP_EB:
+1392 0x01BE  7DF707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1393 0x01BF _NOP_FB:
+1394 0x01BF  7DFF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1395  --------------------------------------------------------------------------------
+1396  -- Row C : 0x0C-0xFC
+1397  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1398  --------------------------------------------------------------------------------
+1399 0x01C0 _TSB_abs:
+1400 0x01C0  43440780 BRV0 _RMW_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1401 0x01C1 _TRB_abs:
+1402 0x01C1  43440780 BRV0 _RMW_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1403 0x01C2 _BIT_abs:
+1404 0x01C2  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1405 0x01C3 _BIT_absX:
+1406 0x01C3  421C0780 BRV0 _RO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1407 0x01C4 _JMP_abs:
+1408 0x01C4  41740780 BRV0 _Jmp,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1409 0x01C5 _NOP_5C:
+1410 0x01C5  7E2F07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1411 0x01C6 _JMP_absi:
+1412 0x01C6  417C0780 BRV0 _JmpI,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1413 0x01C7 _JMP_absXi:
+1414 0x01C7  41940780 BRV0 _JmpXI,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1415 0x01C8 _STY_abs:
+1416 0x01C8  429C0780 BRV0 _WO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1417 0x01C9 _STZ_abs:
+1418 0x01C9  429C0780 BRV0 _WO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1419 0x01CA _LDY_abs:
+1420 0x01CA  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1421 0x01CB _LDY_absX:
+1422 0x01CB  421C0780 BRV0 _RO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1423 0x01CC _CPY_abs:
+1424 0x01CC  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1425 0x01CD _NOP_DC:
+1426 0x01CD  7E6F07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1427 0x01CE _CPX_abs:
+1428 0x01CE  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1429 0x01CF _NOP_FC:
+1430 0x01CF  7E7F07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1431  --------------------------------------------------------------------------------
+1432  -- Row D : 0x0D-0xFD
+1433  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1434  --------------------------------------------------------------------------------
+1435 0x01D0 _ORA_abs:
+1436 0x01D0  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1437 0x01D1 _ORA_absX:
+1438 0x01D1  421C0780 BRV0 _RO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1439 0x01D2 _AND_abs:
+1440 0x01D2  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1441 0x01D3 _AND_absX:
+1442 0x01D3  421C0780 BRV0 _RO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1443 0x01D4 _EOR_abs:
+1444 0x01D4  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1445 0x01D5 _EOR_absX:
+1446 0x01D5  421C0780 BRV0 _RO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1447 0x01D6 _ADC_abs:
+1448 0x01D6  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1449 0x01D7 _ADC_absX:
+1450 0x01D7  421C0780 BRV0 _RO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1451 0x01D8 _STA_abs:
+1452 0x01D8  429C0780 BRV0 _WO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1453 0x01D9 _STA_absX:
+1454 0x01D9  42AC0780 BRV0 _WO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1455 0x01DA _LDA_abs:
+1456 0x01DA  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1457 0x01DB _LDA_absX:
+1458 0x01DB  421C0780 BRV0 _RO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1459 0x01DC _CMP_abs:
+1460 0x01DC  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1461 0x01DD _CMP_absX:
+1462 0x01DD  421C0780 BRV0 _RO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1463 0x01DE _SBC_abs:
+1464 0x01DE  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1465 0x01DF _SBC_absX:
+1466 0x01DF  421C0780 BRV0 _RO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1467  --------------------------------------------------------------------------------
+1468  -- Row E : 0x0E-0xFE
+1469  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1470  --------------------------------------------------------------------------------
+1471 0x01E0 _ASL_abs:
+1472 0x01E0  43440780 BRV0 _RMW_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1473 0x01E1 _ASL_absX:
+1474 0x01E1  435C0780 BRV0 _RMW_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1475 0x01E2 _ROL_abs:
+1476 0x01E2  43440780 BRV0 _RMW_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1477 0x01E3 _ROL_absX:
+1478 0x01E3  435C0780 BRV0 _RMW_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1479 0x01E4 _LSR_abs:
+1480 0x01E4  43440780 BRV0 _RMW_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1481 0x01E5 _LSR_absX:
+1482 0x01E5  435C0780 BRV0 _RMW_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1483 0x01E6 _ROR_abs:
+1484 0x01E6  43440780 BRV0 _RMW_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1485 0x01E7 _ROR_absX:
+1486 0x01E7  435C0780 BRV0 _RMW_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1487 0x01E8 _STX_abs:
+1488 0x01E8  429C0780 BRV0 _WO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1489 0x01E9 _STZ_absX:
+1490 0x01E9  42AC0780 BRV0 _WO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1491 0x01EA _LDX_abs:
+1492 0x01EA  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1493 0x01EB _LDX_absY:
+1494 0x01EB  422C0780 BRV0 _RO_AbsY,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1495 0x01EC _DEC_abs:
+1496 0x01EC  43440780 BRV0 _RMW_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1497 0x01ED _DEC_absX:
+1498 0x01ED  435C0780 BRV0 _RMW_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1499 0x01EE _INC_abs:
+1500 0x01EE  43440780 BRV0 _RMW_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1501 0x01EF _INC_absX:
+1502 0x01EF  435C0780 BRV0 _RMW_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1503  --------------------------------------------------------------------------------
+1504  -- Row F : 0x0F-0xFF (Rockwell Instructions: BBRx/BBSx dp,rel)
+1505  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1506  --------------------------------------------------------------------------------
+1507 0x01F0 _BBR0_dp_rel:
+1508 0x01F0  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1509 0x01F1 _BBR1_dp_rel:
+1510 0x01F1  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1511 0x01F2 _BBR2_dp_rel:
+1512 0x01F2  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1513 0x01F3 _BBR3_dp_rel:
+1514 0x01F3  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1515 0x01F4 _BBR4_dp_rel:
+1516 0x01F4  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1517 0x01F5 _BBR5_dp_rel:
+1518 0x01F5  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1519 0x01F6 _BBR6_dp_rel:
+1520 0x01F6  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1521 0x01F7 _BBR7_dp_rel:
+1522 0x01F7  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1523 0x01F8 _BBS0_dp_rel:
+1524 0x01F8  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1525 0x01F9 _BBS1_dp_rel:
+1526 0x01F9  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1527 0x01FA _BBS2_dp_rel:
+1528 0x01FA  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1529 0x01FB _BBS3_dp_rel:
+1530 0x01FB  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1531 0x01FC _BBS4_dp_rel:
+1532 0x01FC  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1533 0x01FD _BBS5_dp_rel:
+1534 0x01FD  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1535 0x01FE _BBS6_dp_rel:
+1536 0x01FE  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1537 0x01FF _BBS7_dp_rel:
+1538 0x01FF  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1539  --------------------------------------------------------------------------------
+1540  -- End of Instruction Decode Table
+1541  --------------------------------------------------------------------------------
+1543 0x0200 _Last: .org 512
+1545 0x0200 _end:
+-- Instructions --
+0x0000  RTS   RTS         .asm    0       -- Return from Subroutine
+0x0001  BSR   BSR         .asm    1       -- Branch to subroutine
+0x0002 FTCH   FTCH        .asm    2       -- Fetch next instruction
+0x0003  BMW   BMW         .asm    3       -- Branch multi-way
+0x0004 BRV0   BRV0        .asm    4       -- Branch via 0
+0x0005 BRV1   BRV1        .asm    5       -- Branch via 1
+0x0006 BRV2   BRV2        .asm    6       -- Branch via 2
+0x0007 BRV3   BRV3        .asm    7       -- Branch via 3
+0x0008 BTH0   BTH0        .asm    8       -- Branch if T0 is high
+0x0009 BTH1   BTH1        .asm    9       -- Branch if T1 is high
+0x000A BTH2   BTH2        .asm    10      -- Branch if T2 is high
+0x000B BTH3   BTH3        .asm    11      -- Branch if T3 is high
+0x000C BTL0   BTL0        .asm    12      -- Branch if T0 is low
+0x000D BTL1   BTL1        .asm    13      -- Branch if T1 is low
+0x000E BTL2   BTL2        .asm    14      -- Branch if T2 is low
+0x000F BTL3   BTL3        .asm    15      -- Branch if T3 is low
+ 
+-- Equates --
+0x0000 PC          .equ    0       -- NA <= PC (default)
+0x0001 Inc         .equ    1       -- NA <= PC + 1
+0x0002 MAR         .equ    2       -- NA <= MAR + 0
+0x0003 Nxt         .equ    3       -- NA <= MAR + 1
+0x0004 Stk         .equ    4       -- NA <= SP + 0
+0x0005 DPN         .equ    5       -- NA <= {0, OP1} + 0
+0x0006 DPX         .equ    6       -- NA <= {0, OP1} + {0, X}
+0x0007 DPY         .equ    7       -- NA <= {0, OP1} + {0, Y}
+0x0008 LDA         .equ    8       -- NA <= {OP2, OP1} + 0
+0x000E LDAX        .equ    14      -- NA <= {OP2, OP1} + {0, X}
+0x000F LDAY        .equ    15      -- NA <= {OP2, OP1} + {0, Y}
+0x0001 Pls         .equ    1       -- PC <= PC + 1
+0x0002 Jmp         .equ    2       -- PC <= NA
+0x0003 Rel         .equ    3       -- PC <= PC + (CC ? {{8{DI[7]}}, DI} : 1)
+0x0001 WR          .equ    1       -- Bus Operand Write
+0x0002 RD          .equ    2       -- Bus Operand Read
+0x0003 IF          .equ    3       -- Bus Insruction Fetch
+0x0000 ALU         .equ    0       -- M   <= DI
+0x0001 OP2         .equ    1       -- OP2 <= DI
+0x0002 OP1         .equ    2       -- OP1 <= DI
+0x0003 IR          .equ    3       -- IR  <= DI
+0x0001 PCH         .equ    1       -- DO  <= PCH
+0x0002 PCL         .equ    2       -- DO  <= PCL
+0x0003 PSW         .equ    3       -- DO  <= PSW (P)
+0x0002 Psh         .equ    2       -- S <= S - 1
+0x0003 Pop         .equ    3       -- S <= S + 1
+0x0001 WE_A        .equ    1       -- Write Enable A
+0x0002 WE_X        .equ    2       -- Write Enable X
+0x0003 WE_Y        .equ    3       -- Write Enable Y
+0x0004 WE_R        .equ    4       -- Write Enable Register - write selected register
+0x0005 WE_S        .equ    5       -- Write Enable S
+0x0006 WE_P        .equ    6       -- Write Enable P
+0x0007 WE_M        .equ    7       -- Write Enable M(emory)
+0x0001 ISR         .equ    1       -- Assert ISR: Clear D, Set I
+ 
+-- Defines --
+0x0004 Inst        .def    4       -- Instruction
+0x0009 BA          .def    9       -- Branch Address
+0x0001 Wait        .def    1       -- Conditional Execution Required
+0x0002 En          .def    2       -- Enable ALU, and Sample Interrupts
+0x0004 NA_Cntl     .def    4       -- Next Address Control Field
+0x0002 PC_Cntl     .def    2       -- Program Counter Control Field
+0x0002 IO_Cntl     .def    2       -- I/O Cycle Control Field
+0x0002 DIO_Cntl    .def    2       -- Data Input/Output Demux/Mux Control Field
+0x0002 Stk_Cntl    .def    2       -- ALU Stack Pointer Control Field
+0x0003 RegWE_Cntl  .def    3       -- Register Write Enable (A, X, Y, S, P)
+0x0001 PSW_Cntl    .def    1       -- Asserted to Clear D and Set I in PSW
+ 
+-- Labels --
+0x0000 _Start
+0x0001 _Rst
+0x0020 _Nxt
+0x0020 _Psh
+0x0020 _Pop
+0x0020 _Rel
+0x0020 _Imm
+0x0021 _Int
+0x0022 _Brk
+0x0027 _JSR
+0x002A _RTI
+0x002D _RTS
+0x002E _Jmp
+0x002F _JmpI
+0x0032 _JmpXI
+0x0035 _RO_DP
+0x0036 _RO_DPX
+0x0037 _RO_DPY
+0x0038 _RO_DPI
+0x003B _RO_DPXI
+0x003E _RO_DPIY
+0x0041 _RO_Abs
+0x0043 _RO_AbsX
+0x0045 _RO_AbsY
+0x0047 _WO_DP
+0x0048 _WO_DPX
+0x0049 _WO_DPY
+0x004A _WO_DPI
+0x004D _WO_DPXI
+0x0050 _WO_DPIY
+0x0053 _WO_Abs
+0x0055 _WO_AbsX
+0x0057 _WO_AbsY
+0x0060 _RMW
+0x0062 _RMW_DP
+0x0064 _RMW_DPX
+0x0066 _RMW_DPY
+0x0068 _RMW_Abs
+0x006B _RMW_AbsX
+0x006E _RMW_AbsY
+0x0071 _BByx_dp_rel
+0x0073 _End_uPgm
+0x00FC _WAI
+0x0100 _IDEC_Start
+0x0100 _BRK_imm
+0x0101 _BPL_rel
+0x0102 _JSR_abs
+0x0103 _BMI_rel
+0x0104 _RTI_imp
+0x0105 _BVC_rel
+0x0106 _RTS_imp
+0x0107 _BVS_rel
+0x0108 _BRA_rel
+0x0109 _BCC_re
+0x010A _LDY_imm
+0x010B _BCS_rel
+0x010C _CPY_imm
+0x010D _BNE_rel
+0x010E _CPX_imm
+0x010F _BEQ_rel
+0x0110 _ORA_dpXi
+0x0111 _ORA_dpiY
+0x0112 _AND_dpXi
+0x0113 _AND_dpiY
+0x0114 _EOR_dpXi
+0x0115 _EOR_dpiY
+0x0116 _ADC_dpXi
+0x0117 _ADC_dpiY
+0x0118 _STA_dpXi
+0x0119 _STA_dpiY
+0x011A _LDA_dpXi
+0x011B _LDA_dpiY
+0x011C _CMP_dpXi
+0x011D _CMP_dpiY
+0x011E _SBC_dpXi
+0x011F _SBC_dpiY
+0x0120 _NOP_02
+0x0121 _ORA_dpi
+0x0122 _NOP_22
+0x0123 _AND_dpi
+0x0124 _NOP_42
+0x0125 _EOR_dpi
+0x0126 _NOP_62
+0x0127 _ADC_dpi
+0x0128 _NOP_82
+0x0129 _STA_dpi
+0x012A _LDX_imm
+0x012B _LDA_dpi
+0x012C _NOP_C2
+0x012D _CMP_dpi
+0x012E _NOP_E2
+0x012F _SBC_dpi
+0x0130 _NOP_03
+0x0131 _NOP_13
+0x0132 _NOP_23
+0x0133 _NOP_33
+0x0134 _NOP_43
+0x0135 _NOP_53
+0x0136 _NOP_63
+0x0137 _NOP_73
+0x0138 _NOP_83
+0x0139 _NOP_93
+0x013A _NOP_A3
+0x013B _NOP_B3
+0x013C _NOP_C3
+0x013D _NOP_D3
+0x013E _NOP_E3
+0x013F _NOP_F3
+0x0140 _TSB_dp
+0x0141 _TRB_dp
+0x0142 _BIT_dp
+0x0143 _BIT_dpX
+0x0144 _NOP_44
+0x0145 _NOP_54
+0x0146 _STZ_dp
+0x0147 _STZ_dpX
+0x0148 _STY_dp
+0x0149 _STY_dpX
+0x014A _LDY_dp
+0x014B _LDY_dpX
+0x014C _CPY_dp
+0x014D _NOP_D4
+0x014E _CPX_dp
+0x014F _NOP_F4
+0x0150 _ORA_dp
+0x0151 _ORA_dpX
+0x0152 _AND_dp
+0x0153 _AND_dpX
+0x0154 _EOR_dp
+0x0155 _EOR_dpX
+0x0156 _ADC_dp
+0x0157 _ADC_dpX
+0x0158 _STA_dp
+0x0159 _STA_dpX
+0x015A _LDA_dp
+0x015B _LDA_dpX
+0x015C _CMP_dp
+0x015D _CMP_dpX
+0x015E _SBC_dp
+0x015F _SBC_dpX
+0x0160 _ASL_dp
+0x0161 _ASL_dpX
+0x0162 _ROL_dp
+0x0163 _ROL_dpX
+0x0164 _LSR_dp
+0x0165 _LSR_dpX
+0x0166 _ROR_dp
+0x0167 _ROR_dpX
+0x0168 _STX_dp
+0x0169 _STX_dpY
+0x016A _LDX_dp
+0x016B _LDX_dpY
+0x016C _DEC_dp
+0x016D _DEC_dpX
+0x016E _INC_dp
+0x016F _INC_dpX
+0x0170 _RMB0_dp
+0x0171 _RMB1_dp
+0x0172 _RMB2_dp
+0x0173 _RMB3_dp
+0x0174 _RMB4_dp
+0x0175 _RMB5_dp
+0x0176 _RMB6_dp
+0x0177 _RMB7_dp
+0x0178 _SMB0_dp
+0x0179 _SMB1_dp
+0x017A _SMB2_dp
+0x017B _SMB3_dp
+0x017C _SMB4_dp
+0x017D _SMB5_dp
+0x017E _SMB6_dp
+0x017F _SMB7_dp
+0x0180 _PHP
+0x0181 _CLC
+0x0182 _PLP
+0x0183 _SEC
+0x0184 _PHA
+0x0185 _CLI
+0x0186 _PLA
+0x0187 _SEI
+0x0188 _DEY
+0x0189 _TYA
+0x018A _TAY
+0x018B _CLV
+0x018C _INY
+0x018D _CLD
+0x018E _INX
+0x018F _SED
+0x0190 _ORA_imm
+0x0191 _ORA_absY
+0x0192 _AND_imm
+0x0193 _AND_absY
+0x0194 _EOR_imm
+0x0195 _EOR_absY
+0x0196 _ADC_imm
+0x0197 _ADC_absY
+0x0198 _BIT_imm
+0x0199 _STA_absY
+0x019A _LDA_imm
+0x019B _LDA_absY
+0x019C _CMP_imm
+0x019D _CMP_absY
+0x019E _SBC_imm
+0x019F _SBC_absY
+0x01A0 _ASL_A
+0x01A1 _INC_A
+0x01A2 _ROL_A
+0x01A3 _DEC_A
+0x01A4 _LSR_A
+0x01A5 _PHY
+0x01A6 _ROR_A
+0x01A7 _PLY
+0x01A8 _TXA
+0x01A9 _TXS
+0x01AA _TAX
+0x01AB _TSX
+0x01AC _DEX
+0x01AD _PHX
+0x01AE _NOP
+0x01AF _PLX
+0x01B0 _NOP_0B
+0x01B1 _NOP_1B
+0x01B2 _NOP_2B
+0x01B3 _NOP_3B
+0x01B4 _NOP_4B
+0x01B5 _NOP_5B
+0x01B6 _NOP_6B
+0x01B7 _NOP_7B
+0x01B8 _NOP_8B
+0x01B9 _NOP_9B
+0x01BA _NOP_AB
+0x01BB _NOP_BB
+0x01BC _WAI_CB
+0x01BD _STP_DB
+0x01BE _NOP_EB
+0x01BF _NOP_FB
+0x01C0 _TSB_abs
+0x01C1 _TRB_abs
+0x01C2 _BIT_abs
+0x01C3 _BIT_absX
+0x01C4 _JMP_abs
+0x01C5 _NOP_5C
+0x01C6 _JMP_absi
+0x01C7 _JMP_absXi
+0x01C8 _STY_abs
+0x01C9 _STZ_abs
+0x01CA _LDY_abs
+0x01CB _LDY_absX
+0x01CC _CPY_abs
+0x01CD _NOP_DC
+0x01CE _CPX_abs
+0x01CF _NOP_FC
+0x01D0 _ORA_abs
+0x01D1 _ORA_absX
+0x01D2 _AND_abs
+0x01D3 _AND_absX
+0x01D4 _EOR_abs
+0x01D5 _EOR_absX
+0x01D6 _ADC_abs
+0x01D7 _ADC_absX
+0x01D8 _STA_abs
+0x01D9 _STA_absX
+0x01DA _LDA_abs
+0x01DB _LDA_absX
+0x01DC _CMP_abs
+0x01DD _CMP_absX
+0x01DE _SBC_abs
+0x01DF _SBC_absX
+0x01E0 _ASL_abs
+0x01E1 _ASL_absX
+0x01E2 _ROL_abs
+0x01E3 _ROL_absX
+0x01E4 _LSR_abs
+0x01E5 _LSR_absX
+0x01E6 _ROR_abs
+0x01E7 _ROR_absX
+0x01E8 _STX_abs
+0x01E9 _STZ_absX
+0x01EA _LDX_abs
+0x01EB _LDX_absY
+0x01EC _DEC_abs
+0x01ED _DEC_absX
+0x01EE _INC_abs
+0x01EF _INC_absX
+0x01F0 _BBR0_dp_rel
+0x01F1 _BBR1_dp_rel
+0x01F2 _BBR2_dp_rel
+0x01F3 _BBR3_dp_rel
+0x01F4 _BBR4_dp_rel
+0x01F5 _BBR5_dp_rel
+0x01F6 _BBR6_dp_rel
+0x01F7 _BBR7_dp_rel
+0x01F8 _BBS0_dp_rel
+0x01F9 _BBS1_dp_rel
+0x01FA _BBS2_dp_rel
+0x01FB _BBS3_dp_rel
+0x01FC _BBS4_dp_rel
+0x01FD _BBS5_dp_rel
+0x01FE _BBS6_dp_rel
+0x01FF _BBS7_dp_rel
+0x0200 _Last
+0x0200 _end
+ 
+File  Prog     
+Line  Line   Opcode                                Line
+0614 0x0000 _Start: .org 0
+0615 0x0000  600D0300 BRV2 _Rst,1,1,,, IF -- Load {OP2, OP1} with Vector
+0616 0x0001 _Rst:
+0617 0x0001  200C0280 FTCH $,1,0,,, RD, OP1 -- Read Indirect Dst Ptr Lo
+0618 0x0002  20143A40 FTCH $,1,0, Nxt, Jmp, RD, OP2 -- Read Indirect Dst Ptr Hi
+0619  --
+0620 0x0003  501D07C0 BRV1 $,1,1,, Pls, IF, IR -- Instruction Fetch
+0622  -- this space reserved for future use - boot loader for the microprogram ROMs
+0624  --------------------------------------------------------------------------------
+0625  --------------------------------------------------------------------------------
+0626  -- 2-Way Jump Table: _Nxt and _Int
+0627  --------------------------------------------------------------------------------
+0628  --------------------------------------------------------------------------------
+0629  -- Instruction Fetch and Execute Microstate
+0630  --------------------------------------------------------------------------------
+0000 0x0004  00000000 added by program
+0000 0x0005  00000000 added by program
+0000 0x0006  00000000 added by program
+0000 0x0007  00000000 added by program
+0000 0x0008  00000000 added by program
+0000 0x0009  00000000 added by program
+0000 0x000A  00000000 added by program
+0000 0x000B  00000000 added by program
+0000 0x000C  00000000 added by program
+0000 0x000D  00000000 added by program
+0000 0x000E  00000000 added by program
+0000 0x000F  00000000 added by program
+0000 0x0010  00000000 added by program
+0000 0x0011  00000000 added by program
+0000 0x0012  00000000 added by program
+0000 0x0013  00000000 added by program
+0000 0x0014  00000000 added by program
+0000 0x0015  00000000 added by program
+0000 0x0016  00000000 added by program
+0000 0x0017  00000000 added by program
+0000 0x0018  00000000 added by program
+0000 0x0019  00000000 added by program
+0000 0x001A  00000000 added by program
+0000 0x001B  00000000 added by program
+0000 0x001C  00000000 added by program
+0000 0x001D  00000000 added by program
+0000 0x001E  00000000 added by program
+0000 0x001F  00000000 added by program
+0631 0x0020 _Nxt: .org 32
+0632 0x0020 _Psh:
+0633 0x0020 _Pop:
+0634 0x0020 _Rel:
+0635 0x0020 _Imm:
+0636 0x0020  510507C8 BRV1 _Nxt,1,1,, Pls, IF, IR,, WE_R -- Instruction Fetch/Execute
+0638  --------------------------------------------------------------------------------
+0639  -- Interrupt Entry - NMI, (unmasked) IRQ (falls through to _BRK)
+0640  --------------------------------------------------------------------------------
+0642 0x0021 _Int:
+0643 0x0021  61154168 BRV2 _Brk,1,1, Stk,, WR, PCH, Psh, WE_R -- Push PCH, capture Vector
+0645  --------------------------------------------------------------------------------
+0646  -- BRK Entry - BRK #imm (_Int falls through to _Brk, see comment above)
+0647  --------------------------------------------------------------------------------
+0649 0x0022 _Brk:
+0650 0x0022  211441A0 FTCH $,1,0, Stk,, WR, PCL, Psh -- Push PCL
+0651 0x0023  211C49E1 FTCH $,1,0, Stk, Jmp, WR, PSW, Psh,, ISR -- Push P; Clr D, Set I
+0652  --
+0653 0x0024  21248280 FTCH $,1,0, LDA,, RD, OP1 -- Read Indirect Dst Ptr Lo
+0654 0x0025  212C3A40 FTCH $,1,0, Nxt, Jmp, RD, OP2 -- Read Indirect Dst Ptr Hi
+0655  --
+0656 0x0026  513507C0 BRV1 $,1,1,, Pls, IF, IR -- Instruction Fetch
+0658  --------------------------------------------------------------------------------
+0659  -- Jump To Subroutine - JSR Abs (Not interruptable)
+0660  --------------------------------------------------------------------------------
+0662 0x0027 _JSR:
+0663 0x0027  213C0340 FTCH $,1,0,,, IF, OP2 -- Load Indirect Dst Ptr Lo
+0664 0x0028  21444160 FTCH $,1,0, Stk,, WR, PCH, Psh -- Push PC Hi
+0665 0x0029  410449A0 BRV0 _Nxt,1,0, Stk, Jmp, WR, PCL, Psh -- Push PC Lo
+0667  --------------------------------------------------------------------------------
+0668  -- Return from Interrupt - RTI (Not interruptable)
+0669  --------------------------------------------------------------------------------
+0671 0x002A _RTI:
+0672 0x002A  215442BC FTCH $,1,0, Stk,, RD, OP1, Pop, WE_P -- Pop PCL
+0673 0x002B  215C4A70 FTCH $,1,0, Stk, Jmp, RD, OP2, Pop -- Pop PCH
+0674  --
+0675 0x002C  516507C0 BRV1 $,1,1,, Pls, IF, IR -- Next, no Reg_WE, P okay
+0677  --------------------------------------------------------------------------------
+0678  -- Return From Subroutine - RTS (Not interruptable)
+0679  --------------------------------------------------------------------------------
+0681 0x002D _RTS:
+0682 0x002D  41044A70 BRV0 _Nxt,1,0, Stk, Jmp, RD, OP2, Pop -- Pop PCH
+0684  --------------------------------------------------------------------------------
+0685  -- Jump Absolute - JMP Abs (Not interruptable)
+0686  --------------------------------------------------------------------------------
+0688 0x002E _Jmp:
+0689 0x002E  41040B40 BRV0 _Nxt,1,0,, Jmp, IF, OP2
+0691  --------------------------------------------------------------------------------
+0692  -- Jump Indirect - JMP (Abs) (Not interruptable)
+0693  --------------------------------------------------------------------------------
+0695 0x002F _JmpI:
+0696 0x002F  217C0740 FTCH $,1,0,, Pls, IF, OP2 -- Load Indirect Dst Ptr Lo
+0697 0x0030  21848280 FTCH $,1,0, LDA,, RD, OP1 -- Read Indirect Dst Ptr Hi
+0698 0x0031  41043A40 BRV0 _Nxt,1,0, Nxt, Jmp, RD, OP2 -- Goto Next
+0700  --------------------------------------------------------------------------------
+0701  -- Jump Pre-Indexed Indirect - JMP (Abs, X) (Not interruptable)
+0702  --------------------------------------------------------------------------------
+0704 0x0032 _JmpXI:
+0705 0x0032  21940740 FTCH $,1,0,, Pls, IF, OP2 -- Load Indirect Dst Ptr Lo
+0706 0x0033  219CE280 FTCH $,1,0, LDAX,, RD, OP1 -- Read Indirect Dst Ptr Hi
+0707 0x0034  41043A40 BRV0 _Nxt,1,0, Nxt, Jmp, RD, OP2 -- Goto Next
+0709  --------------------------------------------------------------------------------
+0710  -- Memory Read-Only Data Page Direct - xxx DP
+0711  --------------------------------------------------------------------------------
+0713 0x0035 _RO_DP:
+0714 0x0035  31045280 BMW _Nxt,1,0, DPN,, RD, OP1 -- Read DP Mem
+0716  -----------------------------------------------------------------------------
+0717  -- Memory Read-Only Pre-Indexed Data Page Direct - xxx DP, X
+0718  --------------------------------------------------------------------------------
+0720 0x0036 _RO_DPX:
+0721 0x0036  31046280 BMW _Nxt,1,0, DPX,, RD, OP1 -- Read DP Mem
+0723  --------------------------------------------------------------------------------
+0724  -- Memory Read-Only Post-Indexed Data Page Direct - xxx DP, Y
+0725  --------------------------------------------------------------------------------
+0727 0x0037 _RO_DPY:
+0728 0x0037  31047280 BMW _Nxt,1,0, DPY,, RD, OP1 -- Read DP Mem
+0730  ------------------------------------------------------------------------------
+0731  -- Memory Read-Only Data Page Indirect - xxx (DP)
+0732  --------------------------------------------------------------------------------
+0734 0x0038 _RO_DPI:
+0735 0x0038  21C45280 FTCH $,1,0, DPN,, RD, OP1 -- Read DP Mem Ptr Lo
+0736 0x0039  21CC3240 FTCH $,1,0, Nxt,, RD, OP2 -- Read DP Mem Ptr Hi
+0737 0x003A  31048280 BMW _Nxt,1,0, LDA,, RD, OP1 -- Read Operand
+0739  --------------------------------------------------------------------------------
+0740  -- Memory Read-Only Pre-Indexed Data Page Indirect - xxx (DP, X)
+0741  --------------------------------------------------------------------------------
+0743 0x003B _RO_DPXI:
+0744 0x003B  21DC6280 FTCH $,1,0, DPX,, RD, OP1 -- Read DP Mem Ptr Lo (DP,X)
+0745 0x003C  21E43240 FTCH $,1,0, Nxt,, RD, OP2 -- Read DP Mem Ptr Hi
+0746 0x003D  31048280 BMW _Nxt,1,0, LDA,, RD, OP1 -- Read Operand
+0748  --------------------------------------------------------------------------------
+0749  -- Memory Read-Only Post-Indexed Data Page Indirect - xxx (DP), Y
+0750  --------------------------------------------------------------------------------
+0752 0x003E _RO_DPIY:
+0753 0x003E  21F45280 FTCH $,1,0, DPN,, RD, OP1 -- Read DP Mem Ptr Lo
+0754 0x003F  21FC3240 FTCH $,1,0, Nxt,, RD, OP2 -- Read DP Mem Ptr Hi
+0755 0x0040  3104F280 BMW _Nxt,1,0, LDAY,, RD, OP1 -- Read Operand (DP),Y
+0757  --------------------------------------------------------------------------------
+0758  -- Memory Read-Only Absolute - xxx Abs
+0759  --------------------------------------------------------------------------------
+0761 0x0041 _RO_Abs:
+0762 0x0041  220C0740 FTCH $,1,0,, Pls, IF, OP2 -- Read Mem Ptr Hi
+0763 0x0042  31048280 BMW _Nxt,1,0, LDA,, RD, OP1 -- Read Operand
+0765  --------------------------------------------------------------------------------
+0766  -- Memory Read-Only Pre-Indexed Absolute - xxx Abs, X
+0767  --------------------------------------------------------------------------------
+0769 0x0043 _RO_AbsX:
+0770 0x0043  221C0740 FTCH $,1,0,, Pls, IF, OP2 -- Read Mem Ptr Hi
+0771 0x0044  3104E280 BMW _Nxt,1,0, LDAX,, RD, OP1 -- Read Operand Abs,X
+0773  --------------------------------------------------------------------------------
+0774  -- Memory Read-Only Post-Indexed Absolute - xxx Abs, Y
+0775  --------------------------------------------------------------------------------
+0777 0x0045 _RO_AbsY:
+0778 0x0045  222C0740 FTCH $,1,0,, Pls, IF, OP2 -- Read Mem Ptr Hi
+0779 0x0046  3104F280 BMW _Nxt,1,0, LDAY,, RD, OP1 -- Read Operand Abs,Y
+0781  --------------------------------------------------------------------------------
+0782  -- Memory Write-Only Data Page Direct - xxx DP
+0783  --------------------------------------------------------------------------------
+0785 0x0047 _WO_DP:
+0786 0x0047  31045100 BMW _Nxt,1,0, DPN,, WR -- Write to DP
+0788  -----------------------------------------------------------------------------
+0789  -- Memory Write-Only Pre-Indexed Data Page Direct - xxx DP, X
+0790  --------------------------------------------------------------------------------
+0792 0x0048 _WO_DPX:
+0793 0x0048  31046100 BMW _Nxt,1,0, DPX,, WR -- Write to DP,X
+0795  -----------------------------------------------------------------------------
+0796  -- Memory Write-Only Post-Indexed Data Page Direct - xxx DP, Y
+0797  --------------------------------------------------------------------------------
+0799 0x0049 _WO_DPY:
+0800 0x0049  31047100 BMW _Nxt,1,0, DPY,, WR -- Write to DP,Y
+0802  --------------------------------------------------------------------------------
+0803  -- Memory Write-Only Data Page Indirect - xxx (DP)
+0804  --------------------------------------------------------------------------------
+0806 0x004A _WO_DPI:
+0807 0x004A  22545280 FTCH $,1,0, DPN,, RD, OP1 -- Read DP Mem Ptr Lo
+0808 0x004B  225C3240 FTCH $,1,0, Nxt,, RD, OP2 -- Read DP Mem Ptr Hi
+0809 0x004C  31048100 BMW _Nxt,1,0, LDA,, WR -- Write to (DP)
+0811  --------------------------------------------------------------------------------
+0812  -- Memory Write-Only Data Page Indirect - xxx (DP, X)
+0813  --------------------------------------------------------------------------------
+0815 0x004D _WO_DPXI:
+0816 0x004D  226C6280 FTCH $,1,0, DPX,, RD, OP1 -- Read DP Mem Ptr Lo
+0817 0x004E  22743240 FTCH $,1,0, Nxt,, RD, OP2 -- Read DP Mem Ptr Hi
+0818 0x004F  31048100 BMW _Nxt,1,0, LDA,, WR -- Write to (DP)
+0820  --------------------------------------------------------------------------------
+0821  -- Memory Write-Only Post-Indexed Data Page Indirect - xxx (DP), Y
+0822  --------------------------------------------------------------------------------
+0824 0x0050 _WO_DPIY:
+0825 0x0050  22845280 FTCH $,1,0, DPN,, RD, OP1 -- Read DP Mem Ptr Lo
+0826 0x0051  228C3240 FTCH $,1,0, Nxt,, RD, OP2 -- Read DP Mem Ptr Hi
+0827 0x0052  3104F100 BMW _Nxt,1,0, LDAY,, WR -- Write to (DP)
+0829  --------------------------------------------------------------------------------
+0830  -- Memory Write-Only Absolute - xxx Abs
+0831  --------------------------------------------------------------------------------
+0833 0x0053 _WO_Abs:
+0834 0x0053  229C0740 FTCH $,1,0,, Pls, IF, OP2 -- Read Mem Ptr Hi
+0835 0x0054  31048100 BMW _Nxt,1,0, LDA,, WR -- Write to Abs
+0837  --------------------------------------------------------------------------------
+0838  -- Memory Write-Only Pre-Indexed Absolute - xxx Abs, X
+0839  --------------------------------------------------------------------------------
+0841 0x0055 _WO_AbsX:
+0842 0x0055  22AC0740 FTCH $,1,0,, Pls, IF, OP2 -- Read Mem Ptr Hi
+0843 0x0056  3104E100 BMW _Nxt,1,0, LDAX,, WR -- Write to Abs,X
+0845  --------------------------------------------------------------------------------
+0846  -- Memory Write-Only Post-Indexed Absolute - xxx Abs, Y
+0847  --------------------------------------------------------------------------------
+0849 0x0057 _WO_AbsY:
+0850 0x0057  22BC0740 FTCH $,1,0,, Pls, IF, OP2 -- Read Mem Ptr Hi
+0851 0x0058  3104F100 BMW _Nxt,1,0, LDAY,, WR -- Write to Abs,Y
+0853  --------------------------------------------------------------------------------
+0854  -- 2-way Read-Modify-Write Instruction/Interrupt Jump Table
+0855  --------------------------------------------------------------------------------
+0000 0x0059  00000000 added by program
+0000 0x005A  00000000 added by program
+0000 0x005B  00000000 added by program
+0000 0x005C  00000000 added by program
+0000 0x005D  00000000 added by program
+0000 0x005E  00000000 added by program
+0000 0x005F  00000000 added by program
+0857 0x0060 _RMW: .org 96
+0858 0x0060  530507C0 BRV1 _RMW,1,1,, Pls, IF, IR -- Instruction Fetch/Execute
+0859 0x0061  61154160 BRV2 _Brk,1,1, Stk, , WR, PCH, Psh -- Push PCH, capture Vector
+0861  --------------------------------------------------------------------------------
+0862  -- Memory Read-Modify-Write Data Page Direct - xxx DP
+0863  --------------------------------------------------------------------------------
+0865 0x0062 _RMW_DP:
+0866 0x0062  23145280 FTCH $,1,0, DPN,, RD, OP1 -- Read from DP
+0867 0x0063  33042108 BMW _RMW,1,0, MAR,, WR,,,WE_R -- Write to DP
+0869  --------------------------------------------------------------------------------
+0870  -- Memory Read-Modify-Write Pre-Indexed Data Page Direct - xxx DP, X
+0871  --------------------------------------------------------------------------------
+0873 0x0064 _RMW_DPX:
+0874 0x0064  23246280 FTCH $,1,0, DPX,, RD, OP1 -- Read from DP,X
+0875 0x0065  33042108 BMW _RMW,1,0, MAR,, WR,,,WE_R -- Write to DP,X
+0877  --------------------------------------------------------------------------------
+0878  -- Memory Read-Modify-Write Post-Indexed Data Page Direct - xxx DP, Y
+0879  --------------------------------------------------------------------------------
+0881 0x0066 _RMW_DPY:
+0882 0x0066  23347280 FTCH $,1,0, DPY,, RD, OP1 -- Read from DP,Y
+0883 0x0067  33042108 BMW _RMW,1,0, MAR,, WR,,,WE_R -- Write to DP,Y
+0885  --------------------------------------------------------------------------------
+0886  -- Memory Read-Modify-Write Absolute - xxx Abs
+0887  --------------------------------------------------------------------------------
+0889 0x0068 _RMW_Abs:
+0890 0x0068  23440740 FTCH $,1,0,, Pls, IF, OP2 -- Read Mem Ptr Hi
+0891 0x0069  234C8280 FTCH $,1,0, LDA,, RD, OP1 -- Read from Abs
+0892 0x006A  33042108 BMW _RMW,1,0, MAR,, WR,,,WE_R -- Write to Abs
+0894  --------------------------------------------------------------------------------
+0895  -- Memory Read-Modify-Write Pre-Indexed Absolute - xxx Abs, X
+0896  --------------------------------------------------------------------------------
+0898 0x006B _RMW_AbsX:
+0899 0x006B  235C0740 FTCH $,1,0,, Pls, IF, OP2 -- Read Mem Ptr Hi
+0900 0x006C  2364E280 FTCH $,1,0, LDAX,, RD, OP1 -- Read from Abs,X
+0901 0x006D  33042108 BMW _RMW,1,0, MAR,, WR,,,WE_R -- Write to Abs,X
+0903  --------------------------------------------------------------------------------
+0904  -- Memory Read-Modify-Write Post-Indexed Absolute - xxx Abs, Y
+0905  --------------------------------------------------------------------------------
+0907 0x006E _RMW_AbsY:
+0908 0x006E  23740740 FTCH $,1,0,, Pls, IF, OP2 -- Read Mem Ptr Hi
+0909 0x006F  237CF280 FTCH $,1,0, LDAY,, RD, OP1 -- Read from Abs,Y
+0910 0x0070  33042108 BMW _RMW,1,0, MAR,, WR,,,WE_R -- Write to Abs,Y
+0912  --------------------------------------------------------------------------------
+0913  -- Rockwell BBRx/BBSx dp,rel instructions
+0914  --------------------------------------------------------------------------------
+0916 0x0071 _BByx_dp_rel:
+0917 0x0071  238C5280 FTCH $,1,0, DPN,, RD, OP1 -- Read from DP
+0918 0x0072  41040F80 BRV0 _Nxt,1,0,, Rel, IF, OP1 -- Read rel value
+0920  --------------------------------------------------------------------------------
+0921  -- End of Microprogram Routines for Normal Instructions
+0922  --------------------------------------------------------------------------------
+0924 0x0073 _End_uPgm:
+0926  --------------------------------------------------------------------------------
+0927  -- WAI - Wait for Interrupt
+0928  --------------------------------------------------------------------------------
+0000 0x0073  00000000 added by program
+0000 0x0074  00000000 added by program
+0000 0x0075  00000000 added by program
+0000 0x0076  00000000 added by program
+0000 0x0077  00000000 added by program
+0000 0x0078  00000000 added by program
+0000 0x0079  00000000 added by program
+0000 0x007A  00000000 added by program
+0000 0x007B  00000000 added by program
+0000 0x007C  00000000 added by program
+0000 0x007D  00000000 added by program
+0000 0x007E  00000000 added by program
+0000 0x007F  00000000 added by program
+0000 0x0080  00000000 added by program
+0000 0x0081  00000000 added by program
+0000 0x0082  00000000 added by program
+0000 0x0083  00000000 added by program
+0000 0x0084  00000000 added by program
+0000 0x0085  00000000 added by program
+0000 0x0086  00000000 added by program
+0000 0x0087  00000000 added by program
+0000 0x0088  00000000 added by program
+0000 0x0089  00000000 added by program
+0000 0x008A  00000000 added by program
+0000 0x008B  00000000 added by program
+0000 0x008C  00000000 added by program
+0000 0x008D  00000000 added by program
+0000 0x008E  00000000 added by program
+0000 0x008F  00000000 added by program
+0000 0x0090  00000000 added by program
+0000 0x0091  00000000 added by program
+0000 0x0092  00000000 added by program
+0000 0x0093  00000000 added by program
+0000 0x0094  00000000 added by program
+0000 0x0095  00000000 added by program
+0000 0x0096  00000000 added by program
+0000 0x0097  00000000 added by program
+0000 0x0098  00000000 added by program
+0000 0x0099  00000000 added by program
+0000 0x009A  00000000 added by program
+0000 0x009B  00000000 added by program
+0000 0x009C  00000000 added by program
+0000 0x009D  00000000 added by program
+0000 0x009E  00000000 added by program
+0000 0x009F  00000000 added by program
+0000 0x00A0  00000000 added by program
+0000 0x00A1  00000000 added by program
+0000 0x00A2  00000000 added by program
+0000 0x00A3  00000000 added by program
+0000 0x00A4  00000000 added by program
+0000 0x00A5  00000000 added by program
+0000 0x00A6  00000000 added by program
+0000 0x00A7  00000000 added by program
+0000 0x00A8  00000000 added by program
+0000 0x00A9  00000000 added by program
+0000 0x00AA  00000000 added by program
+0000 0x00AB  00000000 added by program
+0000 0x00AC  00000000 added by program
+0000 0x00AD  00000000 added by program
+0000 0x00AE  00000000 added by program
+0000 0x00AF  00000000 added by program
+0000 0x00B0  00000000 added by program
+0000 0x00B1  00000000 added by program
+0000 0x00B2  00000000 added by program
+0000 0x00B3  00000000 added by program
+0000 0x00B4  00000000 added by program
+0000 0x00B5  00000000 added by program
+0000 0x00B6  00000000 added by program
+0000 0x00B7  00000000 added by program
+0000 0x00B8  00000000 added by program
+0000 0x00B9  00000000 added by program
+0000 0x00BA  00000000 added by program
+0000 0x00BB  00000000 added by program
+0000 0x00BC  00000000 added by program
+0000 0x00BD  00000000 added by program
+0000 0x00BE  00000000 added by program
+0000 0x00BF  00000000 added by program
+0000 0x00C0  00000000 added by program
+0000 0x00C1  00000000 added by program
+0000 0x00C2  00000000 added by program
+0000 0x00C3  00000000 added by program
+0000 0x00C4  00000000 added by program
+0000 0x00C5  00000000 added by program
+0000 0x00C6  00000000 added by program
+0000 0x00C7  00000000 added by program
+0000 0x00C8  00000000 added by program
+0000 0x00C9  00000000 added by program
+0000 0x00CA  00000000 added by program
+0000 0x00CB  00000000 added by program
+0000 0x00CC  00000000 added by program
+0000 0x00CD  00000000 added by program
+0000 0x00CE  00000000 added by program
+0000 0x00CF  00000000 added by program
+0000 0x00D0  00000000 added by program
+0000 0x00D1  00000000 added by program
+0000 0x00D2  00000000 added by program
+0000 0x00D3  00000000 added by program
+0000 0x00D4  00000000 added by program
+0000 0x00D5  00000000 added by program
+0000 0x00D6  00000000 added by program
+0000 0x00D7  00000000 added by program
+0000 0x00D8  00000000 added by program
+0000 0x00D9  00000000 added by program
+0000 0x00DA  00000000 added by program
+0000 0x00DB  00000000 added by program
+0000 0x00DC  00000000 added by program
+0000 0x00DD  00000000 added by program
+0000 0x00DE  00000000 added by program
+0000 0x00DF  00000000 added by program
+0000 0x00E0  00000000 added by program
+0000 0x00E1  00000000 added by program
+0000 0x00E2  00000000 added by program
+0000 0x00E3  00000000 added by program
+0000 0x00E4  00000000 added by program
+0000 0x00E5  00000000 added by program
+0000 0x00E6  00000000 added by program
+0000 0x00E7  00000000 added by program
+0000 0x00E8  00000000 added by program
+0000 0x00E9  00000000 added by program
+0000 0x00EA  00000000 added by program
+0000 0x00EB  00000000 added by program
+0000 0x00EC  00000000 added by program
+0000 0x00ED  00000000 added by program
+0000 0x00EE  00000000 added by program
+0000 0x00EF  00000000 added by program
+0000 0x00F0  00000000 added by program
+0000 0x00F1  00000000 added by program
+0000 0x00F2  00000000 added by program
+0000 0x00F3  00000000 added by program
+0000 0x00F4  00000000 added by program
+0000 0x00F5  00000000 added by program
+0000 0x00F6  00000000 added by program
+0000 0x00F7  00000000 added by program
+0000 0x00F8  00000000 added by program
+0000 0x00F9  00000000 added by program
+0000 0x00FA  00000000 added by program
+0000 0x00FB  00000000 added by program
+0930 0x00FC _WAI: .org 252 -- Set up 4-way table for WAI instruction
+0931 0x00FC  37E40000 BMW _WAI,1,0 -- No external interrupts asserted
+0932 0x00FD  410C0000 BRV0 _Int,1,0 -- Int asserted by NMI, do NMI interrupt
+0933 0x00FE  41040000 BRV0 _Nxt,1,0 -- xIRQ asserted with IRQ_Msk asserted, continue
+0934 0x00FF  410C0000 BRV0 _Int,1,0 -- Int asserted by xIRQ, do IRQ interrupt
+0936 0x0100 _IDEC_Start: .org 256
+0938  --------------------------------------------------------------------------------
+0939  -- Start of Instruction Decode Table (Entry for each Opcode)
+0940  --
+0941  -- Instead of being organized in numerical order, the table is organized by
+0942  -- rows: the least significant nibble and the most significant nibble of the
+0943  -- opcode are swapped. This organization more clearly shows the arrangement of
+0944  -- the addressing modes of the WDC W65C02 microprocessor being emulated. It al-
+0945  -- so more clearly shows the regularity of the ALU instructions that are imple-
+0946  -- mented. The implementation of the microprogram is first based on the addres-
+0947  -- sing mode, and then on the ALU function. Single cycle instructions will be
+0948  -- easily recognized in the following table because their table entry use the
+0949  -- BRV3 MPC instruction. Multi-cycle instructions use the BRV0 MPC instruction
+0950  -- to vector a microroutine in the lower 256 words of the microprogram ROM/RAM.
+0951  -- Single byte instructions such as BRK, RTS, RTI, and register push/pull in-
+0952  -- structions (PHA, PLA, PHP, PLP, PHX, PLX, PHY, PLY), and multi-byte instruc-
+0953  -- tions like JSR abs are implemented with special microroutines that perform
+0954  -- the necessary stack accesses. The remainder of the microroutines are orga-
+0955  -- nized by addressing mode, and whether the mode is used in a RO, WO, or RMW
+0956  -- manner.
+0957  --
+0958  -- Microprogram Word Format:
+0959  --
+0960  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+0961  --
+0962  --------------------------------------------------------------------------------
+0964  --------------------------------------------------------------------------------
+0965  -- Row 0 : 0x00-0xF0 (All branches/JMPs/JSR implemented as uninterruptable)
+0966  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+0967  --------------------------------------------------------------------------------
+0968 0x0100 _BRK_imm:
+0969 0x0100  6115416C BRV2 _Brk,1,1, Stk,, WR, PCH, Psh, WE_P -- Start Break Handler
+0970 0x0101 _BPL_rel:
+0971 0x0101  41040F80 BRV0 _Rel,1,0,, Rel, IF, OP1 -- Read rel Value
+0972 0x0102 _JSR_abs:
+0973 0x0102  413C0780 BRV0 _JSR,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+0974 0x0103 _BMI_rel:
+0975 0x0103  41040F80 BRV0 _Rel,1,0,, Rel, IF, OP1 -- Read rel Value
+0976 0x0104 _RTI_imp:
+0977 0x0104  415442B0 BRV0 _RTI,1,0, Stk,, RD, OP1, Pop -- Read PSW from Stack
+0978 0x0105 _BVC_rel:
+0979 0x0105  41040F80 BRV0 _Rel,1,0,, Rel, IF, OP1 -- Read rel Value
+0980 0x0106 _RTS_imp:
+0981 0x0106  416C42B0 BRV0 _RTS,1,0, Stk,, RD, OP1, Pop -- Read PCL from Stack
+0982 0x0107 _BVS_rel:
+0983 0x0107  41040F80 BRV0 _Rel,1,0,, Rel, IF, OP1 -- Read rel Value
+0984 0x0108 _BRA_rel:
+0985 0x0108  41040F80 BRV0 _Rel,1,0,, Rel, IF, OP1 -- Read rel Value
+0986 0x0109 _BCC_rel
+0987 0x0109  41040F80 BRV0 _Rel,1,0,, Rel, IF, OP1 -- Read rel Value
+0988 0x010A _LDY_imm:
+0989 0x010A  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read #imm Value
+0990 0x010B _BCS_rel:
+0991 0x010B  41040F80 BRV0 _Rel,1,0,, Rel, IF, OP1 -- Read rel Value
+0992 0x010C _CPY_imm:
+0993 0x010C  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read #imm Value
+0994 0x010D _BNE_rel:
+0995 0x010D  41040F80 BRV0 _Rel,1,0,, Rel, IF, OP1 -- Read rel Value
+0996 0x010E _CPX_imm:
+0997 0x010E  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read #imm Value
+0998 0x010F _BEQ_rel:
+0999 0x010F  41040F80 BRV0 _Rel,1,0,, Rel, IF, OP1 -- Read rel Value
+1000  --------------------------------------------------------------------------------
+1001  -- Row 1 : 0x01-0xF1
+1002  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1003  --------------------------------------------------------------------------------
+1004 0x0110 _ORA_dpXi:
+1005 0x0110  41DC0780 BRV0 _RO_DPXI,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1006 0x0111 _ORA_dpiY:
+1007 0x0111  41F40780 BRV0 _RO_DPIY,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1008 0x0112 _AND_dpXi:
+1009 0x0112  41DC0780 BRV0 _RO_DPXI,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1010 0x0113 _AND_dpiY:
+1011 0x0113  41F40780 BRV0 _RO_DPIY,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1012 0x0114 _EOR_dpXi:
+1013 0x0114  41DC0780 BRV0 _RO_DPXI,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1014 0x0115 _EOR_dpiY:
+1015 0x0115  41F40780 BRV0 _RO_DPIY,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1016 0x0116 _ADC_dpXi:
+1017 0x0116  41DC0780 BRV0 _RO_DPXI,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1018 0x0117 _ADC_dpiY:
+1019 0x0117  41F40780 BRV0 _RO_DPIY,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1020 0x0118 _STA_dpXi:
+1021 0x0118  426C0780 BRV0 _WO_DPXI,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1022 0x0119 _STA_dpiY:
+1023 0x0119  42840780 BRV0 _WO_DPIY,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1024 0x011A _LDA_dpXi:
+1025 0x011A  41DC0780 BRV0 _RO_DPXI,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1026 0x011B _LDA_dpiY:
+1027 0x011B  41F40780 BRV0 _RO_DPIY,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1028 0x011C _CMP_dpXi:
+1029 0x011C  41DC0780 BRV0 _RO_DPXI,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1030 0x011D _CMP_dpiY:
+1031 0x011D  41F40780 BRV0 _RO_DPIY,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1032 0x011E _SBC_dpXi:
+1033 0x011E  41DC0780 BRV0 _RO_DPXI,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1034 0x011F _SBC_dpiY:
+1035 0x011F  41F40780 BRV0 _RO_DPIY,1,0,, Pls, IF, OP1 -- Read DP Ptr
+1036  --------------------------------------------------------------------------------
+1037  -- Row 2 : 0x02-0xF2
+1038  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1039  --------------------------------------------------------------------------------
+1040 0x0120 _NOP_02:
+1041 0x0120  790707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1042 0x0121 _ORA_dpi:
+1043 0x0121  41C40780 BRV0 _RO_DPI,1,0,, Pls, IF, OP1 -- Read DP
+1044 0x0122 _NOP_22:
+1045 0x0122  791707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1046 0x0123 _AND_dpi:
+1047 0x0123  41C40780 BRV0 _RO_DPI,1,0,, Pls, IF, OP1 -- Read DP
+1048 0x0124 _NOP_42:
+1049 0x0124  792707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1050 0x0125 _EOR_dpi:
+1051 0x0125  41C40780 BRV0 _RO_DPI,1,0,, Pls, IF, OP1 -- Read DP
+1052 0x0126 _NOP_62:
+1053 0x0126  793707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1054 0x0127 _ADC_dpi:
+1055 0x0127  41C40780 BRV0 _RO_DPI,1,0,, Pls, IF, OP1 -- Read DP
+1056 0x0128 _NOP_82:
+1057 0x0128  794707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1058 0x0129 _STA_dpi:
+1059 0x0129  42540780 BRV0 _WO_DPI,1,0,, Pls, IF, OP1 -- Read DP
+1060 0x012A _LDX_imm:
+1061 0x012A  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read #imm Value
+1062 0x012B _LDA_dpi:
+1063 0x012B  41C40780 BRV0 _RO_DPI,1,0,, Pls, IF, OP1 -- Read DP
+1064 0x012C _NOP_C2:
+1065 0x012C  796707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1066 0x012D _CMP_dpi:
+1067 0x012D  41C40780 BRV0 _RO_DPI,1,0,, Pls, IF, OP1 -- Read DP
+1068 0x012E _NOP_E2:
+1069 0x012E  797707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1070 0x012F _SBC_dpi:
+1071 0x012F  41C40780 BRV0 _RO_DPI,1,0,, Pls, IF, OP1 -- Read DP
+1072  --------------------------------------------------------------------------------
+1073  -- Row 3 : 0x03-0xF3
+1074  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1075  --------------------------------------------------------------------------------
+1076 0x0130 _NOP_03:
+1077 0x0130  798707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1078 0x0131 _NOP_13:
+1079 0x0131  798F07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1080 0x0132 _NOP_23:
+1081 0x0132  799707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1082 0x0133 _NOP_33:
+1083 0x0133  799F07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1084 0x0134 _NOP_43:
+1085 0x0134  79A707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1086 0x0135 _NOP_53:
+1087 0x0135  79AF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1088 0x0136 _NOP_63:
+1089 0x0136  79B707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1090 0x0137 _NOP_73:
+1091 0x0137  79BF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1092 0x0138 _NOP_83:
+1093 0x0138  79C707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1094 0x0139 _NOP_93:
+1095 0x0139  79CF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1096 0x013A _NOP_A3:
+1097 0x013A  79D707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1098 0x013B _NOP_B3:
+1099 0x013B  79DF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1100 0x013C _NOP_C3:
+1101 0x013C  79E707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1102 0x013D _NOP_D3:
+1103 0x013D  79EF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1104 0x013E _NOP_E3:
+1105 0x013E  79F707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1106 0x013F _NOP_F3:
+1107 0x013F  79FF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1108  --------------------------------------------------------------------------------
+1109  -- Row 4 : 0x04-0xF4
+1110  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1111  --------------------------------------------------------------------------------
+1112 0x0140 _TSB_dp:
+1113 0x0140  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1114 0x0141 _TRB_dp:
+1115 0x0141  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1116 0x0142 _BIT_dp:
+1117 0x0142  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1118 0x0143 _BIT_dpX:
+1119 0x0143  41B40780 BRV0 _RO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1120 0x0144 _NOP_44:
+1121 0x0144  7A2707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1122 0x0145 _NOP_54:
+1123 0x0145  7A2F07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1124 0x0146 _STZ_dp:
+1125 0x0146  423C0780 BRV0 _WO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1126 0x0147 _STZ_dpX:
+1127 0x0147  42440780 BRV0 _WO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1128 0x0148 _STY_dp:
+1129 0x0148  423C0780 BRV0 _WO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1130 0x0149 _STY_dpX:
+1131 0x0149  42440780 BRV0 _WO_DPX,1,0,, Pls, IR, OP1 -- Read DP
+1132 0x014A _LDY_dp:
+1133 0x014A  41AC0780 BRV0 _RO_DP,1,0,, Pls, IR, OP1 -- Read DP
+1134 0x014B _LDY_dpX:
+1135 0x014B  41B40780 BRV0 _RO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1136 0x014C _CPY_dp:
+1137 0x014C  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1138 0x014D _NOP_D4:
+1139 0x014D  7A6F07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1140 0x014E _CPX_dp:
+1141 0x014E  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1142 0x014F _NOP_F4:
+1143 0x014F  7A7F07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1144  --------------------------------------------------------------------------------
+1145  -- Row 5 : 0x05-0xF5
+1146  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1147  --------------------------------------------------------------------------------
+1148 0x0150 _ORA_dp:
+1149 0x0150  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1150 0x0151 _ORA_dpX:
+1151 0x0151  41B40780 BRV0 _RO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1152 0x0152 _AND_dp:
+1153 0x0152  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1154 0x0153 _AND_dpX:
+1155 0x0153  41B40780 BRV0 _RO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1156 0x0154 _EOR_dp:
+1157 0x0154  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1158 0x0155 _EOR_dpX:
+1159 0x0155  41B40780 BRV0 _RO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1160 0x0156 _ADC_dp:
+1161 0x0156  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1162 0x0157 _ADC_dpX:
+1163 0x0157  41B40780 BRV0 _RO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1164 0x0158 _STA_dp:
+1165 0x0158  423C0780 BRV0 _WO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1166 0x0159 _STA_dpX:
+1167 0x0159  42440780 BRV0 _WO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1168 0x015A _LDA_dp:
+1169 0x015A  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1170 0x015B _LDA_dpX:
+1171 0x015B  41B40780 BRV0 _RO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1172 0x015C _CMP_dp:
+1173 0x015C  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1174 0x015D _CMP_dpX:
+1175 0x015D  41B40780 BRV0 _RO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1176 0x015E _SBC_dp:
+1177 0x015E  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1178 0x015F _SBC_dpX:
+1179 0x015F  41B40780 BRV0 _RO_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1180  --------------------------------------------------------------------------------
+1181  -- Row 6 : 0x06-0xF6
+1182  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1183  --------------------------------------------------------------------------------
+1184 0x0160 _ASL_dp:
+1185 0x0160  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1186 0x0161 _ASL_dpX:
+1187 0x0161  43240780 BRV0 _RMW_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1188 0x0162 _ROL_dp:
+1189 0x0162  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1190 0x0163 _ROL_dpX:
+1191 0x0163  43240780 BRV0 _RMW_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1192 0x0164 _LSR_dp:
+1193 0x0164  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1194 0x0165 _LSR_dpX:
+1195 0x0165  43240780 BRV0 _RMW_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1196 0x0166 _ROR_dp:
+1197 0x0166  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1198 0x0167 _ROR_dpX:
+1199 0x0167  43240780 BRV0 _RMW_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1200 0x0168 _STX_dp:
+1201 0x0168  423C0780 BRV0 _WO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1202 0x0169 _STX_dpY:
+1203 0x0169  424C0780 BRV0 _WO_DPY,1,0,, Pls, IF, OP1 -- Read DP
+1204 0x016A _LDX_dp:
+1205 0x016A  41AC0780 BRV0 _RO_DP,1,0,, Pls, IF, OP1 -- Read DP
+1206 0x016B _LDX_dpY:
+1207 0x016B  41BC0780 BRV0 _RO_DPY,1,0,, Pls, IF, OP1 -- Read DP
+1208 0x016C _DEC_dp:
+1209 0x016C  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1210 0x016D _DEC_dpX:
+1211 0x016D  43240780 BRV0 _RMW_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1212 0x016E _INC_dp:
+1213 0x016E  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1214 0x016F _INC_dpX:
+1215 0x016F  43240780 BRV0 _RMW_DPX,1,0,, Pls, IF, OP1 -- Read DP
+1216  --------------------------------------------------------------------------------
+1217  -- Row 7 : 0x07-0xF7 (Rockwell Instructions: RMBx/SMBx dp)
+1218  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1219  --------------------------------------------------------------------------------
+1220 0x0170 _RMB0_dp:
+1221 0x0170  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1222 0x0171 _RMB1_dp:
+1223 0x0171  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1224 0x0172 _RMB2_dp:
+1225 0x0172  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1226 0x0173 _RMB3_dp:
+1227 0x0173  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1228 0x0174 _RMB4_dp:
+1229 0x0174  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1230 0x0175 _RMB5_dp:
+1231 0x0175  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1232 0x0176 _RMB6_dp:
+1233 0x0176  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1234 0x0177 _RMB7_dp:
+1235 0x0177  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1236 0x0178 _SMB0_dp:
+1237 0x0178  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1238 0x0179 _SMB1_dp:
+1239 0x0179  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1240 0x017A _SMB2_dp:
+1241 0x017A  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1242 0x017B _SMB3_dp:
+1243 0x017B  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1244 0x017C _SMB4_dp:
+1245 0x017C  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1246 0x017D _SMB5_dp:
+1247 0x017D  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1248 0x017E _SMB6_dp:
+1249 0x017E  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1250 0x017F _SMB7_dp:
+1251 0x017F  43140780 BRV0 _RMW_DP,1,0,, Pls, IF, OP1 -- Read DP
+1252  --------------------------------------------------------------------------------
+1253  -- Row 8 : 0x08-0xF8
+1254  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1255  --------------------------------------------------------------------------------
+1256 0x0180 _PHP:
+1257 0x0180  41044120 BRV0 _Psh,1,0, Stk,, WR,, Psh -- Push P
+1258 0x0181 _CLC:
+1259 0x0181  7C0F07CC BRV3 $,1,3,, Pls, IF, IR,, WE_P -- Clear Carry Flag
+1260 0x0182 _PLP:
+1261 0x0182  410442B0 BRV0 _Pop,1,0, Stk,, RD, OP1, Pop -- Pop P
+1262 0x0183 _SEC:
+1263 0x0183  7C1F07CC BRV3 $,1,3,, Pls, IF, IR,, WE_P -- Set Carry Flag
+1264 0x0184 _PHA:
+1265 0x0184  41044120 BRV0 _Psh,1,0, Stk,, WR,, Psh -- Push A
+1266 0x0185 _CLI:
+1267 0x0185  5C2D07CC BRV1 $,1,1,, Pls, IF, IR,, WE_P -- Clear Interrupt Mask Flg
+1268 0x0186 _PLA:
+1269 0x0186  410442B0 BRV0 _Pop,1,0, Stk,, RD, OP1, Pop -- Pop A
+1270 0x0187 _SEI:
+1271 0x0187  5C3D07CC BRV1 $,1,1,, Pls, IF, IR,, WE_P -- Set Interrupt Mask Flag
+1272 0x0188 _DEY:
+1273 0x0188  7C4707C6 BRV3 $,1,3,, Pls, IF, IR,, WE_Y -- Decrement Y
+1274 0x0189 _TYA:
+1275 0x0189  7C4F07C2 BRV3 $,1,3,, Pls, IF, IR,, WE_A -- Transfer Y to A
+1276 0x018A _TAY:
+1277 0x018A  7C5707C6 BRV3 $,1,3,, Pls, IF, IR,, WE_Y -- Transfer A to Y
+1278 0x018B _CLV:
+1279 0x018B  7C5F07CC BRV3 $,1,3,, Pls, IF, IR,, WE_P -- Clear oVerflow Flag
+1280 0x018C _INY:
+1281 0x018C  7C6707C6 BRV3 $,1,3,, Pls, IF, IR,, WE_Y -- Increment Y
+1282 0x018D _CLD:
+1283 0x018D  7C6F07CC BRV3 $,1,3,, Pls, IF, IR,, WE_P -- Clear Decimal Mode Flag
+1284 0x018E _INX:
+1285 0x018E  7C7707C4 BRV3 $,1,3,, Pls, IF, IR,, WE_X -- Increment X
+1286 0x018F _SED:
+1287 0x018F  7C7F07CC BRV3 $,1,3,, Pls, IF, IR,, WE_P -- Set Decimal Mode Flag
+1288  --------------------------------------------------------------------------------
+1289  -- Row 9 : 0x09-0xF9
+1290  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1291  --------------------------------------------------------------------------------
+1292 0x0190 _ORA_imm:
+1293 0x0190  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read Immediate Operand
+1294 0x0191 _ORA_absY:
+1295 0x0191  422C0780 BRV0 _RO_AbsY,1,0,, Pls, IF, OP1 -- Read Mem Ptr Lo
+1296 0x0192 _AND_imm:
+1297 0x0192  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read Immediate Operand
+1298 0x0193 _AND_absY:
+1299 0x0193  422C0780 BRV0 _RO_AbsY,1,0,, Pls, IF, OP1 -- Read Mem Ptr Lo
+1300 0x0194 _EOR_imm:
+1301 0x0194  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read Immediate Operand
+1302 0x0195 _EOR_absY:
+1303 0x0195  422C0780 BRV0 _RO_AbsY,1,0,, Pls, IF, OP1 -- Read Mem Ptr Lo
+1304 0x0196 _ADC_imm:
+1305 0x0196  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read Immediate Operand
+1306 0x0197 _ADC_absY:
+1307 0x0197  422C0780 BRV0 _RO_AbsY,1,0,, Pls, IF, OP1 -- Read Mem Ptr Lo
+1308 0x0198 _BIT_imm:
+1309 0x0198  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read Immediate Operand
+1310 0x0199 _STA_absY:
+1311 0x0199  42BC0780 BRV0 _WO_AbsY,1,0,, Pls, IF, OP1 -- Read Mem Ptr Lo
+1312 0x019A _LDA_imm:
+1313 0x019A  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read Immediate Operand
+1314 0x019B _LDA_absY:
+1315 0x019B  422C0780 BRV0 _RO_AbsY,1,0,, Pls, IF, OP1 -- Read Mem Ptr Lo
+1316 0x019C _CMP_imm:
+1317 0x019C  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read Immediate Operand
+1318 0x019D _CMP_absY:
+1319 0x019D  422C0780 BRV0 _RO_AbsY,1,0,, Pls, IF, OP1 -- Read Mem Ptr Lo
+1320 0x019E _SBC_imm:
+1321 0x019E  31040780 BMW _Imm,1,0,, Pls, IF, OP1 -- Read Immediate Operand
+1322 0x019F _SBC_absY:
+1323 0x019F  422C0780 BRV0 _RO_AbsY,1,0,, Pls, IF, OP1 -- Read Mem Ptr Lo
+1324  --------------------------------------------------------------------------------
+1325  -- Row A : 0x0A-0xFA
+1326  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1327  --------------------------------------------------------------------------------
+1328 0x01A0 _ASL_A:
+1329 0x01A0  7D0707C2 BRV3 $,1,3,, Pls, IF, IR,, WE_A -- Arithmetic Shift A Left
+1330 0x01A1 _INC_A:
+1331 0x01A1  7D0F07C2 BRV3 $,1,3,, Pls, IF, IR,, WE_A -- Increment A
+1332 0x01A2 _ROL_A:
+1333 0x01A2  7D1707C2 BRV3 $,1,3,, Pls, IF, IR,, WE_A -- Rotate A Left
+1334 0x01A3 _DEC_A:
+1335 0x01A3  7D1F07C2 BRV3 $,1,3,, Pls, IF, IR,, WE_A -- Decrement A
+1336 0x01A4 _LSR_A:
+1337 0x01A4  7D2707C2 BRV3 $,1,3,, Pls, IF, IR,, WE_A -- Logical Shift A Right
+1338 0x01A5 _PHY:
+1339 0x01A5  41044120 BRV0 _Psh,1,0, Stk,, WR,, Psh -- Push Y
+1340 0x01A6 _ROR_A:
+1341 0x01A6  7D3707C2 BRV3 $,1,3,, Pls, IF, IR,, WE_A -- Rotate A Right
+1342 0x01A7 _PLY:
+1343 0x01A7  410442B0 BRV0 _Pop,1,0, Stk,, RD, OP1, Pop -- Pop Y
+1344 0x01A8 _TXA:
+1345 0x01A8  7D4707C2 BRV3 $,1,3,, Pls, IF, IR,, WE_A -- Transfer X to A
+1346 0x01A9 _TXS:
+1347 0x01A9  7D4F07CA BRV3 $,1,3,, Pls, IF, IR,, WE_S -- Transfer X to S
+1348 0x01AA _TAX:
+1349 0x01AA  7D5707C4 BRV3 $,1,3,, Pls, IF, IR,, WE_X -- Transfer A to X
+1350 0x01AB _TSX:
+1351 0x01AB  7D5F07C4 BRV3 $,1,3,, Pls, IF, IR,, WE_X -- Transfer S to X
+1352 0x01AC _DEX:
+1353 0x01AC  7D6707C4 BRV3 $,1,3,, Pls, IF, IR,, WE_X -- Decrement X
+1354 0x01AD _PHX:
+1355 0x01AD  41044120 BRV0 _Psh,1,0, Stk,, WR,, Psh -- Push X
+1356 0x01AE _NOP: -- the real NOP
+1357 0x01AE  7D7707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip True NOP Instruction
+1358 0x01AF _PLX:
+1359 0x01AF  410442B0 BRV0 _Pop,1,0, Stk,, RD, OP1, Pop -- Pop X
+1360  --------------------------------------------------------------------------------
+1361  -- Row B : 0x0B-0xFB
+1362  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1363  --------------------------------------------------------------------------------
+1364 0x01B0 _NOP_0B:
+1365 0x01B0  7D8707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1366 0x01B1 _NOP_1B:
+1367 0x01B1  7D8F07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1368 0x01B2 _NOP_2B:
+1369 0x01B2  7D9707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1370 0x01B3 _NOP_3B:
+1371 0x01B3  7D9F07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1372 0x01B4 _NOP_4B:
+1373 0x01B4  7DA707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1374 0x01B5 _NOP_5B:
+1375 0x01B5  7DAF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1376 0x01B6 _NOP_6B:
+1377 0x01B6  7DB707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1378 0x01B7 _NOP_7B:
+1379 0x01B7  7DBF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1380 0x01B8 _NOP_8B:
+1381 0x01B8  7DC707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1382 0x01B9 _NOP_9B:
+1383 0x01B9  7DCF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1384 0x01BA _NOP_AB:
+1385 0x01BA  7DD707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1386 0x01BB _NOP_BB:
+1387 0x01BB  7DDF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1388 0x01BC _WAI_CB:
+1389 0x01BC  47E40000 BRV0 _WAI,1,0 -- Wait for Interrupt
+1390 0x01BD _STP_DB:
+1391 0x01BD  4DE80000 BRV0 $,0,0 -- Stop execution
+1392 0x01BE _NOP_EB:
+1393 0x01BE  7DF707C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1394 0x01BF _NOP_FB:
+1395 0x01BF  7DFF07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1396  --------------------------------------------------------------------------------
+1397  -- Row C : 0x0C-0xFC
+1398  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1399  --------------------------------------------------------------------------------
+1400 0x01C0 _TSB_abs:
+1401 0x01C0  43440780 BRV0 _RMW_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1402 0x01C1 _TRB_abs:
+1403 0x01C1  43440780 BRV0 _RMW_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1404 0x01C2 _BIT_abs:
+1405 0x01C2  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1406 0x01C3 _BIT_absX:
+1407 0x01C3  421C0780 BRV0 _RO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1408 0x01C4 _JMP_abs:
+1409 0x01C4  41740780 BRV0 _Jmp,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1410 0x01C5 _NOP_5C:
+1411 0x01C5  7E2F07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1412 0x01C6 _JMP_absi:
+1413 0x01C6  417C0780 BRV0 _JmpI,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1414 0x01C7 _JMP_absXi:
+1415 0x01C7  41940780 BRV0 _JmpXI,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1416 0x01C8 _STY_abs:
+1417 0x01C8  429C0780 BRV0 _WO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1418 0x01C9 _STZ_abs:
+1419 0x01C9  429C0780 BRV0 _WO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1420 0x01CA _LDY_abs:
+1421 0x01CA  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1422 0x01CB _LDY_absX:
+1423 0x01CB  421C0780 BRV0 _RO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1424 0x01CC _CPY_abs:
+1425 0x01CC  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1426 0x01CD _NOP_DC:
+1427 0x01CD  7E6F07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1428 0x01CE _CPX_abs:
+1429 0x01CE  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1430 0x01CF _NOP_FC:
+1431 0x01CF  7E7F07C0 BRV3 $,1,3,, Pls, IF, IR -- Skip Invalid Instruction
+1432  --------------------------------------------------------------------------------
+1433  -- Row D : 0x0D-0xFD
+1434  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1435  --------------------------------------------------------------------------------
+1436 0x01D0 _ORA_abs:
+1437 0x01D0  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1438 0x01D1 _ORA_absX:
+1439 0x01D1  421C0780 BRV0 _RO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1440 0x01D2 _AND_abs:
+1441 0x01D2  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1442 0x01D3 _AND_absX:
+1443 0x01D3  421C0780 BRV0 _RO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1444 0x01D4 _EOR_abs:
+1445 0x01D4  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1446 0x01D5 _EOR_absX:
+1447 0x01D5  421C0780 BRV0 _RO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1448 0x01D6 _ADC_abs:
+1449 0x01D6  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1450 0x01D7 _ADC_absX:
+1451 0x01D7  421C0780 BRV0 _RO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1452 0x01D8 _STA_abs:
+1453 0x01D8  429C0780 BRV0 _WO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1454 0x01D9 _STA_absX:
+1455 0x01D9  42AC0780 BRV0 _WO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1456 0x01DA _LDA_abs:
+1457 0x01DA  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1458 0x01DB _LDA_absX:
+1459 0x01DB  421C0780 BRV0 _RO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1460 0x01DC _CMP_abs:
+1461 0x01DC  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1462 0x01DD _CMP_absX:
+1463 0x01DD  421C0780 BRV0 _RO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1464 0x01DE _SBC_abs:
+1465 0x01DE  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1466 0x01DF _SBC_absX:
+1467 0x01DF  421C0780 BRV0 _RO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1468  --------------------------------------------------------------------------------
+1469  -- Row E : 0x0E-0xFE
+1470  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1471  --------------------------------------------------------------------------------
+1472 0x01E0 _ASL_abs:
+1473 0x01E0  43440780 BRV0 _RMW_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1474 0x01E1 _ASL_absX:
+1475 0x01E1  435C0780 BRV0 _RMW_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1476 0x01E2 _ROL_abs:
+1477 0x01E2  43440780 BRV0 _RMW_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1478 0x01E3 _ROL_absX:
+1479 0x01E3  435C0780 BRV0 _RMW_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1480 0x01E4 _LSR_abs:
+1481 0x01E4  43440780 BRV0 _RMW_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1482 0x01E5 _LSR_absX:
+1483 0x01E5  435C0780 BRV0 _RMW_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1484 0x01E6 _ROR_abs:
+1485 0x01E6  43440780 BRV0 _RMW_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1486 0x01E7 _ROR_absX:
+1487 0x01E7  435C0780 BRV0 _RMW_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1488 0x01E8 _STX_abs:
+1489 0x01E8  429C0780 BRV0 _WO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1490 0x01E9 _STZ_absX:
+1491 0x01E9  42AC0780 BRV0 _WO_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1492 0x01EA _LDX_abs:
+1493 0x01EA  420C0780 BRV0 _RO_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1494 0x01EB _LDX_absY:
+1495 0x01EB  422C0780 BRV0 _RO_AbsY,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1496 0x01EC _DEC_abs:
+1497 0x01EC  43440780 BRV0 _RMW_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1498 0x01ED _DEC_absX:
+1499 0x01ED  435C0780 BRV0 _RMW_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1500 0x01EE _INC_abs:
+1501 0x01EE  43440780 BRV0 _RMW_Abs,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1502 0x01EF _INC_absX:
+1503 0x01EF  435C0780 BRV0 _RMW_AbsX,1,0,, Pls, IF, OP1 -- Read Dst Ptr Lo
+1504  --------------------------------------------------------------------------------
+1505  -- Row F : 0x0F-0xFF (Rockwell Instructions: BBRx/BBSx dp,rel)
+1506  -- I BA, Wt, En, NA, PC, IO, DI, SP, Reg_WE, ISR
+1507  --------------------------------------------------------------------------------
+1508 0x01F0 _BBR0_dp_rel:
+1509 0x01F0  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1510 0x01F1 _BBR1_dp_rel:
+1511 0x01F1  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1512 0x01F2 _BBR2_dp_rel:
+1513 0x01F2  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1514 0x01F3 _BBR3_dp_rel:
+1515 0x01F3  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1516 0x01F4 _BBR4_dp_rel:
+1517 0x01F4  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1518 0x01F5 _BBR5_dp_rel:
+1519 0x01F5  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1520 0x01F6 _BBR6_dp_rel:
+1521 0x01F6  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1522 0x01F7 _BBR7_dp_rel:
+1523 0x01F7  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1524 0x01F8 _BBS0_dp_rel:
+1525 0x01F8  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1526 0x01F9 _BBS1_dp_rel:
+1527 0x01F9  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1528 0x01FA _BBS2_dp_rel:
+1529 0x01FA  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1530 0x01FB _BBS3_dp_rel:
+1531 0x01FB  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1532 0x01FC _BBS4_dp_rel:
+1533 0x01FC  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1534 0x01FD _BBS5_dp_rel:
+1535 0x01FD  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1536 0x01FE _BBS6_dp_rel:
+1537 0x01FE  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1538 0x01FF _BBS7_dp_rel:
+1539 0x01FF  438C0780 BRV0 _BByx_dp_rel,1,0,, Pls, IF, OP1 -- Read DP
+1540  --------------------------------------------------------------------------------
+1541  -- End of Instruction Decode Table
+1542  --------------------------------------------------------------------------------
+1544 0x0200 _Last: .org 512
+1546 0x0200 _end:

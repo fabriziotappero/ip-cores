@@ -1,0 +1,577 @@
+header
+Project: M65C02_Decoder_ROM
+File Revision: 0015
+Author(s): Michael A. Morris
+Description: M65C02 Instruction Decoder ROM
+endh
+
+--------------------------------------------------------------------------------
+--
+--  Copyright 2011-2012 by Michael A. Morris, dba M. A. Morris & Associates
+--
+--  All rights reserved. The source code contained herein is publicly released
+--  under the terms and conditions of the GNU Lesser Public License. No part of
+--  this source code may be reproduced or transmitted in any form or by any
+--  means, electronic or mechanical, including photocopying, recording, or any
+--  information storage and retrieval system in violation of the license under
+--  which the source code is released.
+--
+--  The source code contained herein is free; it may be redistributed and/or 
+--  modified in accordance with the terms of the GNU Lesser General Public
+--  License as published by the Free Software Foundation; either version 2.1 of
+--  the GNU Lesser General Public License, or any later version.
+--
+--  The source code contained herein is freely released WITHOUT ANY WARRANTY;
+--  without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+--  PARTICULAR PURPOSE. (Refer to the GNU Lesser General Public License for
+--  more details.)
+--
+--  A copy of the GNU Lesser General Public License should have been received
+--  along with the source code contained herein; if not, a copy can be obtained
+--  by writing to:
+--
+--  Free Software Foundation, Inc.
+--  51 Franklin Street, Fifth Floor
+--  Boston, MA  02110-1301 USA
+--
+--  Further, no use of this source code is permitted in any form or means
+--  without inclusion of this banner prominently in any derived works. 
+--
+--  Michael A. Morris
+--  Huntsville, AL
+--
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+-- Revision History:
+--------------------------------------------------------------------------------
+--
+--  0001    11D17   mam     Initial development
+--
+--  0002    11E14   mam     Completed capture of MAM65C02 Instruction Decoder
+--
+--  0003    11E28   mam     Added Direct Page Relative addressing mode to tables
+--
+--  0004    11K27   mam     Changed number of operands for BRK instruction from
+--                          0 to 1, which will account for the fact that the
+--                          return address pushed on the stack is $+2 instead of
+--                          $+1 as would be the case if the byte after BRK was
+--                          not treated as an operand.
+--
+--  0005    12A21   mam     Updated the instruction decoder so that the decoded
+--                          addressing mode accounts for RO, WO, and RMW opera-
+--                          tions. RO modes only read memory, WO modes only
+--                          write to memory, and RMW modes perform operations on
+--                          operands stored in memory. Renamed the various
+--                          addressing modes so that it is easier to understand
+--                          what is required for each addressing mode. Made some
+--                          corrections to the instruction decode tables where
+--                          incorrect addressing modes were being used for some
+--                          instructions. Since DP,rel mode is not being imple-
+--                          mented at this time, moved to the end of the decode
+--                          table. Table increased from 29 to 37 distinct micro-
+--                          program routines.
+--
+--  0006    12A28   mam     Changed the microword format. Deleted field indica-
+--                          the number of operands, and replaced with single bit
+--                          field that controls the selection of the index reg.
+--
+--  0007    12B04   mam     Changed the microword format. Replaced index regis-
+--                          ter select field with Read-Modify-Write field.
+--
+--  0008    12B18   mam     Corrected CCSel field for most of the INC/DEC/INX/
+--                          DEX/INY/DEY instructions. Most were set to update
+--                          the N, Z, and C bits, when only N, Z are updated by
+--                          these instructions. Similarly, corrected the CC bits
+--                          updated by BIT instructions. Bit imm only updates Z,
+--                          while the others update N, V, and Z.
+--
+--  0009    12B19   mam     Added missing instruction: STZ dp,X
+--
+--  0010    12B20   mam     Added WS_P to write field of all opcodes which modi-
+--                          fy status bits in P, if a write to a internal regis-
+--                          ter not already filled for the Write Select field.
+--                          This is expected to preclude a change in the new
+--                          register write enable decode logic that would add in
+--                          an update to P whenever the CCSel field is in the
+--                          appropriate range of values. This provides direct
+--                          control, through the M65C02_ALU decoder, of updates
+--                          to the processor status word.
+--
+--  0011    12B23   mam     Corrected incorrectly coded microword for NOP_1F.
+--                          The ALU Op field was not set to XFR as it should 
+--                          have been.
+--
+--  0012    12C04   mam     Corrected two entries: ora (dp) and sta (dp),y. The
+--                          first had an AND operation programmed instead of an 
+--                          ORA. The second was typed in as an sty (dp),y, so
+--                          the output select field was set for Y instead of A.
+--
+--  0013    12K17   mam     RMW flag not set for INC and DEC instructions.
+--
+--  0014    12L09   mam     Change definitions of Mode to add STP and WAI. Up-
+--                          dated Mode fields for JMP, and added the STP/WAI
+--                          instructions. Corrected the mode of the PLA instruc-
+--                          tion from INT to STK.
+--
+--  0015    12L13   mam     Completed addition of the Rockwell RMBx, SMBx, BBRx,
+--                          and BBSx instruction. All 32 opcodes added into the
+--                          instruction decode, and RMBx and SMBX marked as RMW.
+--
+--------------------------------------------------------------------------------
+-- Instruction (Next Address and Data) Field
+--------------------------------------------------------------------------------
+
+STP         .asm    0       -- Stop Processor Instruction
+INV         .asm    1       -- Invalid Instruction
+BRK         .asm    2       -- BRK Instruction/Trap/Interrupt
+JMP         .asm    3       -- Bcc/JMP/JSR/RTS/RTI Instruction
+STK         .asm    4       -- Stack Operation Instruction (PLx/PHx)
+INT         .asm    5       -- Internal Operation Instruction
+MEM         .asm    6       -- Memory Operation Instruction
+WAI         .asm    7       -- Waiting for Interrupt Instruction (NMI/IRQ)
+
+--------------------------------------------------------------------------------
+-- ROM ( output ) Field definitions
+--------------------------------------------------------------------------------
+
+Inst        .def    3       -- Instruction (Addressing Mode)
+RMW         .def    1       -- Read-Modify-Write Instruction Type Field
+ALU_OP      .def    4       -- ALU Operation
+QSel        .def    2       -- ALU Q Operand Select
+RSel        .def    1       -- ALU R Operand Select
+AU_Mode     .def    1       -- ALU Arithmetic Unit Mode (1 : Subtraction)
+CSel        .def    1       -- ALU Arithmetic Unit Carry Input Select
+WSel        .def    3       -- ALU Register Write Select
+OSel        .def    3       -- ALU Register Output Select
+CCSel       .def    5       -- ALU Condition Code Operation
+Opcode      .def    8       -- Instruction Opcode
+
+--------------------------------------------------------------------------------
+-- Constant definitions
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+--  ALU Operation Field (ALU_Op) Definitions
+
+XFR         .equ    0   -- ALU <= {OSel: 0, A, X, Y, P, S, M}
+
+--  Logic Unit Operations
+
+AND         .equ    1   -- ALU <= A & M;      N <= ALU[7]; Z <= ~|ALU;
+ORA         .equ    2   -- ALU <= A | M;      N <= ALU[7]; Z <= ~|ALU;
+EOR         .equ    3   -- ALU <= A ^ M;      N <= ALU[7]; Z <= ~|ALU;
+
+--  Arithmetic Unit Operations
+
+ADC         .equ    4   -- ALU <= Q +  M + C; N <= ALU[7]; Z <= ~|ALU;
+--                                            V <= OVF;    C <= COut;
+SBC         .equ    5   -- ALU <= Q + ~M + C; N <= ALU[7]; Z <= ~|ALU;
+--                                            V <= OVF;    C <= COut;
+INC         .equ    6   -- ALU <= Q +  1 + 0; N <= ALU[7]; Z <= ~|ALU;
+DEC         .equ    7   -- ALU <= Q + ~1 + 1; N <= ALU[7]; Z <= ~|ALU;
+
+--  Shift Unit Operations
+
+ASL         .equ    8   -- ALU <= R << 1;     N <= ALU[6]; Z <= ~|ALU; C <= R[7]
+LSR         .equ    9   -- ALU <= R >> 1;     N <= 0;      Z <= ~|ALU; C <= R[0]
+ROL         .equ    10  -- ALU <= {R[6:0], C} N <= ALU[7]; Z <= ~|ALU; C <= R[7]
+ROR         .equ    11  -- ALU <= {C, R[7:1]} N <= ALU[7]; Z <= ~|ALU; C <= R[0]
+
+--  Bit Unit Operations
+
+BIT         .equ    12  -- ALU <= (A & M);    N <= M[7];   Z <= ~|(A & M);
+--                                            V <= M[6];
+TRB         .equ    13  -- ALU <= M & ~A;                  Z <= ~|(A & M);
+TSB         .equ    14  -- ALU <= M |  A;                  Z <= ~|(A & M);
+
+--  Arithmetic Unit Comparison Operation
+
+CMP         .equ    15  -- ALU <= Q + ~M + 1  N <= ALU[7]; Z <= ~|ALU; C <= COut
+
+--------------------------------------------------------------------------------
+--  ALU Q Operand Select (default ALU Q Operand - A)
+--------------------------------------------------------------------------------
+
+QS_A      .equ    0   -- Select A (default)
+QS_M      .equ    1   -- Select M
+QS_X      .equ    2   -- Select X
+QS_Y      .equ    3   -- Select Y
+
+--------------------------------------------------------------------------------
+--  ALU R Operand Select:          R     <= (1) ? 8'h01 : M)
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+--  ALU Arithmetic Unit Mode:      Adder <= ((AU_Mode) ? Subtract : Add)
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+--  ALU Carry Multiplexer Select:  Ci    <= ((CSel) ? AU_Mode : C)
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+--  ALU Register Write Select Definitions
+
+WS_A        .equ    1   -- Write Accumulator (Binary)
+WS_X        .equ    2   -- Write X (Pre-Index Register)
+WS_Y        .equ    3   -- Write Y (Post-Index Register)
+WS_S        .equ    5   -- Write S (Stack Pointer)
+WS_P        .equ    6   -- Write P (Processor Status Word)
+
+--------------------------------------------------------------------------------
+--  ALU Register Output Select Definitions
+
+OS_A        .equ    1   -- Output Accumulator
+OS_X        .equ    2   -- Output X
+OS_Y        .equ    3   -- Output Y
+OS_Z        .equ    4   -- Output Zero (0)
+OS_S        .equ    5   -- Output S (Stack Pointer)
+OS_P        .equ    6   -- Output P (Processor Status Word)
+OS_M        .equ    7   -- Output M (Transfer)
+
+--------------------------------------------------------------------------------
+--  Condition Code Operation/Output Select Definitions
+--      Note: CC_Out = 1 unless ((CCSel[4:3] != 2'b01) | ((CCSel[4:1] == 3))
+
+SMBx        .equ    4   -- Rockwell SMBx
+RMBx        .equ    5   -- Rockwell RMBx
+BBSx        .equ    6   -- Rockwell BBSx
+BBRx        .equ    7   -- Rockwell BBRx
+--
+CC          .equ    8   -- CC_Out = ~C;
+CS          .equ    9   -- CC_Out =  C;
+NE          .equ    10  -- CC_Out = ~Z;
+EQ          .equ    11  -- CC_Out =  Z;
+VC          .equ    12  -- CC_Out = ~V;
+VS          .equ    13  -- CC_Out =  V;
+PL          .equ    14  -- CC_OUT = ~N;
+MI          .equ    15  -- CC_Out =  N;
+CLC         .equ    16  -- C <= 0;
+SEC         .equ    17  -- C <= 1;
+CLI         .equ    18  -- I <= 0;
+SEI         .equ    19  -- I <= 1;
+CLD         .equ    20  -- D <= 0;
+SED         .equ    21  -- D <= 1;
+CLV         .equ    22  -- V <= 0;
+BRK         .equ    23  -- B <= 1;
+Z           .equ    24  -- Z <= ~|(A & M);
+NZ          .equ    25  -- N <= ALU[7]; Z <= ~|ALU;
+NZC         .equ    26  -- N <= ALU[7]; Z <= ~|ALU; C <= COut
+NVZ         .equ    27  -- N <= M[7];   Z <= ~|(A & M); V <= M[6];
+NVZC        .equ    28  -- N <= ALU[7]; Z <= ~|ALU; V <= OVF;  C <= COut;
+--            .equ    29  -- Reserved
+--            .equ    30  -- Reserved
+PSW         .equ    31  -- P <= M;
+
+--------------------------------------------------------------------------------
+
+_start:     .org    0
+
+--------------------------------------------------------------------------------
+
+    BRK     0,XFR,QS_A,0,0,0,WS_P,    ,BRK ,0x00      -- 00: BRK #imm
+    MEM     0,ORA,QS_A,0,0,0,WS_A,    ,NZ  ,0x01      -- 01: ORA (dp,X)
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0x02      -- 02: NOP
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0x03      -- 03: NOP
+    MEM     1,TSB,QS_A,0,0,0,WS_P,    ,Z   ,0x04      -- 04: TSB dp
+    MEM     0,ORA,QS_A,0,0,0,WS_A,    ,NZ  ,0x05      -- 05: ORA dp
+    MEM     1,ASL,QS_M,0,0,0,WS_P,    ,NZC ,0x06      -- 06: ASL dp
+    MEM     1,XFR,QS_M,0,0,0,    ,    ,RMBx,0xFE      -- 07: RMB0 dp
+    STK     0,XFR,QS_A,0,0,0,    ,OS_P,    ,0x08      -- 08: PHP
+    MEM     0,ORA,QS_A,0,0,0,WS_A,    ,NZ  ,0x09      -- 09: ORA #imm
+    INT     0,ASL,QS_A,0,0,0,WS_A,    ,NZC ,0x0A      -- 0A: ASL A
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0x0B      -- 0B: NOP
+    MEM     1,TSB,QS_A,0,0,0,WS_P,    ,Z   ,0x0C      -- 0C: TSB abs
+    MEM     0,ORA,QS_A,0,0,0,WS_A,    ,NZ  ,0x0D      -- 0D: ORA abs
+    MEM     1,ASL,QS_M,0,0,0,WS_P,    ,NZC ,0x0E      -- OE: ASL abs
+    JMP     0,XFR,QS_M,0,0,0,    ,    ,BBRx,0x01      -- 0F: BBR0 dp,rel
+
+--------------------------------------------------------------------------------
+
+    JMP     0,XFR,QS_A,0,0,0,    ,    ,PL  ,0x10      -- 10: BPL rel
+    MEM     0,ORA,QS_A,0,0,0,WS_A,    ,NZ  ,0x11      -- 11: ORA (dp),Y
+    MEM     0,ORA,QS_A,0,0,0,WS_A,    ,NZ  ,0x12      -- 12: ORA (dp)
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0x13      -- 13: NOP
+    MEM     1,TRB,QS_M,0,0,0,WS_P,    ,Z   ,0x14      -- 14: TRB dp
+    MEM     0,ORA,QS_A,0,0,0,WS_A,    ,NZ  ,0x15      -- 15: ORA dp,X
+    MEM     1,ASL,QS_M,0,0,0,WS_P,    ,NZC ,0x16      -- 16: ASL dp,X
+    MEM     1,XFR,QS_M,0,0,0,    ,    ,RMBx,0xFD      -- 17: RMB1 dp
+    INT     0,XFR,QS_A,0,0,0,WS_P,    ,CLC ,0x18      -- 18: CLC
+    MEM     0,ORA,QS_A,0,0,0,WS_A,    ,NZ  ,0x19      -- 19: ORA abs,Y
+    INT     0,INC,QS_A,1,0,1,WS_A,    ,NZ  ,0x1A      -- 1A: INC A
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0x1B      -- 1B: NOP
+    MEM     1,TRB,QS_A,0,0,0,WS_P,    ,Z   ,0x1C      -- 1C: TRB abs
+    MEM     0,ORA,QS_A,0,0,0,WS_A,    ,NZ  ,0x1D      -- 1D: ORA abs,X
+    MEM     1,ASL,QS_M,0,0,0,WS_P,    ,NZC ,0x1E      -- 1E: ASL abs,X
+    JMP     0,XFR,QS_M,0,0,0,    ,    ,BBRx,0x02      -- 1F: BBR1 dp,rel
+
+--------------------------------------------------------------------------------
+
+    JMP     0,XFR,QS_A,0,0,0,    ,    ,    ,0x20      -- 20: JSR abs
+    MEM     0,AND,QS_A,0,0,0,WS_A,    ,NZ  ,0x21      -- 21: AND (dp,X)
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0x22      -- 22: NOP
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0x23      -- 23: NOP
+    MEM     0,BIT,QS_A,0,0,0,WS_P,    ,NVZ ,0x24      -- 24: BIT dp
+    MEM     0,AND,QS_A,0,0,0,WS_A,    ,NZ  ,0x25      -- 25: AND dp
+    MEM     1,ROL,QS_M,0,0,0,WS_P,    ,NZC ,0x26      -- 26: ROL dp
+    MEM     1,XFR,QS_M,0,0,0,    ,    ,RMBx,0xFB      -- 27: RMB2 dp
+    STK     0,XFR,QS_A,0,0,0,WS_P,    ,PSW ,0x28      -- 28: PLP
+    MEM     0,AND,QS_A,0,0,0,WS_A,    ,NZ  ,0x29      -- 29: AND #imm
+    INT     0,ROL,QS_A,0,0,0,WS_A,    ,NZC ,0x2A      -- 2A: ROL A
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0x2B      -- 2B: NOP
+    MEM     0,BIT,QS_A,0,0,0,WS_P,    ,NVZ ,0x2C      -- 2C: BIT abs
+    MEM     0,AND,QS_A,0,0,0,WS_A,    ,NZ  ,0x2D      -- 2D: AND abs
+    MEM     1,ROL,QS_M,0,0,0,WS_P,    ,NZC ,0x2E      -- 2E: ROL abs
+    JMP     0,XFR,QS_M,0,0,0,    ,    ,BBRx,0x04      -- 2F: BBR2 db,rel
+
+--------------------------------------------------------------------------------
+
+    JMP     0,XFR,QS_A,0,0,0,    ,    ,MI  ,0x30      -- 30: BMI rel
+    MEM     0,AND,QS_A,0,0,0,WS_A,    ,NZ  ,0x31      -- 31: AND (dp),Y
+    MEM     0,AND,QS_A,0,0,0,WS_A,    ,NZ  ,0x32      -- 32: AND (dp)
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0x33      -- 33: NOP
+    MEM     0,BIT,QS_A,0,0,0,WS_P,    ,NVZ ,0x34      -- 34: BIT dp,X
+    MEM     0,AND,QS_A,0,0,0,WS_A,    ,NZ  ,0x35      -- 35: AND dp,X
+    MEM     1,ROL,QS_M,0,0,0,WS_P,    ,NZC ,0x36      -- 36: ROL dp,X
+    MEM     1,XFR,QS_M,0,0,0,    ,    ,RMBx,0xF7      -- 37: RMB3 dp
+    INT     0,AND,QS_A,0,0,0,WS_P,    ,SEC ,0x38      -- 38: SEC
+    MEM     0,AND,QS_A,0,0,0,WS_A,    ,NZ  ,0x39      -- 39: AND abs,Y
+    INT     0,DEC,QS_A,1,1,1,WS_A,    ,NZ  ,0x3A      -- 3A: DEC A
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0x3B      -- 3B: NOP
+    MEM     0,BIT,QS_A,0,0,0,WS_P,    ,NVZ ,0x3C      -- 3C: BIT abs,X
+    MEM     0,AND,QS_A,0,0,0,WS_A,    ,NZ  ,0x3D      -- 3D: AND abs,X
+    MEM     1,ROL,QS_M,0,0,0,WS_P,    ,NZC ,0x3E      -- 3E: ROL abs,X
+    JMP     0,XFR,QS_M,0,0,0,    ,    ,BBRx,0x08      -- 3F: BBR3 dp,rel
+
+--------------------------------------------------------------------------------
+
+    JMP     0,XFR,QS_A,0,0,0,WS_P,    ,PSW ,0x40      -- 40: RTI
+    MEM     0,EOR,QS_A,0,0,0,WS_A,    ,NZ  ,0x41      -- 41: EOR (dp,X)
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0x42      -- 42: NOP
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0x43      -- 43: NOP
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0x44      -- 44: NOP
+    MEM     0,EOR,QS_A,0,0,0,WS_A,    ,NZ  ,0x45      -- 45: EOR dp
+    MEM     1,LSR,QS_M,0,0,0,WS_P,    ,NZC ,0x46      -- 46: LSR dp
+    MEM     1,XFR,QS_M,0,0,0,    ,    ,RMBx,0xEF      -- 47: RMB4 dp
+    STK     0,XFR,QS_A,0,0,0,    ,OS_A,    ,0x48      -- 48: PHA
+    MEM     0,EOR,QS_A,0,0,0,WS_A,    ,NZ  ,0x49      -- 49: EOR #imm
+    INT     0,LSR,QS_A,0,0,0,WS_A,    ,NZC ,0x4A      -- 4A: LSR A
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0x4B      -- 4B: NOP
+    JMP     0,XFR,QS_A,0,0,0,    ,    ,    ,0x4C      -- 4C: JMP abs
+    MEM     0,EOR,QS_A,0,0,0,WS_A,    ,NZ  ,0x4D      -- 4D: EOR abs
+    MEM     1,LSR,QS_M,0,0,0,WS_P,    ,NZC ,0x4E      -- 4E: LSR abs
+    JMP     0,XFR,QS_M,0,0,0,    ,    ,BBRx,0x10      -- 4F: BBR4 dp,rel
+
+--------------------------------------------------------------------------------
+
+    JMP     0,XFR,QS_A,0,0,0,    ,    ,VC  ,0x50      -- 50: BVC rel
+    MEM     0,EOR,QS_A,0,0,0,WS_A,    ,NZ  ,0x51      -- 51: EOR (dp),Y
+    MEM     0,EOR,QS_A,0,0,0,WS_A,    ,NZ  ,0x52      -- 52: EOR (dp)
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0x53      -- 53: NOP
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0x54      -- 54: NOP
+    MEM     0,EOR,QS_A,0,0,0,WS_A,    ,NZ  ,0x55      -- 55: EOR dp,X
+    MEM     1,LSR,QS_M,0,0,0,WS_P,    ,NZC ,0x56      -- 56: LSR dp,X
+    MEM     1,XFR,QS_M,0,0,0,    ,    ,RMBx,0xDF      -- 57: RMB5 dp
+    INT     0,XFR,QS_A,0,0,0,WS_P,    ,CLI ,0x58      -- 58: CLI
+    MEM     0,EOR,QS_A,0,0,0,WS_A,    ,NZ  ,0x59      -- 59: EOR abs,Y
+    STK     0,XFR,QS_A,0,0,0,    ,OS_Y,    ,0x5A      -- 5A: PHY
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0x5B      -- 5B: NOP
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0x5C      -- 5C: NOP
+    MEM     0,EOR,QS_A,0,0,0,WS_A,    ,NZ  ,0x5D      -- 5D: EOR abs,X
+    MEM     1,LSR,QS_M,0,0,0,WS_P,    ,NZC ,0x5E      -- 5E: LSR abs,X
+    JMP     0,XFR,QS_M,0,0,0,    ,    ,BBRx,0x20      -- 5F: BBR5 dp,rel
+
+--------------------------------------------------------------------------------
+
+    JMP     0,XFR,QS_A,0,0,0,    ,    ,    ,0x60      -- 60: RTS
+    MEM     0,ADC,QS_A,0,0,0,WS_A,    ,NVZC,0x61      -- 61: ADC (dp,X)
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0x62      -- 62: NOP
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0x63      -- 63: NOP
+    MEM     0,XFR,QS_A,0,0,0,    ,OS_Z,    ,0x64      -- 64: STZ dp
+    MEM     0,ADC,QS_A,0,0,0,WS_A,    ,NVZC,0x65      -- 65: ADC dp
+    MEM     1,ROR,QS_M,0,0,0,WS_P,    ,NZC ,0x66      -- 66: ROR dp
+    INV     1,XFR,QS_M,0,0,0,    ,    ,RMBx,0xBF      -- 67: RMB6 dp
+    STK     0,XFR,QS_A,0,0,0,WS_A,    ,NZ  ,0x68      -- 68: PLA
+    MEM     0,ADC,QS_A,0,0,0,WS_A,    ,NVZC,0x69      -- 69: ADC #imm
+    MEM     0,ROR,QS_A,0,0,0,WS_A,    ,NZC ,0x6A      -- 6A: ROR A
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0x6B      -- 6B: NOP
+    JMP     0,XFR,QS_A,0,0,0,    ,    ,    ,0x6C      -- 6C: JMP (abs)
+    MEM     0,ADC,QS_A,0,0,0,WS_A,    ,NVZC,0x6D      -- 6D: ADC abs
+    MEM     1,ROR,QS_M,0,0,0,WS_P,    ,NZC ,0x6E      -- 6E: ROR abs
+    JMP     0,XFR,QS_M,0,0,0,    ,    ,BBRx,0x40      -- 6F: BBR6 dp,rel
+
+--------------------------------------------------------------------------------
+
+    JMP     0,XFR,QS_A,0,0,0,    ,    ,VS  ,0x70      -- 70: BVS rel
+    MEM     0,ADC,QS_A,0,0,0,WS_A,    ,NVZC,0x71      -- 71: ADC (dp),Y
+    MEM     0,ADC,QS_A,0,0,0,WS_A,    ,NVZC,0x72      -- 72: ADC (dp)
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0x73      -- 73: NOP
+    MEM     0,XFR,QS_A,0,0,0,    ,OS_Z,    ,0x74      -- 74: STZ dp,X
+    MEM     0,ADC,QS_A,0,0,0,WS_A,    ,NVZC,0x75      -- 75: ADC dp,X
+    MEM     1,ROR,QS_M,0,0,0,WS_P,    ,NZC ,0x76      -- 76: ROR dp,X
+    MEM     1,XFR,QS_M,0,0,0,    ,    ,RMBx,0x7F      -- 77: RMB7 dp
+    INT     0,XFR,QS_A,0,0,0,WS_P,    ,SEI ,0x78      -- 78: SEI
+    MEM     0,ADC,QS_A,0,0,0,WS_A,    ,NVZC,0x79      -- 79: ADC abs,Y
+    STK     0,XFR,QS_M,0,0,0,WS_Y,    ,NZ  ,0x7A      -- 7A: PLY
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0x7B      -- 7B: NOP
+    JMP     0,XFR,QS_A,0,0,0,    ,    ,    ,0x7C      -- 7C: JMP (abs,X)
+    MEM     0,ADC,QS_A,0,0,0,WS_A,    ,NVZC,0x7D      -- 7D: ADC abs,X
+    MEM     1,ROR,QS_M,0,0,0,WS_P,    ,NZC ,0x7E      -- 7E: ROR abs,X
+    JMP     0,XFR,QS_M,0,0,0,    ,    ,BBRx,0x80      -- 7F: BBR7 dp,rel
+
+--------------------------------------------------------------------------------
+
+    JMP     0,XFR,QS_A,0,0,0,    ,    ,    ,0x80      -- 80: BRA rel
+    MEM     0,XFR,QS_A,0,0,0,    ,OS_A,    ,0x81      -- 81: STA (dp,X)
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0x82      -- 82: NOP
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0x83      -- 83: NOP
+    MEM     0,XFR,QS_A,0,0,0,    ,OS_Y,    ,0x84      -- 84: STY dp
+    MEM     0,XFR,QS_A,0,0,0,    ,OS_A,    ,0x85      -- 85: STA dp
+    MEM     0,XFR,QS_A,0,0,0,    ,OS_X,    ,0x86      -- 86: STX dp
+    MEM     1,XFR,QS_M,0,0,0,    ,    ,SMBx,0x01      -- 87: SMB0 dp
+    INT     0,DEC,QS_Y,1,1,1,WS_Y,OS_Y,NZ  ,0x88      -- 88: DEY
+    MEM     0,BIT,QS_A,0,0,0,WS_P,    ,Z   ,0x89      -- 89: BIT #imm
+    INT     0,XFR,QS_A,0,0,0,WS_A,OS_X,NZ  ,0x8A      -- 8A: TXA
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0x8B      -- 8B: NOP
+    MEM     0,XFR,QS_A,0,0,0,    ,OS_Y,    ,0x8C      -- 8C: STY abs
+    MEM     0,XFR,QS_A,0,0,0,    ,OS_A,    ,0x8D      -- 8D: STA abs
+    MEM     0,XFR,QS_A,0,0,0,    ,OS_X,    ,0x8E      -- 8E: STX abs
+    JMP     0,XFR,QS_M,0,0,0,    ,    ,BBSx,0x01      -- 8F: BBS0 dp,rel
+
+--------------------------------------------------------------------------------
+
+    JMP     0,XFR,QS_A,0,0,0,    ,    ,CC  ,0x90      -- 90: BCC rel
+    MEM     0,XFR,QS_A,0,0,0,    ,OS_A,    ,0x91      -- 91: STA (dp),Y
+    MEM     0,XFR,QS_A,0,0,0,    ,OS_A,    ,0x92      -- 92: STA (dp)
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0x93      -- 93: NOP
+    MEM     0,XFR,QS_A,0,0,0,    ,OS_Y,    ,0x94      -- 94: STY dp,X
+    MEM     0,XFR,QS_A,0,0,0,    ,OS_A,    ,0x95      -- 95: STA dp,X
+    MEM     0,XFR,QS_A,0,0,0,    ,OS_X,    ,0x96      -- 96: STX dp,Y
+    MEM     1,XFR,QS_M,0,0,0,    ,    ,SMBx,0x02      -- 97: SMB1 dp
+    INT     0,XFR,QS_A,0,0,0,WS_A,OS_Y,NZ  ,0x98      -- 98: TYA
+    MEM     0,XFR,QS_A,0,0,0,    ,OS_A,    ,0x99      -- 99: STA abs,Y
+    INT     0,XFR,QS_A,0,0,0,WS_S,OS_X,    ,0x9A      -- 9A: TXS
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0x9B      -- 9B: NOP
+    MEM     0,XFR,QS_A,0,0,0,    ,OS_Z,    ,0x9C      -- 9C: STZ abs
+    MEM     0,XFR,QS_A,0,0,0,    ,OS_A,    ,0x9D      -- 9D: STA abs,X
+    MEM     0,XFR,QS_A,0,0,0,    ,OS_Z,    ,0x9E      -- 9E: STZ abs,X
+    JMP     0,XFR,QS_M,0,0,0,    ,    ,BBSx,0x02      -- 9F: BBS1 dp,rel
+
+--------------------------------------------------------------------------------
+
+    MEM     0,XFR,QS_A,0,0,0,WS_Y,    ,NZ  ,0xA0      -- A0: LDY #imm
+    MEM     0,XFR,QS_A,0,0,0,WS_A,    ,NZ  ,0xA1      -- A1: LDA (dp,X)
+    MEM     0,XFR,QS_A,0,0,0,WS_X,    ,NZ  ,0xA2      -- A2: LDX #imm
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0xA3      -- A3: NOP
+    MEM     0,XFR,QS_A,0,0,0,WS_Y,    ,NZ  ,0xA4      -- A4: LDY dp
+    MEM     0,XFR,QS_A,0,0,0,WS_A,    ,NZ  ,0xA5      -- A5: LDA dp
+    MEM     0,XFR,QS_A,0,0,0,WS_X,    ,NZ  ,0xA6      -- A6: LDX dp
+    MEM     1,XFR,QS_M,0,0,0,    ,    ,SMBx,0x04      -- A7: SMB2 dp
+    INT     0,XFR,QS_A,0,0,0,WS_Y,OS_A,NZ  ,0xA8      -- A8: TAY
+    MEM     0,XFR,QS_A,0,0,0,WS_A,    ,NZ  ,0xA9      -- A9: LDA #imm
+    INT     0,XFR,QS_A,0,0,0,WS_X,OS_A,NZ  ,0xAA      -- AA: TAX
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0xAB      -- AB: NOP
+    MEM     0,XFR,QS_A,0,0,0,WS_Y,    ,NZ  ,0xAC      -- AC: LDY abs
+    MEM     0,XFR,QS_A,0,0,0,WS_A,    ,NZ  ,0xAD      -- AD: LDA abs
+    MEM     0,XFR,QS_A,0,0,0,WS_X,    ,NZ  ,0xAE      -- AE: LDX abs
+    JMP     0,XFR,QS_M,0,0,0,    ,    ,BBSx,0x04      -- AF: BBS2 dp,rel
+
+--------------------------------------------------------------------------------
+
+    JMP     0,XFR,QS_A,0,0,0,    ,    ,CS  ,0xB0      -- B0: BCS rel
+    MEM     0,XFR,QS_A,0,0,0,WS_A,    ,NZ  ,0xB1      -- B1: LDA (dp),Y
+    MEM     0,XFR,QS_A,0,0,0,WS_A,    ,NZ  ,0xB2      -- B2: LDA (dp)
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0xB3      -- B3: NOP
+    MEM     0,XFR,QS_A,0,0,0,WS_Y,    ,NZ  ,0xB4      -- B4: LDY dp,X
+    MEM     0,XFR,QS_A,0,0,0,WS_A,    ,NZ  ,0xB5      -- B5: LDA dp,X
+    MEM     0,XFR,QS_A,0,0,0,WS_X,    ,NZ  ,0xB6      -- B6: LDX dp,Y
+    MEM     1,XFR,QS_M,0,0,0,    ,    ,SMBx,0x08      -- B7: SMB3 dp
+    INT     0,XFR,QS_A,0,0,0,WS_P,    ,CLV ,0xB8      -- B8: CLV
+    MEM     0,XFR,QS_A,0,0,0,WS_A,    ,NZ  ,0xB9      -- B9: LDA abs,Y
+    INT     0,XFR,QS_A,0,0,0,WS_X,OS_S,NZ  ,0xBA      -- BA: TSX
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0xBB      -- BB: NOP
+    MEM     0,XFR,QS_A,0,0,0,WS_Y,    ,NZ  ,0xBC      -- BC: LDY abs,X
+    MEM     0,XFR,QS_A,0,0,0,WS_A,    ,NZ  ,0xBD      -- BD: LDA abs,X
+    MEM     0,XFR,QS_A,0,0,0,WS_X,    ,NZ  ,0xBE      -- BE: LDX abs,Y
+    JMP     0,XFR,QS_M,0,0,0,    ,    ,BBSx,0x08      -- BF: BBS3 dp,rel
+
+--------------------------------------------------------------------------------
+
+    MEM     0,CMP,QS_Y,0,1,1,WS_P,    ,NZC ,0xC0      -- C0: CPY #imm
+    MEM     0,CMP,QS_A,0,1,1,WS_P,    ,NZC ,0xC1      -- C1: CMP (dp,X)
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0xC2      -- C2: NOP
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0xC3      -- C3: NOP
+    MEM     0,CMP,QS_Y,0,1,1,WS_P,    ,NZC ,0xC4      -- C4: CPY dp
+    MEM     0,CMP,QS_A,0,1,1,WS_P,    ,NZC ,0xC5      -- C5: CMP dp
+    MEM     1,DEC,QS_M,1,1,1,WS_P,    ,NZ  ,0xC6      -- C6: DEC dp
+    MEM     1,XFR,QS_M,0,0,0,    ,    ,SMBx,0x10      -- C7: SMB4 dp
+    INT     0,INC,QS_Y,1,0,1,WS_Y,    ,NZ  ,0xC8      -- C8: INY
+    MEM     0,CMP,QS_A,0,1,1,WS_P,    ,NZC ,0xC9      -- C9: CMP #imm
+    INT     0,DEC,QS_X,1,1,1,WS_X,    ,NZ  ,0xCA      -- CA: DEX
+    WAI     0,XFR,QS_A,0,0,0,    ,    ,    ,0xCB      -- CB: WAI
+    MEM     0,CMP,QS_Y,0,1,1,WS_P,    ,NZC ,0xCC      -- CC: CPY abs
+    MEM     0,CMP,QS_A,0,1,1,WS_P,    ,NZC ,0xCD      -- CD: CMP abs
+    MEM     1,DEC,QS_M,1,1,1,WS_P,    ,NZ  ,0xCE      -- CE: DEC abs
+    JMP     0,XFR,QS_M,0,0,0,    ,    ,BBSx,0x10      -- CF: BBS4 dp,rel
+
+--------------------------------------------------------------------------------
+
+    JMP     0,XFR,QS_A,0,0,0,    ,    ,NE  ,0xD0      -- D0: BNE rel
+    MEM     0,CMP,QS_A,0,1,1,WS_P,    ,NZC ,0xD1      -- D1: CMP (dp),Y
+    MEM     0,CMP,QS_A,0,1,1,WS_P,    ,NZC ,0xD2      -- D2: CMP (dp)
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0xD3      -- D3: NOP
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0xD4      -- D4: NOP
+    MEM     0,CMP,QS_A,0,1,1,WS_P,    ,NZC ,0xD5      -- D5: CMP dp,X
+    MEM     1,DEC,QS_M,1,1,1,WS_P,    ,NZ  ,0xD6      -- D6: DEC dp,X
+    MEM     1,XFR,QS_M,0,0,0,    ,    ,SMBx,0x20      -- D7: SMB5 dp
+    INT     0,XFR,QS_A,0,0,0,WS_P,    ,CLD ,0xD8      -- D8: CLD
+    MEM     0,CMP,QS_A,0,1,1,WS_P,    ,NZC ,0xD9      -- D9: CMP abs,Y
+    STK     0,XFR,QS_A,0,0,0,    ,OS_X,    ,0xDA      -- DA: PHX
+    STP     0,XFR,QS_A,0,0,0,    ,    ,    ,0xDB      -- DB: STP
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0xDC      -- DC: NOP
+    MEM     0,CMP,QS_A,0,1,1,WS_P,    ,NZC ,0xDD      -- DD: CMP abs,X
+    MEM     1,DEC,QS_M,1,1,1,WS_P,    ,NZ  ,0xDE      -- DE: DEC abs,X
+    JMP     0,XFR,QS_M,0,0,0,    ,    ,BBSx,0x20      -- DF: BBS5 dp,rel
+
+--------------------------------------------------------------------------------
+
+    MEM     0,CMP,QS_X,0,1,1,WS_P,    ,NZC ,0xE0      -- E0: CPX #imm
+    MEM     0,SBC,QS_A,0,1,0,WS_A,    ,NVZC,0xE1      -- E1: SBC (dp,X)
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0xE2      -- E2: NOP
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0xE3      -- E3: NOP
+    MEM     0,CMP,QS_X,0,1,1,WS_P,    ,NZC ,0xE4      -- E4: CPX dp
+    MEM     0,SBC,QS_A,0,1,0,WS_A,    ,NVZC,0xE5      -- E5: SBC dp
+    MEM     1,INC,QS_M,1,0,1,WS_P,    ,NZ  ,0xE6      -- E6: INC dp
+    MEM     1,XFR,QS_M,0,0,0,    ,    ,SMBx,0x40      -- E7: SMB6 dp
+    INT     0,INC,QS_X,1,0,1,WS_X,    ,NZ  ,0xE8      -- E8: INX
+    MEM     0,SBC,QS_A,0,1,0,WS_A,    ,NVZC,0xE9      -- E9: SBC #imm
+    INT     0,XFR,QS_A,0,0,0,    ,    ,    ,0xEA      -- EA: NOP
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0xEB      -- EB: NOP
+    MEM     0,CMP,QS_X,0,1,1,WS_P,    ,NZC ,0xEC      -- EC: CPX abs
+    MEM     0,SBC,QS_A,0,1,0,WS_A,    ,NVZC,0xED      -- ED: SBC abs
+    MEM     1,INC,QS_M,1,0,1,WS_P,    ,NZ  ,0xEE      -- EE: INC abs
+    JMP     0,XFR,QS_M,0,0,0,    ,    ,BBSx,0x40      -- EF: BBS6 dp,rel
+
+--------------------------------------------------------------------------------
+
+    JMP     0,XFR,QS_A,0,0,0,    ,    ,EQ  ,0xF0      -- F0: BEQ rel
+    MEM     0,SBC,QS_A,0,1,0,WS_A,    ,NVZC,0xF1      -- F1: SBC (dp),Y
+    MEM     0,SBC,QS_A,0,1,0,WS_A,    ,NVZC,0xF2      -- F2: SBC (dp)
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0xF3      -- F3: NOP
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0xF4      -- F4: NOP
+    MEM     0,SBC,QS_A,0,1,0,WS_A,    ,NVZC,0xF5      -- F5: SBC dp,X
+    MEM     1,INC,QS_M,1,0,1,WS_P,    ,NZ  ,0xF6      -- F6: INC dp,X
+    MEM     1,XFR,QS_M,0,0,0,    ,    ,SMBx,0x80      -- F7: SMB7 dp
+    INT     0,XFR,QS_A,0,0,0,WS_P,    ,SED ,0xF8      -- F8: SED
+    MEM     0,SBC,QS_A,0,1,0,WS_A,    ,NVZC,0xF9      -- F9: SBC abs,Y
+    STK     0,XFR,QS_M,0,0,0,WS_X,    ,NZ  ,0xFA      -- FA: PLX
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0xFB      -- FB: NOP
+    INV     0,XFR,QS_A,0,0,0,    ,    ,    ,0xFC      -- FC: NOP
+    MEM     0,SBC,QS_A,0,1,0,WS_A,    ,NVZC,0xFD      -- FD: SBC abs,X
+    MEM     1,INC,QS_M,1,0,1,WS_P,    ,NZ  ,0xFE      -- FE: INC abs,X
+    JMP     0,XFR,QS_M,0,0,0,    ,    ,BBSx,0x80      -- FF: BBS7 dp,rel
+
+--------------------------------------------------------------------------------
+
+_end:
