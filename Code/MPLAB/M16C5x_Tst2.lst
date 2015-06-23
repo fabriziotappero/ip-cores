@@ -1,0 +1,263 @@
+MPASM  5.50                   M16C5X_TST2.ASM   7-4-2013  11:39:38         PAGE  1
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+                      00001 ;*******************************************************************************
+                      00002 ; M16C5x_Tst2.ASM
+                      00003 ;
+                      00004 ;       This is the source for the test program used to develop the PIC16C5x proce-
+                      00005 ;       core. It has also been used to test the P16C5x version of the PIC16C5x core.
+                      00006 ;
+                      00007 ;       The first instruction of the program is expected to be placed in location 0.
+                      00008 ;
+                      00009 ;       The program tests most instructions, but not is a self-checking manner. In-
+                      00010 ;       spection of the registers is the method used to verify that the cores are
+                      00011 ;       operating correctly.
+                      00012 ;
+                      00013 ;*******************************************************************************
+                      00014 
+                      00015         LIST P=16F59, R=DEC
+                      00016 
+                      00017 ;-------------------------------------------------------------------------------
+                      00018 ;   Set ScratchPadRam here.  If you are using a PIC16C5X device, use: 
+                      00019 ;ScratchPadRam EQU     0x10
+                      00020 ;   Otherwise, use:
+                      00021 ;ScratchPadRam EQU     0x20
+                      00022 ;-------------------------------------------------------------------------------
+                      00023 
+  0000000A            00024 ScratchPadRam   EQU     0x0A
+                      00025 
+                      00026 ;-------------------------------------------------------------------------------
+                      00027 ; Variables
+                      00028 ;-------------------------------------------------------------------------------
+                      00029 
+  00000000            00030 INDF                    EQU             0                       ; Indirect Register File Access Location
+  00000001            00031 Tmr0                    EQU             1                       ; Timer 0
+  00000002            00032 PCL                             EQU             2                       ; Low Byte Program Counter
+  00000003            00033 Status                  EQU             3                       ; Processor Status Register
+  00000004            00034 FSR                             EQU             4                       ; File Select Register
+  00000005            00035 PortA                   EQU             5                       ; I/O Port A Address
+  00000006            00036 PortB                   EQU             6                       ; I/O Port B Address
+  00000007            00037 PortC                   EQU             7                       ; I/O Port C Address
+                      00038 
+  0000000A            00039 Cntr                    EQU     ScratchPadRam+0
+  0000000B            00040 MemStart                EQU             ScratchPadRam+1
+  00000015            00041 Count                   EQU             32-MemStart
+                      00042 
+  0000000A            00043 DelayLoop               EQU             ScratchPadRam+0
+                      00044 
+                      00045 ;-------------------------------------------------------------------------------
+                      00046 ; Set Reset/WDT Vector
+                      00047 ;-------------------------------------------------------------------------------
+                      00048 
+07FF                  00049                 ORG     H'7FF'
+                      00050        
+Message[306]: Crossing page boundary -- ensure page bits are set.
+07FF   0A00           00051                 GOTO    Start
+                      00052 
+MPASM  5.50                   M16C5X_TST2.ASM   7-4-2013  11:39:38         PAGE  2
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+                      00053 ;-------------------------------------------------------------------------------
+                      00054 ; Main Program
+                      00055 ;-------------------------------------------------------------------------------
+                      00056 
+0000                  00057                 ORG     H'000'
+                      00058 
+                      00059 ;-------------------------------------------------------------------------------
+0000   0763           00060 Start                   BTFSS   Status,3        ;; Test PD (STATUS.3), if 1, ~SLEEP restart
+0001   0A30           00061                 GOTO    SleepRestart    ;; SLEEP restart, continue test program
+0002   0C07           00062                 MOVLW   0x07            ;; load OPTION
+0003   0002           00063                 OPTION
+0004   0040           00064                 CLRW                    ;; clear working register
+0005   0005           00065                 TRIS    PortA       ;; load W into port control registers
+0006   0006           00066                 TRIS    PortB
+0007   0007           00067                 TRIS    PortC
+                      00068 ;
+                      00069 ;               GOTO    Next            ;; Test GOTO
+                      00070 ;
+0008   0A0A           00071                                 GOTO    Next
+                      00072 ;
+0009   0CFF           00073                 MOVLW   0xFF            ;; instruction should be skipped
+                      00074 ;
+000A   090D           00075 Next            CALL    Subroutine      ;; Test CALL
+                      00076 
+000B   0022           00077                 MOVWF   PCL             ;; Test Computed GOTO, Load PCL with W
+000C   0000           00078                 NOP                     ;; No Operation
+                      00079 
+000D   080E           00080 Subroutine              RETLW   Subroutine + 1  ;; Test RETLW, return 0x0E in W
+                      00081 
+000E   0C0B           00082                 MOVLW   MemStart        ;; starting RAM + 1
+000F   0024           00083                 MOVWF   FSR             ;; indirect address register (FSR)
+                      00084 ;-------------------------------------------------------------------------------
+0010   0C15           00085                 MOVLW   Count           ;; internal RAM count - 1
+0011   002A           00086                 MOVWF   Cntr            ;; loop counter
+0012   0CAA           00087                 MOVLW   0xAA            ;; zero working register
+                      00088 ;
+0013   0020           00089 Loop1                   MOVWF   INDF            ;; clear RAM indirectly
+0014   02A4           00090                 INCF    FSR,1           ;; increment FSR
+0015   02EA           00091                 DECFSZ  Cntr,1          ;; decrement loop counter
+0016   0A13           00092                 GOTO    Loop1           ;; loop until loop counter == 0
+                      00093 ;
+0017   0C0B           00094                 MOVLW   MemStart        ;; starting RAM + 1
+0018   0024           00095                 MOVWF   FSR             ;; reload FSR
+0019   0CEB           00096                 MOVLW   (256 - Count)   ;; set loop counter to 256 - 23
+001A   002A           00097                                 MOVWF   Cntr
+                      00098 ;
+001B   0260           00099 Loop2                   COMF    INDF,1          ;; Complement Memory Pattern from Loop 1
+001C   02A4           00100                                 INCF    FSR,1           ;; Increment Indirect Pointer to Memory
+001D   03EA           00101                 INCFSZ  Cntr,1          ;; increment counter loop until 0
+001E   0A1B           00102                 GOTO    Loop2           ;; loop    
+                      00103 ;
+001F   006A           00104                 CLRF    Cntr            ;; Clear Memory Location 0x08
+                      00105 ;-------------------------------------------------------------------------------
+MPASM  5.50                   M16C5X_TST2.ASM   7-4-2013  11:39:38         PAGE  3
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+0020   00EA           00106                                 DECF    Cntr,1          ;; Decrement Memory Location 0x08
+0021   01CA           00107                 ADDWF   Cntr,0          ;; Add Memory Location 0x08 to W, Store in W
+0022   00AA           00108                 SUBWF   Cntr,1          ;; Subtract Memory Location 0x08
+0023   036A           00109                 RLF     Cntr,1          ;; Rotate Memory Location 0x08
+0024   032A           00110                 RRF     Cntr,1          ;; Rotate Memory Location
+0025   0C69           00111                 MOVLW   0x69            ;; Load W with test pattern: W <= 0x69
+0026   002A           00112                 MOVWF   (MemStart - 1)    ;; Initialize Memory with test pattern
+0027   03AA           00113                 SWAPF   Cntr,1          ;; Test SWAPF: (0x08) <= 0x96 
+0028   012A           00114                 IORWF   Cntr,1          ;; Test IORWF: (0x08) <= 0x69 | 0x96 
+0029   016A           00115                 ANDWF   Cntr,1          ;; Test ANDWF: (0x08) <= 0x69 & 0xFF
+002A   01AA           00116                 XORWF   Cntr,1          ;; Test XORWF: (0x08) <= 0x69 ^ 0x69
+Message[305]: Using default destination of 1 (file).
+002B   026A           00117                 COMF    Cntr            ;; Test COMF:  (0x08) <= ~0x00  
+002C   0D96           00118                 IORLW   0x96            ;; Test IORLW:      W <= 0x69 | 0x96
+002D   0E69           00119                 ANDLW   0x69            ;; Test ANDLW:      W <= 0xFF & 0x69
+002E   0F69           00120                 XORLW   0x69            ;; Test XORLW:      W <= 0x69 ^ 0x69
+                      00121 ;                SLEEP                  ;; Stop Execution of test program: HALT
+002F   0A40           00122                                 GOTO    PortTst
+                      00123 ;-------------------------------------------------------------------------------
+0030   0004           00124 SleepRestart    CLRWDT                  ;; Detected SLEEP restart, Clr WDT to reset PD
+0031   0663           00125                 BTFSC   Status,3        ;; Check STATUS.3, skip if ~PD clear
+0032   0A34           00126                 GOTO    Continue        ;; ~PD is set, CLRWDT cleared PD
+0033   0A33           00127 ErrorLoop       GOTO    ErrorLoop   ;; ERROR: hold here on error
+                      00128 ;
+0034   0C10           00129 Continue                MOVLW   0x10            ;; Load FSR with non-banked RAM address
+0035   0024           00130                 MOVWF   FSR             ;; Initialize FSR for Bit Processor Tests
+0036   0060           00131                 CLRF    INDF            ;; Clear non-banked RAM location using INDF
+0037   0503           00132                 BSF     Status,0        ;; Set   STATUS.0 (C) bit 
+0038   0423           00133                 BCF     Status,1        ;; Clear STATUS.1 (DC) bit
+0039   0443           00134                 BCF     Status,2        ;; Clear STATUS.2 (Z) bit
+003A   0203           00135                 MOVF    Status,0        ;; Load W with STATUS
+003B   0300           00136                 RRF     INDF,0          ;; Rotate Right RAM location: C <= 0,      W <= 0x80
+003C   0340           00137                 RLF     INDF,0          ;; Rotate Left  RAM location: C <= 0, (INDF) <= 0x00
+003D   0020           00138                 MOVWF   INDF            ;; Write result back to RAM: (INDF) <= 0x80
+003E   0021           00139                 MOVWF   Tmr0            ;; Write to TMR0, clear Prescaler
+003F   0A00           00140                 GOTO    Start           ;; Restart Program
+                      00141 ;-------------------------------------------------------------------------------
+                      00142 ;PortTst
+                      00143 ;
+                      00144 ;                MOVLW   0xAA           ;; Load W with 0xAA
+                      00145 ;                MOVWF   PortA          ;; WE_PortA
+                      00146 ;                MOVWF   PortB          ;; WE_PortB
+                      00147 ;                MOVWF   PortC          ;; WE_PortC
+                      00148 ;                MOVF    PortA,0        ;; RE_PortA
+                      00149 ;                MOVF    PortB,0        ;; RE_PortB
+                      00150 ;                MOVF    PortC,0        ;; RE_PortC
+                      00151 ;                COMF    PortA,1    ;; Complement PortA
+                      00152 ;                COMF    PortB,1    ;; Complement PortB
+                      00153 ;                COMF    PortC,1    ;; Complement PortC
+                      00154 ;                CLRF    PortA          ;; Clear PortA
+                      00155 ;                CLRF    PortB          ;; Clear PortB
+                      00156 ;                CLRF    PortC          ;; Clear PortC
+                      00157 ;                CLRW                   ;; zero working register
+MPASM  5.50                   M16C5X_TST2.ASM   7-4-2013  11:39:38         PAGE  4
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+                      00158 ;
+                      00159 ;
+0040   00EC           00160 PortTst                 DECF    0x0C,1
+0041   020C           00161                                 MOVF    0x0C,0
+0042   0025           00162                                 MOVWF   PortA
+                      00163 ;
+0043   0945           00164                                 CALL    Delay
+                      00165 ;
+0044   0A40           00166                                 GOTO    PortTst
+                      00167 
+                      00168 ;
+                      00169 ;       Delay Subroutine
+                      00170 ;
+0045   0000           00171 Delay                   NOP
+                      00172 ;
+0046   0CEE           00173                                 MOVLW   0xEE
+0047   002A           00174                                 MOVWF   0x0A
+0048   0C01           00175                                 MOVLW   0x01
+0049   002B           00176                                 MOVWF   0x0B
+                      00177 ;
+004A   02EA           00178 DelayLp                 DECFSZ  0x0A,1          ;; Decrement Delay Low
+004B   0A4A           00179                                 GOTO    DelayLp
+004C   0004           00180                                 CLRWDT                          ;; Tickle WDT
+004D   02EB           00181                                 DECFSZ  0x0B,1          ;; Decrement Delay High
+004E   0A4A           00182                                 GOTO    DelayLp
+                      00183 ;
+004F   0800           00184                                 RETLW   0x00
+                      00185 ;-------------------------------------------------------------------------------
+                      00186                                 END
+MPASM  5.50                   M16C5X_TST2.ASM   7-4-2013  11:39:38         PAGE  5
+
+
+SYMBOL TABLE
+  LABEL                             VALUE 
+
+Cntr                              0000000A
+Continue                          00000034
+Count                             00000015
+Delay                             00000045
+DelayLoop                         0000000A
+DelayLp                           0000004A
+ErrorLoop                         00000033
+FSR                               00000004
+INDF                              00000000
+Loop1                             00000013
+Loop2                             0000001B
+MemStart                          0000000B
+Next                              0000000A
+PCL                               00000002
+PortA                             00000005
+PortB                             00000006
+PortC                             00000007
+PortTst                           00000040
+ScratchPadRam                     0000000A
+SleepRestart                      00000030
+Start                             00000000
+Status                            00000003
+Subroutine                        0000000D
+Tmr0                              00000001
+__16F59                           00000001
+__DEBUG                           1
+
+
+MEMORY USAGE MAP ('X' = Used,  '-' = Unused)
+
+0000 : XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX
+0040 : XXXXXXXXXXXXXXXX ---------------- ---------------- ----------------
+07C0 : ---------------- ---------------- ---------------- ---------------X
+
+All other memory blocks unused.
+
+Program Memory Words Used:    81
+Program Memory Words Free:  1967
+
+
+Errors   :     0
+Warnings :     0 reported,     0 suppressed
+Messages :     2 reported,     0 suppressed
+
+

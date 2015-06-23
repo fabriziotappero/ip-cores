@@ -1,0 +1,335 @@
+MPASM  5.50                   M16C5X_TST3.ASM   7-13-2013  13:25:47         PAGE  1
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+                      00001 ;*******************************************************************************
+                      00002 ; M16C5x_Tst3.ASM
+                      00003 ;
+                      00004 ;       This is the source for the test program used to develop the PIC16C5x proce-
+                      00005 ;       core. It has also been used to test the P16C5x version of the PIC16C5x core.
+                      00006 ;
+                      00007 ;       The first instruction of the program is expected to be placed in location 0.
+                      00008 ;
+                      00009 ;       The program tests most instructions, but not is a self-checking manner. In-
+                      00010 ;       spection of the registers is the method used to verify that the cores are
+                      00011 ;       operating correctly.
+                      00012 ;
+                      00013 ;*******************************************************************************
+                      00014 
+                      00015         LIST P=16F59, R=DEC
+                      00016 
+                      00017 ;-------------------------------------------------------------------------------
+                      00018 ;   Set ScratchPadRam here.  If you are using a PIC16C5X device, use: 
+                      00019 ;ScratchPadRam EQU     0x10
+                      00020 ;   Otherwise, use:
+                      00021 ;ScratchPadRam EQU     0x20
+                      00022 ;-------------------------------------------------------------------------------
+                      00023 
+  00000010            00024 ScratchPadRAM   EQU     0x10
+                      00025 
+                      00026 ;-------------------------------------------------------------------------------
+                      00027 ; Variables
+                      00028 ;-------------------------------------------------------------------------------
+                      00029 
+  00000000            00030 INDF                    EQU             0                       ; Indirect Register File Access Location
+  00000001            00031 Tmr0                    EQU             1                       ; Timer 0
+  00000002            00032 PCL                             EQU             2                       ; Low Byte Program Counter
+  00000003            00033 Status                  EQU             3                       ; Processor Status Register
+  00000004            00034 FSR                             EQU             4                       ; File Select Register
+  00000005            00035 PortA                   EQU             5                       ; I/O Port A Address
+  00000006            00036 PortB                   EQU             6                       ; I/O Port B Address
+  00000007            00037 PortC                   EQU             7                       ; I/O Port C Address
+                      00038 
+  0000000A            00039 SPI_CR          EQU     0x0A        ; SPI Control Register Shadow/Working Copy
+  0000000B            00040 SPI_SR          EQU     0x0B        ; SPI Status Register Shadow/Working Copy
+  0000000C            00041 SPI_DIO_H       EQU     0x0C        ; 1st byte To/From from SPI Rcv FIFO
+  0000000D            00042 SPI_DIO_L       EQU     0x0D        ; 2nd byte To/From from SPI Rcv FIFO
+                      00043 
+  0000000F            00044 DlyCntr         EQU     0x0F        ; General Purpose Delay Counter Register
+                      00045 
+                      00046 ;-------------------------------------------------------------------------------
+                      00047 ; SPI Control Register Bit Map (M16C5x TRIS A register)
+                      00048 ;-------------------------------------------------------------------------------
+                      00049 
+  00000000            00050 SPI_CR_REn      EQU     0           ; Enable MISO Data Capture
+  00000001            00051 SPI_CR_SSel     EQU     1           ; Slv Select: 0 - Ext SEEPROM, 1 - SSP_UART
+  00000002            00052 SPI_CR_MD0      EQU     2           ; SPI Md[1:0]: UART    - Mode 0 or Mode 3
+  00000003            00053 SPI_CR_MD1      EQU     3           ;              SEEPROM - Mode 0 or Mode 3
+MPASM  5.50                   M16C5X_TST3.ASM   7-13-2013  13:25:47         PAGE  2
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+  00000004            00054 SPI_CR_BR0      EQU     4           ; SPI Baud Rate: 0 - Clk/2, ... Clk/128
+  00000005            00055 SPI_CR_BR1      EQU     5           ; Default: 110 - Clk/64
+  00000006            00056 SPI_CR_BR2      EQU     6           ; Clk/2 29.4912 MHz
+  00000007            00057 SPI_CR_DIR      EQU     7           ; SPI Shift Direction: 0 - MSB, 1 - LSB
+                      00058 
+                      00059 ;-------------------------------------------------------------------------------
+                      00060 ; SPI Status Register Bit Map (M16C5x Port A input)
+                      00061 ;-------------------------------------------------------------------------------
+                      00062 
+  00000000            00063 SPI_SR_TF_EF    EQU     0           ; SPI TF Empty Flag (All Data Transmitted)
+  00000001            00064 SPI_SR_TF_FF    EQU     1           ; SPI TF Full Flag  (Possible Overrun Error)
+  00000002            00065 SPI_SR_RF_EF    EQU     2           ; SPI RF Empty Flag (Data Available)
+  00000003            00066 SPI_SR_RF_FF    EQU     3           ; SPI RF Full Flag  (Possible Overrun Error)
+  00000004            00067 SPI_SR_DE       EQU     4           ; SSP UART RS-485 Drive Enable
+  00000005            00068 SPI_SR_RTS      EQU     5           ; SSP UART Request-To-Send Modem Control Out
+  00000006            00069 SPI_SR_CTS      EQU     6           ; SSP UART Clear-To-Send Modem Control Input
+  00000007            00070 SPI_SR_IRQ      EQU     7           ; SSP UART Interrupt Request Output
+                      00071 
+                      00072 ;-------------------------------------------------------------------------------
+                      00073 ; SSP UART Control Register (RA = 000) (16-bits Total) (Read-Write)
+                      00074 ;-------------------------------------------------------------------------------
+                      00075 
+  00000003            00076 UART_CR_RA      EQU     3           ; Bits 7:5 SPI_DIO_H
+  00000001            00077 UART_CR_WnR     EQU     1           ; Bit 4 SPI_DIO_H, Write if Set, elxe Read
+  00000002            00078 UART_CR_MD      EQU     2           ; Bits 3:2 SPI_DIO_H, UART Mode: 232/485
+  00000001            00079 UART_CR_RTSo    EQU     1           ; Bit 1 SPI_DIO_H, Request-To-Send Output
+  00000001            00080 UART_CR_IE      EQU     1           ; Bit 0 SPI_DIO_H, Interrupt Enable
+  00000004            00081 UART_CR_FMT     EQU     4           ; Bits 7:4 SPI_DIO_L, Serial Frame Format
+  00000004            00082 UART_CR_BAUD    EQU     4           ; Bits 3:0 SPI_DIO_L, Serial Baud Rate
+                      00083 
+                      00084 ;-------------------------------------------------------------------------------
+                      00085 ; SSP UART Status Register (RA = 001) (16-bits Total) (Read-Only)
+                      00086 ;-------------------------------------------------------------------------------
+                      00087 
+  00000003            00088 UART_SR_RA      EQU     3           ; Bits 7:5 SPI_DIO_H
+  00000001            00089 UART_SR_WnR     EQU     1           ; Bit 4 SPI_DIO_H, Ignored if Set
+  00000002            00090 UART_SR_MD      EQU     2           ; Bits 4:2 SPI_DIO_H, UART Mode
+  00000001            00091 UART_SR_RTSi    EQU     1           ; Bit 1 SPI_DIO_H, RTS signal level
+  00000001            00092 UART_SR_CTSi    EQU     1           ; Bit 0 SPI_DIO_H, CTS signal level
+  00000002            00093 UART_SR_RS      EQU     2           ; Bits 7:6 SPI_DIO_L, Rx FIFO State
+  00000002            00094 UART_SR_TS      EQU     2           ; Bits 5:4 SPI_DIO_L, Tx FIFO State
+  00000001            00095 UART_SR_iRTO    EQU     1           ; Bit 3 SPI_DIO_L, Rcv Timeout Interrupt
+  00000001            00096 UART_SR_iRDA    EQU     1           ; Bit 2 SPI_DIO_L, Rcv Data Available
+  00000001            00097 UART_SR_iTHE    EQU     1           ; Bit 1 SPI_DIO_L, Tx FIFO Half Empty
+  00000001            00098 UART_SR_iTFE    EQU     1           ; Bit 0 SPI_DIO_L, Tx FIFO Empty
+                      00099 
+                      00100 ;-------------------------------------------------------------------------------
+                      00101 ; SSP UART Transmit Data Register (RA = 010) (16-bits Total) (Write-Only)
+                      00102 ;-------------------------------------------------------------------------------
+                      00103 
+  00000003            00104 UART_TD_RA      EQU     3           ; Bits 7:5 SPI_DIO_H
+  00000001            00105 UART_TD_WnR     EQU     1           ; Bit 4 SPI_DIO_H, Ignored if Not Set
+  00000001            00106 UART_TD_TFC     EQU     1           ; Bit 3 SPI_DIO_H, Transmit FIFO Clear/Rst
+MPASM  5.50                   M16C5X_TST3.ASM   7-13-2013  13:25:47         PAGE  3
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+  00000001            00107 UART_TD_RFC     EQU     1           ; Bit 2 SPI_DIO_H, Receive FIFO Clear/Reset
+  00000001            00108 UART_TD_HLD     EQU     1           ; Bit 1 SPI_DIO_H, Transmit delayed until 0
+  00000001            00109 UART_TD_Rsvd    EQU     1           ; Bit 0 SPI_DIO_H, Reserved
+  00000008            00110 UART_TD_DO      EQU     8           ; Bits 7:0 SPI_DIO_L, Tx Data: 7 or 8 bits
+                      00111 
+                      00112 ;-------------------------------------------------------------------------------
+                      00113 ; SSP UART Recieve Data Register (RA = 011) (16-bits Total) (Read-Only)
+                      00114 ;-------------------------------------------------------------------------------
+                      00115 
+  00000003            00116 UART_RD_RA      EQU     3           ; Bits 7:5 SPI_DIO_H
+  00000001            00117 UART_RD_WnR     EQU     1           ; Bit 4 SPI_DIO_H, Ignored if Set
+  00000001            00118 UART_RD_TRDY    EQU     1           ; Bit 3 SPI_DIO_H, Transmit Ready
+  00000001            00119 UART_RD_RRDY    EQU     1           ; Bit 2 SPI_DIO_H, Receive Ready
+  00000001            00120 UART_RD_RTO     EQU     1           ; Bit 1 SPI_DIO_H, Receive Time Out Detected
+  00000001            00121 UART_RD_RERR    EQU     1           ; Bit 0 SPI_DIO_H, Receive Error Dectected
+  00000008            00122 UART_RD_DI      EQU     8           ; Bits 7:0 SPI_DIO_L, Rx Data: 7 or 8 bits
+                      00123 
+                      00124 ;-------------------------------------------------------------------------------
+                      00125 ; Set Reset/WDT Vector
+                      00126 ;-------------------------------------------------------------------------------
+                      00127 
+07FF                  00128                 ORG     0x7FF
+                      00129        
+Message[306]: Crossing page boundary -- ensure page bits are set.
+07FF   0A00           00130                 GOTO    Start
+                      00131 
+                      00132 ;-------------------------------------------------------------------------------
+                      00133 ; Main Program
+                      00134 ;-------------------------------------------------------------------------------
+                      00135 
+0000                  00136                 ORG     0x000
+                      00137 
+                      00138 ;-------------------------------------------------------------------------------
+                      00139 
+0000   0CFF           00140 Start           MOVLW   0xFF            ; Initialize TRIS A and TRIS B to all 1s
+0001   0005           00141                 TRIS    5
+0002   0006           00142                 TRIS    6
+                      00143                 
+0003   0C0E           00144                 MOVLW   0x0E            ; Load W with SPI CR Initial Value
+0004   002A           00145                 MOVWF   SPI_CR          ; Save copy of value
+0005   0007           00146                 TRIS    7               ; Initialize SPI CR
+                      00147                 
+0006   0C08           00148                 MOVLW   0x08            ; Delay before using SPI I/F
+0007   002F           00149                 MOVWF   DlyCntr
+0008   02EF           00150 SPI_Init_Dly    DECFSZ  DlyCntr,1
+0009   0A08           00151                 GOTO    SPI_Init_Dly
+                      00152                 
+000A   0C1B           00153                 MOVLW   0x1B            ; UART CR (Hi): RS485 w/o Loop Back, IE
+000B   0027           00154                 MOVWF   PortC           ; Output to SPI and to UART
+000C   0C00           00155                 MOVLW   0x00            ; UART CR (Lo) Set 8N1
+000D   0027           00156                 MOVWF   PortC
+                      00157 
+000E   0C30           00158                 MOVLW   0x30            ; UART BRR (Hi) PS[3:0]
+MPASM  5.50                   M16C5X_TST3.ASM   7-13-2013  13:25:47         PAGE  4
+
+
+LOC  OBJECT CODE     LINE SOURCE TEXT
+  VALUE
+
+000F   0027           00159                 MOVWF   PortC           ; Output to SPI and to UART
+0010   0CBF           00160                 MOVLW   0xBF            ; UART BRR (Lo) Div[7:0]
+0011   0027           00161                 MOVWF   PortC
+                      00162 
+0012   0705           00163 WaitLp1         BTFSS   PortA, SPI_SR_TF_EF ; Wait for UART UCR, BRR output
+0013   0A12           00164                 GOTO    WaitLp1
+                      00165                 
+0014   0C50           00166 Wr_UART_TD      MOVLW   0x50            ; UART TD (Hi) RA = 2, WnR = 1
+0015   0027           00167                 MOVWF   PortC           ; Output to SPI and to UART
+0016   0C55           00168                 MOVLW   0x55            ; UART TD (Lo) 0x55 = "U"
+0017   0027           00169                 MOVWF   PortC           ; Output to SPI and to UART
+                      00170 
+0018   0705           00171 WaitLp2         BTFSS   PortA, SPI_SR_TF_EF ; Wait for UART CR data to be sent
+0019   0A18           00172                 GOTO    WaitLp2
+                      00173                 
+001A   050A           00174                 BSF     SPI_CR, SPI_CR_REn  ; Enable SPI IF Capture MISO data
+                      00175                 
+001B   020A           00176                 MOVF    SPI_CR,0        ; Load SPI CR Shadow
+001C   0007           00177                 TRIS    7               ; Enable SPI I/F Receive Function   
+                      00178                 
+001D   0C20           00179 Rd_UART_SR      MOVLW   0x20            ; Read UART Status Register
+001E   0027           00180                 MOVWF   PortC
+001F   0040           00181                 CLRW
+0020   0027           00182                 MOVWF   PortC
+                      00183                 
+0021   0645           00184 WaitLp3         BTFSC   PortA, SPI_SR_RF_EF ; Wait for UART Return Data (Hi)
+0022   0A21           00185                 GOTO    WaitLp3
+                      00186                 
+0023   0207           00187                 MOVF    PortC,0         ; Read SPI Receive FIFO
+0024   002C           00188                 MOVWF   SPI_DIO_H       ; Store UART SR (hi byte)
+                      00189                 
+                      00190                 
+0025   0645           00191 WaitLp4         BTFSC   PortA, SPI_SR_RF_EF ; Wait for UART Return Data (Hi)
+0026   0A25           00192                 GOTO    WaitLp4
+                      00193                 
+0027   0207           00194                 MOVF    PortC,0         ; Read SPI Receive FIFO
+0028   002D           00195                 MOVWF   SPI_DIO_L       ; Store UART SR (hi byte)
+                      00196                 
+0029   070D           00197                 BTFSS   SPI_DIO_L,0     ; Test UART_SR_iTFE bit
+002A   0A1D           00198                 GOTO    Rd_UART_SR      ; Loop until UART TF Empty
+                      00199 
+002B   040A           00200                 BCF     SPI_CR, SPI_CR_REn  ; Disable SPI IF Capture MISO data
+                      00201 
+002C   020A           00202                 MOVF    SPI_CR,0        ; Load SPI CR Shadow
+002D   0007           00203                 TRIS    7               ; Disable SPI I/F Receive Function   
+                      00204 
+002E   0A14           00205                 GOTO    Wr_UART_TD      ; Loop Forever, send 0x55 continously
+                      00206 
+                      00207 ;-------------------------------------------------------------------------------
+                      00208                                 
+                      00209                                 END
+MPASM  5.50                   M16C5X_TST3.ASM   7-13-2013  13:25:47         PAGE  5
+
+
+SYMBOL TABLE
+  LABEL                             VALUE 
+
+DlyCntr                           0000000F
+FSR                               00000004
+INDF                              00000000
+PCL                               00000002
+PortA                             00000005
+PortB                             00000006
+PortC                             00000007
+Rd_UART_SR                        0000001D
+SPI_CR                            0000000A
+SPI_CR_BR0                        00000004
+SPI_CR_BR1                        00000005
+SPI_CR_BR2                        00000006
+SPI_CR_DIR                        00000007
+SPI_CR_MD0                        00000002
+SPI_CR_MD1                        00000003
+SPI_CR_REn                        00000000
+SPI_CR_SSel                       00000001
+SPI_DIO_H                         0000000C
+SPI_DIO_L                         0000000D
+SPI_Init_Dly                      00000008
+SPI_SR                            0000000B
+SPI_SR_CTS                        00000006
+SPI_SR_DE                         00000004
+SPI_SR_IRQ                        00000007
+SPI_SR_RF_EF                      00000002
+SPI_SR_RF_FF                      00000003
+SPI_SR_RTS                        00000005
+SPI_SR_TF_EF                      00000000
+SPI_SR_TF_FF                      00000001
+ScratchPadRAM                     00000010
+Start                             00000000
+Status                            00000003
+Tmr0                              00000001
+UART_CR_BAUD                      00000004
+UART_CR_FMT                       00000004
+UART_CR_IE                        00000001
+UART_CR_MD                        00000002
+UART_CR_RA                        00000003
+UART_CR_RTSo                      00000001
+UART_CR_WnR                       00000001
+UART_RD_DI                        00000008
+UART_RD_RA                        00000003
+UART_RD_RERR                      00000001
+UART_RD_RRDY                      00000001
+UART_RD_RTO                       00000001
+UART_RD_TRDY                      00000001
+UART_RD_WnR                       00000001
+UART_SR_CTSi                      00000001
+UART_SR_MD                        00000002
+UART_SR_RA                        00000003
+UART_SR_RS                        00000002
+UART_SR_RTSi                      00000001
+UART_SR_TS                        00000002
+MPASM  5.50                   M16C5X_TST3.ASM   7-13-2013  13:25:47         PAGE  6
+
+
+SYMBOL TABLE
+  LABEL                             VALUE 
+
+UART_SR_WnR                       00000001
+UART_SR_iRDA                      00000001
+UART_SR_iRTO                      00000001
+UART_SR_iTFE                      00000001
+UART_SR_iTHE                      00000001
+UART_TD_DO                        00000008
+UART_TD_HLD                       00000001
+UART_TD_RA                        00000003
+UART_TD_RFC                       00000001
+UART_TD_Rsvd                      00000001
+UART_TD_TFC                       00000001
+UART_TD_WnR                       00000001
+WaitLp1                           00000012
+WaitLp2                           00000018
+WaitLp3                           00000021
+WaitLp4                           00000025
+Wr_UART_TD                        00000014
+__16F59                           00000001
+
+
+MEMORY USAGE MAP ('X' = Used,  '-' = Unused)
+
+0000 : XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXXX XXXXXXXXXXXXXXX- ----------------
+07C0 : ---------------- ---------------- ---------------- ---------------X
+
+All other memory blocks unused.
+
+Program Memory Words Used:    48
+Program Memory Words Free:  2000
+
+
+Errors   :     0
+Warnings :     0 reported,     0 suppressed
+Messages :     1 reported,     0 suppressed
+
+
