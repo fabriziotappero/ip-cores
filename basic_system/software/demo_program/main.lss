@@ -1,0 +1,1679 @@
+
+main.elf:     file format elf32-bigarm
+
+Sections:
+Idx Name          Size      VMA       LMA       File off  Algn
+  0 .text         00000a40  00000000  00000000  00008000  2**2
+                  CONTENTS, ALLOC, LOAD, READONLY, CODE
+  1 .stack        00004000  00000b00  00000b00  00008a40  2**0
+                  ALLOC
+  2 .comment      0000001b  00000000  00000000  00008a40  2**0
+                  CONTENTS, READONLY
+  3 .debug_aranges 00000040  00000000  00000000  00008a60  2**3
+                  CONTENTS, READONLY, DEBUGGING
+  4 .debug_pubnames 00000243  00000000  00000000  00008aa0  2**0
+                  CONTENTS, READONLY, DEBUGGING
+  5 .debug_info   000007d9  00000000  00000000  00008ce3  2**0
+                  CONTENTS, READONLY, DEBUGGING
+  6 .debug_abbrev 0000023b  00000000  00000000  000094bc  2**0
+                  CONTENTS, READONLY, DEBUGGING
+  7 .debug_line   000002d0  00000000  00000000  000096f7  2**0
+                  CONTENTS, READONLY, DEBUGGING
+  8 .debug_frame  0000024c  00000000  00000000  000099c8  2**2
+                  CONTENTS, READONLY, DEBUGGING
+  9 .debug_str    00000319  00000000  00000000  00009c14  2**0
+                  CONTENTS, READONLY, DEBUGGING
+ 10 .debug_loc    000006d6  00000000  00000000  00009f2d  2**0
+                  CONTENTS, READONLY, DEBUGGING
+Disassembly of section .text:
+
+00000000 <_boot>:
+
+// Runtime Interrupt Vectors
+// -------------------------
+Vectors:
+        b     _start                    // reset - _start
+   0:	ea000012 	b	50 <_mainCRTStartup>
+        b     und_handler               // undefined - _undf
+   4:	ea000062 	b	194 <und_handler>
+        b     swi_handler               // SWI - _swi
+   8:	ea000055 	b	164 <swi_handler>
+        b     iab_handler               // program abort - _pabt
+   c:	ea000048 	b	134 <iab_handler>
+        b     iab_handler               // data abort - _dabt
+  10:	ea000047 	b	134 <iab_handler>
+        nop                             // reserved
+  14:	e1a00000 	nop			(mov r0,r0)
+        ldr   pc,[pc,#-0xFF0]           // IRQ - read the VIC
+  18:	e51ffff0 	ldr	pc, [pc, #-4080]	; fffff030 <_stack+0xffffa530>
+        ldr   pc,[pc,#-0xFF0]           // FIQ - read the VIC
+  1c:	e51ffff0 	ldr	pc, [pc, #-4080]	; fffff034 <_stack+0xffffa534>
+
+00000020 <_undf>:
+  20:	00000038 	andeq	r0, r0, r8, lsr r0
+
+00000024 <_swi>:
+  24:	0000003c 	andeq	r0, r0, ip, lsr r0
+
+00000028 <_pabt>:
+  28:	00000040 	andeq	r0, r0, r0, asr #32
+
+0000002c <_dabt>:
+  2c:	00000044 	andeq	r0, r0, r4, asr #32
+
+00000030 <_irq>:
+  30:	00000048 	andeq	r0, r0, r8, asr #32
+
+00000034 <_fiq>:
+  34:	0000004c 	andeq	r0, r0, ip, asr #32
+
+00000038 <__undf>:
+
+#if 0
+// Use this group for production
+_undf:  .word _reset                    // undefined - _reset
+_swi:   .word _reset                    // SWI - _reset
+_pabt:  .word _reset                    // program abort - _reset
+_dabt:  .word _reset                    // data abort - _reset
+_irq:   .word _reset                    // IRQ - _reset
+_fiq:   .word _reset                    // FIQ - _reset
+
+#else
+// Use this group for development
+_undf:  .word __undf                    // undefined
+_swi:   .word __swi                     // SWI
+_pabt:  .word __pabt                    // program abort
+_dabt:  .word __dabt                    // data abort
+_irq:   .word __irq                     // IRQ
+_fiq:   .word __fiq                     // FIQ
+
+__undf: b     .                         // undefined
+  38:	eafffffe 	b	38 <__undf>
+
+0000003c <__swi>:
+__swi:  b     .                         // SWI
+  3c:	eafffffe 	b	3c <__swi>
+
+00000040 <__pabt>:
+__pabt: b     .                         // program abort
+  40:	eafffffe 	b	40 <__pabt>
+
+00000044 <__dabt>:
+__dabt: b     .                         // data abort
+  44:	eafffffe 	b	44 <__dabt>
+
+00000048 <__irq>:
+__irq:  b     .                         // IRQ
+  48:	eafffffe 	b	48 <__irq>
+
+0000004c <__fiq>:
+__fiq:  b     .                         // FIQ
+  4c:	eafffffe 	b	4c <__fiq>
+
+00000050 <_mainCRTStartup>:
+#endif
+        .size _boot, . - _boot
+        .endfunc
+
+
+// Setup the operating mode & stack.
+// ---------------------------------
+        .global _start, start, _mainCRTStartup
+        .func   _start
+
+_start:
+start:
+_mainCRTStartup:
+
+// Initialize Interrupt System
+// - Set stack location for each mode
+// - Leave in System Mode with Interrupts Disabled
+// -----------------------------------------------
+        ldr   r0,=_stack                    // Calc stack base
+  50:	e59f0228 	ldr	r0, [pc, #552]	; 280 <.text+0x280>
+		mrs   r1,CPSR
+  54:	e10f1000 	mrs	r1, CPSR
+		bic   r1,r1,#0x7F
+  58:	e3c1107f 	bic	r1, r1, #127	; 0x7f
+		orr   r1,r1,#MODE_UND|IRQ_BIT|FIQ_BIT  // Change to Undefined Instruction mode
+  5c:	e38110db 	orr	r1, r1, #219	; 0xdb
+        msr   CPSR,r1
+  60:	e129f001 	msr	CPSR_fc, r1
+        mov   sp,r0                         // Store stack base
+  64:	e1a0d000 	mov	sp, r0
+
+        sub   r0,r0,#UND_STACK_SIZE         // Calc stack base
+  68:	e2400004 	sub	r0, r0, #4	; 0x4
+		mrs   r1,CPSR
+  6c:	e10f1000 	mrs	r1, CPSR
+		bic   r1,r1,#0x7F
+  70:	e3c1107f 	bic	r1, r1, #127	; 0x7f
+        orr   r1,r1,#MODE_ABT|IRQ_BIT|FIQ_BIT  // Change to Abort Mode
+  74:	e38110d7 	orr	r1, r1, #215	; 0xd7
+        msr   CPSR,r1
+  78:	e129f001 	msr	CPSR_fc, r1
+        mov   sp,r0                         // Store stack base
+  7c:	e1a0d000 	mov	sp, r0
+
+        sub   r0,r0,#ABT_STACK_SIZE         // Calc stack base
+  80:	e2400004 	sub	r0, r0, #4	; 0x4
+		mrs   r1,CPSR
+  84:	e10f1000 	mrs	r1, CPSR
+		bic   r1,r1,#0x7F
+  88:	e3c1107f 	bic	r1, r1, #127	; 0x7f
+        orr   r1,r1,#MODE_FIQ|IRQ_BIT|FIQ_BIT  // Change to FIQ Mode
+  8c:	e38110d1 	orr	r1, r1, #209	; 0xd1
+        msr   CPSR,r1
+  90:	e129f001 	msr	CPSR_fc, r1
+        mov   sp,r0                         // Store stack base
+  94:	e1a0d000 	mov	sp, r0
+
+        sub   r0,r0,#FIQ_STACK_SIZE         // Calc stack base
+  98:	e2400004 	sub	r0, r0, #4	; 0x4
+		mrs   r1,CPSR
+  9c:	e10f1000 	mrs	r1, CPSR
+		bic   r1,r1,#0x7F
+  a0:	e3c1107f 	bic	r1, r1, #127	; 0x7f
+        orr   r1,r1,#MODE_IRQ|IRQ_BIT|FIQ_BIT  // Change to IRQ Mode
+  a4:	e38110d2 	orr	r1, r1, #210	; 0xd2
+        msr   CPSR,r1
+  a8:	e129f001 	msr	CPSR_fc, r1
+        mov   sp,r0                         // Store stack base
+  ac:	e1a0d000 	mov	sp, r0
+
+        sub   r0,r0,#IRQ_STACK_SIZE         // Calc stack base
+  b0:	e2400080 	sub	r0, r0, #128	; 0x80
+		mrs   r1,CPSR
+  b4:	e10f1000 	mrs	r1, CPSR
+		bic   r1,r1,#0x7F
+  b8:	e3c1107f 	bic	r1, r1, #127	; 0x7f
+        orr   r1,r1,#MODE_SVC|IRQ_BIT|FIQ_BIT  // Change to Supervisor Mode
+  bc:	e38110d3 	orr	r1, r1, #211	; 0xd3
+        msr   CPSR,r1
+  c0:	e129f001 	msr	CPSR_fc, r1
+        mov   sp,r0                         // Store stack base
+  c4:	e1a0d000 	mov	sp, r0
+
+        sub   r0,r0,#SVC_STACK_SIZE         // Calc stack base
+  c8:	e2400004 	sub	r0, r0, #4	; 0x4
+		mrs   r1,CPSR
+  cc:	e10f1000 	mrs	r1, CPSR
+		bic   r1,r1,#0x7F
+  d0:	e3c1107f 	bic	r1, r1, #127	; 0x7f
+        orr   r1,r1,#MODE_SYS|IRQ_BIT|FIQ_BIT  // Change to System Mode
+  d4:	e38110df 	orr	r1, r1, #223	; 0xdf
+        msr   CPSR,r1
+  d8:	e129f001 	msr	CPSR_fc, r1
+        mov   sp,r0                         // Store stack base
+  dc:	e1a0d000 	mov	sp, r0
+
+// Copy initialized data to its execution address in RAM
+// -> not necessary, bootloader can be directly ecxecuted from ROM
+// -----------------------------------------------------
+//#ifdef ROM_RUN
+//        ldr   r1,=_etext                // -> ROM data start
+//        ldr   r2,=_data                 // -> data start
+//        ldr   r3,=_edata                // -> end of data
+//1:      cmp   r2,r3                     // check if data to move
+//        ldrlo r0,[r1],#4                // copy it
+//        strlo r0,[r2],#4
+//        blo   1b                        // loop until done
+//#endif
+
+// Clear .bss
+// Hell no!
+// ----------
+//        mov   r0,#0                     // get a zero
+//        ldr   r1,=__bss_start           // -> bss start
+//        ldr   r2,=__bss_end__           // -> bss end
+//2:      cmp   r1,r2                     // check if data to clear
+//        strlo r0,[r1],#4                // clear 4 bytes
+//        blo   2b                        // loop until done
+
+// Call main program: main(0)
+// --------------------------
+        mov   r0,#0                     // no arguments (argc = 0)
+  e0:	e3a00000 	mov	r0, #0	; 0x0
+        mov   r1,r0
+  e4:	e1a01000 	mov	r1, r0
+        mov   r2,r0
+  e8:	e1a02000 	mov	r2, r0
+        mov   fp,r0                     // null frame pointer
+  ec:	e1a0b000 	mov	fp, r0
+        mov   r7,r0                     // null frame pointer for thumb
+  f0:	e1a07000 	mov	r7, r0
+        ldr   r10,=main
+  f4:	e59fa188 	ldr	sl, [pc, #392]	; 284 <.text+0x284>
+        mov   lr,pc
+  f8:	e1a0e00f 	mov	lr, pc
+        bx    r10                       // enter main()
+  fc:	e12fff1a 	bx	sl
+
+00000100 <_reset>:
+
+        .size   _start, . - _start
+        .endfunc
+
+        .global _reset, reset, exit, abort
+        .func   _reset
+_reset:
+reset:
+exit:
+abort:
+
+        b     .                         // loop until reset
+ 100:	eafffffe 	b	100 <_reset>
+
+00000104 <dab_handler>:
+
+// Data Fetch Abort Interrupt Handler
+// -------------------------------------------------------------------
+dab_handler:
+		mov   r13, lr
+ 104:	e1a0d00e 	mov	sp, lr
+		mov   r4, #16
+ 108:	e3a04010 	mov	r4, #16	; 0x10
+		mcr   p15, 0, r4, c13, c13, 0
+ 10c:	ee0d4f1d 	mcr	15, 0, r4, cr13, cr13, {0}
+		mov   r4, #'<'
+ 110:	e3a0403c 	mov	r4, #60	; 0x3c
+		bl    uart0_send_byte
+ 114:	eb000051 	bl	260 <uart0_send_byte>
+		mov   r4, #'D'
+ 118:	e3a04044 	mov	r4, #68	; 0x44
+		bl    uart0_send_byte
+ 11c:	eb00004f 	bl	260 <uart0_send_byte>
+		mov   r4, #'A'
+ 120:	e3a04041 	mov	r4, #65	; 0x41
+		bl    uart0_send_byte
+ 124:	eb00004d 	bl	260 <uart0_send_byte>
+		mov   r4, #'B'
+ 128:	e3a04042 	mov	r4, #66	; 0x42
+		bl    uart0_send_byte
+ 12c:	eb00004b 	bl	260 <uart0_send_byte>
+		b     isr_handler
+ 130:	ea000022 	b	1c0 <isr_handler>
+
+00000134 <iab_handler>:
+
+// Instruction Fetch Abort Interrupt Handler
+// -------------------------------------------------------------------
+iab_handler:
+		mov   r13, lr
+ 134:	e1a0d00e 	mov	sp, lr
+		mov   r4, #32
+ 138:	e3a04020 	mov	r4, #32	; 0x20
+		mcr   p15, 0, r4, c13, c13, 0
+ 13c:	ee0d4f1d 	mcr	15, 0, r4, cr13, cr13, {0}
+		mov   r4, #'<'
+ 140:	e3a0403c 	mov	r4, #60	; 0x3c
+		bl    uart0_send_byte
+ 144:	eb000045 	bl	260 <uart0_send_byte>
+		mov   r4, #'I'
+ 148:	e3a04049 	mov	r4, #73	; 0x49
+		bl    uart0_send_byte
+ 14c:	eb000043 	bl	260 <uart0_send_byte>
+		mov   r4, #'A'
+ 150:	e3a04041 	mov	r4, #65	; 0x41
+		bl    uart0_send_byte
+ 154:	eb000041 	bl	260 <uart0_send_byte>
+		mov   r4, #'B'
+ 158:	e3a04042 	mov	r4, #66	; 0x42
+		bl    uart0_send_byte
+ 15c:	eb00003f 	bl	260 <uart0_send_byte>
+		b     isr_handler
+ 160:	ea000016 	b	1c0 <isr_handler>
+
+00000164 <swi_handler>:
+
+// Software Interrupt Handler
+// -------------------------------------------------------------------
+swi_handler:
+		mov   r13, lr
+ 164:	e1a0d00e 	mov	sp, lr
+		mov   r4, #64
+ 168:	e3a04040 	mov	r4, #64	; 0x40
+		mcr   p15, 0, r4, c13, c13, 0
+ 16c:	ee0d4f1d 	mcr	15, 0, r4, cr13, cr13, {0}
+		mov   r4, #'<'
+ 170:	e3a0403c 	mov	r4, #60	; 0x3c
+		bl    uart0_send_byte
+ 174:	eb000039 	bl	260 <uart0_send_byte>
+		mov   r4, #'S'
+ 178:	e3a04053 	mov	r4, #83	; 0x53
+		bl    uart0_send_byte
+ 17c:	eb000037 	bl	260 <uart0_send_byte>
+		mov   r4, #'W'
+ 180:	e3a04057 	mov	r4, #87	; 0x57
+		bl    uart0_send_byte
+ 184:	eb000035 	bl	260 <uart0_send_byte>
+		mov   r4, #'I'
+ 188:	e3a04049 	mov	r4, #73	; 0x49
+		bl    uart0_send_byte
+ 18c:	eb000033 	bl	260 <uart0_send_byte>
+		b     isr_handler
+ 190:	ea00000a 	b	1c0 <isr_handler>
+
+00000194 <und_handler>:
+
+// Undefined Instruction Interrupt Handler
+// -------------------------------------------------------------------
+und_handler:
+		mov   r13, lr
+ 194:	e1a0d00e 	mov	sp, lr
+		mov   r4, #128
+ 198:	e3a04080 	mov	r4, #128	; 0x80
+		mcr   p15, 0, r4, c13, c13, 0
+ 19c:	ee0d4f1d 	mcr	15, 0, r4, cr13, cr13, {0}
+		mov   r4, #'<'
+ 1a0:	e3a0403c 	mov	r4, #60	; 0x3c
+		bl    uart0_send_byte
+ 1a4:	eb00002d 	bl	260 <uart0_send_byte>
+		mov   r4, #'U'
+ 1a8:	e3a04055 	mov	r4, #85	; 0x55
+		bl    uart0_send_byte
+ 1ac:	eb00002b 	bl	260 <uart0_send_byte>
+		mov   r4, #'N'
+ 1b0:	e3a0404e 	mov	r4, #78	; 0x4e
+		bl    uart0_send_byte
+ 1b4:	eb000029 	bl	260 <uart0_send_byte>
+		mov   r4, #'D'
+ 1b8:	e3a04044 	mov	r4, #68	; 0x44
+		bl    uart0_send_byte
+ 1bc:	eb000027 	bl	260 <uart0_send_byte>
+
+000001c0 <isr_handler>:
+
+// Interrupt Handler
+// -------------------------------------------------------------------
+isr_handler:
+		mov   r4, #'-'
+ 1c0:	e3a0402d 	mov	r4, #45	; 0x2d
+		bl    uart0_send_byte
+ 1c4:	eb000025 	bl	260 <uart0_send_byte>
+		mov   r4, #'I'
+ 1c8:	e3a04049 	mov	r4, #73	; 0x49
+		bl    uart0_send_byte
+ 1cc:	eb000023 	bl	260 <uart0_send_byte>
+		mov   r4, #'N'
+ 1d0:	e3a0404e 	mov	r4, #78	; 0x4e
+		bl    uart0_send_byte
+ 1d4:	eb000021 	bl	260 <uart0_send_byte>
+		mov   r4, #'T'
+ 1d8:	e3a04054 	mov	r4, #84	; 0x54
+		bl    uart0_send_byte
+ 1dc:	eb00001f 	bl	260 <uart0_send_byte>
+		mov   r4, #' '
+ 1e0:	e3a04020 	mov	r4, #32	; 0x20
+		bl    uart0_send_byte
+ 1e4:	eb00001d 	bl	260 <uart0_send_byte>
+		mov   r4, #'@'
+ 1e8:	e3a04040 	mov	r4, #64	; 0x40
+		bl    uart0_send_byte
+ 1ec:	eb00001b 	bl	260 <uart0_send_byte>
+
+		sub   r7, r13, #4
+ 1f0:	e24d7004 	sub	r7, sp, #4	; 0x4
+		bl    uart0_print_hex
+ 1f4:	eb00000a 	bl	224 <uart0_print_hex>
+
+		mov   r4, #' '
+ 1f8:	e3a04020 	mov	r4, #32	; 0x20
+		bl    uart0_send_byte
+ 1fc:	eb000017 	bl	260 <uart0_send_byte>
+		mov   r4, #'['		
+ 200:	e3a0405b 	mov	r4, #91	; 0x5b
+		bl    uart0_send_byte
+ 204:	eb000015 	bl	260 <uart0_send_byte>
+
+		mrc   p15,0,r7, c9, c9
+ 208:	ee197f19 	mrc	15, 0, r7, cr9, cr9, {0}
+		bl    uart0_print_hex
+ 20c:	eb000004 	bl	224 <uart0_print_hex>
+
+		mov   r4, #']'
+ 210:	e3a0405d 	mov	r4, #93	; 0x5d
+		bl    uart0_send_byte
+ 214:	eb000011 	bl	260 <uart0_send_byte>
+		mov   r4, #'>'
+ 218:	e3a0403e 	mov	r4, #62	; 0x3e
+		bl    uart0_send_byte
+ 21c:	eb00000f 	bl	260 <uart0_send_byte>
+		b .
+ 220:	eafffffe 	b	220 <isr_handler+0x60>
+
+00000224 <uart0_print_hex>:
+
+
+// Send 32-bit HEX value via UART0
+// -------------------------------------------------------------------
+uart0_print_hex:
+		mov   r9, lr // save link register
+ 224:	e1a0900e 	mov	r9, lr
+		mov   r8, #32
+ 228:	e3a08020 	mov	r8, #32	; 0x20
+
+0000022c <uart0_print_hex_loop>:
+
+uart0_print_hex_loop:
+		cmp   r8, #0
+ 22c:	e3580000 	cmp	r8, #0	; 0x0
+		moveq pc, r9
+ 230:	01a0f009 	moveq	pc, r9
+
+		sub   r8, r8, #4
+ 234:	e2488004 	sub	r8, r8, #4	; 0x4
+		mov   r6, r7, lsr r8 // isolate 4-bit value
+ 238:	e1a06837 	mov	r6, r7, lsr r8
+		and   r6, r6, #0x0F
+ 23c:	e206600f 	and	r6, r6, #15	; 0xf
+
+		cmp   r6, #9
+ 240:	e3560009 	cmp	r6, #9	; 0x9
+		bgt   adapt_char
+ 244:	ca000001 	bgt	250 <adapt_char>
+		add   r4, r6, #'0'
+ 248:	e2864030 	add	r4, r6, #48	; 0x30
+
+		b     uart0_print_hex_char
+ 24c:	ea000001 	b	258 <uart0_print_hex_char>
+
+00000250 <adapt_char>:
+adapt_char:
+		sub   r6, r6, #10
+ 250:	e246600a 	sub	r6, r6, #10	; 0xa
+		add   r4, r6, #'A'
+ 254:	e2864041 	add	r4, r6, #65	; 0x41
+
+00000258 <uart0_print_hex_char>:
+
+uart0_print_hex_char:
+		bl    uart0_send_byte
+ 258:	eb000000 	bl	260 <uart0_send_byte>
+		b     uart0_print_hex_loop
+ 25c:	eafffff2 	b	22c <uart0_print_hex_loop>
+
+00000260 <uart0_send_byte>:
+
+
+// Send one char via UART0
+// -------------------------------------------------------------------
+uart0_send_byte:
+		ldr   r0, =(0xFFFF001C)
+ 260:	e59f0020 	ldr	r0, [pc, #32]	; 288 <.text+0x288>
+		ldr   r0, [r0]
+ 264:	e5900000 	ldr	r0, [r0]
+		and   r0, r0, #0x01
+ 268:	e2000001 	and	r0, r0, #1	; 0x1
+		cmp   r0, #0
+ 26c:	e3500000 	cmp	r0, #0	; 0x0
+		beq   uart0_send_byte
+ 270:	0afffffa 	beq	260 <uart0_send_byte>
+		ldr   r0, =(0xFFFF0018)
+ 274:	e59f0010 	ldr	r0, [pc, #16]	; 28c <.text+0x28c>
+		str   r4, [r0]
+ 278:	e5804000 	str	r4, [r0]
+		mov   pc, lr
+ 27c:	e1a0f00e 	mov	pc, lr
+ 280:	00004b00 	andeq	r4, r0, r0, lsl #22
+ 284:	00000964 	andeq	r0, r0, r4, ror #18
+ 288:	ffff001c 	undefined instruction 0xffff001c
+ 28c:	ffff0018 	undefined instruction 0xffff0018
+
+00000290 <io_read_gpio0_pin>:
+{
+//	unsigned long _cmsr = get_cmsr();
+//	set_cmsr(_cmsr  | (1<<CMSR_IRQ) | (1<<CMSR_FIQ));
+
+		unsigned long temp = GPIO0_IN & (1<<pin);
+ 290:	e3e03a0f 	mvn	r3, #61440	; 0xf000
+ 294:	e5131ffb 	ldr	r1, [r3, #-4091]
+ 298:	e20020ff 	and	r2, r0, #255	; 0xff
+	
+//	set_cmsr(_cmsr);
+	return temp;
+}
+ 29c:	e3a00001 	mov	r0, #1	; 0x1
+ 2a0:	e0010210 	and	r0, r1, r0, lsl r2
+ 2a4:	e12fff1e 	bx	lr
+
+000002a8 <io_read_gpio0_port>:
+
+// ******************************************************************************
+// Read general purpose IO port
+   unsigned long io_read_gpio0_port(void)
+// ******************************************************************************
+{
+//	unsigned long _cmsr = get_cmsr();
+//	set_cmsr(_cmsr  | (1<<CMSR_IRQ) | (1<<CMSR_FIQ));
+
+		unsigned long temp = GPIO0_IN;
+ 2a8:	e3e03a0f 	mvn	r3, #61440	; 0xf000
+ 2ac:	e5130ffb 	ldr	r0, [r3, #-4091]
+
+//	set_cmsr(_cmsr);
+	return temp;
+}
+ 2b0:	e12fff1e 	bx	lr
+
+000002b4 <io_set_gpio0_pin>:
+
+// ******************************************************************************
+// Set general purpose IO port
+   void io_set_gpio0_pin(unsigned char pin)
+// ******************************************************************************
+{
+//	unsigned long _cmsr = get_cmsr();
+//	set_cmsr(_cmsr  | (1<<CMSR_IRQ) | (1<<CMSR_FIQ));
+
+		GPIO0_OUT = GPIO0_OUT | (1<<pin);
+ 2b4:	e3e01a0f 	mvn	r1, #61440	; 0xf000
+ 2b8:	e5113fff 	ldr	r3, [r1, #-4095]
+ 2bc:	e20000ff 	and	r0, r0, #255	; 0xff
+ 2c0:	e3a02001 	mov	r2, #1	; 0x1
+ 2c4:	e1833012 	orr	r3, r3, r2, lsl r0
+ 2c8:	e5013fff 	str	r3, [r1, #-4095]
+
+//	set_cmsr(_cmsr);
+}
+ 2cc:	e12fff1e 	bx	lr
+
+000002d0 <io_clr_gpio0_pin>:
+
+// ******************************************************************************
+// Clear general purpose IO port
+   void io_clr_gpio0_pin(unsigned char pin)
+// ******************************************************************************
+{
+ 2d0:	e20000ff 	and	r0, r0, #255	; 0xff
+//	unsigned long _cmsr = get_cmsr();
+//	set_cmsr(_cmsr  | (1<<CMSR_IRQ) | (1<<CMSR_FIQ));
+
+		GPIO0_OUT = GPIO0_OUT & ~(1<<pin);
+ 2d4:	e3a02001 	mov	r2, #1	; 0x1
+ 2d8:	e1a02012 	mov	r2, r2, lsl r0
+ 2dc:	e3e01a0f 	mvn	r1, #61440	; 0xf000
+ 2e0:	e5113fff 	ldr	r3, [r1, #-4095]
+ 2e4:	e1e02002 	mvn	r2, r2
+ 2e8:	e0033002 	and	r3, r3, r2
+ 2ec:	e5013fff 	str	r3, [r1, #-4095]
+
+//	set_cmsr(_cmsr);
+}
+ 2f0:	e12fff1e 	bx	lr
+
+000002f4 <io_toggle_gpio0_pin>:
+// ******************************************************************************
+// Set general purpose IO port
+   void io_toggle_gpio0_pin(unsigned char pin)
+// ******************************************************************************
+{
+//	unsigned long _cmsr = get_cmsr();
+//	set_cmsr(_cmsr  | (1<<CMSR_IRQ) | (1<<CMSR_FIQ));
+
+		GPIO0_OUT = GPIO0_OUT ^ (1<<pin);
+ 2f4:	e3e01a0f 	mvn	r1, #61440	; 0xf000
+ 2f8:	e5113fff 	ldr	r3, [r1, #-4095]
+ 2fc:	e20000ff 	and	r0, r0, #255	; 0xff
+ 300:	e3a02001 	mov	r2, #1	; 0x1
+ 304:	e0233012 	eor	r3, r3, r2, lsl r0
+ 308:	e5013fff 	str	r3, [r1, #-4095]
+
+//	set_cmsr(_cmsr);
+}
+ 30c:	e12fff1e 	bx	lr
+
+00000310 <io_set_gpio0_port>:
+
+// ******************************************************************************
+// Clear general purpose IO port
+   void io_set_gpio0_port(unsigned long value)
+// ******************************************************************************
+{
+//	unsigned long _cmsr = get_cmsr();
+//	set_cmsr(_cmsr  | (1<<CMSR_IRQ) | (1<<CMSR_FIQ));
+
+		GPIO0_OUT = value;
+ 310:	e3e03a0f 	mvn	r3, #61440	; 0xf000
+ 314:	e5030fff 	str	r0, [r3, #-4095]
+
+//	set_cmsr(_cmsr);
+}
+ 318:	e12fff1e 	bx	lr
+
+0000031c <io_set_pwm>:
+
+
+
+// ###########################################################################################################################
+// Pulse-Width-Modulation Controller
+// ###########################################################################################################################
+
+// ******************************************************************************
+// Set pwm value
+   void io_set_pwm(unsigned char port, unsigned char data)
+// ******************************************************************************
+{
+ 31c:	e20000ff 	and	r0, r0, #255	; 0xff
+//	unsigned long _cmsr = get_cmsr();
+//	set_cmsr(_cmsr  | (1<<CMSR_IRQ) | (1<<CMSR_FIQ));
+
+	unsigned long temp = 0;
+
+	// value adjustment
+	if(port > 7)
+ 320:	e3500007 	cmp	r0, #7	; 0x7
+ 324:	e92d4010 	stmdb	sp!, {r4, lr}
+ 328:	e3a0c000 	mov	ip, #0	; 0x0
+ 32c:	e3e0e0ff 	mvn	lr, #255	; 0xff
+ 330:	e20110ff 	and	r1, r1, #255	; 0xff
+ 334:	8a000011 	bhi	380 <io_set_pwm+0x64>
+		port = 0;
+
+	if(port < 4){
+		temp = PWM0_CONF0; // get working copy
+		temp = temp & ~(0xFF << (port*8)); // clear old value
+		temp = temp | (unsigned long)(data << (port*8)); // insert new value
+		PWM0_CONF0 = temp;
+	}
+	else{
+		port = port-4;
+		temp = PWM0_CONF1; // get working copy
+		temp = temp & ~(0xFF << (port*8)); // clear old value
+ 338:	e2403004 	sub	r3, r0, #4	; 0x4
+ 33c:	e20330ff 	and	r3, r3, #255	; 0xff
+ 340:	e3500003 	cmp	r0, #3	; 0x3
+ 344:	e1a0e183 	mov	lr, r3, lsl #3
+ 348:	e3e04a0f 	mvn	r4, #61440	; 0xf000
+ 34c:	e1a0c180 	mov	ip, r0, lsl #3
+ 350:	9a000007 	bls	374 <io_set_pwm+0x58>
+ 354:	e3a030ff 	mov	r3, #255	; 0xff
+ 358:	e1a03e13 	mov	r3, r3, lsl lr
+ 35c:	e5142f8b 	ldr	r2, [r4, #-3979]
+ 360:	e1e03003 	mvn	r3, r3
+ 364:	e0022003 	and	r2, r2, r3
+		temp = temp | (unsigned long)(data << (port*8)); // insert new value
+ 368:	e1822e11 	orr	r2, r2, r1, lsl lr
+		PWM0_CONF1 = temp;
+ 36c:	e5042f8b 	str	r2, [r4, #-3979]
+ 370:	e8bd8010 	ldmia	sp!, {r4, pc}
+ 374:	e3a030ff 	mov	r3, #255	; 0xff
+ 378:	e1a03c13 	mov	r3, r3, lsl ip
+ 37c:	e1e0e003 	mvn	lr, r3
+ 380:	e3e02a0f 	mvn	r2, #61440	; 0xf000
+ 384:	e5123f8f 	ldr	r3, [r2, #-3983]
+ 388:	e003300e 	and	r3, r3, lr
+ 38c:	e1833c11 	orr	r3, r3, r1, lsl ip
+ 390:	e5023f8f 	str	r3, [r2, #-3983]
+ 394:	e8bd8010 	ldmia	sp!, {r4, pc}
+
+00000398 <io_get_pwm>:
+	}
+//	set_cmsr(_cmsr);
+}
+
+// ******************************************************************************
+// Set pwm value
+   unsigned char io_get_pwm(unsigned char port)
+// ******************************************************************************
+{
+ 398:	e20000ff 	and	r0, r0, #255	; 0xff
+//	unsigned long _cmsr = get_cmsr();
+//	set_cmsr(_cmsr  | (1<<CMSR_IRQ) | (1<<CMSR_FIQ));
+
+	unsigned long temp = 0;
+
+	// value adjustment
+	if(port > 7)
+ 39c:	e3500007 	cmp	r0, #7	; 0x7
+ 3a0:	e3a02000 	mov	r2, #0	; 0x0
+ 3a4:	8a00000a 	bhi	3d4 <io_get_pwm+0x3c>
+		port = 0;
+
+	if(port < 4)
+		temp = PWM0_CONF0; // get config register
+	else{
+		port = port-4;
+		temp = PWM0_CONF1; // get config register
+ 3a8:	e2403004 	sub	r3, r0, #4	; 0x4
+ 3ac:	e3500003 	cmp	r0, #3	; 0x3
+ 3b0:	e20320ff 	and	r2, r3, #255	; 0xff
+ 3b4:	9a000005 	bls	3d0 <io_get_pwm+0x38>
+ 3b8:	e3e03a0f 	mvn	r3, #61440	; 0xf000
+ 3bc:	e5130f8b 	ldr	r0, [r3, #-3979]
+ 3c0:	e1a02182 	mov	r2, r2, lsl #3
+ 3c4:	e1a00230 	mov	r0, r0, lsr r2
+ 3c8:	e20000ff 	and	r0, r0, #255	; 0xff
+	}
+
+	temp = temp >> (port*8); // only keep designated byte
+
+//	set_cmsr(_cmsr);
+	return (unsigned char)temp;
+}
+ 3cc:	e12fff1e 	bx	lr
+ 3d0:	e1a02180 	mov	r2, r0, lsl #3
+ 3d4:	e3e03a0f 	mvn	r3, #61440	; 0xf000
+ 3d8:	e5130f8f 	ldr	r0, [r3, #-3983]
+ 3dc:	e1a00230 	mov	r0, r0, lsr r2
+ 3e0:	e20000ff 	and	r0, r0, #255	; 0xff
+ 3e4:	e12fff1e 	bx	lr
+
+000003e8 <io_uart0_read_byte>:
+
+
+
+// ###########################################################################################################################
+// General Purpose UART "miniUART" (UART_0)
+// ###########################################################################################################################
+
+// ******************************************************************************
+// Read one byte via UART 0
+   int io_uart0_read_byte(void)
+// ******************************************************************************
+{
+//	unsigned long _cmsr = get_cmsr();
+//	set_cmsr(_cmsr  | (1<<CMSR_IRQ) | (1<<CMSR_FIQ));
+
+	int temp;
+	if ((UART0_SREG & (1<<CUART_RXD)) != 0) // byte available?
+ 3e8:	e3e02a0f 	mvn	r2, #61440	; 0xf000
+ 3ec:	e5123fe3 	ldr	r3, [r2, #-4067]
+ 3f0:	e3130002 	tst	r3, #2	; 0x2
+ 3f4:	e3e00000 	mvn	r0, #0	; 0x0
+		temp = UART0_DATA;
+ 3f8:	15120fe7 	ldrne	r0, [r2, #-4071]
+	else
+		temp = -1;
+
+//	set_cmsr(_cmsr);
+	return temp;
+}
+ 3fc:	e12fff1e 	bx	lr
+
+00000400 <io_uart0_send_byte>:
+
+// ******************************************************************************
+// Write one byte via UART 0
+   int io_uart0_send_byte(int ch)
+// ******************************************************************************
+{
+ 400:	e3e02a0f 	mvn	r2, #61440	; 0xf000
+//	unsigned long _cmsr = get_cmsr();
+//	set_cmsr(_cmsr  | (1<<CMSR_IRQ) | (1<<CMSR_FIQ));
+
+	while((UART0_SREG & (1<<CUART_TXB)) == 0); // uart busy?
+ 404:	e5123fe3 	ldr	r3, [r2, #-4067]
+ 408:	e3130001 	tst	r3, #1	; 0x1
+ 40c:	0afffffc 	beq	404 <io_uart0_send_byte+0x4>
+	UART0_DATA = (ch & 0x000000FF);
+ 410:	e20030ff 	and	r3, r0, #255	; 0xff
+ 414:	e5023fe7 	str	r3, [r2, #-4071]
+
+//	set_cmsr(_cmsr);
+	return ch;
+}
+ 418:	e12fff1e 	bx	lr
+
+0000041c <io_spi0_config>:
+
+
+
+// ###########################################################################################################################
+// Serial Peripherial Interface (SPI_CONTROLLER_0)
+// ###########################################################################################################################
+
+// ******************************************************************************
+// Configure SPI 0
+   void io_spi0_config(unsigned char auto_cs, unsigned long data_size)
+// ******************************************************************************
+{
+ 41c:	e20000ff 	and	r0, r0, #255	; 0xff
+//	unsigned long _cmsr = get_cmsr();
+//	set_cmsr(_cmsr  | (1<<CMSR_IRQ) | (1<<CMSR_FIQ));
+	// devices update their serial input on a rising edge of sclk,
+	// so we need to update the mosi output of the core before
+	// -> at the falling edge of sclk = set SPI_TX_NEG
+	if(auto_cs == 1)
+ 420:	e3500001 	cmp	r0, #1	; 0x1
+		SPI0_CONF = (1<<SPI_ACS) | (1<<SPI_TX_NEG) | data_size; // auto assert cs
+	else
+		SPI0_CONF = (0<<SPI_ACS) | (1<<SPI_TX_NEG) | data_size; // manual assert cs
+ 424:	e3812b01 	orr	r2, r1, #1024	; 0x400
+ 428:	03e03a0f 	mvneq	r3, #61440	; 0xf000
+ 42c:	e3811b09 	orr	r1, r1, #9216	; 0x2400
+ 430:	13e03a0f 	mvnne	r3, #61440	; 0xf000
+ 434:	05031fcf 	streq	r1, [r3, #-4047]
+ 438:	15032fcf 	strne	r2, [r3, #-4047]
+ 43c:	e12fff1e 	bx	lr
+
+00000440 <io_spi0_speed>:
+//	set_cmsr(_cmsr);
+}
+
+// ******************************************************************************
+// Configure SPI 0 CLK frequency -> (sys_clk/(spi_clk*2))-1
+   void io_spi0_speed(unsigned long clk_divider)
+// ******************************************************************************
+{
+//	unsigned long _cmsr = get_cmsr();
+//	set_cmsr(_cmsr  | (1<<CMSR_IRQ) | (1<<CMSR_FIQ));
+
+		SPI0_PRSC = clk_divider; // (sys_clk/(spi_clk*2))-1;
+ 440:	e3e03a0f 	mvn	r3, #61440	; 0xf000
+ 444:	e5030fcb 	str	r0, [r3, #-4043]
+
+//	set_cmsr(_cmsr);
+}
+ 448:	e12fff1e 	bx	lr
+
+0000044c <io_spi0_trans>:
+
+// ******************************************************************************
+// Sends/receives max 32 bits via SPI, CS and config must be done outside
+   unsigned long io_spi0_trans(unsigned long data)
+// ******************************************************************************
+{
+ 44c:	e3e02a0f 	mvn	r2, #61440	; 0xf000
+//	unsigned long _cmsr = get_cmsr();
+//	set_cmsr(_cmsr  | (1<<CMSR_IRQ) | (1<<CMSR_FIQ));
+
+	// spi transmission
+	while((SPI0_CONF & (1<<SPI_BUSY)) != 0); // wait for prev tx to finish
+ 450:	e5123fcf 	ldr	r3, [r2, #-4047]
+ 454:	e3130c01 	tst	r3, #256	; 0x100
+ 458:	1afffffc 	bne	450 <io_spi0_trans+0x4>
+	SPI0_DAT0 = data;
+ 45c:	e5020fbf 	str	r0, [r2, #-4031]
+	SPI0_CONF = SPI0_CONF | (1<<SPI_BUSY); // start transmitter
+ 460:	e5123fcf 	ldr	r3, [r2, #-4047]
+ 464:	e3833c01 	orr	r3, r3, #256	; 0x100
+ 468:	e5023fcf 	str	r3, [r2, #-4047]
+ 46c:	e3e02a0f 	mvn	r2, #61440	; 0xf000
+	while((SPI0_CONF & (1<<SPI_BUSY)) != 0); // wait for rx to finish
+ 470:	e5123fcf 	ldr	r3, [r2, #-4047]
+ 474:	e3130c01 	tst	r3, #256	; 0x100
+ 478:	1afffffc 	bne	470 <io_spi0_trans+0x24>
+	unsigned long temp = SPI0_DAT0;
+ 47c:	e5120fbf 	ldr	r0, [r2, #-4031]
+
+//	set_cmsr(_cmsr);
+	return temp;
+}
+ 480:	e12fff1e 	bx	lr
+
+00000484 <io_spi0_enable>:
+
+// ******************************************************************************
+// Controls the CS of SPI0, enables a connected CS (turns it LOW)
+   void io_spi0_enable(unsigned char device)
+// ******************************************************************************
+{
+//	unsigned long _cmsr = get_cmsr();
+//	set_cmsr(_cmsr  | (1<<CMSR_IRQ) | (1<<CMSR_FIQ));
+
+		SPI0_SCSR = SPI0_SCSR | (1<<device);
+ 484:	e3e01a0f 	mvn	r1, #61440	; 0xf000
+ 488:	e5113fc7 	ldr	r3, [r1, #-4039]
+ 48c:	e20000ff 	and	r0, r0, #255	; 0xff
+ 490:	e3a02001 	mov	r2, #1	; 0x1
+ 494:	e1833012 	orr	r3, r3, r2, lsl r0
+ 498:	e5013fc7 	str	r3, [r1, #-4039]
+
+//	set_cmsr(_cmsr);
+}
+ 49c:	e12fff1e 	bx	lr
+
+000004a0 <io_spi0_disable>:
+
+// ******************************************************************************
+// Controls the CS of SPI0, disables a connected CS (turns it HIGH)
+   void io_spi0_disable(unsigned char device)
+// ******************************************************************************
+{
+ 4a0:	e20000ff 	and	r0, r0, #255	; 0xff
+//	unsigned long _cmsr = get_cmsr();
+//	set_cmsr(_cmsr  | (1<<CMSR_IRQ) | (1<<CMSR_FIQ));
+
+		SPI0_SCSR = SPI0_SCSR & ~(1<<device);
+ 4a4:	e3a02001 	mov	r2, #1	; 0x1
+ 4a8:	e1a02012 	mov	r2, r2, lsl r0
+ 4ac:	e3e01a0f 	mvn	r1, #61440	; 0xf000
+ 4b0:	e5113fc7 	ldr	r3, [r1, #-4039]
+ 4b4:	e1e02002 	mvn	r2, r2
+ 4b8:	e0033002 	and	r3, r3, r2
+ 4bc:	e5013fc7 	str	r3, [r1, #-4039]
+
+//	set_cmsr(_cmsr);
+}
+ 4c0:	e12fff1e 	bx	lr
+
+000004c4 <io_i2c0_speed>:
+
+
+
+
+// ###########################################################################################################################
+// Inter Intergrated Circuit Interface (I²C_CONTROLLER_0)
+// ###########################################################################################################################
+
+// ******************************************************************************
+// Configure SPI 0 CLK frequency -> (sys_clk/(5*i2c_clock)-1
+   void io_i2c0_speed(unsigned long clk_divider)
+// ******************************************************************************
+{
+//	unsigned long _cmsr = get_cmsr();
+//	set_cmsr(_cmsr  | (1<<CMSR_IRQ) | (1<<CMSR_FIQ));
+		I2C0_CTRL = I2C0_CTRL & ~(1<<I2C_EN); // disable i2c core
+ 4c4:	e3e02a0f 	mvn	r2, #61440	; 0xf000
+ 4c8:	e5123f97 	ldr	r3, [r2, #-3991]
+		I2C0_PRLO = clk_divider;
+		I2C0_PRHI = clk_divider >> 8;
+ 4cc:	e1a01420 	mov	r1, r0, lsr #8
+ 4d0:	e3c33080 	bic	r3, r3, #128	; 0x80
+ 4d4:	e5023f97 	str	r3, [r2, #-3991]
+ 4d8:	e5020f9f 	str	r0, [r2, #-3999]
+ 4dc:	e5021f9b 	str	r1, [r2, #-3995]
+		I2C0_CTRL = I2C0_CTRL | (1<<I2C_EN); // enable i2c core
+ 4e0:	e5123f97 	ldr	r3, [r2, #-3991]
+ 4e4:	e3833080 	orr	r3, r3, #128	; 0x80
+ 4e8:	e5023f97 	str	r3, [r2, #-3991]
+//	set_cmsr(_cmsr);
+}
+ 4ec:	e12fff1e 	bx	lr
+
+000004f0 <io_i2c0_byte_transfer>:
+
+// ******************************************************************************
+// Read/write byte from/to I²C slave, max 2 address bytes
+   int io_i2c0_byte_transfer(unsigned char rw,        // 'r' read / 'w' write cycle
+                             unsigned char id,        // device ID
+							 unsigned long data_adr,  // data address
+							 unsigned char adr_bytes, // number of adr bytes
+							 unsigned char data)      // data byte
+// ******************************************************************************
+{
+ 4f0:	e92d4030 	stmdb	sp!, {r4, r5, lr}
+//	unsigned long _cmsr = get_cmsr();
+//	set_cmsr(_cmsr  | (1<<CMSR_IRQ) | (1<<CMSR_FIQ));
+
+	// transfer slave identification address
+	I2C0_DATA = id & 0xFE;                  // device id and write
+	I2C0_CMD = (1<<I2C_STA) | (1<<I2C_WR);  // start condition and write cycle
+ 4f4:	e3a0c090 	mov	ip, #144	; 0x90
+ 4f8:	e20140fe 	and	r4, r1, #254	; 0xfe
+ 4fc:	e3e0ea0f 	mvn	lr, #61440	; 0xf000
+ 500:	e5dd500f 	ldrb	r5, [sp, #15]
+ 504:	e20000ff 	and	r0, r0, #255	; 0xff
+ 508:	e50e4f93 	str	r4, [lr, #-3987]
+ 50c:	e20110ff 	and	r1, r1, #255	; 0xff
+ 510:	e50ecfaf 	str	ip, [lr, #-4015]
+ 514:	e1a04002 	mov	r4, r2
+ 518:	e203c0ff 	and	ip, r3, #255	; 0xff
+	while((I2C0_STAT & (1<<I2C_TIP)) != 0); // wait for transfer to finish
+ 51c:	e51e3faf 	ldr	r3, [lr, #-4015]
+ 520:	e3130002 	tst	r3, #2	; 0x2
+ 524:	1afffffc 	bne	51c <io_i2c0_byte_transfer+0x2c>
+	if((I2C0_STAT & (1<<I2C_RXACK)) != 0){  // ack received?
+ 528:	e51e3faf 	ldr	r3, [lr, #-4015]
+ 52c:	e3130080 	tst	r3, #128	; 0x80
+ 530:	13e00000 	mvnne	r0, #0	; 0x0
+ 534:	18bd8030 	ldmneia	sp!, {r4, r5, pc}
+//		set_cmsr(_cmsr);
+		return -1;
+	}
+
+	// transfer data address
+	while(adr_bytes != 0){
+ 538:	e35c0000 	cmp	ip, #0	; 0x0
+ 53c:	0a000012 	beq	58c <io_i2c0_byte_transfer+0x9c>
+		adr_bytes--;
+ 540:	e24c3001 	sub	r3, ip, #1	; 0x1
+ 544:	e203c0ff 	and	ip, r3, #255	; 0xff
+		if(adr_bytes == 1)
+ 548:	e35c0001 	cmp	ip, #1	; 0x1
+			I2C0_DATA = data_adr >> 8;          // high byte
+ 54c:	01a02424 	moveq	r2, r4, lsr #8
+ 550:	03e03a0f 	mvneq	r3, #61440	; 0xf000
+		else
+			I2C0_DATA = data_adr;               // low byte
+ 554:	13e03a0f 	mvnne	r3, #61440	; 0xf000
+ 558:	05032f93 	streq	r2, [r3, #-3987]
+ 55c:	15034f93 	strne	r4, [r3, #-3987]
+		I2C0_CMD = (1<<I2C_WR);                 // write cycle
+ 560:	e3e02a0f 	mvn	r2, #61440	; 0xf000
+ 564:	e3a03010 	mov	r3, #16	; 0x10
+ 568:	e5023faf 	str	r3, [r2, #-4015]
+		while((I2C0_STAT & (1<<I2C_TIP)) != 0); // wait for transfer to finish
+ 56c:	e5123faf 	ldr	r3, [r2, #-4015]
+ 570:	e3130002 	tst	r3, #2	; 0x2
+ 574:	1afffffc 	bne	56c <io_i2c0_byte_transfer+0x7c>
+		if((I2C0_STAT & (1<<I2C_RXACK)) != 0){  // ack received?
+ 578:	e5123faf 	ldr	r3, [r2, #-4015]
+ 57c:	e3130080 	tst	r3, #128	; 0x80
+ 580:	0affffec 	beq	538 <io_i2c0_byte_transfer+0x48>
+ 584:	e3e00001 	mvn	r0, #1	; 0x1
+ 588:	e8bd8030 	ldmia	sp!, {r4, r5, pc}
+//			set_cmsr(_cmsr);
+			return -2;
+		}
+	}
+
+	if(rw == 'w'){
+ 58c:	e3500077 	cmp	r0, #119	; 0x77
+ 590:	1a00000c 	bne	5c8 <io_i2c0_byte_transfer+0xd8>
+		// write adressed byte
+		I2C0_DATA = data;                       // send data
+ 594:	e3e03a0f 	mvn	r3, #61440	; 0xf000
+		I2C0_CMD = (1<<I2C_STO) | (1<<I2C_WR);  // stop condition and write cycle
+ 598:	e3a02050 	mov	r2, #80	; 0x50
+ 59c:	e5035f93 	str	r5, [r3, #-3987]
+ 5a0:	e5032faf 	str	r2, [r3, #-4015]
+ 5a4:	e1a02003 	mov	r2, r3
+		while((I2C0_STAT & (1<<I2C_TIP)) != 0); // wait for transfer to finish
+ 5a8:	e5123faf 	ldr	r3, [r2, #-4015]
+ 5ac:	e3130002 	tst	r3, #2	; 0x2
+ 5b0:	1afffffc 	bne	5a8 <io_i2c0_byte_transfer+0xb8>
+		if((I2C0_STAT & (1<<I2C_RXACK)) != 0){  // ack received?
+ 5b4:	e5123faf 	ldr	r3, [r2, #-4015]
+ 5b8:	e2130080 	ands	r0, r3, #128	; 0x80
+ 5bc:	08bd8030 	ldmeqia	sp!, {r4, r5, pc}
+//			set_cmsr(_cmsr);
+			return -3;
+		}
+		else{
+//			set_cmsr(_cmsr);
+			return 0;
+		}
+	}
+
+	if(rw == 'r'){
+		// re-send control byte - this time with read-bit
+		I2C0_DATA = id | 0x01;                  // device id and READ
+		I2C0_CMD = (1<<I2C_STA) | (1<<I2C_WR);  // start condition and write cycle
+		while((I2C0_STAT & (1<<I2C_TIP)) != 0); // wait for transfer to finish
+		if((I2C0_STAT & (1<<I2C_RXACK)) != 0){  // ack received?
+//			set_cmsr(_cmsr);
+			return -3;
+		}
+		// read adressed byte
+		I2C0_CMD = (1<<I2C_STO) | (1<<I2C_RD) | (1<<I2C_ACK);
+		while((I2C0_STAT & (1<<I2C_TIP)) != 0); // wait for transfer to finish
+		return I2C0_DATA;
+ 5c0:	e3e00002 	mvn	r0, #2	; 0x2
+	}
+
+//	set_cmsr(_cmsr);
+	return -4;
+}
+ 5c4:	e8bd8030 	ldmia	sp!, {r4, r5, pc}
+ 5c8:	e3500072 	cmp	r0, #114	; 0x72
+ 5cc:	13e00003 	mvnne	r0, #3	; 0x3
+ 5d0:	18bd8030 	ldmneia	sp!, {r4, r5, pc}
+ 5d4:	e3813001 	orr	r3, r1, #1	; 0x1
+ 5d8:	e3e02a0f 	mvn	r2, #61440	; 0xf000
+ 5dc:	e3a01090 	mov	r1, #144	; 0x90
+ 5e0:	e5023f93 	str	r3, [r2, #-3987]
+ 5e4:	e5021faf 	str	r1, [r2, #-4015]
+ 5e8:	e5123faf 	ldr	r3, [r2, #-4015]
+ 5ec:	e3130002 	tst	r3, #2	; 0x2
+ 5f0:	1afffffc 	bne	5e8 <io_i2c0_byte_transfer+0xf8>
+ 5f4:	e5123faf 	ldr	r3, [r2, #-4015]
+ 5f8:	e3130080 	tst	r3, #128	; 0x80
+ 5fc:	1affffef 	bne	5c0 <io_i2c0_byte_transfer+0xd0>
+ 600:	e3a03068 	mov	r3, #104	; 0x68
+ 604:	e5023faf 	str	r3, [r2, #-4015]
+ 608:	e3e00a0f 	mvn	r0, #61440	; 0xf000
+ 60c:	e5103faf 	ldr	r3, [r0, #-4015]
+ 610:	e3130002 	tst	r3, #2	; 0x2
+ 614:	1afffffc 	bne	60c <io_i2c0_byte_transfer+0x11c>
+ 618:	e5100f93 	ldr	r0, [r0, #-3987]
+ 61c:	e8bd8030 	ldmia	sp!, {r4, r5, pc}
+
+00000620 <get_syscpreg>:
+
+
+
+
+// ###########################################################################################################################
+// System
+// ###########################################################################################################################
+
+// ******************************************************************************
+// read system coprocessor register x
+   unsigned long get_syscpreg(unsigned char index)
+// ******************************************************************************
+{
+ 620:	e20000ff 	and	r0, r0, #255	; 0xff
+	unsigned long _cp_val;
+	switch(index){
+ 624:	e350000f 	cmp	r0, #15	; 0xf
+ 628:	979ff100 	ldrls	pc, [pc, r0, lsl #2]
+ 62c:	ea00000f 	b	670 <.text+0x670>
+ 630:	000006f0 	streqd	r0, [r0], -r0
+ 634:	000006e8 	andeq	r0, r0, r8, ror #13
+ 638:	000006e0 	andeq	r0, r0, r0, ror #13
+ 63c:	000006d8 	ldreqd	r0, [r0], -r8
+ 640:	000006d0 	ldreqd	r0, [r0], -r0
+ 644:	000006c8 	andeq	r0, r0, r8, asr #13
+ 648:	000006c0 	andeq	r0, r0, r0, asr #13
+ 64c:	000006b8 	streqh	r0, [r0], -r8
+ 650:	000006b0 	streqh	r0, [r0], -r0
+ 654:	000006a8 	andeq	r0, r0, r8, lsr #13
+ 658:	000006a0 	andeq	r0, r0, r0, lsr #13
+ 65c:	00000698 	muleq	r0, r8, r6
+ 660:	00000690 	muleq	r0, r0, r6
+ 664:	00000688 	andeq	r0, r0, r8, lsl #13
+ 668:	00000680 	andeq	r0, r0, r0, lsl #13
+ 66c:	00000678 	andeq	r0, r0, r8, ror r6
+ 670:	e3a00000 	mov	r0, #0	; 0x0
+ 674:	e12fff1e 	bx	lr
+		case ID_REG_0:   asm volatile ("mrc p15,0,%0, c0, c0" : "=r" (_cp_val) : /* no inputs */  ); break;
+		case ID_REG_1:   asm volatile ("mrc p15,0,%0, c1, c1" : "=r" (_cp_val) : /* no inputs */  ); break;
+		case ID_REG_2:   asm volatile ("mrc p15,0,%0, c2, c2" : "=r" (_cp_val) : /* no inputs */  ); break;
+		case 3:          asm volatile ("mrc p15,0,%0, c3, c3" : "=r" (_cp_val) : /* no inputs */  ); break;
+		case 4:          asm volatile ("mrc p15,0,%0, c4, c4" : "=r" (_cp_val) : /* no inputs */  ); break;
+		case 5:          asm volatile ("mrc p15,0,%0, c5, c5" : "=r" (_cp_val) : /* no inputs */  ); break;
+		case SYS_CTRL_0: asm volatile ("mrc p15,0,%0, c6, c6" : "=r" (_cp_val) : /* no inputs */  ); break;
+		case 7:          asm volatile ("mrc p15,0,%0, c7, c7" : "=r" (_cp_val) : /* no inputs */  ); break;
+		case CSTAT:      asm volatile ("mrc p15,0,%0, c8, c8" : "=r" (_cp_val) : /* no inputs */  ); break;
+		case ADR_FB:     asm volatile ("mrc p15,0,%0, c9, c9" : "=r" (_cp_val) : /* no inputs */  ); break;
+		case 10:         asm volatile ("mrc p15,0,%0,c10,c10" : "=r" (_cp_val) : /* no inputs */  ); break;
+		case LFSR_POLY:  asm volatile ("mrc p15,0,%0,c11,c11" : "=r" (_cp_val) : /* no inputs */  ); break;
+		case LFSR_DATA:  asm volatile ("mrc p15,0,%0,c12,c12" : "=r" (_cp_val) : /* no inputs */  ); break;
+		case SYS_IO:     asm volatile ("mrc p15,0,%0,c13,c13" : "=r" (_cp_val) : /* no inputs */  ); break;
+		case 14:         asm volatile ("mrc p15,0,%0,c14,c14" : "=r" (_cp_val) : /* no inputs */  ); break;
+		case 15:         asm volatile ("mrc p15,0,%0,c15,c15" : "=r" (_cp_val) : /* no inputs */  ); break;
+ 678:	ee1f0f1f 	mrc	15, 0, r0, cr15, cr15, {0}
+		default:         _cp_val = 0; break;
+	}
+	return _cp_val;
+}
+ 67c:	e12fff1e 	bx	lr
+ 680:	ee1e0f1e 	mrc	15, 0, r0, cr14, cr14, {0}
+ 684:	e12fff1e 	bx	lr
+ 688:	ee1d0f1d 	mrc	15, 0, r0, cr13, cr13, {0}
+ 68c:	e12fff1e 	bx	lr
+ 690:	ee1c0f1c 	mrc	15, 0, r0, cr12, cr12, {0}
+ 694:	e12fff1e 	bx	lr
+ 698:	ee1b0f1b 	mrc	15, 0, r0, cr11, cr11, {0}
+ 69c:	e12fff1e 	bx	lr
+ 6a0:	ee1a0f1a 	mrc	15, 0, r0, cr10, cr10, {0}
+ 6a4:	e12fff1e 	bx	lr
+ 6a8:	ee190f19 	mrc	15, 0, r0, cr9, cr9, {0}
+ 6ac:	e12fff1e 	bx	lr
+ 6b0:	ee180f18 	mrc	15, 0, r0, cr8, cr8, {0}
+ 6b4:	e12fff1e 	bx	lr
+ 6b8:	ee170f17 	mrc	15, 0, r0, cr7, cr7, {0}
+ 6bc:	e12fff1e 	bx	lr
+ 6c0:	ee160f16 	mrc	15, 0, r0, cr6, cr6, {0}
+ 6c4:	e12fff1e 	bx	lr
+ 6c8:	ee150f15 	mrc	15, 0, r0, cr5, cr5, {0}
+ 6cc:	e12fff1e 	bx	lr
+ 6d0:	ee140f14 	mrc	15, 0, r0, cr4, cr4, {0}
+ 6d4:	e12fff1e 	bx	lr
+ 6d8:	ee130f13 	mrc	15, 0, r0, cr3, cr3, {0}
+ 6dc:	e12fff1e 	bx	lr
+ 6e0:	ee120f12 	mrc	15, 0, r0, cr2, cr2, {0}
+ 6e4:	e12fff1e 	bx	lr
+ 6e8:	ee110f11 	mrc	15, 0, r0, cr1, cr1, {0}
+ 6ec:	e12fff1e 	bx	lr
+ 6f0:	ee100f10 	mrc	15, 0, r0, cr0, cr0, {0}
+ 6f4:	e12fff1e 	bx	lr
+
+000006f8 <set_syscpreg>:
+
+// ******************************************************************************
+// write system coprocessor register x
+   void set_syscpreg(unsigned long _cp_val, unsigned char index)
+// ******************************************************************************
+{
+ 6f8:	e20110ff 	and	r1, r1, #255	; 0xff
+	switch(index){
+ 6fc:	e2411006 	sub	r1, r1, #6	; 0x6
+ 700:	e3510007 	cmp	r1, #7	; 0x7
+ 704:	979ff101 	ldrls	pc, [pc, r1, lsl #2]
+ 708:	ea000008 	b	730 <.text+0x730>
+ 70c:	00000734 	andeq	r0, r0, r4, lsr r7
+ 710:	00000730 	andeq	r0, r0, r0, lsr r7
+ 714:	00000730 	andeq	r0, r0, r0, lsr r7
+ 718:	00000730 	andeq	r0, r0, r0, lsr r7
+ 71c:	00000730 	andeq	r0, r0, r0, lsr r7
+ 720:	0000073c 	andeq	r0, r0, ip, lsr r7
+ 724:	00000744 	andeq	r0, r0, r4, asr #14
+ 728:	0000072c 	andeq	r0, r0, ip, lsr #14
+//		case ID_REG_0:   asm volatile ("mcr p15,0,%0, c0, c0,0" : /* no outputs */ : "r" (_cp_val)); break;
+//		case ID_REG_1:   asm volatile ("mcr p15,0,%0, c1, c1,0" : /* no outputs */ : "r" (_cp_val)); break;
+//		case ID_REG_2:   asm volatile ("mcr p15,0,%0, c2, c2,0" : /* no outputs */ : "r" (_cp_val)); break;
+//		case 3:          asm volatile ("mcr p15,0,%0, c3, c3,0" : /* no outputs */ : "r" (_cp_val)); break;
+//		case 4:          asm volatile ("mcr p15,0,%0, c4, c4,0" : /* no outputs */ : "r" (_cp_val)); break;
+//		case 5:          asm volatile ("mcr p15,0,%0, c5, c5,0" : /* no outputs */ : "r" (_cp_val)); break;
+		case SYS_CTRL_0: asm volatile ("mcr p15,0,%0, c6, c6,0" : /* no outputs */ : "r" (_cp_val)); break;
+//		case 7:          asm volatile ("mcr p15,0,%0, c7, c7,0" : /* no outputs */ : "r" (_cp_val)); break;
+//		case CSTAT:      asm volatile ("mcr p15,0,%0, c8, c8,0" : /* no outputs */ : "r" (_cp_val)); break;
+//		case ADR_FB:     asm volatile ("mcr p15,0,%0, c9, c9,0" : /* no outputs */ : "r" (_cp_val)); break;
+//		case 10:         asm volatile ("mcr p15,0,%0,c10,c10,0" : /* no outputs */ : "r" (_cp_val)); break;
+		case LFSR_POLY:  asm volatile ("mcr p15,0,%0,c11,c11,0" : /* no outputs */ : "r" (_cp_val)); break;
+		case LFSR_DATA:  asm volatile ("mcr p15,0,%0,c12,c12,0" : /* no outputs */ : "r" (_cp_val)); break;
+		case SYS_IO:     asm volatile ("mcr p15,0,%0,c13,c13,0" : /* no outputs */ : "r" (_cp_val)); break;
+ 72c:	ee0d0f1d 	mcr	15, 0, r0, cr13, cr13, {0}
+ 730:	e12fff1e 	bx	lr
+ 734:	ee060f16 	mcr	15, 0, r0, cr6, cr6, {0}
+ 738:	e12fff1e 	bx	lr
+ 73c:	ee0b0f1b 	mcr	15, 0, r0, cr11, cr11, {0}
+ 740:	e12fff1e 	bx	lr
+ 744:	ee0c0f1c 	mcr	15, 0, r0, cr12, cr12, {0}
+ 748:	e12fff1e 	bx	lr
+
+0000074c <io_enable_xint>:
+//		case 14:         asm volatile ("mcr p15,0,%0,c14,c14,0" : /* no outputs */ : "r" (_cp_val)); break;
+//		case 15:         asm volatile ("mcr p15,0,%0,c15,c15,0" : /* no outputs */ : "r" (_cp_val)); break;
+		default:         break;
+	}
+}
+// ******************************************************************************
+// read CMSR value
+   static inline unsigned long get_cmsr(void)
+// ******************************************************************************
+{
+	unsigned long _cmsr;
+	asm volatile (" mrs %0, cpsr" : "=r" (_cmsr) : /* no inputs */  );
+ 74c:	e10f3000 	mrs	r3, CPSR
+	return _cmsr;
+}
+
+// ******************************************************************************
+// write CMSR value
+   static inline void set_cmsr(unsigned long _cmsr)
+// ******************************************************************************
+{
+	asm volatile (" msr cpsr, %0" : /* no outputs */ : "r" (_cmsr)  );
+ 750:	e3c330c0 	bic	r3, r3, #192	; 0xc0
+ 754:	e129f003 	msr	CPSR_fc, r3
+}
+
+// ******************************************************************************
+// Enable all external INTs
+   void io_enable_xint(void)
+// ******************************************************************************
+{
+	unsigned long _cmsr = get_cmsr();
+	_cmsr = _cmsr & ~(1<<CMSR_FIQ) &~(1<<CMSR_IRQ);
+	set_cmsr(_cmsr);
+}
+ 758:	e12fff1e 	bx	lr
+
+0000075c <io_disable_xint>:
+ 75c:	e10f3000 	mrs	r3, CPSR
+ 760:	e38330c0 	orr	r3, r3, #192	; 0xc0
+ 764:	e129f003 	msr	CPSR_fc, r3
+
+// ******************************************************************************
+// Disable all global IBTs
+   void io_disable_xint(void)
+// ******************************************************************************
+{
+	unsigned long _cmsr = get_cmsr();
+	_cmsr = _cmsr | (1<<CMSR_FIQ) | (1<<CMSR_IRQ);
+	set_cmsr(_cmsr);
+}
+ 768:	e12fff1e 	bx	lr
+
+0000076c <long_to_hex_string>:
+   void long_to_hex_string(unsigned long data,    // max 32 bit data word
+                           unsigned char *buffer, // buffer to store the string
+						   unsigned char numbers) // number of places, max 8
+// ############################################################################################
+{
+ 76c:	e92d4010 	stmdb	sp!, {r4, lr}
+ 770:	e20240ff 	and	r4, r2, #255	; 0xff
+	unsigned char temp_char = 0;
+	unsigned long temp_data = 0;
+
+	// fit into range
+	if(numbers > 8)
+ 774:	e3540008 	cmp	r4, #8	; 0x8
+ 778:	83a04008 	movhi	r4, #8	; 0x8
+ 77c:	8a000001 	bhi	788 <long_to_hex_string+0x1c>
+		numbers = 8;
+	if(numbers < 1)
+ 780:	e3540000 	cmp	r4, #0	; 0x0
+		numbers = 1;
+
+	while(numbers > 0){
+		// isolate one 4-bit value
+		if(numbers > 1)
+			temp_data = data >> ((numbers-1)*4);
+		else
+			temp_data = data;
+		temp_data = temp_data & 0x0000000F;
+		numbers--;
+
+		// convert 4-bit value temp_data to char temp_char
+		if(temp_data < 10)
+			temp_char = '0' + temp_data;
+		else
+			temp_char = 'A' + temp_data - 10;
+
+		// save character
+		*buffer++ = temp_char;
+	}
+
+	*buffer++ = 0; // terminate string
+}
+ 784:	03a04001 	moveq	r4, #1	; 0x1
+ 788:	e1a02001 	mov	r2, r1
+ 78c:	e1a0e004 	mov	lr, r4
+ 790:	e1a0310e 	mov	r3, lr, lsl #2
+ 794:	e35e0001 	cmp	lr, #1	; 0x1
+ 798:	e2433004 	sub	r3, r3, #4	; 0x4
+ 79c:	e1a0c000 	mov	ip, r0
+ 7a0:	81a0c330 	movhi	ip, r0, lsr r3
+ 7a4:	e24e3001 	sub	r3, lr, #1	; 0x1
+ 7a8:	e20cc00f 	and	ip, ip, #15	; 0xf
+ 7ac:	e203e0ff 	and	lr, r3, #255	; 0xff
+ 7b0:	e35c0009 	cmp	ip, #9	; 0x9
+ 7b4:	e28c3030 	add	r3, ip, #48	; 0x30
+ 7b8:	828c3037 	addhi	r3, ip, #55	; 0x37
+ 7bc:	e35e0000 	cmp	lr, #0	; 0x0
+ 7c0:	e4c23001 	strb	r3, [r2], #1
+ 7c4:	1afffff1 	bne	790 <long_to_hex_string+0x24>
+ 7c8:	e2443001 	sub	r3, r4, #1	; 0x1
+ 7cc:	e20330ff 	and	r3, r3, #255	; 0xff
+ 7d0:	e0813003 	add	r3, r1, r3
+ 7d4:	e5c3e001 	strb	lr, [r3, #1]
+ 7d8:	e8bd8010 	ldmia	sp!, {r4, pc}
+
+000007dc <get_adc>:
+
+// ############################################################################################
+// read external ADC value
+   unsigned int get_adc(int adc_index) // adc 0..7
+// ############################################################################################
+{
+ 7dc:	e92d4010 	stmdb	sp!, {r4, lr}
+ 7e0:	e1a04000 	mov	r4, r0
+	unsigned long temp;
+
+	if ((adc_index < 0) || (adc_index > 7))
+ 7e4:	e3540007 	cmp	r4, #7	; 0x7
+		return 0;
+
+	// config spi
+	io_spi0_config(1,16); // auto assert cs, 16 bit transfer
+ 7e8:	e3a01010 	mov	r1, #16	; 0x10
+ 7ec:	e3a00001 	mov	r0, #1	; 0x1
+ 7f0:	9a000001 	bls	7fc <get_adc+0x20>
+	io_spi0_enable(adc_cs);
+
+	temp = adc_index * 2048;
+	io_spi0_trans(0); // dummy read
+	return (unsigned int)io_spi0_trans(temp);
+}
+ 7f4:	e3a00000 	mov	r0, #0	; 0x0
+ 7f8:	e8bd8010 	ldmia	sp!, {r4, pc}
+ 7fc:	ebffff06 	bl	41c <io_spi0_config>
+ 800:	e3a00006 	mov	r0, #6	; 0x6
+ 804:	ebffff1e 	bl	484 <io_spi0_enable>
+ 808:	e3a00000 	mov	r0, #0	; 0x0
+ 80c:	ebffff0e 	bl	44c <io_spi0_trans>
+ 810:	e1a00584 	mov	r0, r4, lsl #11
+ 814:	e8bd4010 	ldmia	sp!, {r4, lr}
+ 818:	eaffff0b 	b	44c <io_spi0_trans>
+
+0000081c <delay>:
+
+// ############################################################################################
+// simple delay routine
+   void delay(int time) // waits time*10000 clock ticks
+// ############################################################################################
+{
+	time = time*2500*4;
+ 81c:	e0603280 	rsb	r3, r0, r0, lsl #5
+ 820:	e0800103 	add	r0, r0, r3, lsl #2
+ 824:	e0800100 	add	r0, r0, r0, lsl #2
+ 828:	e1a00200 	mov	r0, r0, lsl #4
+	while(time > 0){
+ 82c:	e3500000 	cmp	r0, #0	; 0x0
+ 830:	d12fff1e 	bxle	lr
+		asm volatile ("NOP");
+ 834:	e1a00000 	nop			(mov r0,r0)
+ 838:	e2500001 	subs	r0, r0, #1	; 0x1
+ 83c:	1afffffc 	bne	834 <delay+0x18>
+ 840:	e12fff1e 	bx	lr
+
+00000844 <string_cmpc>:
+		time--;
+	}
+}
+
+// ############################################################################################
+// String compare, buffered string with immediate const char string
+   unsigned char string_cmpc(unsigned char *string1, const char *string2, unsigned char length)
+// ############################################################################################
+{
+	while(length != 0){
+ 844:	e212c0ff 	ands	ip, r2, #255	; 0xff
+ 848:	0a00000b 	beq	87c <string_cmpc+0x38>
+		if(*string1++ != (unsigned char)*string2++)
+ 84c:	e5d02000 	ldrb	r2, [r0]
+ 850:	e5d13000 	ldrb	r3, [r1]
+ 854:	e1520003 	cmp	r2, r3
+ 858:	0a000004 	beq	870 <string_cmpc+0x2c>
+ 85c:	ea000008 	b	884 <string_cmpc+0x40>
+ 860:	e5f02001 	ldrb	r2, [r0, #1]!
+ 864:	e5f13001 	ldrb	r3, [r1, #1]!
+ 868:	e1520003 	cmp	r2, r3
+ 86c:	1a000004 	bne	884 <string_cmpc+0x40>
+			return(0); // missmatch
+		length--;
+ 870:	e24c3001 	sub	r3, ip, #1	; 0x1
+ 874:	e213c0ff 	ands	ip, r3, #255	; 0xff
+ 878:	1afffff8 	bne	860 <string_cmpc+0x1c>
+ 87c:	e3a00001 	mov	r0, #1	; 0x1
+	}
+	return(1); // match
+}
+ 880:	e12fff1e 	bx	lr
+ 884:	e3a00000 	mov	r0, #0	; 0x0
+ 888:	e12fff1e 	bx	lr
+
+0000088c <uart0_printf>:
+// ############################################################################################
+// Print text string via UART 0
+   const char *uart0_printf(const char *string)
+// ############################################################################################
+{
+ 88c:	e92d4010 	stmdb	sp!, {r4, lr}
+ 890:	e1a04000 	mov	r4, r0
+	char ch;
+
+	while ((ch = *string)){
+ 894:	e5d00000 	ldrb	r0, [r0]
+ 898:	e3500000 	cmp	r0, #0	; 0x0
+ 89c:	1a000003 	bne	8b0 <uart0_printf+0x24>
+ 8a0:	ea000005 	b	8bc <uart0_printf+0x30>
+ 8a4:	e5f40001 	ldrb	r0, [r4, #1]!
+ 8a8:	e3500000 	cmp	r0, #0	; 0x0
+ 8ac:	0a000002 	beq	8bc <uart0_printf+0x30>
+		if (io_uart0_send_byte(ch)<=0)
+ 8b0:	ebfffed2 	bl	400 <io_uart0_send_byte>
+ 8b4:	e3500000 	cmp	r0, #0	; 0x0
+ 8b8:	cafffff9 	bgt	8a4 <uart0_printf+0x18>
+			break;
+		string++;
+	}
+	return string;
+}
+ 8bc:	e1a00004 	mov	r0, r4
+ 8c0:	e8bd8010 	ldmia	sp!, {r4, pc}
+
+000008c4 <uart0_scanf>:
+
+// ############################################################################################
+// Read text string via UART 0
+   void uart0_scanf(unsigned char *buffer, int length, unsigned char en_echo)
+// ############################################################################################
+{
+ 8c4:	e92d4070 	stmdb	sp!, {r4, r5, r6, lr}
+	int temp = 0;
+
+	while(length > 0){
+ 8c8:	e2514000 	subs	r4, r1, #0	; 0x0
+ 8cc:	e1a05000 	mov	r5, r0
+ 8d0:	e20260ff 	and	r6, r2, #255	; 0xff
+ 8d4:	d8bd8070 	ldmleia	sp!, {r4, r5, r6, pc}
+		temp = io_uart0_read_byte();
+ 8d8:	ebfffec2 	bl	3e8 <io_uart0_read_byte>
+		if(temp != -1){
+ 8dc:	e3700001 	cmn	r0, #1	; 0x1
+			temp = (unsigned char)(temp & 0x000000FF);
+ 8e0:	e20030ff 	and	r3, r0, #255	; 0xff
+ 8e4:	0a000005 	beq	900 <uart0_scanf+0x3c>
+			*buffer++ = temp;
+			if(en_echo == 1)
+ 8e8:	e3560001 	cmp	r6, #1	; 0x1
+ 8ec:	e5c53000 	strb	r3, [r5]
+				io_uart0_send_byte(temp); // echo
+ 8f0:	e1a00003 	mov	r0, r3
+ 8f4:	e2855001 	add	r5, r5, #1	; 0x1
+ 8f8:	0a000003 	beq	90c <uart0_scanf+0x48>
+			length--;
+ 8fc:	e2444001 	sub	r4, r4, #1	; 0x1
+ 900:	e3540000 	cmp	r4, #0	; 0x0
+ 904:	cafffff3 	bgt	8d8 <uart0_scanf+0x14>
+ 908:	e8bd8070 	ldmia	sp!, {r4, r5, r6, pc}
+ 90c:	ebfffebb 	bl	400 <io_uart0_send_byte>
+ 910:	eafffff9 	b	8fc <uart0_scanf+0x38>
+
+00000914 <uart0_print_buffer>:
+		}
+	}
+}
+
+// ############################################################################################
+// Print character buffer via UART 0
+   void uart0_print_buffer(unsigned char *buffer, int size)
+// ############################################################################################
+{
+ 914:	e92d4030 	stmdb	sp!, {r4, r5, lr}
+	unsigned char char_buffer = 0;
+	while(size > 0){
+ 918:	e2514000 	subs	r4, r1, #0	; 0x0
+ 91c:	e1a05000 	mov	r5, r0
+ 920:	d8bd8030 	ldmleia	sp!, {r4, r5, pc}
+		char_buffer = *buffer++;
+		io_uart0_send_byte((int)char_buffer);
+ 924:	e4d50001 	ldrb	r0, [r5], #1
+ 928:	ebfffeb4 	bl	400 <io_uart0_send_byte>
+ 92c:	e2544001 	subs	r4, r4, #1	; 0x1
+ 930:	1afffffb 	bne	924 <uart0_print_buffer+0x10>
+ 934:	e8bd8030 	ldmia	sp!, {r4, r5, pc}
+
+00000938 <timer0_isr>:
+
+
+/* ---- IRQ: Timer ISR ---- */
+void __attribute__ ((interrupt("IRQ"))) timer0_isr(void)
+{
+ 938:	e24ee004 	sub	lr, lr, #4	; 0x4
+ 93c:	e92d500f 	stmdb	sp!, {r0, r1, r2, r3, ip, lr}
+	// toggle status led
+	set_syscpreg((get_syscpreg(SYS_IO) ^ 0x01), SYS_IO);
+ 940:	e3a0000d 	mov	r0, #13	; 0xd
+ 944:	ebffff35 	bl	620 <get_syscpreg>
+ 948:	e3a0100d 	mov	r1, #13	; 0xd
+ 94c:	e2200001 	eor	r0, r0, #1	; 0x1
+ 950:	ebffff68 	bl	6f8 <set_syscpreg>
+
+	// acknowledge interrupt
+	VICVectAddr = 0;
+ 954:	e3a02000 	mov	r2, #0	; 0x0
+ 958:	e3e03000 	mvn	r3, #0	; 0x0
+ 95c:	e5032fcf 	str	r2, [r3, #-4047]
+}
+ 960:	e8fd900f 	ldmia	sp!, {r0, r1, r2, r3, ip, pc}^
+
+00000964 <main>:
+
+
+/* ---- Main function ---- */
+int main(void)
+{
+	int temp;
+
+	// timer init
+	STME0_CNT  = 0;
+	STME0_VAL  = 50000000; // threshold value for 1s ticks
+ 964:	e3a027be 	mov	r2, #49807360	; 0x2f80000
+ 968:	e2822a2f 	add	r2, r2, #192512	; 0x2f000
+ 96c:	e3e01a0f 	mvn	r1, #61440	; 0xf000
+ 970:	e2822080 	add	r2, r2, #128	; 0x80
+ 974:	e3a03000 	mov	r3, #0	; 0x0
+ 978:	e5013fdf 	str	r3, [r1, #-4063]
+ 97c:	e5012fdb 	str	r2, [r1, #-4059]
+	STME0_CONF = (1<<2) | (1<<1) | (1<<0); // interrupt en, auto reset, timer enable
+	VICVectAddr0 = (unsigned long)timer0_isr;
+ 980:	e59f205c 	ldr	r2, [pc, #92]	; 9e4 <.text+0x9e4>
+ 984:	e3e00000 	mvn	r0, #0	; 0x0
+ 988:	e2833007 	add	r3, r3, #7	; 0x7
+ 98c:	e5013fd7 	str	r3, [r1, #-4055]
+ 990:	e5002fbf 	str	r2, [r0, #-4031]
+	VICVectCntl0 = (1<<5) | 0; // enable and channel select = 0 (timer0)
+ 994:	e2833019 	add	r3, r3, #25	; 0x19
+	VICIntEnable = (1<<0); // enable channel 0 (timer0)
+ 998:	e3a02001 	mov	r2, #1	; 0x1
+ 99c:	e5003f7f 	str	r3, [r0, #-3967]
+ 9a0:	e52de004 	str	lr, [sp, #-4]!
+ 9a4:	e5002fef 	str	r2, [r0, #-4079]
+	io_enable_xint(); // enable IRQ
+ 9a8:	ebffff67 	bl	74c <io_enable_xint>
+
+	// Intro
+	uart0_printf("\r\n\r\nSTORM SoC Basic Configuration\r\n");
+ 9ac:	e59f0034 	ldr	r0, [pc, #52]	; 9e8 <.text+0x9e8>
+ 9b0:	ebffffb5 	bl	88c <uart0_printf>
+	uart0_printf("Demo program\r\n\r\n");
+ 9b4:	e59f0030 	ldr	r0, [pc, #48]	; 9ec <.text+0x9ec>
+ 9b8:	ebffffb3 	bl	88c <uart0_printf>
+
+	uart0_printf("Press any key!\r\n");
+ 9bc:	e59f002c 	ldr	r0, [pc, #44]	; 9f0 <.text+0x9f0>
+ 9c0:	ebffffb1 	bl	88c <uart0_printf>
+
+	// echo received char
+	while(1){
+		temp = io_uart0_read_byte();
+ 9c4:	ebfffe87 	bl	3e8 <io_uart0_read_byte>
+		if (temp != -1)
+ 9c8:	e3700001 	cmn	r0, #1	; 0x1
+ 9cc:	0afffffc 	beq	9c4 <main+0x60>
+			io_uart0_send_byte(temp);
+ 9d0:	ebfffe8a 	bl	400 <io_uart0_send_byte>
+ 9d4:	ebfffe83 	bl	3e8 <io_uart0_read_byte>
+ 9d8:	e3700001 	cmn	r0, #1	; 0x1
+ 9dc:	1afffffb 	bne	9d0 <main+0x6c>
+ 9e0:	eafffff7 	b	9c4 <main+0x60>
+ 9e4:	00000938 	andeq	r0, r0, r8, lsr r9
+ 9e8:	000009f4 	streqd	r0, [r0], -r4
+ 9ec:	00000a18 	andeq	r0, r0, r8, lsl sl
+ 9f0:	00000a2c 	andeq	r0, r0, ip, lsr #20
+ 9f4:	0d0a0d0a 	stceq	13, cr0, [sl, #-40]
+ 9f8:	53544f52 	cmppl	r4, #328	; 0x148
+ 9fc:	4d20536f 	stcmi	3, cr5, [r0, #-444]!
+ a00:	43204261 	teqmi	r0, #268435462	; 0x10000006
+ a04:	73696320 	cmnvc	r9, #-2147483648	; 0x80000000
+ a08:	436f6e66 	cmnmi	pc, #1632	; 0x660
+ a0c:	69677572 	stmvsdb	r7!, {r1, r4, r5, r6, r8, sl, ip, sp, lr}^
+ a10:	6174696f 	cmnvs	r4, pc, ror #18
+ a14:	6e0d0a00 	fmacsvs	s0, s26, s0
+ a18:	44656d6f 	strmibt	r6, [r5], #-3439
+ a1c:	2070726f 	rsbcss	r7, r0, pc, ror #4
+ a20:	6772616d 	ldrvsb	r6, [r2, -sp, ror #2]!
+ a24:	0d0a0d0a 	stceq	13, cr0, [sl, #-40]
+ a28:	00000000 	andeq	r0, r0, r0
+ a2c:	50726573 	rsbpls	r6, r2, r3, ror r5
+ a30:	7320616e 	teqvc	r0, #-2147483621	; 0x8000001b
+ a34:	79206b65 	stmvcdb	r0!, {r0, r2, r5, r6, r8, r9, fp, sp, lr}
+ a38:	79210d0a 	stmvcdb	r1!, {r1, r3, r8, sl, fp}
+ a3c:	00000000 	andeq	r0, r0, r0
