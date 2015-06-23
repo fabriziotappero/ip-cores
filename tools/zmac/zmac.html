@@ -1,0 +1,614 @@
+<H3>Overview of zmac</H3>
+zmac is a Z-80 macro cross-assembler. It has all the features you'd
+expect. It assembles the specified input file (with a '.z' extension
+if there is no pre-existing extension and the file as given doesn't
+exist) and produces program output in many <A HREF="#format">different formats</A>.
+It also produces a nicely-formatted
+listing of the machine code and cycle counts alongside the source
+in a ".lst" file.
+<P>
+To reduce clutter and command line options, all zmac output is put
+into an (auto-created) <TT>zout</TT> subdirectory.  For <TT>file.z</TT> the listing
+will be in <TT>zout/file.lst</TT>, the TRS-80 executable format in <TT>zout/file.cmd</TT>
+and so on.
+<P>
+<A HREF="#undoc">Undocumented</A> Z-80 instructions are supported as well as 8080 code.
+<P>
+zmac strives to be a powerful assembler with expressions familiar to C
+programmers while providing good backward compatibility with original
+assemblers such as Edtasm, MRAS and Macro-80.
+<HR>
+<H3>Usage</H3>
+zmac
+[ --help ]
+[ --version ]
+[ --dep ]
+[ --mras ]
+[ --rel ]
+[ --doc ]
+[ --zmac ]
+[ -8bcefghijJlLmnopstz ]
+[ filename[.z] ]
+<P>
+<H3>Options</H3>
+<P>
+<TABLE>
+<TR><TD VALIGN="TOP"><PRE>--help </PRE></TD><TD>Display a list of options and a terse description of what the options do. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>--version </PRE></TD><TD>Print zmac version name. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>--mras </PRE></TD><TD>MRAS compatibility mode.  Any <TT>?</TT> in a label will be expanded to the current module identifier as set by <TT>*mod</TT>. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>--rel </PRE></TD><TD>Output ".rel" (relocatable object file) format only. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>--zmac </PRE></TD><TD>zmac compatibility mode.  <TT>defl</TT> labels are undefined after each pass. Quotes and double quotes are stripped from macro arguments before expansion. <TT>$</TT> is ignored in identifiers allowing <TT>foo$bar</TT> to construct identifiers in macro expansions.  Use <TT>`</TT> (backquote) instead in normal mode.  Labels starting with <TT>"."</TT> are temporary and are reset whenever a non-temporary label is defined (thus they may be reused).  Labels starting with <TT>"_"</TT> are local to their file thus avoid multiple definition when brought in with <TT>include</TT>. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>--dep </PRE></TD><TD>Print all files read by <TT>include</TT> and <TT>incbin</TT>. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>--doc </PRE></TD><TD>Print this documentation in HTML format to standard output. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>-8 </PRE></TD><TD>Accept 8080 mnemonics preferentially.  Equivalent to <TT>.8080</TT> pseudo-op. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>-b </PRE></TD><TD>Don't generate any machine code output at all. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>-c </PRE></TD><TD>Make the listing continuous, i.e., don't generate any page breaks or page headers. Can make things less confusing if you're going to consult the listing online rather than printing it.  This is the default. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>-e </PRE></TD><TD>Omit the "error report" section in the listing. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>-f </PRE></TD><TD>List instructions not assembled due to "<TT>if</TT>" expressions being false. (Normally these are not shown in the listing.) </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>-g </PRE></TD><TD>List only the first line of equivalent hex for a source line. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>-h </PRE></TD><TD>Display a list of options and a terse description of what the options do. (same as --help) </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>-i </PRE></TD><TD>Don't list files included with <TT>include</TT> or <TT>read</TT>. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>-I dir </PRE></TD><TD>Add <TT>dir</TT> to the end of the include file search path. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>-j </PRE></TD><TD>Promote relative jumps and <TT>DJNZ</TT> to absolute equivalents as needed. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>-J </PRE></TD><TD>Error if an absolute jump could be replaced with a relative jump. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>-l </PRE></TD><TD>Don't generate a listing at all. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>-L </PRE></TD><TD>Generate listing no matter what. Overrides any conflicting options. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>-m </PRE></TD><TD>List macro expansions. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>-n </PRE></TD><TD>Omit line numbers from listing. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>-o </PRE></TD><TD>List to standard output. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>-p </PRE></TD><TD>Use a few linefeeds for page break in listing rather than ^L. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>-P </PRE></TD><TD>Output listing for a printer with headers, multiple symbols per column, etc. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>-s </PRE></TD><TD>Omit the symbol table from the listing. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>-t </PRE></TD><TD>Only output number of errors instead list of each one. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>-z </PRE></TD><TD>Accept Z-80 mnemonics preferentially.  Equivalent to <TT>.z80</TT> pseudo-op. </TD></TR>
+</TABLE>
+<HR>
+<H3>Input Format</H3>
+<P>
+zmac uses the standard Zilog mnemonics, and the pseudo-ops are also
+largely as you'd expect.
+<P>
+A "<TT>.</TT>" may optionally preceeed any psuedo-op.
+For example, "<TT>.org</TT>" and "<TT>org</TT>" are treated as equivalent.
+<P>
+Input can be upper or lowercase.
+<P>
+Comments start with <TT>;</TT> and carry on to the end of the line.
+<P>
+Number constants can take a trailing h or a leading $ or 0x for hex,
+a trailing b for binary, a trailing o or q for octal, or a trailing
+d for decimal.
+<P>
+<TT>'LH'</TT> (any length 2 string) can be treated as a number whose value
+is <TT>'H'</TT> * 256 + <TT>'L'</TT>.
+<P>
+Labels are declared with <TT>label:</TT> or just <TT>label</TT> - indentation is unimportant.
+Labels can be up to 40 chars long.  They can start with and contain 
+letters, digits, <TT>$</TT>, <TT>.</TT>, <TT>?</TT>, <TT>@</TT> and _.  Ambiguous identifiers like
+<TT>$FCB</TT> will be treated as hex constants unless defined as a label.  Labels
+declared with two colons (<TT>label::</TT>) make the label public.
+<P>
+Here is how other things work.  Numbers are used as examples, but a full
+<A HREF="#expr">expression</A> can be used in their place.
+<P>
+<H4>Data</H4>
+<P>
+<TT>defb 42</TT>
+<BLOCKQUOTE>A byte.  <TT>ascii</TT>, <TT>byte</TT>, <TT>db</TT>, <TT>defm</TT> and <TT>text</TT> are synonyms.
+</BLOCKQUOTE>
+<P>
+<TT>defb 'foobar'</TT>
+<BLOCKQUOTE>An ASCII character string (not NUL-terminated).
+Double quotes can also be used.
+</BLOCKQUOTE>
+<P>
+<TT>defb 'Who needs anything more than CP/M?',13,10,'$'</TT>
+<BLOCKQUOTE>Strings and bytes can mix together.
+</BLOCKQUOTE>
+<P>
+<TT>defw 2112</TT>
+<P>
+<TT>defw $123,0x456</TT>
+<BLOCKQUOTE>A word (16 bits).  <TT>word</TT> and <TT>dw</TT> are synonyms.
+</BLOCKQUOTE>
+<P>
+<TT>defd $12345678</TT>
+<BLOCKQUOTE>A double word (32 bits). <TT>dword</TT> is a synonym.
+</BLOCKQUOTE>
+<P>
+<TT>defs 500</TT>
+<BLOCKQUOTE>Skip output ahead 500 bytes.  This will insert 500 zeros in the ".ams"
+and ".cim" output files or if inside a ".phase" section.
+<TT>block</TT>, <TT>ds</TT> and <TT>rmem</TT> are synonyms.
+</BLOCKQUOTE>
+<P>
+<TT>dc 'string'</TT>
+<BLOCKQUOTE>Like <TT>ascii</TT> but accepts only a single string and the high bit of the
+last character will be set.
+</BLOCKQUOTE>
+<P>
+<TT>dc count,value</TT>
+<BLOCKQUOTE>Repeat the byte <TT>value</TT> a total of <TT>count</TT> times.  Similar to <TT>defs</TT>
+except that memory is always filled with <TT>value</TT>.
+</BLOCKQUOTE>
+<P>
+<TT>incbin file</TT>
+<BLOCKQUOTE>Inserts the raw contents of the file into the assembly.  Simpler for
+large amounts of data.
+</BLOCKQUOTE>
+<P>
+<H4>Symbols</H4>
+<P>
+<TT>label equ 100</TT>
+<BLOCKQUOTE>Define a symbol to have a fixed value.  The symbol can be used before it
+is defined.  A symbol defined with <TT>equ</TT> or as a label can be defined only
+once, except that a symbol defined with <TT>equ</TT> may be redefined to the
+same value.
+</BLOCKQUOTE>
+<P>
+<TT>label defl 200</TT>
+<BLOCKQUOTE>Define a symbol to have a changeable value.  The symbol cannot be used
+before it is defined, and it can be redefined to a different value later
+with another <TT>defl</TT>. <TT>aset</TT> is a synonym.
+</BLOCKQUOTE>
+<P>
+<TT>min</TT>
+<P>
+<TT>max</TT>
+<BLOCKQUOTE>Same as <TT>defl</TT> except that the symbol is defined as the
+smaller or bigger of two comma-separated expressions.
+</BLOCKQUOTE>
+<P>
+<TT>*mod</TT>
+<BLOCKQUOTE>Increment the internal module name string.  The first time this results
+in "a".  Then "b", "c", ... "z".  Then "aa", "ab", "ac", etc. all the way
+up to "zzzz".  The module name string is used in <TT>--mras</TT> mode where "?" in
+label names is replaced with the current module name.
+</BLOCKQUOTE>
+<P>
+<TT>extern lab1,lab2,...</TT>
+<BLOCKQUOTE>The listed labels are defined in an external module for later linking.
+No effect unless zmac is producing ".rel" output.
+<TT>ext</TT> and <TT>extrn</TT> are synonyms.
+</BLOCKQUOTE>
+<P>
+<TT>public lab1,lab2,...</TT>
+<BLOCKQUOTE>The given labels will be visible to external modules when linking.
+No effect unless zmac is producing ".rel" output.
+<TT>global</TT> and <TT>entry</TT> are synonyms.
+</BLOCKQUOTE>
+<P>
+<H4>Location Control</H4>
+<P>
+<TT>org 9000h</TT>
+<BLOCKQUOTE>Set the address to assemble to 0x9000.
+</BLOCKQUOTE>
+<P>
+<TT>phase address</TT>
+<BLOCKQUOTE>Continue to produce code and data for loading at the current address
+but assemble instructions and define labels as if they originated at
+the given address.  Useful when producing code that will be copied to
+a different location before being executed (e.g., an overlay).
+</BLOCKQUOTE>
+<P>
+<TT>dephase</TT>
+<BLOCKQUOTE>End <TT>phase</TT> mode assembly.
+</BLOCKQUOTE>
+<P>
+<TT>aseg</TT>
+<TT>cseg</TT>
+<TT>dseg</TT>
+<BLOCKQUOTE>Switch to the absolute, code and data segments respectively.
+No effect unless zmac is producing ".rel" output.
+</BLOCKQUOTE>
+<P>
+<H4>Input Control</H4>
+<P>
+<TT>end</TT>
+<BLOCKQUOTE>Ends the input.  Any lines after an <TT>end</TT> are silently ignored.
+If an arg is given, it declares the entry address for the program.
+This has no effect in ".cim" output. In ".hex" output
+it generates an S-record directing 0 bytes of data to be loaded
+at the given address.
+</BLOCKQUOTE>
+<P>
+<TT>if</TT> ... [ <TT>else</TT> ... ] <TT>endif</TT>
+<BLOCKQUOTE>For conditional assembly. If you do <TT>if foo</TT> and <TT>foo</TT> evaluates to
+zero, all the lines up until the next corresponding <TT>else</TT> or <TT>endif</TT>
+are completely ignored.  Conversely, if <TT>foo</TT> evaluates to non-zero, any
+lines from a corresponding <TT>else</TT> to the <TT>endif</TT> are ignored.  Ifs can
+be nested.  <TT>cond</TT>/<TT>endc</TT> are synonyms for <TT>if</TT>/<TT>endif</TT>.
+</BLOCKQUOTE>
+<P>
+<TT>include file</TT>
+<BLOCKQUOTE>Include a file. Like C's (well, cpp's) #include and follows the same
+include path search rules, but the filename arg
+lacks the angle brackets or quotes (though single or double quotes may be used).
+<TT>read</TT> is a synonym.
+</BLOCKQUOTE>
+<P>
+<TT>comment X</TT>
+<BLOCKQUOTE>Suspend assembly until the next occurence of character <TT>X</TT> on a line.
+The rest of the line will be ignored.  A multi-line comment.
+</BLOCKQUOTE>
+<P>
+<TT>assert expr</TT>
+<BLOCKQUOTE>Stop assembly if <TT>expr</TT> is non-zero.
+</BLOCKQUOTE>
+<P>
+<H4>Cycle Counting</H4>
+<P>
+<TT>sett expr</TT>
+<BLOCKQUOTE>Set the current T-state count to <TT>expr</TT>. <TT>tstate</TT> is a synonym.
+</BLOCKQUOTE>
+<P>
+<TT>setocf expr</TT>
+<BLOCKQUOTE>Set the current opcode fetch count to <TT>expr</TT>.
+</BLOCKQUOTE>
+<P>
+<H4>Code Generation</H4>
+<P>
+<TT>8080</TT>
+<BLOCKQUOTE>Make cycle counting operators return 8080 cycle counts and
+interpret any ambiguous assembly statements as Intel 8080 mnemonics.
+<TT>CP</TT> will be interpreted as "call on positive" and <TT>JP</TT> as "jump on positive".
+</BLOCKQUOTE>
+<P>
+<TT>z80</TT>
+<BLOCKQUOTE>Make cycle counting operators return Z-80 cycle counts and
+interpret any ambiguous assembly statements as Zilog Z-80 mnemonics.
+<TT>CP</TT> will be interpreted as "compare accumulator" and <TT>JP</TT> as "jump unconditionally".
+</BLOCKQUOTE>
+<P>
+<TT>jperror enable</TT>
+<BLOCKQUOTE>If <TT>enable</TT> is non-zero, turn on errors when <TT>JR</TT> instructions could be used
+instead of <TT>JP</TT>, off otherwise.  Used to check existing code for situations
+where shorter code could be generated.  Same as <TT>-J</TT> option.
+No effect if in 8080 mode.
+</BLOCKQUOTE>
+<P>
+<TT>jrpromote enable</TT>
+<BLOCKQUOTE>If <TT>enable</TT> is non-zero, <TT>JR</TT> and <TT>DJNZ</TT> instructions will be promoted to
+equivalent <TT>JP</TT> and <TT>DEC&nbsp;B</TT>, <TT>JP&nbsp;NZ</TT> instructions if the relative branch
+offset is out of range.  If <TT>enable</TT> is zero, promotion is disabled.
+Same as the <TT>-j</TT> option.
+No effect if in 8080 mode.
+</BLOCKQUOTE>
+<P>
+<H4>Undocumented <A NAME="undoc">Instructions</A></H4>
+<P>
+Most Z-80 chips support a number of undocumented instructions that were part of
+the original design but not made an offical part of the Zilog specification.
+These instructions may not be supported by all Z-80 chips, especially
+licensed variants, but are fairly widely available nonetheless.
+<P>
+<TT>sl1 r</TT>
+<BLOCKQUOTE>Same as <TT>sla r</TT> but shifts a 1 into the lower bit of <TT>r</TT> rather than a 0.
+</BLOCKQUOTE>
+<P>
+<TT>in (c)</TT>
+<BLOCKQUOTE>Inputs a byte from port <TT>c</TT> but does not store the value.  Flags are still
+set as with the normal <TT>in r,(c)</TT> instruction.
+</BLOCKQUOTE>
+<P>
+<TT>out (c),0</TT>
+<BLOCKQUOTE>Outputs a zero to port <TT>c</TT>.
+</BLOCKQUOTE>
+<P>
+<TT>bit/set/res n,(ix+d),r</TT>
+<P>
+<TT>rlc/rrc/rl/rr/sla/sl1/sra/srl (iy+d),r</TT>
+<BLOCKQUOTE>Same as the corresponding operation on just <TT>(ix+d)</TT> or <TT>(iy+d)</TT> but with
+the result being stored both into <TT>(ix+d)</TT> and register <TT>r</TT>.  Except for <TT>bit</TT>
+which has no effect on <TT>r</TT>. zmac supports the syntax to allow those
+instruction patterns to be generated.
+</BLOCKQUOTE>
+<P>
+The upper and lower bytes of the <TT>ix</TT> and <TT>iy</TT> can be used in a number of
+instructions much in the same way as <TT>d</TT> and <TT>e</TT> correspond to the upper and
+lower bytes of <TT>de</TT>.  zmac names these <TT>ixh</TT>, <TT>ixl</TT>, <TT>iyh</TT> and <TT>iyl</TT> and
+are referred to generically as <TT>ixylh</TT> here.
+<P>
+<TT>inc/dec/add/adc/sub/sbc/and/xor/or/cp ixylh</TT>
+<BLOCKQUOTE>Arithmetic or logical operation on <TT>ix</TT> or <TT>iy</TT> high or low byte.
+</BLOCKQUOTE>
+<P>
+<TT>ld a/b/c/d/e,ixylh</TT>
+<BLOCKQUOTE>Load register with <TT>ix</TT> or <TT>iy</TT> high or low byte.
+</BLOCKQUOTE>
+<P>
+<TT>ld ixylh,a/b/c/d/e</TT>
+<BLOCKQUOTE>Load <TT>ix</TT> or <TT>iy</TT> high or low byte with register.
+</BLOCKQUOTE>
+<P>
+<TT>pfix</TT>
+<P>
+<TT>pfiy</TT>
+<BLOCKQUOTE>Output $DD and $FD prefix bytes.  The Z-80 allows multiple prefix bytes
+for IX and IY instructions.  This allows you to specify them abstractly.
+There is little purpose except for delaying an interrupt or confusing
+disassemblers.
+</BLOCKQUOTE>
+<P>
+<H4>Miscellaneous</H4>
+<P>
+<TT>name str</TT>
+<BLOCKQUOTE>Set the name of the output model to <TT>str</TT>.  For compatibility reasons
+<TT>str</TT> may be parenthesized (e.g., "<TT>name ('foo')</TT>").  Not all output
+formats support an internal name and many have severe length limits.
+</BLOCKQUOTE>
+<P>
+<TT>rsym</TT> and <TT>wsym</TT>
+<BLOCKQUOTE>Read/write a symbol file. These simply load/save the currently defined
+symbols from/to the file specified (in a non-portable format). <TT>rsym</TT>
+takes place at the point it is encountered in the file (on the first
+pass); <TT>wsym</TT> is delayed until assembly has finished.
+</BLOCKQUOTE>
+<P>
+<H4>Listing Pseudo-ops</H4>
+<P>
+There are several pseudo-ops for controlling the listing. None of
+these ops appear in the listing themselves:
+<P>
+<TT>eject</TT>
+<BLOCKQUOTE>Start a new listing page.
+</BLOCKQUOTE>
+<P>
+<TT>nolist</TT>
+<BLOCKQUOTE>Do nothing. This can be used to have a comment in the source but not
+the listing, I suppose.
+</BLOCKQUOTE>
+<P>
+<TT>elist</TT>, <TT>flist</TT>, <TT>glist</TT>, <TT>mlist</TT>
+<BLOCKQUOTE>These have the same effect as the similarly-named command-line
+options, though possibly with the sense reversed depending on the
+default. Use an arg &gt;0 (or no arg) to enable, and an arg &lt;0 to
+disable.
+</BLOCKQUOTE>
+<P>
+<TT>list</TT>
+<BLOCKQUOTE>Sets whether to list or not. You can use this to avoid listing certain
+parts of the source. Takes same optional arg as 'elist', etc..
+</BLOCKQUOTE>
+<P>
+<TT>title</TT>
+<BLOCKQUOTE>Set title (used in listing and symbol file).
+</BLOCKQUOTE>
+<P>
+<TT>space</TT>
+<BLOCKQUOTE>Output arg blank lines in the listing, or one line if no arg is given.
+</BLOCKQUOTE>
+<P>
+<HR>
+<P>
+<H3><A NAME="expr">Expressions</A></H3>
+<P>
+Expressions feature a full set of C operators with the same precedence
+rules and some common assembler extensions and names.
+Here is the complete list of operators, highest-precedence first.
+Operators separated only by a space are synonyms; for example, <TT>~</TT>
+is the same as <TT>not</TT>.
+<P>
+<TT>!</TT> (logical), <TT>~ not</TT> (bitwise), <TT>+</TT> (unary), <TT>-</TT> (unary), <TT>low</TT>, <TT>high</TT>, <TT>t</TT>, <TT>tilo</TT>, <TT>tihi</TT>, <TT>ocf</TT>
+<P>
+<TT>*</TT>, <TT>/</TT>, <TT>% mod</TT>
+<P>
+<TT>+</TT>, <TT>-</TT>
+<P>
+<TT>&lt;&lt; shl</TT>, <TT>&gt;&gt; shr</TT>
+<P>
+<TT>&lt; lt</TT>, <TT>&gt; gt</TT>, <TT>&lt;= le</TT>, <TT>&gt;= ge</TT>
+<P>
+<TT>== = eq</TT>, <TT>!= &lt;&gt; ne</TT>
+<P>
+<TT>&amp; and</TT> (bitwise)
+<P>
+<TT>^ xor</TT> (bitwise)
+<P>
+<TT>| or</TT> (bitwise)
+<P>
+<TT>&amp;&amp;</TT>
+<P>
+<TT>||</TT>
+<P>
+<TT>? :</TT>  (ternary choice operator)
+<P>
+You can use normal parentheses or square brackets to override
+the precedence rules. Square brackets can be used where parentheses would
+conflict with Z-80 mnemonic syntax, but this is not necessary in any
+practical case.
+<P>
+The <TT>?</TT> may need spaces around it to distinguish it from a label that
+has <TT>?</TT> in it.
+<P>
+The unary operators not familiar to C programmers:
+<P>
+<TABLE>
+<TR><TD VALIGN="TOP"><PRE>low expr </PRE></TD><TD>Returns low 8 bits of <TT>expr</TT> </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>high expr </PRE></TD><TD>Returns high 8 bits of <TT>expr</TT> </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>t expr </PRE></TD><TD>Current count of T-states up to memory location <TT>expr</TT> </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>tilo expr </PRE></TD><TD>Low count of T-states used by instruction at memory location <TT>expr</TT> </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>tihi expr </PRE></TD><TD>High count of T-states used by instruction at memory location <TT>expr</TT> </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>ocf expr </PRE></TD><TD>Current count of opcode fetches up to memory location <TT>expr</TT> </TD></TR>
+</TABLE>
+<HR>
+<H3>Macros</H3>
+The following defines a macro named m with zero or more formal parameters
+<TT>p1</TT>, <TT>p2</TT>, ..., <TT>pn</TT>, zero or more local symbols <TT>?s1</TT>, <TT>?s2</TT>, ..., <TT>?sm</TT>,
+and body <TT>b1</TT>, <TT>b2</TT>, ...:
+<P>
+<TABLE>
+<TR><TD VALIGN="TOP"><PRE><TT>m macro p1, p2, ..., pn, ?s1, ?s2, ..., ?sm</TT> </PRE></TD><TD> </TD></TR>
+<TR><TD VALIGN="TOP"><PRE><TT>&nbsp;&nbsp;&nbsp;b1</TT> </PRE></TD><TD> </TD></TR>
+<TR><TD VALIGN="TOP"><PRE><TT>&nbsp;&nbsp;&nbsp;b2</TT> </PRE></TD><TD> </TD></TR>
+<TR><TD VALIGN="TOP"><PRE><TT>&nbsp;&nbsp;&nbsp;...</TT> </PRE></TD><TD> </TD></TR>
+<TR><TD VALIGN="TOP"><PRE><TT>&nbsp;&nbsp;&nbsp;endm</TT> </TD></TR>
+</TABLE>
+<P>
+The macro is called by writing:
+<BLOCKQUOTE><TT>m v1, v2, ..., vn</TT>
+</BLOCKQUOTE>
+<P>
+A macro call expands to the text of the macro's body, with each 
+occurrence of a formal parameter <TT>pk</TT> replaced by the corresponding 
+value <TT>vk</TT>, and with each local symbol <TT>?sk</TT> replaced by a new, unique 
+symbol invented for this call.  Invented symbols begin with <TT>?</TT>,
+so you should avoid using such symbols elsewhere in your program.
+<P>
+zmac currently does not check that you have provided the right number 
+of parameters when calling a macro.  If you provide too few, unmatched 
+formals are replaced with the empty string.  If you provide too 
+many, the additional values begin to replace local symbols as if 
+they were ordinary parameters.  (This could be considered a feature.)  
+After the local symbols are all replaced, additional parameters 
+are silently ignored.
+<P>
+For compatibility with Macro-80, the first line of a macro definition can
+list other labels that will be treated locally:
+<P>
+<BLOCKQUOTE><TT>&nbsp;&nbsp;&nbsp;local lab1,lab2,...</TT>
+</BLOCKQUOTE>
+<P>
+Each time the macro is expanded the local labels are replaced with unique
+names thus avoiding multiple definition problems.
+<P>
+For compatability with MRAS, macro arguments may be preceeded by <TT>&nbsp;</TT>
+in their definition and use.
+<P>
+Any <TT>`</TT> (backquote) in a macro is ignored thus allowing a macro to
+construct identifiers.  For example:
+<P>
+<TABLE>
+<TR><TD VALIGN="TOP"><PRE><TT>move macro dir</TT> </PRE></TD><TD> </TD></TR>
+<TR><TD VALIGN="TOP"><PRE><TT>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;ld`dir`r</TT> </PRE></TD><TD> </TD></TR>
+<TR><TD VALIGN="TOP"><PRE><TT>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;endm</TT> </TD></TR>
+</TABLE>
+<P>
+Invoking <TT>move i</TT> will construct a <TT>ldir</TT> block move instruction.
+<HR>
+<H3>Compatibility</H3>
+<P>
+zmac is broadly compatible with many original Z-80 and 8080 assemblers
+because it accepts many different names for common operations and has
+liberal identifier and numeric formats.  It also accepts most simple
+usage of macros.
+<P>
+When assembling old code keep these portability problems in mind.
+<P>
+Expression order of evaluation may be different.  zmac uses C semantics
+more order of evaluation but assemblers often used simple left to right
+ordering.  zmac will evaluate <TT>2+2*3</TT> as <TT>8</TT> where other assemblers will
+yield <TT>12</TT>.
+<P>
+zmac has no support operating on strings in macros.  Assemblers like Macro-80
+could perform conditional tests on strings.
+<P>
+Advanced macros are unlikely to work.  zmac hasn't advanced to the state where
+all the possible ways of substituting parameters are supported.  Nor does it
+have simple repetition, a way to exit a macro expansion early and so on.
+<P>
+Consult the original assembler manual.  zmac error messages won't help you
+figure out what an unknown assembler command is supposed to do.
+<P>
+Compare against original output.  The very safest thing to do when porting
+assembly code is to compare the binary output of zmac against that produced
+by the original assembler.  This way you can ensure everything has been
+interpreted correctly.  Only once that has been achieved should you modify
+the code.
+<HR>
+<H3>Errors and Warnings</H3>
+<P>
+Any errors or warnings encountered during assembly are reported to standard
+error and in the listing file.  The errors output immediately give the source
+file and line number containing the error.  In listings the error letter
+and message appear just after the line containing the error.
+<P>
+<TABLE>
+<TR><TD VALIGN="TOP"><PRE>B </PRE></TD><TD>Balance error </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>&nbsp; </PRE></TD><TD>A string is missing an closing quote or an <TT>if</TT> is missing an <TT>endif</TT> </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>E </PRE></TD><TD>Expression error </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>&nbsp; </PRE></TD><TD>An expression did not parse or attempts a divide or modulus by 0. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>F </PRE></TD><TD>Syntax error </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>&nbsp; </PRE></TD><TD>General problem with the syntax on a line.  Sometimes extra explanation will be printed on standard output. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>I </PRE></TD><TD>Digit error </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>&nbsp; </PRE></TD><TD>A numeric constant has too many digits to be represented as a 32 bit number. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>M </PRE></TD><TD>Mult. def. error </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>&nbsp; </PRE></TD><TD>A symbol has been defined more than once and those values differ. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>P </PRE></TD><TD>Phase error </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>&nbsp; </PRE></TD><TD>On the second or subsequent assembly passes the assembly has changed significantly.  Most commonly it means an <TT>if</TT> has changed conditions but can also happen when labels or equated values do not converge to a fixed value. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>U </PRE></TD><TD>Undeclared error </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>&nbsp; </PRE></TD><TD>An undeclared symbol was used in an expression or <TT>public</TT> statement. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>V </PRE></TD><TD>Value error </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>&nbsp; </PRE></TD><TD>An invalid value was given to a statement.  Often this means using less than -128 or greater then 255 in a <TT>defb</TT> or less than -32768 or greater than 65535 in a <TT>defw</TT>.  Or similar invalid values used Z-80/8080 opcodes requiring an 8 or 16 bit value (and other restrictions like 0 to 7 for <TT>BIT</TT>). Also if a relative jump is out of range or if a negative value is given in <TT>defs</TT> or <TT>dc</TT>. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>O </PRE></TD><TD>Phase/Dephase error </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>&nbsp; </PRE></TD><TD><TT>phase</TT> was used within another <TT>phase</TT> or <TT>dephase</TT> without <TT>phase</TT>. Or if <TT>org</TT> is used within <TT>phase</TT>. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>A </PRE></TD><TD>Assertion failure error </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>&nbsp; </PRE></TD><TD>An assert statement evaluated to zero. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>J </PRE></TD><TD>Use JR error </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>&nbsp; </PRE></TD><TD>An absolute jump instruction was used where relative jump was in range of the destination address.  Only generated if <TT>-j</TT> or <TT>jrpromote</TT> is in effect. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>R </PRE></TD><TD>Not relocatable error </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>&nbsp; </PRE></TD><TD>An expression was used that must be generated at link time but cannot be handled by the ".rel" format.  For instance, an <TT>org</TT> to a symbol in the data segment when in the code segment.  Or a relative jump to a different segment.  The ".rel" format can evaluate expressions at link time using the <TT>high</TT>, <TT>low</TT>, <TT>not</TT>, <TT>-</TT>, <TT>+</TT>, <TT>*</TT>, <TT>/</TT> and <TT>%</TT> operators. zmac is clever enough to use <TT>high</TT> or <TT>low</TT> in place of <TT>&amp; $ff00</TT> and <TT>&amp; 255</TT>.  But it won't replace a <TT>shl</TT> with a multiply. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>G </PRE></TD><TD>Register usage error </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>&nbsp; </PRE></TD><TD>A invalid register was given to an instruction.  For example, <TT>LD B,(DE)</TT> or <TT>ADD HL,IX</TT>. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>Z </PRE></TD><TD>Z-80 instruction in 8080 mode error </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>&nbsp; </PRE></TD><TD>An instruction was assembled that is only valid on the Z-80 but <TT>.8080</TT> (or <TT>-8</TT>) mode is in effect.  However, use use of Z-80 mnemonics that output valid 8080 instructions is always OK. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>H </PRE></TD><TD>$hex constant interpreted as symbol warning </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>&nbsp; </PRE></TD><TD>A symbol such as <TT>$FCB</TT> has been defined even though it could appear to be a hexadecimal constant.  zmac will treat <TT>$FCB</TT> as symbol for the entire assembly which could be rather surprising if that were not the intent. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>N </PRE></TD><TD>Not implemented warning </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>&nbsp; </PRE></TD><TD>For statements that have been added as parse rules but have no effect. The only current example is <TT>subttl</TT> which sets the sub title of a listing in certain assemblers. </TD></TR>
+</TABLE>
+<P>
+<HR>
+<H3>Output <A NAME="format">Formats</A></H3>
+<P>
+Except for ".rel", zmac writes every known output when assembling.  This
+is no burden on modern computers and saves having to come up with options
+to select a particular output format.
+<P>
+".rel" is a special case since that format is intended for linking and
+can have undefined external symbols which would be errors in the other
+formats which do not support them.
+<P>
+<TABLE>
+<TR><TD VALIGN="TOP"><PRE>.ams </PRE></TD><TD>AMSDOS executable format for Amstrad computers. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>.bds </PRE></TD><TD>Experimental format with the potential for source-level debugging. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>.cas </PRE></TD><TD>TRS-80 high-speed (1500 baud) cassette SYSTEM file.  The internal name of the file is the source file name shortened to 6 characters with suffixes removed. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>.cim </PRE></TD><TD>Core In-Memory image.  A raw binary format with the first byte corresponding to the lowest generated code or data and proceeding contiguously until the highest address generated.  Any gaps are filled with zeros.  Typically used for CP/M where all executables start at address 256 or for ROM images. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>.cmd </PRE></TD><TD>TRS-80 DOS executable file format as used by all major DOSes on the TRS-80 (TRS-DOS, LDOS, MULTIDOS, NEWDOS, etc.) </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>.hex </PRE></TD><TD>Intel hex record format. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>.lcas </PRE></TD><TD>TRS-80 low-speed (500 baud) cassette SYSTEM file.  The internal name of the file is the source file name shortened to 6 characters with suffixes removed. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>.rel </PRE></TD><TD>Relocatable object module format as produced by MACRO-80 and other assemblers. </TD></TR>
+</TABLE>
+<P>
+<HR>
+<H3>Miscellaneous</H3>
+In the symbol table listing, the <TT>=</TT> prefix is given for those symbols
+defined by <TT>equ</TT> or <TT>defl</TT>.
+<HR>
+<H3>Exit Status</H3>
+<P>
+<TABLE>
+<TR><TD VALIGN="TOP"><PRE>0 </PRE></TD><TD>No errors. </TD></TR>
+<TR><TD VALIGN="TOP"><PRE>1 </PRE></TD><TD>One or more errors were found during assembly, or zmac exited with a fatal error. </TD></TR>
+</TABLE>
+<P>
+<HR>
+<H3>Credits</H3>
+Bruce Norskog original wrote zmac in 1978.
+<P>
+Updates and bugfixes over the years by John Providenza, Colin Kelley,
+and more recently by Russell Marks, Mark RISON, Chris Smith,
+Matthew Phillips and Tim Mann.
+<P>
+Extensive modifications for cycle counting, multiple output formats,
+".rel" output, 8080 mode and older assembler compatibilty were written
+by George Phillips.
+<P>
+This document was based on Russell Marks zmac man page which had
+tweaks by Mark RISON and Tim Mann.  George Phillips converted it to HTML
+and documented the new features and some older ones (e.g., <TT>phase</TT>/<TT>dephase</TT>).
+<!--
+  If you ran "zmac --doc" you may want to send the output
+  to a file using "zmac --doc >zmac.html" and then open
+  zmac.html in your web browser.
+-->
