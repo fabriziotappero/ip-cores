@@ -1,0 +1,9 @@
+del .\*.exe
+del .\*.obj
+del .\*.tds
+del *~
+del *.vhd
+del *.bin
+del *.bpr
+del *.bpf
+del *.dsk

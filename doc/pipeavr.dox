@@ -1,0 +1,2725 @@
+/*!
+\defgroup pavr_intro Introduction
+\par Goal
+This project implements an \b 8 \b bit \b controller that is compatible with
+Atmel's \ref pavr_avrarch "AVR architecture", using \b VHDL (Very High speed
+integrated circuits Hardware Definition Language). \n
+The device built here is not a specific controller of the AVR family, but rather
+a maximally featured AVR controller. It is configurable enough to be able to
+simulate most AVR family controllers. \n
+\b The \b goal is to obtain an AVR processor that is as powerful as possible (in
+terms of MIPS), with a work budget of about 6 months*man. \n
+\n
+\par Approach
+Atmel's AVR core is reasonably fast, among the other 8 bit controllers on the
+market (year 2002). Most instructions take one clock. The instruction set is
+(almost) RISC. In real life applications, the average clocks per instruction
+(CPI) is typically 1.2...1.7, depending on the application. CPI=1.4 is a good
+average. The core has a short pipeline, with 2 stages (fetch and execute). With
+Atmel's 0.5um technology, the core runs at 10...15 MHz. \n
+\n
+From the start were searched ways to improve original core's performance. \n
+As the original core already executes most instructions in one clock, two
+ideas come quick in mind: a deeper pipeline and issuing more than one instruction
+per clock (multi-issue). \n
+A deeper pipeline is relatively straightforward. A clock speed increase of about
+3...4x is expected from a 5 or 6 stages pipeline. However, the resulted average
+CPI is expected to be slightly bigger than the original, mainly because of jumps,
+branches, calls and returns. They require the pipeline to be flushed, at least
+partially, thus some clocks are lost while refilling the pipeline. \n
+The multi-issue approach was quickly rejected. The available time budget is
+too small for implementing both a deep pipeline and multi-issuing. On the other
+hand, multi-issue without a deeper pipeline wouldn't make much sense. \n
+\n
+\par Result
+pAVR is a \b parameterizable and \b synthesizable VHDL design, AVR-compatible,
+that has: \n
+<ul>
+   <li> 6 pipeline stages
+   <li> 1 instruction/clock for most instructions
+   <li> estimated clock frequency: \b ~50 \b MHz & \b 0.5 \b um; assuming that
+         Atmel's core runs at 15 MHz & 0.5 um. \n
+         3x Atmel original core's performance.
+   <li> estimated MIPS at 50 MHz: \b 28 \b MIPS (typical), \b 50 \b MIPS (peak) \n
+        3x Atmel original core's performance.. At 15 MHz, Atmel's core has
+        10 MIPS typical, and 15 MIPS peak.
+   <li> CPI: 1.7 clocks/instruction (typical), 1 clock/instruction (peak) \n
+         0.75x (typical), 1.00x (peak) Atmel original core's performance.
+   <li> pAVR architecture is rather computational-friendly than control-friendly.
+         \ref pavr_pipeline_jumps "Jumps", \ref pavr_pipeline_branches "branches",
+         \ref pavr_pipeline_skips "skips", \ref pavr_pipeline_calls "calls" and
+         \ref pavr_pipeline_returns "returns" are relatively expansive in terms of
+         clocks. A branch prediction scheme and a smarter return procedure might
+         be considered as upgrades.
+</ul>
+\n
+The \ref pavr_src "sources" structure is \b modularized. The sources are written
+based on a set of common-sense \ref pavr_src_conv "conventions" (the process
+splitting strategy, signals naming, etc). Thus, pAVR is quite an easily
+\b maintainable design. \n
+Extensive \ref pavr_test "testing" was carried out. \n
+pAVR is to be synthesized and burned into a \ref pavr_fpga "FPGA". \n
+\n
+\par Project structure
+This project is distributed in two forms: \b release and \b devel (development). \n
+\n
+The \b devel distribution contains
+<ul>
+   <li> pAVR documentation
+   <li> VHDL sources for pAVR and associated VHDL tests
+   <li> test programs
+   <li> some utilities (preprocessor, some useful scripts)
+</ul>
+In a word, the devel structure contains anything that is needed for one to develop
+   this project further. As a side note, this project was developed under Windows
+   XP. Yet, all the main software tools used here have Linux counterparts (Doxygen,
+   VHDL simulator, C compiler, TCL interpreter, text editor). \n
+The documentation is generated via Doxygen. For those who don't know how to use
+   this wonderful tool, please check <a href="http://www.doxygen.org"> www.doxygen.org </a>. \n
+In the "doc" directory can be found the sources of the documentation. Also, here
+   are some scripts for compiling the documentation, cleaning it up, or running
+   (viewing) it. \n
+In the "doc/html" folder is placed the compilation result (HTML). The HTML
+   documentation is further compiled into a .CHM (compressed HTML) file that is
+   placed in the "doc/chm" folder. CHM is a very convenient file format, providing
+   about all the features of HTML, plus that it's very small due to compression
+   and very handy (a single file instead of a bunch of files and folders).
+   However, this file format is still Windows-bound. There are neither compilers
+   nor viewers for Linux (but things might change soon...). \n
+The "src" folder contains pAVR VHDL sources, VHDL tests and some Modelsim macro
+   files. \n
+The "test" folder contains the test programs (ASM and ANSI C) with which pAVR was
+   tested. \n
+The "tools" folder contains some utilities. The most important utility is a text
+   preprocessor. In the VHDL sources are placed XML-like tags,  inserted as
+   comments. The preprocessor parses these sources and interprets the XML-like
+   tags. For example, some tags isolate non-synthesizable code that can easily
+   removed when synthesizing pAVR. The preprocessor is also used to insert
+   a common header into all VHDL sources. \n
+Also, in the "tools" folder are some scripts that build devel or release packages. \n
+\n
+The \b release distribution contains only the documentation. However, all the VHDL
+   sources are embedded into the documentation, and are thus easily accessible. \n
+The release distribution comes in two flavors: HTML or CHM. My favorite is CHM,
+   because it's much more compact. However, for viewing the documentation under
+   Linux, HTML is still needed. \n
+\n
+Throughout this project are a few sub-projects that must be  edited/compiled/run
+   independently (for example, generating the documentation, or compiling test
+   sources). For this purpose, I use a TCL console with stdin/stdout/stderr, and
+   a few buttons: edit/compile/run/clean. Each button launches a script with the
+   same name as the button, placed in the same folder as the console script. The
+   stdout/stderr of the scripts are captured on the TCL console. I use this
+   "project manager" (the TCL console) the very same way for, let's say, compiling
+   a C source or generating Doxygen documentation.
+\n
+\n
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_avrarch AVR architecture
+\par AVR features
+- Load-store \ref pavr_avris "RISC" machine
+- Harvard architecture, with separate program/data buses
+- 2 level pipeline: fetch and execute
+- Most instructions execute in 1 clock.
+- Variable instruction word width: 16 or 32 bits. Most instructions are 16 bits
+   wide
+- Register File (RF) with 32 registers
+- IO File (IOF) with 64 registers
+- Loads and stores operate in the Unified Memory space. \n
+The Unified Memory (UM) is the space formed by concatenating the RF, IOF and the
+Data Memory (DM), in this order. Thus, the RF begins at address 0 in the UM, the
+IOF at address 32 and the DM at address 96.
+- Register File mapped pointer registers X, Y, Z, 16 bits each, for indirect
+addressing the Data Memory and the Program Memory (PM). \n
+Pointer registers have pre-decrement and post-increment capabilities.
+
+\todo
+Add some AVR kernel schematics. \n
+Add some AVR general considerations.
+
+\par Notes on AVR downsides
+Among other 8 bit microcontrollers, the AVR architecture is relatively clean and
+   fast. Of course, it is not perfect.
+In the following, I will expand on some of the drawbacks of the AVR architecture. \n
+\n
+Pipeline-friendliness issues:
+   <ul>
+   <li> \b The \b register \b file, \b IO \b file \b and \b data \b memory \b have
+      \b a \b unified \b addressing \b space. \n
+     The Register File, IO file and Data Memory are very different entities,
+      from the point of view of the AVR instruction set. It's an obvious
+      decision to physically implement them as different memory-like entities.
+      Pipelining such a structure is straightforward. A simple and fast
+      pipeline can be built naturally. Every memory-like entity can be
+      assigned a fixed pipe stage during which it is accessed for writing or
+      for reading, with no more than one such elementary operation needed
+      during any instruction. \n
+     \b However, the AVR architecture has a unified addressing space for Register
+      File - IO file - Data Memory. Accessing this Unified Memory space can be
+      done through indirect loads and stores, via dedicated pointer registers.
+      Depending upon the contents of a pointer register, an access to the
+      Register File or the IO file or the Data Memory is needed. This
+      completely messes up the simple pipeline structure above, because
+      instructions' execution is \b data \b driven. As a result, for example, the
+      Register File must now be accessed, let's say for reading, in more than
+      one pipe stage. This is most pipeline-destructive, because different
+      instructions will compete on the same hardware resources. \n
+     Arbitration/stall schemes are required. Also, new data hazards must be
+      dealt with. All these are pretty complex, and come with a cost, in
+      terms of both power consumption and speed. \n
+     The unified address space does bring new addressing capabilities. However,
+      they are unnatural and basically useless. Who will ever place the stack in
+      the Register File or in the IO File? That would make some sense for low-end
+      controllers that don't have Data Memory at all, and rely on a Register
+      File mapped stack. However, the price paid for that is big. \n
+     As a result, pAVR's loads and stores take 2 cycles. If the pointer registers
+      would have pointed only in the Data Memory space, loads and stores would
+      have naturally taken a single clock.
+   <li> \b The \b Register \b File/IO \b file \b operand's \b addresses \b don't
+      \b have \b fixed \b positions \b in \b the \b instruction \b opcodes. \n
+     That would have allowed reducing the number of pipe stages from 6 to 5.
+      As a result, a lower CPI would have been obtained, because of less
+      cycles penalty on the instructions that modify the instruction flow
+      (branches, jumps, calls etc). Also, that would have ment lower power
+      consumption because of less registers and combinational logic.
+   <li> \b The \b instruction \b has \b variable \b width: \b 16 \b or \b 32 \b bits. \n
+     That is not pipeline-friendly. \n
+     Each 32 bit instruction could have easily been replaced by two 16 bit
+     instructions.
+   </ul>
+\n
+Instruction set orthogonalithy issues:
+   - Pointer registers X, Y, Z have addressing capabilities that are different
+      from each other.
+   - Register File locations 0...15 have different addressing capabilities than
+      RF locations 16...31.
+   - IO locations 0 to 31 support more addressing modes than IO locations 32 to
+      63.
+   - There are instructions that work on 16 bit words (for example, 16 bit
+      register-to-register moves). \n
+      The existance of such instructions on a 8 bit RISC controller is questionable.
+      That's not because such operations are not needed, but because the raise in
+      complexity and irregularity is not justifiable. \n
+      The cost/performance balance is negative for these instructions (we're still
+      talking about a controller claimed to be RISC).
+   - opcodes 0x95C8 and 0x9004 do exactly the same thing (LPM). \n
+      Other such examples might exist. \n
+      The instruction bits could have been used more carefully.
+   - CLR affects flags, while SER does not, even though they seem to be
+      complementary intructions. \n
+      This might be a design flaw in the original core \b or designed on
+      (a hidden) purpose by whoever designed the AVR core. By the way, if I
+      remember well some ancient news, AVR was designed not by Atmel, but by a
+      Scandinavian company that was aquired later by Atmel.
+
+\n
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_avris AVR instruction set
+\htmlonly
+<TABLE border="1" cellspacing="0" cellpadding="4">
+<CAPTION> AVR instruction set</CAPTION>
+<TR>
+   <TH> Arithmetic
+   <TH> Bit & Others
+   <TH> Transfer
+   <TH> Jump
+   <TH> Branch
+   <TH> Call
+<TR>
+   <TD valign="top">
+      ADD   Rd, Rr            <BR>
+      ADC   Rd, Rr            <BR>
+      ADIW  Rd+1:Rd, K6       <BR>
+                              <BR>
+      SUB   Rd, Rr            <BR>
+      SUBI  Rd, K8            <BR>
+      SBC   Rd, Rr            <BR>
+      SBCI  Rd, K8            <BR>
+      SBIW  Rd+1:Rd, K6       <BR>
+                              <BR>
+      INC   Rd                <BR>
+      DEC   Rd                <BR>
+                              <BR>
+      AND   Rd, Rr            <BR>
+      ANDI  Rd, K8            <BR>
+      OR Rd, Rr               <BR>
+      ORI   Rd, K8            <BR>
+      EOR   Rd, Rr            <BR>
+                              <BR>
+<!--
+      <S> CLR   Rd </S> (EOR)*     <BR>
+      <S> SER   Rd </S> (LDI)      <BR>
+      <S> SBR   Rd, K8 </S> (ORI)  <BR>
+      <S> CBR   Rd, K8 </S> (ANDI) <BR>
+      <S> TST   Rd </S> (AND)      <BR>
+!-->
+
+      COM   Rd                <BR>
+      NEG   Rd                <BR>
+      CP Rd, Rr               <BR>
+      CPC   Rd, Rr            <BR>
+      CPI   Rd, K8            <BR>
+      SWAP  Rd                <BR>
+                              <BR>
+<!--      <S> LSL   Rd </S> (ADD) <BR> !-->
+      LSR   Rd                <BR>
+<!--      <S> ROL   Rd </S> (ADC) <BR> !-->
+      ROR   Rd                <BR>
+      ASR   Rd                <BR>
+                              <BR>
+
+      MUL      Rd, Rr*        <BR>
+      MULS     Rd, Rr         <BR>
+      MULSU   Rd, Rr          <BR>
+      FMUL      Rd, Rr        <BR>
+      FMULS    Rd, Rr         <BR>
+      FMULSU Rd, Rr           <BR>
+
+
+   <TD valign="top">
+      BSET  s                 <BR>
+      BCLR  s                 <BR>
+      SBI   A, b              <BR>
+      CBI   A, b              <BR>
+      BST   Rd, b             <BR>
+      BLD   Rd, b             <BR>
+                              <BR>
+      NOP                     <BR>
+      <I>
+      BREAK**                 <BR>
+      SLEEP                   <BR>
+      WDR                     <BR>
+      </I>
+
+   <TD valign="top">
+      MOV     Rd, Rr          <BR>
+      MOVW Rd+1:Rd, Rr+1:Rr   <BR>
+                              <BR>
+      IN Rd, A                <BR>
+      OUT   A, Rr             <BR>
+                              <BR>
+      PUSH  Rr                <BR>
+      POP   Rr                <BR>
+                              <BR>
+      LDI   Rd, K8            <BR>
+      LDS   Rd, K16           <BR>
+                              <BR>
+      LD Rd, X                <BR>
+      LD Rd, -X               <BR>
+      LD Rd, X+               <BR>
+                              <BR>
+      LDD   Rd, Y+K6           <BR>
+      LD Rd, -Y               <BR>
+      LD Rd, Y+               <BR>
+                              <BR>
+      LDD   Rd, Z+K6           <BR>
+      LD Rd, -Z               <BR>
+      LD Rd, Z+               <BR>
+                              <BR>
+      STS   K16, Rr           <BR>
+                              <BR>
+      ST X, Rr                <BR>
+      ST -X, Rr               <BR>
+      ST X+, Rr               <BR>
+                              <BR>
+      STD   Y+K6, Rr           <BR>
+      ST -Y, Rr               <BR>
+      ST Y+, Rr               <BR>
+                              <BR>
+      STD   Z+K6, Rr           <BR>
+      ST -Z, Rr               <BR>
+      ST Z+, Rr               <BR>
+                              <BR>
+      LPM                     <BR>
+      LPM   Rd, Z             <BR>
+      LPM   Rd, Z+            <BR>
+      ELPM                    <BR>
+      ELPM  Rd, Z             <BR>
+      ELPM  Rd, Z+            <BR>
+                              <BR>
+      <I>
+      SPM                     <BR>
+      </I>
+
+   <TD valign="top">
+      RJMP  K12               <BR>
+      IJMP                    <BR>
+      EIJMP                   <BR>
+      JMP   K22               <BR>
+
+   <TD valign="top">
+      CPSE  Rd, Rr            <BR>
+                              <BR>
+      SBRC  Rr, b             <BR>
+      SBRS  Rr, b             <BR>
+                              <BR>
+      SBIC  A, b              <BR>
+      SBIS  A, b              <BR>
+                              <BR>
+      BRBC  s, K7             <BR>
+      BRBS  s, K7             <BR>
+
+   <TD valign="top">
+      RCALL   K12             <BR>
+      ICALL                   <BR>
+      EICALL                  <BR>
+      CALL      K22           <BR>
+                              <BR>
+      RET                     <BR>
+      RETI                    <BR>
+
+</TABLE>
+\endhtmlonly
+\b * Multiplications are fully supported by the pipeline (in terms of timing,
+wires and registers). However, the multiplication module itself is null-defined
+in the ALU, and always returns zero for now. It will be defined and plugged into
+the ALU in a future version of pAVR. \n
+\b ** Italicized instructions are currently not implemented in pAVR. \n
+
+\n
+\n
+*/
+
+/*!
+\defgroup pavr_implementation Implementation
+*/
+
+
+
+/*!
+\defgroup pavr_control Pipeline structure
+\ingroup pavr_implementation
+\par Shift-like flow
+pAVR has a pipeline with 6 stages:
+<ul>
+   <li> 1. read Program Memory (PM)
+   <li> 2. strobe Program Memory output into instruction register (INSTR)
+   <li> 3. decode instruction and read Register File (RFRD)
+   <li> 4. strobe Register File output (OPS)
+   <li> 5. execution or Unified Memory access (ALU)
+   <li> 6. write Register File (RFWR)
+</ul>
+\n
+\image html pavr_pipestruct_01.gif \n
+\n
+Each pipeline stage is pretty much of an independent state machine. \n
+\n
+Basically, each pipeline stage receives values from the previous one, in a
+   \b shift-like flow. Only the `terminal' registers contain data actually used,
+   the previous ones are used just for synchronization. \n
+For example, this is how a particular hardware resource request flows through
+   pipeline stages s3, s4 until it is processed in s5: \n
+\n
+\image html pavr_pipestruct_02.gif \n
+\n
+\b Exceptions from this `normal' flow are the \b stall and \b flush actions, which
+   can basically independently stall or reset to zero (force a nop into) any stage.
+   Other exceptions are when several registers in such a chain are actually used,
+   not only the terminal one. \n
+\n
+Apart from the (main) pipeline stages above (stages s1-s6), there are a number
+   of pipeline stages only needed by a few instructions (such as 16 bit
+   arithmetic, some of the skips, returns): s61, s51, s52, s53 and s54. During
+   these pipeline stages, the main stages are stalled. \n
+\n
+Stages s1, s2 are common to all instructions. They bring the instruction from
+   Program Memory (PM) into the instruction register (instruction fetch stages). \n
+During stage s3, the instruction just read from PM is decoded. That is, the
+   following pipeline stages (s4, s5, s6, s61, s51, s52, s53, s54) are
+   instructed what to do, by means of dedicated registers. \n
+\n
+At a given moment, a pipe stage stage can do one of the following actions:
+<ul>
+   <li> execute normally \n
+        The registers in that stage are loaded with:
+      <ul>
+         <li> Values from the previous stage, if that stage is different from s1 or s2 or s3
+         <li> Some particular values if that stage is s1 or s2 (those values are set by the
+            Program Memory manager)
+         <li> Values from the instruction decoder, if that stage is s3
+      </ul>
+   <li> flush (execute nop) \n
+      All registers in that stage are reseted to zero.
+   <li> stall \n
+      All registers in that stage are kept unchanged.
+</ul>
+\n
+
+\par Hardware resource managing
+Pipeline stages can request access to hardware resources. Access to hardware
+   resources is done via dedicated hardware resource managers (one manager
+   per hardware resource; one VHDL process per manager). \n
+\n
+Main hardware resources:
+   <ul>
+      <li> Register File (RF)
+      <li> Bypass Unit (BPU)
+      <ul>
+         <li> Bypass Register 0 (Bypass chain 0) (BPR0)
+         <li> Bypass Register 1 (Bypass chain 1) (BPR1)
+         <li> Bypass Register 2 (Bypass chain 2) (BPR2)
+      </ul>
+      <li> IO File (IOF)
+      <li> Status Register (SREG)
+      <li> Stack Pointer (SP)
+      <li> Arithmetic and Logic Unit (ALU)
+      <li> Data Access Control Unit (DACU)
+      <li> Program Memory (PM)
+      <li> Stall and Flush Unit (SFU)
+   </ul>
+\n
+Only one such request can be received by a given resource at a time. If
+   multiple accesses are requested from a resource, its access manager
+   will assert an error during simulation; that would indicate a design bug. \n
+The pipeline is built so that each resource is normally accessed during a
+   fixed pipeline stage:
+   <ul>
+      <li> RF is normally read in s3 and written in s6.
+      <li> IOF is normally read/written in s5.
+      <li> DM is normally read/written in s5.
+      <li> DACU is normally read/written in s5.
+      <li> PM is normally read in s1.
+   </ul>
+However, exceptions can occur. For example, LPM instructions need to read
+   PM in stage s5. Also, loads/stores must be able to read/write RF in stage s5. \n
+Exceptions are handled at the hardware resource managers level. \n
+
+\par Stall and Flush Unit
+Because of the exceptions above, different pipeline stages can compete for a given
+   hardware resource. A mechanism must be provided to handle hardware resource
+   conflicts. The SFU implements this function, by arbitring hardware resource
+   requests. The SFU stalls some instructions (some pipeline stages), while
+   allowing others to execute. \n
+\n
+Stall handling is done through two sets of signals:
+   <ul>
+      <li> SFU requests (SFU inputs)
+      <ul>
+         <li> stall requests
+         <li> flush requests
+         <li> branch requests
+         <li> skip requests
+         <li> nop requests
+      </ul>
+      <li> SFU control signals (SFU outputs)
+      <ul>
+         <li> stall control
+         <li> flush control
+      </ul>
+      There is one pair of stall-flush control signals for each of the pipeline
+      stages s1, s2, s3, s4, s5, s6.
+   </ul>
+\n
+\image html pavr_hwres_sfu_01.gif
+\n
+Each instruction has an embedded stall behavior, that is decoded by the
+instruction decoder. \n
+Various instructions in the pipeline, in different execution phases, access the
+SFU exactly the same way they access any other hardware resources, through SFU
+access requests. \n
+The SFU prioritizes stall/flush/branch/skip/nop requests and postpones younger
+instructions until older instructions free the hardware resources (SFU hardware
+resource including). The postponing process is done through the stall-flush
+controls, on a per-pipeline stage basis. \n
+The `SFU rule': when a resource conflict appears, the older instruction wins. \n
+\n
+Some instructions need to insert a nop \b before the instruction `wave front',
+   for freeing hardware resources normally used by younger instructions. For
+   example, loads must `steal' the Register File read port 1 from younger
+   instructions. \n
+Nops are inserted by stalling certain pipe stages and flushing other, or
+   possibly the same, stages. \n
+Other instructions need a nop \b after the instruction wave front, for the
+   previous instruction to complete and free hardware resources. For example,
+   stores must wait a clock, until the previous instruction frees the Register
+   File write port. \n
+The two situations differ pretty much from the point of view of the control
+   structure. In the second situation, the instruction is required to stall
+   and flush itself, which adds additional problems. These problems are solved
+   by introducing a dedicated noping state machine in stage s4, whose only
+   purpose is to introduce at most one nop \b after any instruction. On the
+   other hand, introducing nops \b before an instruction wave front is
+   straightforward, as any instruction can stall/flush younger instructions by
+   means of SFU requests. \n
+\n
+The specific SFU requests can be found \ref pavr_hwres_sfu "here".
+\n
+
+\par Shadowing
+Let's consider the following situation: a load instruction reads the Data Memory
+   during pipe stage s5. Suppose that next clock, an older instruction stalls s6,
+   during which Data Memory output was supposed to be written into the Register
+   File. After another clock, the stall is removed, and s6 requests to write the
+   Register File, but the Data Memory output has changed during the stall.
+   Corrupted data will be written into the Register File. With the shadow protocol,
+   the Data Memory output is saved during the stall. When the stall is removed, the
+   Register File is written with the saved data. \n
+\n
+\b The \b shadow \b protocol \n
+If a pipe stage is not permitted to place hardware resource requests, then mark
+   every memory-like entity in that stage as having its output `shadowed', and
+   write its associated shadow register with the corresponding data output.
+   Else, mark it as `unshadowed'. \n
+   As long as the memory-like enity is marked `shadowed', it will be read (by
+   whatever entity needs that) from its associated shadow register, rather than
+   directly from its data output. \n
+In order to enable shadowing during multiple, successive stalls, shadow
+   memory-like entities only if they aren't already shadowed. \n
+\n
+Basically, the condition that shadows a memory-like entity's output is `hardware
+   resources are disabled during that stage'. However, there are exceptions. For
+   example, LPM family instructions steal Program Memory access by stalling the
+   instruction that would normally be fetched that time. By stalling, hardware
+   resource requests become disabled in that pipe stage. Still, LPM family
+   instructions must be able to access directly Program Memory output. Here, the
+   PM must not be shadowed even though during its pipe stage s2 (during which PM
+   is normally accessed) all hardware requests are disabled by default. \n
+Fortunately, there are only a few such exceptions (holes through the shadow
+protocol). Overall, the shadow protocol is still a good idea, as it permits natural
+& automatic handling of a bunch of registers placed in delicate areas. \n
+\n
+
+\todo
+<ul>
+   <li> Branch prediction with hashed branch prediction table and 2 bit predictor.
+   <li> Super-RAM interfacing to Program Memory. \n
+      A super-RAM is a classic RAM with two supplemental lines: a mem_rq input
+      and a mem_ack output. The device that writes/reads the super-RAM knows that
+      it can place an access request when the memory signalizes it's ready via
+      mem_ack. Only then, it can place an access request via mem_rq. \n
+      A super-RAM is a super-class for classic RAM. That is, a super-RAM becomes
+      classic RAM if the RAM ignores mem_rq and keeps continousely mem_ack to 1. \n
+      The super-RAM protocol is so flexible that, as an extreme example, it can
+      serially (!) interface the Program Memory to the controller. That is, about
+      2-3 wires instead of 38 wires, without needing to modify anything in the
+      controller. Of course, that would come with a very large speed penalty, but
+      it allows choosing the most advantageous compromise between the number of
+      wires and speed. The only thing to be done is to add a serial to parallel
+      converter, that complies to the super-RAM protocol. \n
+      After pAVR is made super-RAM compatible, it can run anyway from a regular
+      RAM, as it runs now, by ignoring the two extra lines. Thus, nothing is
+      removed, it's only added. No speed penalty should be payed. \n
+      A simple way to add the super-RAM interface is to force nops into the
+      pipeline as long as the serial-to-parallel converter works on an instruction
+      word. \n
+   <li> Modify stall handling so that no nops are required \b after the instruction
+      wavefront. The instructions could take care of themselves. The idea is that
+      a request to a hardware resource that is already in use by an older instruction,
+      could \b automatically generate a stall. \n
+      That would:
+      <ul>
+         <li> generally simplify instruction handling
+         <li> make average instruction execution slightly faster.
+      </ul>
+</ul>
+
+\n
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_hwres Hardware resources
+\ingroup pavr_implementation
+*/
+
+
+
+/*!
+\defgroup pavr_hwres_rf Register File
+\ingroup pavr_hwres
+The Register File is a 3 port memory, with 2 read ports and 1 write port. \n
+It has 32 locations, 8 bits each. \n
+Separate read and write ports for the upper three 16 bit words are provided.
+The upper three 16 bit words are the pointer registers X (at byte address
+27:26), Y (29:28) and Z (31:30). \n
+The RF is placed at the beginning of the Unified Memory space. \n
+\n
+\image html pavr_hwres_rf_01.gif
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_hwres_rf_rd1 Read port 1
+\ingroup pavr_hwres_rf
+\par Register File read port 1 connectivity
+\n
+\image html pavr_hwres_rf_rd1_01.gif
+\n
+\par Requests to RF read port 1
+   - pavr_s3_rfrd1_rq \n
+      Most ALU-requiring instructions need to read an operand from RF read port 1
+      in the same clock as the instruction is decoded (here, "to read" = "to
+      strobe the read input"). Activate the read signal if necessary, via RF read
+      port 1 manager. \n
+   - pavr_s5_dacu_rfrd1_rq \n
+      \anchor dacu_rq
+      \b Note \b 1: This a somehow `missplaced' RF read port 1 request. To keep
+      the controller compatible with the AVR architecture, loads and stores must
+      operate in the Unified Memory space, that includes Register File, IO File
+      and Data Memory. Thus, it is possible for a LOAD to actually transfer, for
+      example, data from RF to RF, rather than from DM to RF (depending on the
+      addresses involved). \n
+      The DACU manager takes the decision which physical device has to be used,
+      and places consequent calls to the appropriate hardware resource manager.
+      This request is such a call. \n
+      \b Note \b 2: The same situation happens with `misplaced' RF writes in
+      stores. The stores read from RF and can actually write any of RF, IOF or DM.
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_hwres_rf_rd2 Read port 2
+\ingroup pavr_hwres_rf
+\par Register File read port 2 connectivity
+\n
+\image html pavr_hwres_rf_rd2_01.gif
+\n
+\par Requests to RF read port 2
+   - pavr_s3_rfrd2_rq \n
+   Needed by 2 operands instructions (most ALU instructions, moves).
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_hwres_rf_wr Write port
+\ingroup pavr_hwres_rf
+\par Register File write port connectivity
+\n
+\image html pavr_hwres_rf_wr_01.gif
+\n
+\par Requests to RF write port
+   - pavr_s6_aluoutlo8_rfwr_rq \n
+      Request to write the lower 8 bits of the ALU result into the Register File. \n
+   - pavr_s61_aluouthi8_rfwr_rq \n
+      Request to write the higher 8 bits of the ALU result into RF. \n
+   - pavr_s6_iof_rfwr_rq \n
+      Request to write IOF data out into RF. \n
+      Needed by IN, BLD.
+   - pavr_s6_dacu_rfwr_rq \n
+      Request to write Unified Memory data out (DACU data out) into RF. \n
+      Needed by loads and POP.
+   - pavr_s6_pm_rfwr_rq \n
+      Request to write Program Memory data out into RF. \n
+      Needed by LPM, ELPM.
+   - pavr_s5_dacu_rfwr_rq \n
+      Request to write RF out into RF. \n
+      Needed by stores and PUSH. \n
+      See \ref dacu_rq "Note 2".
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_hwres_rf_xwr X port
+\ingroup pavr_hwres_rf
+\par X port connectivity
+\n
+\image html pavr_hwres_rf_xwr_01.gif
+\n
+This is a read and write port. \n
+The contents of the X register is permanently available for reading, under the
+name `pavr_rf_x'. \n
+The X write port consists of a data in (pavr_rf_x_di) and a write strobe
+(pavr_rf_x_wr).
+\par Requests to X write port
+   - pavr_s5_ldstincrampx_xwr_rq \n
+      Increment X. \n
+      If the controller has more than 64KB memory, than increment RAMPX:X (24
+      bits) rather than X (16 bits). \n
+      Needed by loads and stores with postincrement. \n
+   - pavr_s5_ldstdecrampx_xwr_rq \n
+      Decrement X. \n
+      If more than 64KB memory, than decrement RAMPX:X rather than X. \n
+      Needed by loads and stores with predecrement. \n
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_hwres_rf_ywr Y port
+\ingroup pavr_hwres_rf
+\par Y port connectivity
+\n
+\image html pavr_hwres_rf_ywr_01.gif
+\n
+This is a read and write port. \n
+\par Requests to Y write port
+   - pavr_s5_ldstincrampy_ywr_rq \n
+      Increment Y or RAMPY:Y. \n
+      Needed by loads and stores with postincrement. \n
+   - pavr_s5_ldstdecrampy_ywr_rq \n
+      Decrement Y or RAMPY:Y. \n
+      Needed by loads and stores with predecrement. \n
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_hwres_rf_zwr Z port
+\ingroup pavr_hwres_rf
+\par Z port connectivity
+\n
+\image html pavr_hwres_rf_zwr_01.gif
+\n
+This is a read and write port. \n
+\par Requests to Z write port
+   - pavr_s5_ldstincrampz_zwr_rq \n
+      Increment Z or RAMPZ:Z. \n
+      Needed by loads and stores with postincrement. \n
+   - pavr_s5_ldstdecrampz_zwr_rq \n
+      Decrement Z or RAMPZ:Z. \n
+      Needed by loads and stores with predecrement. \n
+   - pavr_s5_lpminc_zwr_rq \n
+      Increment Z. \n
+      Needed by LPM with postincrement. \n
+   - pavr_s5_elpmincrampz_zwr_rq \n
+      Increment RAMPZ:Z. \n
+      Needed by ELPM with postincrement. \n
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_hwres_bpu Bypass Unit
+\ingroup pavr_hwres
+\par General considerations
+The Bypass Unit (BPU) is a FIFO-like temporary storage area, that keeps data to
+be written into the Register File. \n
+If an instruction computes a value that must be written into the Register File
+(RF) (an ALU instruction, for example) it first writes the BPU, and then (or at
+the same time) actually writes the RF. \n
+If the following instructions need an operand from the RF, at the same
+address where the previous result should have been written into the RF, they will
+actually read that operand from the BPU rather than from RF. \n
+This way, `read before write' pipeline hazards are avoided. \n
+\n
+The specific situations where BPU is needed are:
+   - when reading Register File operand(s). \n
+      Reading Register File operands is done through the BPU.
+   - when reading pointer registers. \n
+      Reading pointer registers is done through the BPU.
+
+\par Details
+The algorithm of using BPU:
+<ul>
+   <li> the instruction that wants to write a result into the RF, writes first the
+      BPU with 3 data fields:
+   <ul>
+      <li> the result itself
+      <li> result's address into RF
+      <li> a flag that marks this BPU entry as having valid data (a so-called
+         `active' flag)
+   </ul>
+   <li> next instruction(s) that need an operand from RF, read it through
+      a dedicated function (combinational logic), that does the following:
+   <ul>
+      <li> checks all BPU entries and see which ones are active (hold meaningful
+         data).
+      <li> compares operand's address against the addresses in all active BPU
+         entries.
+      <li> if a single address matches, gets the data in that BPU entry rather than
+         data from the RF.
+      <li> if multiple addresses match, gets the data in the most recent BPU entry.
+         Even though it's possible that 2 matches happen at simultaneous BPU
+         entries, this situation should never occur; it would indicate a design
+         bug. This illegal situation would assert an error during simulation.
+      <li> if no address matches, gets data from the RF (as if BPU were not
+         existing).
+   </ul>
+</ul>
+\n
+The maximum delay between a write and a read from the RF is 4 clocks. Thus, the
+BPU FIFO-like structure has a depth of 4. \n
+On the other hand, the BPU must be able to be written 3  one byte operands, at a
+time (must have 3 write ports). The most BPU demanding instructions are stores with
+pre(post) decrement(increment). Both the one byte data and a 2 byte pointer register
+must be written into the BPU, as well as into the RF. The 3 bytes are
+simultaneousely written into so-called `BPU chains' or `BPU registers' (BPU
+chains 0, 1, 2; or BPU registers 0, 1, 2; or BPR0, BPR1, BPR2). \n
+\n
+The BPU has 3x4 entries, each consisting of:
+   - an 8 bit data field
+   - a 5 bit address field
+   - a flag that marks the entry as active or inactive
+
+\par Accessing BPU:
+\n
+\image html pavr_hwres_bpu_01.gif
+\n
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_hwres_bpr0 Bypass chain 0
+\ingroup pavr_hwres_bpu
+\par Bypass chain 0 (BPR0) write port connectivity
+\n
+\image html pavr_hwres_bpr0_01.gif
+\n
+\par Requests to BPR0 write port
+   - pavr_s5_alu_bpr0wr_rq \n
+      Need by regular ALU instructions. \n
+   - pavr_s6_iof_bpr0wr_rq \n
+      Needed by instructions that read the IO File (IN, BLD).
+   - pavr_s6_daculd_bpr0wr_rq \n
+      Needed by loads.
+   - pavr_s5_dacust_bpr0wr_rq \n
+      Needed by stores.
+   - pavr_s6_pmdo_bpr0wr_rq \n
+      Needed by LPM family instructions.
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_hwres_bpr1 Bypass chain 1
+\ingroup pavr_hwres_bpu
+\par Bypass chain 1 (BPR1) write port connectivity
+\n
+\image html pavr_hwres_bpr1_01.gif
+\n
+\par Requests to BPR1 write port
+   - pavr_s5_alu_bpr1wr_rq \n
+      Need by regular ALU instructions that have a 16 bit result (ADIW, SBIW,
+      MUL, MULS, MULSU, FMUL, FMULS, FMULSU, MOVW).
+   - pavr_s5_dacux_bpr12wr_rq \n
+      Needed by loads and stores with pre(post) decrement(increment). \n
+      Lower byte of X pointer will be written into BPR1.
+   - pavr_s5_dacuy_bpr12wr_rq \n
+      Needed by loads and stores with pre(post) decrement(increment). \n
+      Lower byte of Y pointer will be written into BPR1.
+   - pavr_s5_dacuz_bpr12wr_rq \n
+      Needed by loads and stores with pre(post) decrement(increment). \n
+      Lower byte of Z pointer will be written into BPR1.
+*/
+
+
+
+/*!
+\defgroup pavr_hwres_bpr2 Bypass chain 2
+\ingroup pavr_hwres_bpu
+\par Bypass chain 2 (BPR2) write port connectivity
+\n
+\image html pavr_hwres_bpr2_01.gif
+\n
+\par Requests to BPR2 write port
+   - pavr_s5_dacux_bpr12wr_rq \n
+      Needed by loads and stores with pre(post) decrement(increment). \n
+      Higher byte of X pointer will be written into BPR2.
+   - pavr_s5_dacuy_bpr12wr_rq \n
+      Needed by loads and stores with pre(post) decrement(increment). \n
+      Higher byte of Y pointer will be written into BPR2.
+   - pavr_s5_dacuz_bpr12wr_rq
+      Needed by loads and stores with pre(post) decrement(increment). \n
+      Higher byte of Z pointer will be written into BPR2.
+*/
+
+
+
+/*!
+\defgroup pavr_hwres_iof IO File
+\ingroup pavr_hwres
+The IO File is composed of a set of discrete registers, that are grouped into a
+memory-like entity. The IO File has a general write/read port that is
+byte-oriented, and separate read and write ports for each register in the IO
+File. \n
+\n
+\image html pavr_hwres_iof_01.gif
+\n
+Each IO File register is assigned a unique address in the IO space. That address
+is defined in the in the constants definition file
+(`pavr-constants.vhd'). \n
+The IO space is placed in the Unified Memory just above the RF, that is, starting
+with address 32. \n
+The IO addressing space range is 0...63 (Unified Memory addresses 32...95). \n
+Undefined IO registers will read an undefined value. \n
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_hwres_iof_gen General IO port
+\ingroup pavr_hwres_iof
+\par General IO File port connectivity
+\n
+\image html pavr_hwres_iof_gen_01.gif
+\n
+The general IO File port is a little bit more ellaborated than a simple read/write
+port. It can read bytes from IO registers to output and write bytes from input to
+IO registers. Also, it can do some bit processing: load bits (from T flag in SREG to
+output), store bits (from input to T bit in SREG), set IO bits, clear IO bits. \n
+An opcode has to be provided to specify one of the actions that this port is
+capable of. \n
+\n
+The following \b opcodes are implemented for the IO File general port:
+   - read byte (needed by instructions IN, SBIC, SBIS)
+   - write byte (OUT)
+   - clear bit (CBI)
+   - set bit (SBI)
+   - load bit (BLD)
+   - store bit (BST)
+
+\par Requests to this port
+   - pavr_s5_iof_rq \n
+      Needed by instructions that manipulate IO File in stage s5: CBI, SBI, SBIC,
+      SBIS, BSET, BCLR, IN, OUT, BLD, BST.
+   - pavr_s6_iof_rq \n
+      Needed by instructions that manipulate IO File in stage s6: CBI, SBI, BSET,
+      BCLR.
+   - pavr_s5_dacu_iof_rq \n
+      Needed by loads and stores that are decoded by DACU as accessing IO File. \n
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_hwres_iof_sregwr SREG port
+\ingroup pavr_hwres_iof
+\par SREG port connectivity
+\n
+\image html pavr_hwres_iof_sreg_01.gif
+\n
+\par Requests to this port
+   - pavr_s5_alu_sregwr_rq \n
+      This signalizes that an instruction that uses the ALU wants to update the
+      arithmetic flags. \n
+      Flags I (general interrupt enable, SREG(7)) and T (transfer bit, SREG(6))
+      are left unchanged. \n
+   -  pavr_s5_setiflag_sregwr_rq \n
+      This sets the I flag. \n
+      Only RETI instruction needs this.
+   - pavr_s5_clriflag_sregwr_rq \n
+      This clears the I flag. \n
+      No instruction explicitely requests this. \n
+      This is only requested when an interrupt is acknowledged (during the
+      consequent implicit CALL). \n
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_hwres_iof_spwr SP port
+\ingroup pavr_hwres_iof
+\par SP port connectivity
+\n
+\image html pavr_hwres_iof_sp_01.gif
+\n
+This the stack pointer. \n
+It is 16 bits wide, being composed of two 8 bit registers, SPL and SPH. \n
+The stack can reside anywhere in the Unified Memory space. That is, anywhere in
+the RF, IOF or DM. It can even begin, for example, in RF and continue in IOF.
+However, placing the stack pointer in the IOF is likely to be a programming error,
+as the IOF registers have dedicated functions. Quasi-random values from stack
+written into IOF could result, for example, in an unpredictably trigerring any
+interrupt, and in general, in unpredictable behavior of the controller. \n
+
+\par Requests to this port
+   - pavr_s5_inc_spwr_rq \n
+      Increment SP (SPH & SPL) with 1. \n
+      Needed by POP.
+   - pavr_s5_dec_spwr_rq \n
+      Increment SP with 1. \n
+      Needed by PUSH.
+   - pavr_s5_calldec_spwr_rq \n
+      Decrement SP with 1. \n
+      Needed by RCALL, ICALL, EICALL, CALL, interrupt implicit CALL.
+   - pavr_s51_calldec_spwr_rq \n
+      Decrement SP with 1. \n
+      Needed by RCALL, ICALL, EICALL, CALL, interrupt implicit CALL.
+   - pavr_s52_calldec_spwr_rq \n
+      Decrement SP with 1. \n
+      Needed by RCALL, ICALL, EICALL, CALL, interrupt implicit CALL.
+   - pavr_s5_retinc2_spwr_rq \n
+      Increment SP with 2. \n
+      Needed by RET, RETI.
+   - pavr_s51_retinc_spwr_rq \n
+      Increment SP with 1. \n
+      Needed by RET, RETI. \n
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_hwres_iof_rampxwr RAMPX port
+\ingroup pavr_hwres_iof
+\par RAMPX port connectivity
+\n
+\image html pavr_hwres_iof_rampx_01.gif
+\n
+\par Requests to this port
+   - pavr_s5_ldstincrampx_xwr_rq \n
+      Needed by loads and stores with postincrement. \n
+      Only modify RAMPX if the controller has more than 64 KB of Data Mamory.
+   - pavr_s5_ldstdecrampx_xwr_rq \n
+      Needed by loads and stores with predecrement. \n
+      Only modify RAMPX if the controller has more than 64 KB of Data Mamory. \n
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_hwres_iof_rampywr RAMPY port
+\ingroup pavr_hwres_iof
+\par RAMPY port connectivity
+\n
+\image html pavr_hwres_iof_rampy_01.gif
+\n
+\par Requests to this port
+   - pavr_s5_ldstincrampy_xwr_rq \n
+      Needed by loads and stores with postincrement. \n
+      Only modify RAMPY if the controller has more than 64 KB of Data Mamory.
+   - pavr_s5_ldstdecrampy_xwr_rq \n
+      Needed by loads and stores with predecrement. \n
+      Only modify RAMPY if the controller has more than 64 KB of Data Mamory. \n
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_hwres_iof_rampzwr RAMPZ port
+\ingroup pavr_hwres_iof
+\par RAMPZ port connectivity
+\n
+\image html pavr_hwres_iof_rampz_01.gif
+\n
+\par Requests to this port
+   - pavr_s5_ldstincrampz_xwr_rq \n
+      Needed by loads and stores with postincrement. \n
+      Only modify RAMPZ if the controller has more than 64 KB of Data Mamory.
+   - pavr_s5_ldstdecrampz_xwr_rq \n
+      Needed by loads and stores with predecrement. \n
+      Only modify RAMPZ if the controller has more than 64 KB of Data Mamory. \n
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_hwres_iof_rampdwr RAMPD port
+\ingroup pavr_hwres_iof
+\par RAMPD port connectivity
+\n
+\image html pavr_hwres_iof_rampd_01.gif
+\n
+This is a trivial read-only port. \n
+\n
+The register RAMPD is used in controllers with more than 64KB of Data Memory,
+to access the whole Data Memory space. \n
+RAMPD is used by instructions LDS (LoaD direct from data Space) and STS (STore
+direct to data Space). In order to get to the desired Data Memory space address,
+these instructions concatenate RAMPD with a 16 bit constant from the instruction
+word (RAMPD:k16). \n
+\n
+In controllers with less than 64KB of Data Memory, this register is not used. \n
+The RAMPD register can be written only through the IOF general read and write port. \n
+No instruction explicitely requests to write this register. \n
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_hwres_iof_eindwr EIND port
+\ingroup pavr_hwres_iof
+\par EIND port connectivity
+\n
+\image html pavr_hwres_iof_eind_01.gif
+\n
+This is a trivial read-only port. \n
+\n
+The register EIND is used in controllers with more than 64K words of Program
+Memory, to access the whole program space. \n
+EIND is used by instructions EICALL (Extended Indirect CALL) and EIJMP (Extended
+Indirect JuMP). In order to get to the desired program space address, these
+instructions concatenate EIND with the Z register (EIND:Z). \n
+\n
+In controllers with less than 64K words of Program Memory, this register is not
+used. \n
+The EIND register can be written only through the IOF general read and write
+port. \n
+No instruction explicitely requests to write this register. \n
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_hwres_iof_perif Peripherals
+\ingroup pavr_hwres_iof
+Peripherals are only of secondary importance for this project. \n
+However, an \ref pavr_hwres_iof_perif_pa  "IO port", an
+\ref pavr_hwres_iof_perif_int0 "external interrupt" and an
+\ref pavr_hwres_iof_perif_t0 "8 bit timer" are implemented, to properly test the
+interrupt system. \n
+Peripherals have been designed to be \b decoupled from the kernel. They are easily
+upgradable, without needing to touch the kernel. \n
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_hwres_iof_perif_pa Port A
+\ingroup pavr_hwres_iof_perif
+\par Port A structure
+The port A offers 8 bidirectional general purpose IO lines. \n
+Lines 0 and 1 also have alternate functions:
+<ul>
+   <li> line 0 can be used as \ref pavr_hwres_iof_perif_int0 "external interrupt 0" input
+   <li> line 1 can be used as \ref pavr_hwres_iof_perif_t0 "timer 0" clock input.
+</ul>
+\n
+Port A is managed through 3 IO File locations: \b PORTA, \b DDRA and \b PINA. \n
+\b DDRA sets each pin's direction: DDRA(i)=0 means that line i is input,
+DDRA(i)=1 means that line i is output. \n
+When writing a value to the port, that value goes into \b PORTA. If DDRA configures
+the corresponding lines as outputs, the contents of PORTA will be available on
+external  pins. However, if DDRA configures the lines as inputs (DDRA(i)=0), then:
+<ul>
+   <li> if PORTA(i)=0, the line i is `pure' input (High Z). \n
+   <li> if PORTA(i)=1, the line i is an input weakly pulled high. \n
+</ul>
+\b PINA reads the physical value of external lines, rather than PORTA. \n
+\par Port A schematics
+\n
+\image html pavr_hwres_iof_perif_pa_01.gif
+\n
+\n
+*/
+
+
+/*!
+\defgroup pavr_hwres_iof_perif_int0 External interrupt 0
+\ingroup pavr_hwres_iof_perif
+\par Features
+External interrupt 0 is physically mapped on the line 0 (bit 0) of
+\ref pavr_hwres_iof_perif_pa "port A". \n
+\n
+Its associated interrupt flag resides into the IO File register GIFR (General
+Interrupt Flags Register): \n
+\n
+\image html pavr_hwres_iof_perif_int0_01.gif
+\n
+External interrupt 0 is enabled/disabled by setting/clearing bit 6 in GIMSK
+(General Interrupt Mask) register: \n
+\n
+\image html pavr_hwres_iof_perif_int0_02.gif
+\n
+If enabled, it can trigger an interrupt on high-to-low transition, low-to-high
+transition, or on a low level of the interrupt 0 input. This behavior is defined
+by 2 bits in the MCUCR (Microcontroller Control) register: \n
+\n
+\image html pavr_hwres_iof_perif_int0_03.gif
+\n
+*/
+
+
+/*!
+\defgroup pavr_hwres_iof_perif_t0 Timer 0
+\ingroup pavr_hwres_iof_perif
+\par Features
+The IO File register that holds the current count is TCNT0. \n
+Its behavior is controlled by a set of other IO File registers:
+   - TIFR (Timer Interrupt Flag Register) holds the Timer 0 interrupt flag: \n
+      \n
+      \image html pavr_hwres_iof_perif_t0_02.gif
+      \n
+   - TIMSK (Timer Interrupt Mask) contains the flag that enables/disables Timer 0
+      interrupt: \n
+      \n
+      \image html pavr_hwres_iof_perif_t0_03.gif
+      \n
+   - TCCR0 (Timer 0 Control Register) register defines the prescaling source of
+      Timer 0. \n
+      When external input pin is selected, Timer 0 clock source will be the line 0
+      of \ref pavr_hwres_iof_perif_pa "port A": \n
+      \n
+      \image html pavr_hwres_iof_perif_t0_01.gif
+      \n
+\n
+*/
+
+
+
+
+/*!
+\defgroup pavr_hwres_alu ALU
+\ingroup pavr_hwres
+\par ALU connectivity:
+\n
+\image html pavr_hwres_alu_01.gif
+\n
+\ref alu_pipe_ref_01 "Here" it can be seen how the ALU plugs into the pipeline. \n
+\n
+The ALU is a 100% \b combinational device. \n
+It accepts 2 operands:
+<ul>
+   <li> a 16 bit operand \n
+      This is taken through the Bypass Unit.
+   <li> an 8 bit operand \n
+      This is taken through the Bypass Unit.
+</ul>
+The ALU output is 16 bits wide. \n
+
+\par ALU opcodes:
+   - NOP \n
+   - OP1 \n
+      Transfers operand 1 directly to the ALU output. \n
+     OP2 \n
+      Transfers operand 2 directly to the lower 8 bits of ALU output. \n
+   -  ADD8 \n
+      ADC8 \n
+      Adds with carry lower 8 bits of operand 1 with operand 2. \n
+      SUB8 \n
+      SBC8 \n
+   -  AND8 \n
+      EOR8 \n
+      OR8 \n
+   -  INC8 \n
+      DEC8 \n
+   -  COM8 \n
+      NEG8 \n
+      SWAP8 \n
+   -  LSR8 \n
+      ASR8 \n
+      ROR8 \n
+   -  ADD16 \n
+      Adds without carry operand 1 with operand 2 sign extended to 16 bits. \n
+      SUB16 \n
+   -  MUL8 \n
+      MULS8 \n
+      MULSU8 \n
+      FMUL8 \n
+      FMULS8 \n
+      FMULSU8 \n
+
+\par ALU flags:
+- H (half carry)
+- S (sign)
+- V (two's complement)
+- N (negative)
+- Z (zero)
+- C (carry)
+*/
+
+
+
+
+/*!
+\defgroup pavr_hwres_dacu DACU
+\ingroup pavr_hwres
+\par Overview
+The Data Address Calculation Unit offers a unified read and write access over the
+concatenated RF, IOF and DM space, that is, over the Unified Memory (UM) space. \n
+Loads and stores operate in the UM space. They use the DACU in order to translate
+the Unified Memory address into a RF, IOF or DM address. \n
+The DACU takes requests to read or write into UM space, translates the UM address
+into RF, IOF or DM address, and transparently places requests to read or write
+the specific hardware resource (RF, IOF or DM) that corresponds to the given UM
+address. \n
+
+\par Reading DACU
+\n
+\image html pavr_hwres_dacu_01.gif
+\n
+DACU read \b requests:
+<ul>
+   <li> pavr_s5_x_dacurd_rq <br>
+         Needed by loads from address given by X pointer register.
+   <li> pavr_s5_y_dacurd_rq <br>
+         Needed by loads from address given by Y pointer register.
+   <li> pavr_s5_z_dacurd_rq <br>
+         Needed by loads from address given by Z pointer register.
+   <li> pavr_s5_sp_dacurd_rq <br>
+         Needed by POP instruction.
+   <li> pavr_s5_k16_dacurd_rq <br>
+         Needed by LDS instruction. <br>
+         If the controller has more than 64KB of Data Memory, the Unified Memory
+         address is built by concatenating the RAMPD with the 16 bit constant.
+   <li> pavr_s5_pchi8_dacurd_rq <br>
+         The higher 8 bits of the PC are loaded from the stack. <br>
+         Needed by RET and RETI instructions.
+   <li> pavr_s51_pcmid8_dacurd_rq <br>
+         The middle 8 bits of the PC are loaded from the stack. <br>
+         Needed by RET and RETI instructions.
+   <li> pavr_s52_pclo8_dacurd_rq <br>
+         The lower 8 bits of the PC are loaded from the stack. <br>
+         Needed by RET and RETI instructions.
+</ul>
+\n
+As a response to read requests, the DACU places read \b requests to RF, IOF or DM:
+<ul>
+   <li> pavr_s5_dacu_rfrd1_rq
+   <li> pavr_s5_dacu_iof_rq
+   <li> pavr_s5_dacu_dmrd_rq
+</ul>
+\par Writing DACU
+\n
+\image html pavr_hwres_dacu_02.gif
+\n
+DACU write \b requests:
+<ul>
+   <li> pavr_s5_x_dacuwr_rq <br>
+         Needed by stores to address given by X pointer register.
+   <li> pavr_s5_y_dacuwr_rq <br>
+         Needed by stores to address given by Y pointer register.
+   <li> pavr_s5_z_dacuwr_rq <br>
+         Needed by stores to address given by Z pointer register.
+   <li> pavr_s5_sp_dacuwr_rq <br>
+         Needed by PUSH instruction. <br>
+   <li> pavr_s5_k16_dacuwr_rq <br>
+         Needed by STS instruction. <br>
+         If the controller has more than 64KB of Data Memory, the Unified Memory
+         address is built by concatenating the RAMPD with the 16 bit constant.
+   <li> pavr_s5_pclo8_dacuwr_rq <br>
+         The lower 8 bits of the PC are stored on the stack. <br>
+         Needed by CALL family instructions (CALL, RCALL, ICALL, EICALL, implicit
+         interrupt CALL).
+   <li> pavr_s51_pcmid8_dacuwr_rq <br>
+         The middle 8 bits of the PC are stored on the stack. <br>
+         Needed by CALL family instructions.
+   <li> pavr_s52_pchi8_dacuwr_rq <br>
+         The higher 8 bits of the PC are stored on the stack. <br>
+         Needed by CALL family instructions.
+</ul>
+\n
+As a response to write requests, the DACU places write \b requests to RF, IOF or DM,
+   and BPU:
+<ul>
+   <li> pavr_s5_dacu_rfwr_rq
+   <li> pavr_s5_dacu_iof_rq
+   <li> pavr_s5_dacu_dmwr_rq
+   <li> pavr_s5_dacust_bpr0wr_rq
+</ul>
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_hwres_dm Data Memory
+\ingroup pavr_hwres
+\par Data Memory connectivity
+\n
+\image html pavr_hwres_dm_01.gif
+\n
+The Data Memory is a single port RAM. \n
+That port provides both read and write DM accesses. \n
+The DM is organized on bytes, and has the length set by a constant in the
+constants definition file (`pavr-constants.vhd'). \n
+\n
+\par Requests to DM
+Requests to access DM come only from the DACU: \n
+   - pavr_s5_dacu_dmrd_rq \n
+   - pavr_s5_dacu_dmwr_rq \n
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_hwres_pm Program Memory
+\ingroup pavr_hwres
+\par PM handling
+\n
+\image html pavr_hwres_pm_01.gif
+\n
+The Program Memory is a single port RAM. \n
+That port provides read-only access. Support for the instruction SPM (Store
+Program Memory) is currently not provided. \n
+The PM is organized on 16 bit words, and has the length set by a constant in the
+constants definition file (`pavr-constants.vhd'). \n
+\n
+Apart from controlling the Program Memory, the PM manager also controls the Program
+Counter. \n
+Some PM access requests need to modify the PC, others don't. The only PM requests
+that don't modify the PC are the loads from PM (LPM and ELPM instructions). The
+other requests correspond to instructions that want to modify the instruction
+flow, thus modify the PC (jumps, branches, calls and returns). \n
+
+\par Program Counter handling
+At a given time, the pipeline can process more than one instruction. Up to 6
+instructions can be simultaneousely processed. Obviousely, each of these
+instructions has its own address in the PM. \n
+One may ask: how is defined the Program Counter, as long as two or more instructions
+are simultaneousely executed? Whose address is considered to be the Program Counter? \n
+The answer is: the Program Counter is in fact composed of a set of registers. Each
+instruction in the pipeline has an associated Program Counter that follows it
+while flowing through the pipeline. Implementation details can be found in the
+description of \ref pavr_pipeline_jumps "jumps", \ref pavr_pipeline_branches "branches",
+\ref pavr_pipeline_skips "skips", \ref pavr_pipeline_calls "calls" and
+\ref pavr_pipeline_returns "returns". \n
+As an example, when a relative jump computes the target address, it considers its
+own Program Counter rather than the address of the instruction fetched that
+moment from the PM.
+The instructions that modify the instruction flow (jumps, branches, skips, calls
+and returns) must be able to manipulate the program counters associated with
+pipeline stages s1, s2 and s3. However, this is done not directly, but via the
+Program Memory manager. The PM manager centralizes all instruction flow access
+requests (jump requests, branch requests, etc) and takes care of the program
+counters in an organized and manageable manner. \n
+
+\par Requests to PM
+   - pavr_s5_lpm_pm_rq \n
+      Needed by LPM instruction. \n
+      This request doesn't modify the instruction flow. \n
+   - pavr_s5_elpm_pm_rq \n
+      Needed by ELPM instruction. \n
+      This request doesn't modify the instruction flow. \n
+   - pavr_s4_z_pm_rq \n
+      Needed by ICALL and IJMP. \n
+   - pavr_s4_zeind_pm_rq \n
+      Needed by EICALL and EIJMP. \n
+   - pavr_s4_k22abs_pm_rq \n
+      Needed by CALL and JMP. \n
+      To get to the jump address, the 16 bit instruction constant is concatenated
+      with a 6 bit constant previousely read also from the instruction opcode.
+   - pavr_s4_k12rel_pm_rq \n
+      Needed by RCALL and RJMP. \n
+      Note that pavr_s4_pc is a pipeline register that holds the Program Memory
+      address of the instruction executing in pipeline stage s4. \n
+      Because the relative jump actually occurs in stage s4, pavr_s4_pc is needed
+      rather than the current Program Counter (pavr_pc).
+   - pavr_s6_branch_pm_rq \n
+      Needed by branch instructions (BRBC and BRBS). \n
+   - pavr_s6_skip_pm_rq \n
+      Needed by some skip instructions (CPSE, SBRC and SBRS). \n
+   - pavr_s61_skip_pm_rq \n
+      Needed by some skip instructions (SBIC and SBIS). \n
+   - pavr_s4_k22int_pm_rq \n
+      Needed by implicit interrupt CALL. \n
+   - pavr_s54_ret_pm_rq \n
+      Needed by RET and RETI. \n
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_hwres_sfu Stall and Flush Unit
+\ingroup pavr_hwres
+The pipeline controls its own stall and flush status, through specific stall and
+   flush-related request signals. These requests are sent to the Stall and Flush
+   Unit (SFU). The output of the SFU is a set of signals that directly control
+   pipeline stages (a stall and flush control signals pair for each stage): \n
+\n
+\image html pavr_hwres_sfu_01.gif
+\n
+\par Requests to SFU
+   - stall requests \n
+      The SFU stalls \b all younger stages. However, by stalling-only, the
+         current instruction is spawned into 2 instances. One of them must
+         be killed (flushed). The the younger instance is killed (the
+         previous stage is flushed). \n
+      Thus, a nop is introduced in the pipeline \b  before the instruction
+         wavefront. \n
+      If more than one stage request a stall at the same time, the older
+         one has priority (the younger one will be stalled along with the
+         others). Only after that, the younger one will be ackowledged its
+         stall by means of appropriate stall and flush control signals. \n
+      Stall \b requests:
+      - pavr_s3_stall_rq \n
+      - pavr_s5_stall_rq \n
+      - pavr_s6_stall_rq
+   - flush requests \n
+      The SFU simply flushes that stage. \n
+      More than one flush could be acknolewdged at the same time, without
+         competition. However, all flush requests happen to request to flush the
+         same pipeline stage, s2. \n
+      Flush \b requests:
+      - pavr_s3_flush_s2_rq \n
+      - pavr_s4_flush_s2_rq \n
+      - pavr_s4_ret_flush_s2_rq \n
+      - pavr_s5_ret_flush_s2_rq \n
+      - pavr_s51_ret_flush_s2_rq \n
+      - pavr_s52_ret_flush_s2_rq \n
+      - pavr_s53_ret_flush_s2_rq \n
+      - pavr_s54_ret_flush_s2_rq \n
+      - pavr_s55_ret_flush_s2_rq \n
+   - branch requests \n
+      The SFU flushes stages s2...s5, because the corresponding instructions were
+      already uselessly fetched, and requests the PC to be loaded with the branch
+      relative jump address. \n
+      Branch \b requests:
+      - pavr_s6_branch_rq \n
+   - skip requests \n
+      The SFU treats skips as branches that have the relative jump address equal to
+      0, 1 or 2, depending on the skip condition and on next instruction's length
+      (16/32 bits). \n
+      Skip \b requests:
+      - pavr_s6_skip_rq \n
+      - pavr_s61_skip_rq
+   - nop requests \n
+      The SFU stalls all younger instructions. The current instruction is
+         spawned into 2 instances. The older instance is killed (the very
+         same stage that requested the nop stage is flushed). \n
+      Thus, a nop is introduced in the pipeline \b  after the instruction
+         wavefront. \n
+      In order to do that, a micro-state machine is needed outside the
+         pipeline, because otherwise that stage would undefinitely stall
+         itself. \n
+      Nop \b requests: \n
+      - pavr_s4_nop_rq \n
+\par SFU control signals
+Each main pipeline stage (s1-s6) has 2 kinds of control signals, that are generated by
+   the SFU:
+<ul>
+   <li> stall control \n
+      All registers in this stage are instructed to remain unchanged
+         All possible requests to hardware resources (such as RF, IOF, BPU,
+         DACU, SREG, etc) are reseted (to 0).
+   <li> flush control \n
+      All registers in this stage are reseted (to 0), to a most "benign"
+         state (a nop). Also, all requests to hardware resources are
+         reseted.
+</ul>
+\n
+Each main pipeline stage has an associated flag that determines whether or not
+that stage has the right to access hardware resources. These flags are also
+managed by the SFU. \n
+Hardware resources enabling flags:
+   - pavr_s1_hwrq_en
+   - pavr_s2_hwrq_en
+   - pavr_s3_hwrq_en
+   - pavr_s4_hwrq_en
+   - pavr_s5_hwrq_en
+   - pavr_s6_hwrq_en
+*/
+
+
+
+/*!
+\defgroup pavr_pipeline Pipeline details
+\ingroup pavr_implementation
+*/
+
+
+
+/*!
+\defgroup pavr_pipeline_alu ALU
+\ingroup pavr_pipeline
+\par ALU description
+The ALU is not a potentially conflicting resource, as it is fully controlled by
+pipeline stage s5. \n
+\n
+There are two ALU operands. The first operand is taken either from RF read port 1,
+if it's an 8 bit operand, or taken from RF read port 1 (lower 8 bits) and from RF
+read port 2 (higher 8 bits), if it's a 16 bit operand. The second operand is taken
+either from the RF read port 2 or directly from the instruction opcode; it is
+always 8 bit-wide. \n
+Both operands are fed to the ALU through the Bypass Unit. \n
+All ALU-requiring instructions write their result into the Bypass Unit. \n
+Details about the ALU hardware resource (connectivity, ALU opcodes) can be found
+\ref pavr_hwres_alu "here". \n
+Instructions that make use of the ALU-related pipeline registers:
+   - ADD, ADC, ADIW
+   - SUB, SUBI, SBC, SBCI, SBIW
+   - INC, DEC
+   - AND, ANDI
+   - OR, ORI, EOR
+   - COM, NEG, CP, CPC, CPI, SWAP
+   - LSR, ROR, ASR
+   - MUL, MULS, MULSU
+   - FMUL, FMULS, FMULSU
+   - MOV, MOVW
+
+\par Plugging the ALU into the pipeline
+The pipeline registers related to ALU access are presented in the picture below. \n
+From this picture, it can also easely figured out instructions' timing. \n
+\anchor alu_pipe_ref_01
+\n
+\image html pavr_pipe_alu_01.gif
+\n
+*/
+
+
+/*!
+\defgroup pavr_pipeline_iof IOF access
+\ingroup pavr_pipeline
+\par A few details
+The IO File is accessed during stages s5 or/and s6. \n
+As presented \ref pavr_hwres_iof_gen "here", the IO File can do more than
+byte-oriented read-write operations. It can also do bit processing. \n
+The following data is provided to the IOF, for each pipeline stage in which IOF
+   access is required:
+   - byte address
+   - bit address
+   - opcode
+   - byte data in
+
+\par Accessing the IOF
+Main pipeline registers that implement IOF accessing instructions are presented
+here: \n
+\n
+\image html pavr_pipe_iof_01.gif
+\n
+*/
+
+
+/*!
+\defgroup pavr_pipeline_dacu DACU access
+\ingroup pavr_pipeline
+\par A few details
+The Data Address Calculation Unit (DACU) handles the Unified Memory, by mapping
+Unified Memory addresses into Register File, IO File or Data Memory addresses. \n
+It also transparently places access requests to RF, IOF or DM, as response to UM
+access requests. \n
+More details on DACU requests can be found \ref pavr_hwres_dacu "here". \n
+\par Plugging the DACU into the pipeline
+\n
+\image html pavr_pipe_dacu_01.gif
+\n
+*/
+
+
+/*!
+\defgroup pavr_pipeline_jumps Jumps
+\ingroup pavr_pipeline
+\par A few details
+There are 4 jump instructions:
+<ul>
+   <li> RJMP (relative jump) \n
+      The jump address is obtained by adding to the current Program Counter a 12
+      bit signed offset obtained from the instruction word.
+   <li> IJMP (indirect jump) \n
+      The jump address is read from the Z pointer register. \n
+      The jump destination resides in the lower 64 Kwords of Program Memory. \n
+   <li> EIJMP (extended indirect jump) \n
+      The jump address is read from EIND:Z (higher 6 bis from EIND register in IOF,
+      and lower 16 bits from Z pointer in RF). \n
+      This jump accesses the whole 22 bit addressing space of the Program Memory. \n
+   <li> JMP (long jump) \n
+      The jump address is read from two consecutive instruction words. \n
+      This jump accesses the whole 22 bit addressing space of the Program Memory. \n
+</ul>
+\n
+When a jump is detected into the pipeline, next two instructions (that were already
+uselessly fetched from the Program Memory) are flushed. Then, the Program Memory
+manager is asked permission to access the Program Memory and to modify the
+instruction flow (modify the Program Counter). \n
+After that, unless it gets flushed or stalled by an older instruction, the jump
+instruction will configure the pipeline to fetch from the new PM address. \n
+\n
+RJMP and JMP take 3 clocks, while IJMP and EIJMP take 4 clocks. \n
+
+\par Jump state machine
+\n
+\image html pavr_pipe_jumps_01.gif
+\n
+*/
+
+
+/*!
+\defgroup pavr_pipeline_branches Branches
+\ingroup pavr_pipeline
+\par A few details
+The branches condition a 7 bit relative jump by the value of a bit in the Status
+Register. \n
+If the branch condition is not met, no further action is taken. However, if the
+branch condition is evaluated as true, then all previous stages are flushed and
+the Stall and Flush Unit is requestd a branch. The SFU, in turn, asks the PM
+manager permission to access the Program Memory and modify the program flow. \n
+Branches take place in stage s6. \n
+\n
+Not taken branches take 2 clocks, while taken branches take 4 clocks. \n
+
+\par Branch state machine
+\n
+\image html pavr_pipe_branches_01.gif
+\n
+*/
+
+
+/*!
+\defgroup pavr_pipeline_skips Skips
+\ingroup pavr_pipeline
+\par A few details
+Skips are implemented as branches that have the relative target address equal to
+0, 1 or 2, depending on the skip condition and on whether the following
+instruction has 16 or 32 bits. \n
+There are two kinds of skips: one category that makes the skip request in stage
+s6 (the same as branches), and one that requests skip in s61. The first category
+includes instructions CPSE (Compare registers and skip if equal), SBRC and SBRS
+(skip if bit in register is cleared/set). The second category includes SBIC, SBIS
+(Skip if bit in IO register is cleared/set). \n
+\n
+CPSE, SBRC and SBRS take 2 clocks if not taken, and 4 clocks if taken. \n
+SBIC and SBIS take 3 clocks if not taken, and 5 clocks if taken. \n
+
+\par Skip state machine
+\n
+\image html pavr_pipe_skips_01.gif
+\n
+*/
+
+
+/*!
+\defgroup pavr_pipeline_calls Calls
+\ingroup pavr_pipeline
+\par A few details
+There are 4 call instructions, analogue to the \ref pavr_pipeline_jumps "jump"
+instructions:
+<ul>
+   <li> RCALL (relative call) \n
+      The call address is obtained by adding to the current Program Counter a 12
+      bit signed offset obtained from the instruction word.
+   <li> ICALL (indirect call) \n
+      The call address is read from the Z pointer register. \n
+      The destination resides in the lower 64 Kwords of Program Memory. \n
+   <li> EICALL (extended indirect call) \n
+      The call address is read from EIND:Z (higher 6 bis from EIND register in IOF,
+      and lower 16 bits from Z pointer in RF). \n
+      This call accesses the whole 22 bit addressing space of the Program Memory. \n
+   <li> CALL (far call) \n
+      The call address is read from two consecutive instruction words. \n
+      This call accesses the whole 22 bit addressing space of the Program Memory. \n
+</ul>
+\n
+Apart from these, there is another kind of call, automatically inserted into the
+pipeline when an interrupt is processed. In addition to the regular calls, the
+implicit interrupt call also clears the general interrupt flag (flag I in the
+Status Register). This way, nested interrupts are disabled by default. However,
+they can be enabled explicitely. This behavior is questionable, but is implemented
+for the sake of AVR compatibility. \n
+After an interrupt generates an implicit call, further interrupts are disabled for
+4 clocks. This way, at least one instruction will be executed fron the called
+subroutine. Only after that, another interrupt can change the instruction flow. \n
+\n
+All calls take 4 clocks. \n
+
+\par Call state machine
+\n
+\image html pavr_pipe_calls_01.gif
+\n
+*/
+
+
+/*!
+\defgroup pavr_pipeline_returns Returns
+\ingroup pavr_pipeline
+\par A few details
+There are two kinds of returns:
+<ul>
+   <li> RET \n
+      Return from subroutine. \n
+      The Program Counter is loaded with the return address (22 bit wide) read
+      from the stack, and the Stack Pointer is incremented by 3.
+   <li> RETI \n
+      The same as RET, but in addition sets the general interrupt flag (flag I in
+      the Status Register).
+</ul>
+\n
+Returns are the slowest instructions in the pAVR implementation of the AVR
+instruction set. They take 9 clocks. \n
+First 2 clocks are spent while waiting the previous instructions to write the
+Unified Memory. Next 5 clocks, the Program Counter is read from the Unified
+Memory. In a future version, this part might take only 4 clocks. Finally,
+another 2 clocks are spent while bringing the target instruction into the
+instruction register. \n
+\n
+\image html pavr_pipe_returns_01.gif
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_pipeline_int Interrupts
+\ingroup pavr_pipeline
+\par General
+The Interrupt System can forcedly place calls into the pipeline stage s3, as a
+result of specific IO activity. \n
+\n
+\par Implementation
+The core of the Interrupt System is the Interrupt Manager module. It prioritizes
+the interrupt sources, checks if interrupts are enabled and if the pipeline is
+ready to process interrupts, and finally sends interrupt requests to the
+pipeline, together with the associated interrupt vector and other pipeline
+control signals. \n
+\n
+\image html pavr_hwres_int_01.gif
+\n
+The pipeline acknowledges interrupt requests by forcing the Instruction Decoder
+to decode a call instruction, with the absolute jump address given by the
+Interrupt Manager. Next 2 instructions, that were already uselessly fetched, are
+flushed. \n
+\n
+The interrupt vectors are parameterized, and can be placed anywhere in the
+Program Memory. \n
+Every interrupt has a parameterized priority. \n
+In the present implementation, up to 32 interrupt sources are handled. \n
+2 interrupt sources are implemented:
+\ref pavr_hwres_iof_perif_int0 "external interrupt 0" and
+\ref pavr_hwres_iof_perif_t0 "timer 0" interrupt. \n
+\n
+Because the Interrupt Manger shares much with the IO File, it is not
+built as a separate entity, but rather embedded into the IO File. The Interrupt
+Manager might be implemented as separate entity in a future version of pAVR. \n
+\n
+The interrupt latency is 5 clocks (1 clock needed by the interrupt manager and
+4 clocks needed by the implicit call).
+\n
+*/
+
+
+/*!
+\defgroup pavr_pipeline_others Others
+\ingroup pavr_pipeline
+\par LPM/ELPM state machine
+This is how the LPM/ELPM state machine plugs into the pipeline: \n
+\n
+\image html pavr_pipe_others_01.gif
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_test Testing
+\par Testing strategy
+When testing a certain entity, the following \b testing \b strategy was adopted:
+<ul>
+   <li> embed that entity into a larger one that also includes all other
+   ingredients needed for a real-life simulation of the tested entity. Typical
+   such `other ingredients' are RAMs and multiplexers.
+   <li> run custom VHDL tests that test as much as possible of the functionality
+   of the device under test. Extreme cases are the first situations to be tested.
+</ul>
+\n
+Two kinds of tests were conducted on pAVR:
+<ul>
+   <li> every module of pAVR was separately tested as described in the testing
+   strategy above.
+   <li> pAVR as whole was tested as described in the testing strategy above.
+</ul>
+\n
+
+\par Testing pAVR modules
+Each pAVR module was separately tested. \n
+The particular tests carried out are presented below, grouped by the entities
+under test:
+<ul>
+   <li> \b utilities defined in `std_util.vhd' \n
+      The associated test file is `test_std_util.vhd'. \n
+      The utilities defined in `std_util.vhd' here are:
+      <ul>
+         <li> type conversion routines often used throughout the other source files
+            in this project
+         <li> basic arithmetic functions
+         <li> sign and zero-extend functions \n
+            Both are tested in `test_std_util.vhd'. \n
+            Extreme cases and typical cases are considered. \n
+         <li> vector comparision function \n
+            Tested in `test_std_util.vhd'. \n
+            Extreme cases and typical cases are considered. \n
+      </ul>
+   <li> \b ALU \n
+      The associated tests are defined in `test_pavr_alu.vhd'. They consist of
+      checking the ALU output and flags output for all ALU opcodes, one by one,
+      for all of these situations:
+      <ul>
+         <li> carry in = 0
+         <li> carry in = 1
+         <li> additions generate overflow
+         <li> substractions generate overflow
+      </ul>
+      There are 26 ALU opcodes to be checked for each situation.
+   <li> \b Register \b File \n
+      The associated tests are defined in `test_pavr_register_file.vhd'. \n
+      The following tests are done:
+      <ul>
+         <li> read all ports, one at a time
+            <ul>
+               <li> read port 1 (RFRD1)
+               <li> read port 2 (RFRD2)
+               <li> write port (RFWR)
+               <li> write pointer register X (RFXWR)
+               <li> write pointer register Y (RFYWR)
+               <li> write pointer register Z (RFZWR)
+            </ul>
+         <li> combined RFRD1, RFRD2, RFWR \n
+            They should work simultaneousely.
+         <li> combined RFXWR, RFYWR, RFZWR  \n
+            They should work simultaneousely.
+         <li> combined RFRD1, RFRD2, RFWR, RFXWR, RFYWR, RFZWR \n
+            That is, all RF ports are accessed simultaneousely. They should
+            do their job. \n
+            However, note that the pointer registers are accessible for writting
+            by their own ports but also by the RF write port. Writing them via
+            pointer register write ports overwrites writing via general write
+            port. Even though concurrent writing could happen in a perfectly legal
+            AVR implementation, AVR's behavior is unpredictible (what write port
+            has priority). We have chosen for pAVR the priority as mentioned above.
+      </ul>
+   <li> \b IO \b File \n
+      The associated tests are defined in `test_pavr_io_file.vhd'. \n
+      The following tests are performed on the IOF:
+      <ul>
+         <li> test the IOF general write/read/bit processing port. \n
+            Test all opcodes that this port is capable of:
+            <ul>
+               <li> wrbyte
+               <li> rdbyte
+               <li> clrbit
+               <li> setbit
+               <li> stbit
+               <li> ldbit
+            </ul>
+         <li> test the IOF port A. \n
+            Port A is intended to offer to pAVR pin-level IO connectivity with the
+            outside world. \n
+            Test reading from and writing to Port A. \n
+            Test that Port A pins correctly take the appropriate logic values
+            (high, low, high Z or weak high).
+         <li> test Timer 0.
+            <ul>
+               <li> test Timer 0 prescaler.
+               <li> test Timer 0 overflow.
+               <li> test Timer 0 interrupt.
+            </ul>
+         <li> test External Interrupt 0. \n
+            Test if each possible configuration (activation on low level, rising
+            edge or falling edge) correctly triggers External Interrupt 0 flag.
+      </ul>
+   <li> \b Data \b Memory \n
+      The tests defined in `test_pavr_dm.vhd' are simple read-write confirmations
+      that the Data Memory does its job.
+</ul>
+
+\par Testing the pAVR entity
+pAVR as a whole was tested by building an upper entity that embedds a pAVR, its
+Program Memory and some multiplexers. Those multiplexers are meant to give Program
+Memory control to the test entity (for properly setting up Program Memory
+contents) or to pAVR (while pAVR is actually being monitored as it executes
+intructions from the Program Memory). \n
+\n
+The binary file that will be executed by pAVR during the test is automatically
+loaded into the Program Memory using an ANSI C utility, TagScan. The test entity
+has a number of tags spread over the source code, as comments. The TagScan utility
+reads the binary file to be loaded, scans the test file, and inserts VHDL
+statements into the properly tagged places. These statements load the Program
+Memory using its own write port. This way of initializing the Program Memory
+seems more general (and surely more interesting) than using file IO VHDL
+functions. \n
+The TagScan utility is also used for other purposes. For example, for
+inserting a certain header in all source files. It is heavily used as
+a general preprocessor. \n
+\n
+Testing pAVR as a whole actually means designing and running binaries that put
+pAVR on extreme situations. \n
+The following tests are done:
+\htmlonly
+<ul>
+   <li> <strong> Interrupts </strong> <br>
+      This exercises pAVR interrupt handling. <br>
+      All interrupts are tested. <br>
+      The associated peripherals (Port A, Timer 0 and External Interrupt 0) are
+      put in a variety of conditions. <br>
+      Results: <br>
+      tbd
+   <li> <strong> General test </strong> <br>
+      This is a hand-written assembler source that is meant to be assembled and
+         run on pAVR. <br>
+      It exercises each of pAVR instructions, one by one. <br>
+      It tries to put pAVR in most difficult situations, for each instruction. For
+      example, it exercises:
+      <ul>
+         <li> concurrent stalls
+         <li> stalls combined with 32 bit instructions
+         <li> stalls combined with intructions that change the instruction flow
+         <li> control hazard candidates (stress the Program Memory Manager and
+            the Stall and Flush Unit)
+         <li> data hazard candidates (stress the Bypass Unit)
+      </ul>
+      Results: <br>
+         Passed OK. The verification consisted of checking each instruction, each
+         intermediate result and each relevant intermediate internal state.
+         <table border="1" cellspacing="0" cellpadding="4">
+            <tr>
+               <th> Assembler
+               <th> Clocks
+               <th> Instructions
+               <th> CPI
+            <tr>
+               <td> avrasm32, by Atmel
+               <td> 667
+               <td> 361
+               <td> 1.85
+         </table>
+   <li> <strong> Sieve </strong> <br>
+      Sieve of Eratosthenes; finds the the first 100 prime numbers. <br>
+      Written in ANSI C. <br>
+      Results:
+      <table border="1" cellspacing="0" cellpadding="4">
+         <tr>
+            <th> Compiler
+            <th> Clocks
+            <th> Instructions
+            <th> CPI
+         <tr>
+            <td> avr-gcc, O0
+            <td> 12170
+            <td> 8851
+            <td> 1.37
+         <tr>
+            <td> avr-gcc, O3
+            <td> 11946
+            <td> 8824
+            <td> 1.35
+      </table>
+   <li> <strong> TagScan </strong> <br>
+      Exercises string manipulating routines. <br>
+      Written in ANSI C. <br>
+      Results:
+      <table border="1" cellspacing="0" cellpadding="4">
+         <tr>
+            <th> Compiler
+            <th> Clocks
+            <th> Instructions
+            <th> CPI
+         <tr>
+            <td> tbd
+            <td> tbd
+            <td> tbd
+            <td> tbd
+      </table>
+   <li> <strong> C compiler </strong> <br>
+      Written in ANSI C. <br>
+      Results:
+      <table border="1" cellspacing="0" cellpadding="4">
+         <tr>
+            <th> Compiler
+            <th> Clocks
+            <th> Instructions
+            <th> CPI
+         <tr>
+            <td> tbd
+            <td> tbd
+            <td> tbd
+            <td> tbd
+      </table>
+   <li> <strong> Waves </strong> <br>
+      Simulates waves on the surface of a liquid. <br>
+      Written in ANSI C. <br>
+      Uses floating point numbers (observation: the avr-gcc compiler seems to
+      take about 200 pAVR clocks per floating point operation). <br>
+      A mesh of only 5x5 points is considered, and only 5 iterations
+      are done. Bigger values make the simulation unacceptably long on
+      the available computer. <br>
+
+      Checking the result is done by converting the array of 25 floats
+      into a scaled array of 25 chars, copying these chars from Data
+      Memory (by hand), constructing a 3D image of the result, and
+      comparing it to a reference 3D image. <br>
+
+      Results: <br>
+      Passed OK. As expected, the chars array to be tested exactly matches
+      the reference array.
+      <table border="1" cellspacing="0" cellpadding="4">
+         <tr>
+            <th> Compiler
+            <th> Clocks
+            <th> Instructions
+            <th> CPI
+         <tr>
+            <td> avr-gcc
+            <td> 209,175
+            <td> 122,236
+            <td> 1.71
+      </table>
+</ul>
+\endhtmlonly
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_test_bugs Bugs
+\ingroup pavr_test
+\par Errata to Atmel's AVR documentation:
+The corrected versions of some paragraphs from Atmel's documentation are shown
+below. \n
+Original, wrong, terms are strikelined, while corrected terms are bolded: \n
+- The following text can be found throughout the references. \n
+   \n
+   \htmlonly
+   <font color=gray>
+   "... <br>
+   <strong> RAMPD </strong> <br>
+   <br>
+   Register concatenated with the <s> Z register </s> <strong> instruction word
+   </strong> enabling direct addressing of the whole data space on MCUs with more than 64K
+   bytes data space. <br>
+   <br>
+   <strong> EIND </strong> <br>
+   <br>
+   Register concatenated with the <s> instruction word </s> <strong> Z register </strong>
+   enabling indirect jump and call to the whole program space on MCUs with more
+   than 64K <s> bytes </s> <strong> words </strong> program space. <br>
+   ..." <br>
+   <font color=black>
+   <br>
+   \endhtmlonly
+- In the `AVR Instruction Set' document, page 60:
+   \n
+   \htmlonly
+   <font color=gray>
+   "... <br>
+   <strong> V: </strong> Rd7 * <s> /Rd7 </s> <strong> /Rr7 </strong> * /R7 + /Rd7 * Rr7 * R7 <br>
+   ..."
+   <font color=black>
+   <br>
+   \endhtmlonly
+
+<hr>
+
+\par Atmel's AVRStudio simulator bugs
+- bug001
+   - \b symptom: NEG instruction computes the H flag via other formula than that
+      given in the AVR Instruction Set (H=R3+Rd3). \n
+      Where is the bug, in the simulator or in the document, it's up to be seen. \n
+      Versions 3.53 and 4.04 of AVRStudio behave the same (weird) way. \n
+      Example: initially having SREG=0x01 and R10=0xD9, NEG R10 sets SREG to 0x01
+      instead of 0x21. \n
+      The AVRStudio formula for H seems to be R3*(not Rd3) rather than R3+Rd3.
+- bug002
+   - \b symptom: when trying to set/reset port A pins, there is a 1 clock delay
+      between the moment PORTA receives the bits and the moment PINA gets updated.
+      Those events should have been simultaneous (of course, port A direction was
+      considered already configured as output, by setting DDRA(i)=1).
+
+<hr>
+
+\b pAVR \b bugs \b history
+\par 28-31 July 2002
+   - The Program Memory and Program Counter are handled in different places, even
+      though they share much functionality. Moreover, the Program Counter doesn't
+      have associated an explicit manager. This makes PM and PC quite difficult to
+      maintain. \n
+      Reorganized PM and PC handling. Now they are handled by a common manager,
+      the PM manager. \n
+   - Every test runs smoothly so far.
+
+\par 27 July 2002
+   - The Stall and Flush Unit and Shadow Manager are difficult to maintain because
+      of too many rules and exceptions. \n
+      Reorganized the SFU so that its behavior follows only one rule, the so-called
+      `SFU rule': older hardware resource  requests have priority over younger ones. \n
+      Reorganized the Shadow Manager so that its behavior accurately implements
+      the shadow protocol. However, a few exceptions still exist (such as LPM
+      Program Memory handling or CPSE RF handling).
+   - *** Modelsim 5.3 behaves strange again. \n
+      It asserts hardware managers warnings, but when the the local conditions are
+      investigated, the situation is perfectly legal. It seems that at a moment
+      when a signal has a 0-1 transition and another one has a 1-0 transition,
+      there is a `small' (theoretically 0) amount of time that both signals are
+      considered 1, and that transient triggers the warning. That shouldn't happen,
+      it seems to be a Modelsim bug. \n
+      However, trying to reproduce that behavior was unsuccessfull. It only appears
+      sometimes; the apparition rule is well hidden. \n
+      For now, it's best to ignore these warnings during simulation. However, it
+      means that those assertions don't fullfill their purpose.
+
+\par 25 July 2002
+   - bug023
+      - \b symptom: IJMP and EIJMP don't jump were they are supposed to, if the
+         instruction before them modifies the Z pointer.
+      - \b remedy: IJMP and EIJMP actually jump before even the BPU gets updated
+         by the previous instruction. As they use the Register File mapped Z
+         pointer for finding target address, they need to be calmed down for a
+         clock (Z pointer is modified in stage s5). \n
+         Just request a nop in pipe stage s4. Now IJMP and EIJMP take 4 clocks
+         (RJMP and JMP still take 3).
+      - \b status: corrected
+   - bug024
+      - \b symptom: loads don't work any more (!). They (sometimes) get garbage.
+      - \b remedy: when correcting bug 021, the shadow protocol was applied for
+         all devices that could use it. It was wrong. The Data Address Calculation
+         Unit must not use the shadow protocol, because it gets RF/IOF/DM
+         exclusivity by means of stalling, and it must be granted access to these
+         resources, even during stalls. \n
+         When trying to read from Unified Memory, loads got data from shadow
+         registers, not directly from the RF/IOF/DM 's data out.
+      - \b status: corrected DACU
+   - bug025
+      - \b symptom: JMP gets corrupted if the previous instruction is a load.
+      - \b remedy: JMP is a 32 bit instruction. The second word (a 16 bit constant)
+         can get flushed by a previous instruction stall s5. \n
+         Flush s2 requested in s3 and s4 are more delicate than other flushes.
+         They can interfere with stalls requested by older instructions. They must
+         be stallable because older instructions might want that. If stall s2
+         requested in s3 or s4, then if older instructions require stall, don't
+         blindly flush s2, but rather do nothing and wait for the stall to end.
+         Only after that acknowledge the flush. \n
+      - \b status: corrected
+   - bug026
+      - \b symptom: CPSE doesn't skip the following instruction, when it should.
+      - \b remedy: the skip condition was picked as `not zero flag', instead of
+         `zero flag'.
+      - \b status: corrected
+   - bug027
+      - \b symptom: SBIC and SBIS don't do their job.
+      - \b remedy: IOF read access was simply not requestd.
+      - \b status: corrected the Instruction Decoder by placing an IOF request
+         in pipe stage s5, for SBIC and SBIS
+   - bug028
+      - \b symptom: RCALL doesn't work.
+      - \b remedy:
+         - the 12 bit relative offset wasn't initialized in the Instruction
+         Decoder. Just do that (cut&paste the corresponding code line from RJMP,
+         as the relative jump address is placed in the same bits in the
+         instruction code).
+         - the return address was correct for CALL but bigger with one than needed
+            for RCALL. Actually, CALL and RCALL need \b different return addresses,
+            as CALL has 32 bits and RCALL only 16. \n
+            Modification: now, the current instruction's PC is \b conditionally
+            incremented in pipe stage s4. A new set of wires and registers were
+            introduced so that CALL can request to increment its return address.
+            RCALL doesn't need to do that.
+      - \b status: corrected the Instruction Decoder, so that CALL requires to
+         increment its return address.
+   - note: all instructions seem to work.
+
+\par 24 July 2002
+   - bug020
+      - \b symptom: garbage got by loads placed immediately after stores that
+         modify their pointer.
+      - \b remedy: loads and stores can modify their data pointer. However, the
+         Bypass Unit must also be updated, because the pointer registers are
+         placed in the Register File. The BPU wasn't updated.
+      - \b status: corrected
+      - \b note: the modularity of the design (separate hardware managers, small
+         set of conventions regarding signal naming, grouping similar-function
+         code) payed off. This bug required an intervention spread out over half
+         megabyte of code. The Data Address Calculation Unit, Bypass Unit were
+         modifed, new wires and registers were defined, some of them were renamed.
+   - bug021
+      - \b symptom: stores that modify their pointer make the following
+         instruction unable to update the Bypass Unit. Moreover, the BPU is
+         written with garbage.
+      - \b remedy: Stores and the instruction after them can require to
+         simultaneousely write the BPU. That's because these stores make intensive
+            use of BPU and eat all its write resources. They write 3 bytes: 2 of
+            them in s5 (the modified pointer) and 1 in s6 (the data to be written
+            into the Register File). The one written in s6 can be simultaneous with
+            following instruction's s5 write BPU request. \n
+            To correct this bug, there are 2 options:
+            <ul>
+            <li> 1. add a stall in pipe stage s5 for all stores. That is, stores
+               will take 3 clocks.
+            <li> 2. increase BPU width from 2 chains to 3 chains and modify the way
+               stores make use of Bypass Unit (write all what has to be written -
+               3 bytes - in the same pipe stage, s5). This is more attractive
+               because stores still need only 2 clocks. However, the Bypass Unit
+               continues to grow (from initial depth/width of 2/2 to the present 4/3).
+            </ul>
+         Option 2 was chosen. \n
+         The Unified Memory architecture favorized this bug. Stores
+         must be able to write the Register File and, consequently, write their
+         data into BPU along with the pointer they have modified.
+      - \b status: corrected
+   - bug022
+      - \b symptom: LPM always returns 0.
+      - \b remedy: multiple bug:
+         - The LPM stalled s2, then read s2 status. Seeing it `busy', gives up from
+            reading what it needed and maintains pavr_pm_addr_int at its present value.
+            The Program Memory Manager needs to be instructed to forcedly grant access
+            to LPM instructions to s2, even if it is stalled. Also, the shadow protocol
+            must be bypassed.
+         - LPM didn't update BPU.
+         - pointer registers were used directly in a few hardware managers, not via BPU.
+            This enables subtle read before write hazards (they escaped until now).
+      - \b status: corrected
+   - note: \n
+            LD Rd, -X; LD Rd, X; LD Rd, X+; \n
+            LD Rd, -Y; LD Rd, Y; LD Rd, Y+; LDD Rd, Y+q; \n
+            LD Rd, -Z; LD Rd, Z; LD Rd, Z+; LDD Rd, Z+q; \n
+            ST -X, Rr; ST X, Rr; ST X+, Rr; \n
+            ST -Y, Rr; ST Y, Rr; ST Y+, Rr; STD Y+q, Rr; \n
+            ST -Z, Rr; ST Z, Rr; ST Z+, Rr; STD Z+q, Rr; \n
+            LPM; LPM Rd, Z; LPM Rd, Z+ \n
+            seem to work.
+
+\par 23 July 2002
+   - bug016
+      - \b symptom: read before write data hazards
+      - \b remedy: BLD instruction didn't update BPU.
+      - \b status: corrected
+   - bug017
+      - \b symptom: BLD doesn't modify the target register.
+      - \b remedy: while processing pavr_s5_iof_rq IOF request, the IOF Manager
+         set IOF bit address to zero instead of pavr_s5_iof_bitaddr. Correct that.
+      - \b status: corrected
+   - bug018
+      - \b symptom: Even though they work fine separately, POP, PUSH and MOVW one
+         after another (in various combinations) don't.
+      - \b remedy:
+         This is a triple (!) bug:
+         <ul>
+            <li> MOVW requires a stall in s6 while POP requires a stall in s5. The
+               two stalls are simultaneous. \n
+               The Stall and Flush Unit doesn't handle properly multiple stalls. \n
+               Modify SFU so that the oldest stall doesn't kill the younger one(s),
+               but only delays it (them).
+            <li> The SP was incremented during a stall, and the DACU received after
+               the stall a wrong pointer (the new SP). \n
+               All hardware resources must be stallable. Presently they are not.
+            <li> The instruction after MOVW, PUSH is skipped. The PM data out shadow
+               register doesn't do its job. \n
+               The shadow registers are updated every clock. That's not right. \n
+               Update them only if they don't already hold meaningful data (check
+               the corresponding `shadow_active' flag). Otherwise, during
+               successive stalls they get corrupted.
+         </ul>
+         This was a tough one.
+      - \b status: corrected
+   - bug019
+      - \b symptom: the sequence \n
+         LDI R17, 0xC3 \n
+         ST  Z+, R17 \n
+         results in storing garbage into memory.
+      - \b remedy: the nop requests (placed by ST) increase the needed BPU depth
+         with one. Thus, BPU depth must be increased from 3 to 4.
+      - \b status: corrected
+   - note:
+      - CBI, SBI, BST, BLD, MOVW, IN, OUT, PUSH, POP, LDS, STS    seem to work.
+
+\par 22 July 2002
+   - bug011
+      - \b symptom: DEC does in fact INC
+      - \b remedy: ALU operand 2 is selected as -1 in pipe stage s5, and then, the
+         DEC-related code does out=op1-op2, which results in out=op1+1. \n
+         Just make the ALU treat INC and DEC the same way (that is, out=op1+op2).
+      - \b status: corrected
+   - bug012
+      - \b symptom: BPU doesn't do its job.
+      - \b remedy: stupid and time costly bug, generated by a (too) quick cut and
+         paste in the BPU code.
+      - \b status: corrected
+      - \b note: Modelsim PE/Plus 5.3a_p1 has a cache problem. After correcting
+         this bug, the same results came after recompiling and restarting the
+         simultation. It was enough to close Modelsim and open the project again
+         for things to go fine. It's not the first time Modelsim behaves this way.
+   - bug013
+      - \b symptom: Z flag is computed wrongly for ALU opcodes that need 8 bit
+         substraction with carry.
+      - \b remedy: Z=Z*oldZ
+      - \b status: corrected
+   - bug014
+      - \b symptom: Z flag is computed wrongly for all ALU opcodes (!).
+      - \b remedy: instead of and-ing the negated bits of output, Z output was
+         computed by and-ing output's bits.
+      - \b status: corrected
+   - bug15
+      - \b symptom: read before write data hazards related to IN instruction
+      - \b remedy: IN doesn't write the Bypass Unit. Do that. Nasty one, requiring
+         new wires and registers.
+      - \b status: corrected
+      - \b note: the shadow manager was completed. Pretty much code, hopefully
+         with no new bugs.
+   - notes:
+      - MOV, INC, DEC, AND, AND, OR, ORI, EOR, COM, NEG, CP, CPC, CPI, SWAP, LSR,
+         ROR, ASR, multiplications (timing-only), BCLR, BSET seem to work.
+
+\par 21 July 2002
+   - bug008
+      - \b symptom: read before write data hazards.
+      - \b remedy: the Bypass depth was increased from 2 to 3. Design bug.\n
+         *** To update the documentation!
+      - \b status: corrected.
+   - bug009
+      - \b symptom: the 16 bit arithmetic instructions write only the lower byte of
+         the result in the Register File if the next few instructions aren't
+         nops.
+      - \b remedy: 16 bit arithmetic instructions stalled s6. During stalling s6,
+         the Bypass flushed a value that was needed later. A signal was needed
+         that can stall the BPU. Now, the stall s6 requests also stall the BPU.\n
+         Pretty triky design bug.\n
+         *** To update the documentation!\n
+      - \b status: corrected.
+   - bug010
+      - \b symptom: stalls needed by 16 bit arithmetic instructions induce the
+         replacement of the instruction placed 4 clocks later by a nop
+      - \b remedy: shadow registers were assigned, but never used. PM data out,
+         (and consequently, the instruction register) read a nop instead the
+         correct data that was read during the stall. Now the pipeline uses
+         shadow registers related by PM data out.\n
+         *** The other shadow registers (related to DM, RF, IOF and DACU data out)
+         are still unused!\n
+         *** To update the documentation with shadow-related issues!
+      - \b status: corrected.\n
+   - note:
+      - ADD, ADC, ADIW, SUB, SUBI, SBC, SBIW seem to work.
+
+\par 15 July 2002
+   - bug004
+      - \b remedy: reporting this bug was a bug. The Register File works fine. This
+         bug report was generated by modifying X register (RF addr 27:26) and
+         expecting that RF bulk data (RF addr 0...25) to be modified, which won't
+         happen.
+      - \b status: ok.
+   - bug005
+      - \b remedy: DACU data out was duplicated, with 2 different names: pavr_dacu_do
+         and pavr_s6_dacudo. pavr_dacu_do was only writen, and pavr_s6_dacudo was
+         only read. When RET tried to read the return address from DACU, it got
+         garbage, because it read DACU data out from pavr_s6_dacudo, that was not
+         assigned any value.\n
+         Cut out pavr_s6_dacudo. DACU data out is now unique, for both read an
+         write (that is, pavr_dacu_do). Also, the documentation was updated.
+      - \b status: corrected.
+   - bug006
+      - \b symptom: CALL doesn't work.
+      - \b remedy: in the SP Manager, pavr_s5_calldec_spwr_rq was writen twice, and
+         pavr_s52_calldec_spwr_rq wasn't writen at all, because of a less careful
+         cut-and-paste. As a result, during CALL, PC's lsByte was not stored.
+      - \b status: corrected
+   - bug007
+      - \b symptom: ALU flags are not defined.
+      - \b remedy: ALU flags in was not connected to SREG (zero-level assignment)
+      - \b status: corrected
+   - notes:
+      - RET, CALL seem to work.
+      - pAVR runs its first complete program (12 instructions).
+
+\par 13 July 2002
+   - bug003
+      - \b symptom: RET is a mess
+      - \b remedy: during nop requests, stall must have higher priority that flush in
+         s2. The Stall Manager (the nop request-related lines) must take care of
+         that.
+      - \b status: corrected
+   - bug004
+      - \b symptom: RF seems to be unable to write other registers than pointer
+         registers.
+      - \b status: NOT corrected!
+   - bug005
+      - \b symptom: RET is still a mess.
+      - \b status: NOT corrected!
+   - bugs pool: 004, 005
+
+\par 27 June 2002
+   - bug001
+      - \b symptom: read before write data hazards. Hmm, this kind of bugs shouldn't
+         have occured.
+      - \b remedy: LDI didn't update BPU0. Just do that.
+      - \b status: corrected.
+   - bug002
+      - \b symptom: while reading the code, something was smelling bad.
+      - \b remedy: the code that computes the branch/skip conditions was not writen
+         at all.
+      - \b status: corrected.
+   - notes:
+      - The controller has successfully executed its first instruction (a RJMP)!
+         However, it was the only...\n
+      - The kernel seems to be easy to debug thanks to its regular structure.
+      - RJMP, LDI, NOP seem to work.
+
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_fpga FPGA prototyping
+\ingroup pavr_test
+No FPGAs were burned so far. \n
+\n
+\n
+\n
+*/
+
+
+/*!
+\defgroup pavr_src Sources
+\par Sources
+The source package contains the following files, in the compiling order:
+- <a href="std_util.vhd"> std_util.vhd </a>
+   - Type conversion routines ofted used throughout the other source files in this
+      project
+   - Basic arithmetic functions
+   - Sign and zero-extend functions
+   - Vector comparision function
+- <a href="pavr_util.vhd"> pavr_util.vhd </a>
+   - Bypass Unit access function
+   - Interrupt arbitrer function
+- <a href="pavr_constants.vhd"> pavr_constants.vhd </a>
+   - Constants needed by pAVR
+   - When costumizing pAVR, look and modify (seek-and-destroy) here.
+- <a href="pavr_data_mem.vhd"> pavr_data_mem.vhd </a>
+- <a href="pavr_alu.vhd"> pavr_alu.vhd </a>
+- <a href="pavr_register_file.vhd"> pavr_register_file.vhd </a>
+- <a href="pavr_io_file.vhd"> pavr_io_file.vhd </a>
+- <a href="pavr_control.vhd"> pavr_control.vhd </a>
+   - pAVR pipeline (pAVR kernel)
+
+\par Test sources
+The test sources in this package implement all the tests presented
+\ref pavr_test "above". \n
+The test source package contains the following files:
+- <a href="test_pavr_alu.vhd"> test_pavr_alu.vhd </a> \n
+   Tests the ALU.
+- <a href="test_pavr_control_interrupts.vhd">
+   test_pavr_control_interrupts.vhd </a> \n
+   This test is yet to be done.
+- <a href="test_std_util.vhd">           test_std_util.vhd             </a> \n
+   Tests the utilities defined in `std_util.vhd'.
+- <a href="test_pavr_data_mem.vhd">      test_pavr_data_mem.vhd        </a> \n
+   Tests the Data Memory.
+- <a href="test_pavr_register_file.vhd"> test_pavr_register_file.vhd   </a> \n
+   Tests the Register File.
+- <a href="test_pavr_io_file.vhd">       test_pavr_io_file.vhd         </a> \n
+   Tests the IO File.
+- <a href="test_pavr_constants.vhd">     test_pavr_constants.vhd       </a> \n
+   Defines constants needed by the main test entity.
+- <a href="test_pavr_util.vhd">          test_pavr_util.vhd            </a> \n
+   Defines utilities needed by the main test entity.
+- <a href="test_pavr_pm.vhd">            test_pavr_pm.vhd              </a> \n
+   Defines the Program Memory that is needed by the main test entity.
+- <a href="test_pavr.vhd">               test_pavr.vhd                 </a> \n
+   Defines the main test entity. \n
+   Tests pAVR as a whole.
+
+\anchor pavr_src_conv
+\par Conventions used when writting the VHDL sources
+The terminology used reflects the data flow. \n
+For example, `pavr_s4_s6_rfwr_addr1' is assigned in s3 (by the instruction decoder),
+shifts into `pavr_s5_s6_rfwr_addr1', that finally shifts into
+`pavr_s6_rfwr_addr1' (terminal register). Only this one carries information
+actually used by hardware resource managers. This particualr one signalizes
+an access request to the Register File write port manager. \n
+\n
+Process splitting strategy:
+<ul>
+   <li> requests to hardware resources are managed by dedicated processes, one
+      VHDL process per hardware resource.
+   <li> a main asynchronous process (instruction decoder) computes values that
+      initialize the pipeline in s3.
+   <li> a main synchronous process assings new values to pipeline registers.
+</ul>
+\todo
+Replace `next_...' signals family with a (pretty wide) state decoder.
+
+\par Licensing
+Please read the \ref pavr_about "licensing terms".
+\n
+*/
+
+
+
+
+/*!
+\defgroup pavr_ref References
+\par References
+Most of the documentation needed for this project was found on Atmel's website,
+http://www.atmel.com. While working on this project (2002 Q1, Q2), it was
+available in PDF format, free for downloading. \n
+\n
+The specific documents that were used are:
+<ul>
+   <li> "AVR Instruction Set", Atmel Corporation
+   <li> Datasheets for the controllers:
+   <ul>
+      <li> ATtiny28 series
+      <li> AT90S2313
+      <li> AT90S8535
+      <li> ATmega8 series
+      <li> ATmega103 series
+   </ul>
+</ul>
+\n
+While designing pAVR's pipeline, I found many interesting ideas in the book
+   "Computer architecture - a quantitative approach", by J. Hennessy and D.
+   Patterson. If you are a processor designer, then this book is for you. \n
+
+\par Errata
+A few \ref pavr_test_bugs "bugs" have been found in Atmel's documents.
+\n
+\n
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_thoughts Some final thoughts
+\par Instead of conclusion...
+It's relatively easy to design a fast 8 bit controller. All that has to be done
+   is to follow the path well known from the big brothers, the 32 bit
+   controllers. The short story is: analyze what "typical programs" mean,
+   imagine a simple and fast instruction set, and implement it into a deep
+   pipeline (by the way, for this topics, I recommend you "Computer
+   architecture - a quantitative approach", by J. Hennessy and D. Patterson). \n
+\n
+Then, why are the 8 bit controllers currently on the market so slow? The
+   instruction set, CPI, max frequency for current 8 bit ucs are bad. In fact,
+   they are so bad, that we must consider other factors than pure uc design to
+   explain that. My guess is that market issues distructively interfere here. How
+   is that, this could be another project's goal... \n
+\n
+\n
+*/
+
+
+
+/*!
+\defgroup pavr_about About ...
+\par Project
+\b pAVR (pipelined AVR) is an 8 bit RISC controller, compatible with Atmel's
+AVR core, but about 3x faster in terms of both clock frequency and MIPS. \n
+The increase in speed comes from a relatively deep pipeline.
+\par Version
+0.32
+\par Date
+2002 August 07
+\par Author
+Doru Cuturela, doruu@yahoo.com \n
+\par Licensing
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or
+(at your option) any later version. \n
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+<a href="gpl.txt"> GNU General Public License </a> for more details. \n
+You should have received a copy of the GNU General Public License
+along with this program; if not, write to the Free Software
+Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+
+\par Note
+The design effort for this project was about 6 months (2002, Feb-Aug), one
+man working. \n
+\n
+*/
