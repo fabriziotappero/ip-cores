@@ -1,0 +1,22 @@
+void producer(){
+	wait_clocks(1000);
+	output_z(1);
+	wait_clocks(1000);
+	output_z(2);
+	wait_clocks(1000);
+	output_z(3);
+	wait_clocks(1000);
+	output_z(4);
+	wait_clocks(1000);
+	output_z(5);
+	wait_clocks(1000);
+	output_z(6);
+	wait_clocks(1000);
+	output_z(7);
+	wait_clocks(1000);
+	output_z(8);
+	wait_clocks(1000);
+	output_z(9);
+	wait_clocks(1000);
+	output_z(10);
+}

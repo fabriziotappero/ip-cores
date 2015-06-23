@@ -1,0 +1,60 @@
+#!/usr/bin/env python
+"""A C to Verilog compiler - Command line interface"""
+
+__author__ = "Jon Dawson"
+__copyright__ = "Copyright (C) 2012, Jonathan P Dawson"
+__version__ = "0.1"
+
+import sys
+import os
+import subprocess
+import atexit
+
+from chips.compiler.compiler import comp
+
+children = []
+def cleanup():
+    for child in children:
+        child.terminate()
+atexit.register(cleanup)
+
+if len(sys.argv) < 2 or "help" in sys.argv or "h" in sys.argv:
+    print "Usage: c2verilog.py [options] <input_file>"
+    print
+    print "compile options:"
+    print "  no_reuse      : prevent register resuse"
+    print "  no_concurrent : prevent concurrency"
+    print "  no_initialize_memory : don't initialize memory"
+    print "  speed : optimize for speed (defaults to area)"
+    print
+    print "tool options:"
+    print "  iverilog      : compiles using the icarus verilog compiler"
+    print "  run           : runs compiled code, used with ghdl or modelsimoptions"
+    sys.exit(-1)
+
+input_file = sys.argv[-1]
+options = sys.argv[1:-1]
+name, inputs, outputs, documentation = comp(input_file, options)
+
+
+
+#run the compiled design using the simulator of your choice.
+if "iverilog" in sys.argv:
+    verilog_file = os.path.abspath("%s.v"%name)
+    process = subprocess.Popen(["iverilog", "-o", str(name), str(verilog_file)])
+    children.append(process)
+    result = process.wait()
+    children.remove(process)
+
+    if result:
+      print "Verilog output failed to compile correctly"
+      sys.exit(result)
+
+    if "run" in sys.argv:
+      process = subprocess.Popen(["vvp", str(name)])
+      children.append(process)
+      result = process.wait()
+      children.remove(process)
+      sys.exit(result)
+
+#Add more tools here ...
