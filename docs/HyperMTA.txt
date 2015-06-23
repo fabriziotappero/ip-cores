@@ -1,0 +1,299 @@
+HyperMTA Processor Specifications
+
+This is only a preliminary release and it is not complete.
+
+
+#######################################################################
+#######################################################################
+
+User/System Access
+
+Registers:
+R0-R31: General Purpose Integer
+F0-F31: Floating Point Registers
+C0(F0,F1)-C15(F30,F31): Complex Floating Point Registers
+
+Instruction Format and Next Instruction Data Placement:
+| 42 Bits(I) | 42 Bits(I) | 42 Bits(I) | 2 Bits(11) |
+
+| 64 Bits(D) | 20 Bits(D) | 42 Bits(I) | 2 Bits(01) |
+NID0(I/F)    NID1(I)
+
+| 42 Bits(I) | 42 Bits(I) | 42 Bits(D) | 2 Bits(10) |
+                          NID0(I)
+
+|              126 Bits(D)             | 2 Bits(00) | (Complex)
+NID0(C)
+// 63 Bits of each float least significat bit is zeroed or oneed by instruction
+
+Next Instruction Data:
+Inlined data stored within the next instruction. Nothing else to say except
+it is one of the ways in which we hide memory latency.
+
+Internal VLIW Branching:
+This is another way to hide latency.
+
+The following to reduce branch misprediction penalties since it'll be more
+costly in this system:
+
+| Conditional Branch | ALU OP | ALU OP |
+If true the instruction will execute:
+| ALU | ALU | IGNORE THIS ALU OP |
+else
+| IGNORE THIS | ALU | ALU OP |
+
+Both of those were the same instruction. The Branch instruction contains
+a mask of which molecules to execute of the next instruction. In a standard
+pipelined system all three can be executed and in the write back stage the
+correct molecules will be writen back. This can eliminate small loops.
+Then a special return instruction will return the execution back to normal
+executing all instructions. As in the example it is possible to have
+shared instructions which will be executed either way.
+
+ISA:
+
+Arithmetic(64 bit):
+ADD reg,reg,reg/imm
+SUB reg,reg,reg/imm
+MUL reg,reg,reg/imm
+MULU reg,reg,reg/imm
+DIV reg,reg,reg/imm
+DIVU reg,reg,reg/imm
+MOD reg,reg,reg/imm
+MODU reg,reg,reg/imm
+LMUL reg,reg,reg,reg/imm // Long multiply
+LMULU reg,reg,reg,reg/imm // Long multiply unsigned
+
+Logic(64 bit):
+OR reg,reg,reg/imm
+AND reg,reg,reg/imm
+XOR reg,reg,reg/imm
+NOT reg,reg
+SHL reg,reg,reg/imm
+SHR reg,reg,reg/imm
+ROL reg,reg,reg/imm
+ROR reg,reg,reg/imm
+PCNT reg,reg
+PCNTZ reg,reg
+PCNTC reg,reg
+CHG reg,reg
+SB reg,imm // Set Bit
+CB reg,imm // Clear Bit
+TB reg,imm // Toggle Bit
+
+Floating Point(64 Bit):
+FADD reg,reg,reg
+FSUB reg,reg,reg
+FMUL reg,reg,reg
+FDIV reg,reg,reg
+FMOD reg,reg,reg
+FABS reg,reg
+FNEG reg,reg // Make Negative
+FPOS reg,reg // Make Positive
+FTSIGN reg,reg // Toggle Sign
+FSQ reg,reg
+FCMP reg,reg
+FRND reg // Random Generator
+FPI reg // Load PI
+FE reg // Load E
+FZERO reg // Load ZERO
+FONE reg // Load ONE
+FFLOOR reg,reg
+FCEIL reg,reg
+FINV reg,reg // 1/reg
+
+Complex(128 Bit):
+CADD reg,reg,reg
+CSUB reg,reg,reg
+CMUL reg,reg,reg
+CDIV reg,reg,reg
+CMOD reg,reg,reg // Do we really need this? I don't think so.
+CSQ reg,reg
+CCMP reg,reg // ?
+CI reg // Load I
+
+Branch: // Avoid if possible user internal VLIW branching
+JMP rel
+JMP reg
+JMP{condition} rel
+JMP{condition} reg
+CALL rel
+CALL reg
+CALL{condition} rel
+CALL{condition} reg
+CALL [reg+8*cccc]
+CALL{condition} [reg+8*cccc]
+RETURN
+RETURN{condition}
+
+Internal VLIW Branching:
+// Selects to execute certain molecules of each atom until a return is reached
+// This is another way to hide memory latency
+IVB{condition} moleculemask(0,1,2, or any combination)
+IVRET
+
+Interupt:
+THROW reg/imm
+RTI // Return Interupt
+
+Data Movement:
+MOV reg,reg // Move
+MOVS reg,sreg // Move Special
+MOVS sreg,reg
+PREFETCH // Data Prefetch
+PREFETCHI // Instruction Prefetch
+LOADB(U)
+LOADW(U)
+LOADD(U)
+LOADQ(U)
+STOREB
+STOREW
+STORED
+STOREQ
+LOADF // Load/Store Float
+STOREF
+LOADC // Load/Store Complex
+STOREC
+LOADNID // Load from Next Instruction Data
+LOADFNID // Load Float from Next Instruction Data
+LOADCNID // Load Complex from Next Instruction Data
+EXTRACT reg(dest),reg(src),imm(start),imm(stop)
+DEPOSITE reg(dest),reg(src),reg(srcb),imm(start),imm(stop)
+
+System:
+TLBR reg(threadid),reg(tlbvalueh),reg(tlbvaluel)
+TLBW reg(threadid),reg(tlbvalueh),reg(tlbvaluel)
+
+Interupts: -- Avoid this unless absolutely nessicary
+THROW reg/imm(vector) // Throw Exception
+RETI // Return from Interupt
+
+System:
+IFENCE // Instruction Fence
+DFENCE // Data Fence
+REGISTER reg(threadptr),imm(interupt vector) // Registers an interupt
+SYSCALL // Syscall (Pauses Current Stream/Flags for Service)
+
+Process Management: // Dispatched through MP Bus (8 Threads = 1 Process)
+PROCESS.LOAD reg(addrptr),reg(processorid:processid)
+PROCESS.STORE reg(addrptr),reg(processorid:processid)
+PROCESS.START reg(processorid:processid)
+PROCESS.STOP reg(processorid:processid)
+
+Thread Management: // Dispatched through MP Bus
+THREAD.LOAD reg(addrptr),reg(processorid:threadid) // Loads a threads state
+THREAD.STORE reg(addrptr),reg(processorid:threadid) // Saves a threads state
+THREAD.START reg(processorid:threadid) // Continues execution of a thread
+THREAD.STOP reg(processorid:threadid) // Stops execution of a thread
+BREAK // Debugger Support
+
+Processor Management: // Dispatched through MP Bus
+PROCESSOR.START reg(processorid) // Start the processor
+PROCESSOR.STOP reg(processorid) // Stop the processor
+PROCESSOR.PAUSE reg(processorid) // Pause a processor and all it's streams
+PROCESSOR.CONTINUE reg(processorid) // Resume a processor from pause
+PROCESSOR.RESET reg(processorid) // Restart a processor
+PROCESSOR.PING reg(processorid),reg(result/hop count) // Ping's a processor
+ // result is number of hops to processor or 0 for nonexistant
+
+Processor IDs:
+0000: Startup
+0001: Master Processor (OS Only)
+0002-FFFE: Slave Processors
+FFFF: Broadcast ID
+
+Routing:
+           |             |               |
+           |             |               |
+           |             |               |
+           |             |               |
+-----------1-------------2---------------3------------
+           |             |               |
+           |             |               |
+           |             |               |
+           |             |               |
+-----------4-------------5 NO CONNECTION 6------------
+           |             |               |
+           |             |               |
+           |             |               |
+           |             |               |
+-----------7-------------8---------------9------------
+           |             |               |
+           |             |               |
+           |             |               |
+           |             |               |
+
+Each router will automatically keep track of processor id's and their routing keys
+and each router will try to route to a specified processor using the best way possible
+When a processor is assigned a processor id it automatically tells the router its
+id and the router from then on builds routing key tables as data transfers occur.
+Routers also buffer memory transfers and cache for their own memory banks.
+The routing processors must be capable of sustaining 1 memory read/write to
+each processor every clock cycle. Instructions will have a small special
+buffer so that small loops can be made without any memory access penalty.
+(That is loops not implemented with Internal VLIW Branching.)
+
+I/O Interfacing:
+There are memory based I/O chips connected to the memory routing network.
+They are able to throw interupts by signalling processors through the MP
+Bus that their is a service request needed to be serviced.
+
+CPU Bus Interface:
+Consist of MP Bus interface which connects to microkernel risc processor
+and the memory i/o interface that is 128 bits in length and transfers
+data through.
+
+#######################################################################
+#######################################################################
+MicroKernel Support Processor's ISA(Small risc core) -- Incomplete
+This microprocessor runs part of the os and manages the mp bus.
+
+Arithmetic:
+ADD
+SUB
+SHR
+SHL
+ROR
+ROL
+RND // Random Number Generator
+Arguments: reg,reg,reg
+Arguments: reg,reg,imm16
+
+Logic:
+OR
+AND
+XOR
+NOT
+Arguments: reg,reg,reg
+
+Memory:
+LB/LW/LD(S)
+SB/SW/SD
+Arguments: reg,[reg+imm16]
+
+Branch:
+BEQ(L)
+BNE(L)
+BZ(L)
+BNZ(L)
+BC(L)
+BNC(L)
+J(L)
+JR(L)
+
+Interupts/Special:
+NOP // No Operation
+
+MP(MultiProcessing) Interconnect:
+MPIREAD // Write Buffer
+MPIWRITE // Read Buffer
+MPIREQ? // Branch on Request Pending
+
+Threads:
+TSREQ? // Branch on Thread Service Request
+
+Local Processor Manipulation:
+PSTOP // Processor
+PSTART
+TSTOP reg(threadid) // Thread
+TSTART reg(threadid)
