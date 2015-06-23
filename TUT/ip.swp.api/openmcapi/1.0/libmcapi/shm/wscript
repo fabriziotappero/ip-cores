@@ -1,0 +1,91 @@
+#!/usr/bin/env python
+
+import os.path
+
+from waflib.Build import BuildContext, InstallContext, UninstallContext, CleanContext
+
+def makeopts(ctx, path):
+	'''Assemble the options to pass to Kbuild.'''
+
+	makeopts = [
+		'-C %s/linux/kmod' % path,
+		'ARCH=%s' % ctx.env.ARCH,
+		'INSTALL_MOD_PATH=%s/linux/kmod/deploy' %
+			os.path.join(ctx.out_dir, path),
+	]
+	if ctx.env.LINUXDIR:
+		makeopts.append('KERNELDIR=%s' % ctx.env.LINUXDIR)
+	if ctx.env.CROSS:
+		makeopts.append('CROSS_COMPILE=%s' % ctx.env.CROSS)
+	if ctx.env.LINUXARGS:
+		makeopts.append(ctx.env.LINUXARGS)
+
+	return ' '.join(makeopts)
+
+def options(opt):
+	opt.add_option('--linuxdir', help='Directory to Linux kernel which has had \'make modules_prepare\' run.')
+	opt.add_option('--linuxargs', help='Extra options to pass to the Linux kernel module build system.')
+	opt.add_option('--shm-sysv', action='store_true', help='For debugging purposes: use SysV shared memory instead of physical RAM. Implies --no-kmods.')
+	opt.add_option('--shm-nodes', default='2', type='int', help='Number of nodes communicating via shared memory segment.')
+
+	# These classes are magic to make the Linux kmod build automatically:
+	path = opt.path.abspath()
+	class _build(BuildContext):
+		def compile(self):
+			if not self.env.NO_KMODS:
+				ret = self.exec_command(
+					'make %s modules modules_install' % makeopts(self, path),
+					cwd=path)
+				if ret:
+					self.fatal('make returned %r' % ret)
+			super(_build, self).compile()
+
+	class _clean(CleanContext):
+		def clean(self):
+			if not self.env.NO_KMODS:
+				self.exec_command('make %s clean' % makeopts(self, path),
+				                  cwd=path)
+			super(_clean, self).clean()
+
+def configure(conf):
+	conf.env.LINUXDIR = conf.options.linuxdir
+	conf.env.LINUXARGS = conf.options.linuxargs
+	conf.env.SHM_SYSV = conf.options.shm_sysv
+	if conf.env.SHM_SYSV:
+		conf.env.NO_KMODS = True
+
+	conf.define('CONFIG_SHM_NR_NODES', conf.options.shm_nodes)
+
+def build(bld):
+	includes = [
+		'.',
+		'../include',
+		'../../include',
+		'../../include/%s' % bld.env.OS,
+		'../include/arch/%s' % bld.env.ARCH,
+	]
+
+	sources = [
+		'shm.c'
+	]
+
+	shm_sources = [
+		'sysv.c'
+	]
+
+	extra_sources = {
+		'linux': ['linux/shm_os.c'],
+	}
+
+	if bld.env.SHM_SYSV:
+		# sysv is OS-agnostic and trumps OS drivers
+		sources += shm_sources
+	else:
+		sources += extra_sources.get(bld.env.OS, [])
+
+	bld.objects(
+		target='shm_objs',
+		source=' '.join(sources),
+		includes=' '.join(includes),
+	)
+
