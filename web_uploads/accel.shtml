@@ -1,0 +1,215 @@
+<!--# set var="title" value="Title" -->
+<!--# include virtual="/ssi/ssi_start.shtml" -->
+<link REL="stylesheet" TYPE="text/css" HREF="/people/tantos/styles.css">
+
+<h1>Wishbone Monitor Controller Accelerator</h1>
+<h2>Description</h2>
+<strong>Wishbone Monitor Controller Acclereator</strong> is a small address-generator
+which can (when used properly) fasten up various common video memory operations.
+The core is 100% Wishbone compatible with the 
+<a href="/cores/wb_tk/wb_extensions.shtml">WishboneTK extensions</a>. It incorporates 2
+Wishbone interfaces. A salve interface for accessing it's internal registers and to 
+generating access cycles to the pixel memory and one master interface for the pixel memory. 
+The data width on the two interfaces should be the same but address might not.
+
+<h3>Accelerator functions</h3>
+<p>
+Many 8-bit systems has very limited address space. It's common that they can't access more 
+than 64k of memory but often the available address spaces for video buffer is even much
+smaller. There are two ways to overcome this:
+<ul>
+	<li>Paging</li>
+	<li>Indirect addressing</li>
+</ul>
+Both implementations are quite common in various places. For this core I'm planning to use 
+the second approach with a little twist. You can imagine the indirect addressing of a
+frame buffer as having a cursor on it. Writes will overwrite values under the cursor and reads
+will return the value under the cursor. Writes to the index register will alter the cursor
+position, reads will return cursor location. That fits seamlessly to the way many algorithm
+thinks about the display. However there is one drawback: you need two accesses in average to reach
+a pixel. First you have to set the cursor position by writing the index register and then you can
+access the requested memory position. The first approach (Paging) excels in this. It can provide
+the same information at the same time. 
+<p>
+The important thing is that while paging provides two type of information in one cycle (what 
+and where) indirect addressing provides only one. 
+<p>
+Many algorithms uses relative addressing which is quite time-consuming to implement in SW. they
+would say things like, write to the pixel to the left, or up; Go two rows down, etc. The 
+accelerator part of the design will do such post-modification of the cursor automatically by HW.
+It will have a set of modify registers (a small bunch of RAM). It will also has a separate address
+space of (lets say) 256 locations, used for indirect frame-buffer access. A write operation on this
+address space will identify a post-modify register and provide the information to be written to the
+frame-buffer. After the write completes, the cursor location will be incremented/decremented by the
+value in the addressed post-modify register. Read operation can work the very same way only 
+returning data instead of writing it to the frame-buffer.
+
+<p>
+Let's have an example! Let's say we would like to implement an algorithm of scrolling the screen 
+up by one line. With direct access the code for that would be something like this:
+<pre>
+   mov  R1, frame_buffer_addr
+   mov  R2, frame_buffer_addr+xres/8
+   mov  R3, frame_buffer_size-xres/8
+loop:
+   mov  R4,[R2]
+   mov  [R1],R4
+   inc  R1
+   inc  R2
+   dec  R3
+   jnz  loop
+</pre>
+<p>
+The same thing with indirect addressing:
+<pre>
+   mov  R1, 0
+   mov  R2, xres/8
+   mov  R3, frame_buffer_size-xres/8
+loop:
+   mov  [cursor_reg],R2
+   mov  R4,[pixel_reg]
+   mov  [cursor_reg],R3
+   mov  [pixel_reg],R4
+   inc  R1
+   inc  R2
+   dec  R3
+   jnz  loop
+</pre>
+<p>
+And finally the same thing with the accelerator functions:
+<pre>
+   mov  R1, -xres/8
+   mov  [cursor_post_inc_reg1],R1
+   mov  R1, 1+xres/8
+   mov  [cursor_post_inc_reg2],R1
+   mov  R1, frame_buffer_addr
+   mov  [cursor_reg],R1
+   mov  R2, frame_buffer_size-xres/8
+loop:
+   mov  R1,[cursor_post_inc_reg1] ; will modify cursor position to the upper byte
+   mov  [cursor_post_inc_reg2],R2 ; will modify cursor position to the lower-right pixel
+   dec  R2
+   jnz  loop
+</pre>
+<p>
+As you can see for this particular algorithm this approach is faster than even the direct access
+method to the frame-buffer. Hence the pompous word, accelerator.
+<p>
+If you think about the most common functions you will find that this approach fastens at least the
+following operations
+<ul>
+	<li>copy one part of the screen to another location, especially</li>
+	<ul>
+		<li>scroll</li>
+		<li>mouse cursor</li>
+		<li>character rendering</li>
+	</ul>
+	<li>Copy from local memory to frame buffer or back</li>
+	<li>Line-drawing. Both vertical, horizontal, and Brezenhelm algorithms can benefit from it</li>
+	<li>Drawing continuos curves of nearly any kind</li>
+</ul>
+Of course there is a downside:
+<ul>
+	<li>It takes time to set-up the engine and to program the various post-increment values</li>
+	<li>Generaly, when arbitrary pixels are needed to be accessed it's not any faster than indirect addressing</li>
+	<li>Required address range comparable to paged access</li>
+</ul>
+
+<h3>Programming information</h3>
+<p>
+As discussed above the accelerator maintains and updates a cursor register. That register is large enough to address all 
+possible locations in the pixel memory, that is it has <code>video_addr_width</code> number of bits. This register
+can be read or written by asserting the cur_stb_i pin in a valid Wishbone cycle.
+<p>
+Each location in the accelerator memory functions as an increment value to the cursor. Thus each location has the same
+size as the cursor register itself. If <code>data_width</code> is less than <code>video_addr_width</code> such a
+location cannot be updated in one access. In that case the lower <code>data_width</code> bits of the location written
+or read directly form the data bus of the master Wishbone bus when the <code>ACC_STB_I</code> signal is asserted.
+The upper part of the location is written to/from the extension register. That register can be accessed by
+asserting the <code>EXT_STB_I</code> signal. Pixel memory accesses are performed upon the assertion of the
+<code>MEM_STB_I</code> signal. The accelerator location is selected by the address bits, the pixel memory location
+will be the current value of the cursor register, and the cursor register is updated with the value read from the
+accelerator location.
+<p>
+The accelerator has 2**accel_size locations.
+
+<h3>Wishbone datasheet</h3>
+<table border>
+<tr><th>Description</th><th>Specification</th></tr>
+<tr><td>General Description             </td><td>Monitor controller accelerator.</td></tr>
+<tr><td>Supported cycles                </td><td>Slave read/write<br>Slave block read/write<br>Slave rmw<br>
+												 Master read/write<br>Master block read/write<br>Master rmw<br></td></tr>
+<tr><td>Data port size                  </td><td>Configurable on slave side, same on the master side</td></tr>
+<tr><td>Data port granularity           </td><td>Bus size</td></tr>
+<tr><td>Data port maximum operand size  </td><td>Bus size</td></tr>
+<tr><td>Data transfer ordering          </td><td>Little endien</td></tr>
+<tr><td>Data transfer sequencing        </td><td>n/a</td></tr>
+<tr><td>Supported signal list and cross reference to equivalent Wishbone signals</td><td>
+	<table>
+	<tr><th>Signal name</th><th>Wishbone equiv.</th></tr>
+	<tr><th colspan="2">Common signals for all ports</th></tr>
+	<tr><td>CLK_I       </td><td>CLK_I</td></tr>
+	<tr><td>RST_I       </td><td>RST_I</td></tr>
+	<tr><th colspan="2">Signals to connect to master</th></tr>
+	<tr><td>CYC_I       </td><td>CYC_I</td></tr>
+	<tr><td>CUR_STB_I    </td><td>STB_I</td></tr>
+	<tr><td>EXT_STB_I    </td><td>STB_I</td></tr>
+	<tr><td>ACC_STB_I    </td><td>STB_I</td></tr>
+	<tr><td>MEM_STB_I    </td><td>STB_I</td></tr>
+	<tr><td>WE_I        </td><td>WE_I </td></tr>
+	<tr><td>ACK_O       </td><td>ACK_O</td></tr>
+	<tr><td>SEL_I(..)   </td><td>SEL_I()</td></tr>
+	<tr><td>ADR_I(..)   </td><td>ADR_I()</td></tr>
+	<tr><td>DAT_I(..)   </td><td>DAT_I()</td></tr>
+	<tr><td>DAT_O(..)   </td><td>DAT_O()</td></tr>
+	<tr><th colspan="2">Signals to connect to the pixel memory</th></tr>
+	<tr><td>V_CYC_O       </td><td>CYC_O</td></tr>
+	<tr><td>V_STB_O       </td><td>STB_O</td></tr>
+	<tr><td>V_WE_O        </td><td>WE_O </td></tr>
+	<tr><td>V_ACK_I       </td><td>ACK_I</td></tr>
+	<tr><td>V_ADR_O(..)   </td><td>ADR_O()</td></tr>
+	<tr><td>v_SEL_o(..)   </td><td>SEL_O()</td></tr>
+	<tr><td>V_DAT_I(..)   </td><td>DAT_I()</td></tr>
+	<tr><td>V_DAT_O(..)   </td><td>DAT_O()</td></tr>
+	</table>
+</table>
+<h3>Parameter description</h3>
+<table border>
+<tr><td>Parameter name</th><th>Description</th></tr>
+<tr><td>accel_size       </td><td>Address size of the accelerator memory</td></tr>
+<tr><td>video_addr_width </td><td>Address size of the pixel memory</td></tr>
+<tr><td>data_width       </td><td>Data size of the interfaces</td></tr>
+</table>
+<h3>Signal description</h3>
+<table border>
+<tr><th>Signal name</th><th>Description</th></tr>
+<tr><th colspan="2">Signals to connect to master</th></tr>
+<tr><td>CYC_I       </td><td>Wishbone cycle signal. High value frames blocks of access</td></tr>
+<tr><td>CUR_STB_I   </td><td>Wishbone strobe signal. High value indicates cycle to the cursor register</td></tr>
+<tr><td>EXT_STB_I   </td><td>Wishbone strobe signal. High value indicates cycle to the extension register</td></tr>
+<tr><td>ACC_STB_I   </td><td>Wishbone strobe signal. High value indicates cycle to the accelerator memory</td></tr>
+<tr><td>MEM_STB_I   </td><td>Wishbone strobe signal. High value indicates cycle to the pixel memory</td></tr>
+<tr><td>WE_I        </td><td>Wishbone write enable signal. High indicates data flowing from master to slave</td></tr>
+<tr><td>ACK_O       </td><td>Wishbone acknowledge signal. High indicates that slave finished operation sucessfully</td></tr>
+<tr><td>ACK_OI      </td><td>WhisboneTK acknowledge chain input signal</td></tr>
+<tr><td>ADR_I(accel_size-1..0)  </td><td>Wishbone address bus signals</td></tr>
+<tr><td>SEL_I(data_width/8-1..0) </td><td>Wishbone byte-selection signals</td></tr>
+<tr><td>DAT_I(data_width-1..0)   </td><td>Wishbone data bus input (to slave direction) signals</td></tr>
+<tr><td>DAT_O(data_width-1..0)   </td><td>Wishbone data bus output (to master direction) signals</td></tr>
+<tr><td>DAT_OI(cpu_dat_width-1..0)  </td><td>WhisboneTK data bus chain input signal</td></tr>
+<tr><th colspan="2">Signals to connect to the pixel memory</th></tr>
+<tr><td>V_CYC_O       </td><td>Wishbone cycle signal. High value frames blocks of access</td></tr>
+<tr><td>V_STB_O       </td><td>Wishbone strobe signal. High value indicates cycle to this particular device</td></tr>
+<tr><td>V_WE_O        </td><td>Wishbone write enable signal. High indicates data flowing from master to slave</td></tr>
+<tr><td>V_ACK_I       </td><td>Wishbone acknowledge signal. High indicates that slave finished operation sucessfully</td></tr>
+<tr><td>V_ADR_O(video_addr_width-2..0)  </td><td>Wishbone address bus signals</td></tr>
+<tr><td>V_SEL_O(data_width/8-1..0) </td><td>Wishbone byte-selection signals</td></tr>
+<tr><td>V_DAT_I(data_width-1..0)   </td><td>Wishbone data bus input (to slave direction) signals</td></tr>
+<tr><td>V_DAT_O(data_width-1..0)   </td><td>Wishbone data bus output (to master direction) signals</td></tr>
+</table>
+
+
+<h2>Author & Maintainer</h2>
+<p>
+<a href="/people/tantos">Andras Tantos</a>
+<!--# include virtual="/ssi/ssi_end.shtml" -->
