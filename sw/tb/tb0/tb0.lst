@@ -1,0 +1,859 @@
+0001   0000             ;***********************************************************************
+0002   0000             ; MICROCOSM ASSOCIATES  8080/8085 CPU DIAGNOSTIC VERSION 1.0  (C) 1980
+0003   0000             ;***********************************************************************
+0004   0000             ;
+0005   0000             ;DONATED TO THE "SIG/M" CP/M USER'S GROUP BY:
+0006   0000             ;KELLY SMITH, MICROCOSM ASSOCIATES
+0007   0000             ;3055 WACO AVENUE
+0008   0000             ;SIMI VALLEY, CALIFORNIA, 93065
+0009   0000             ;(805) 527-9321 (MODEM, CP/M-NET (TM))
+0010   0000             ;(805) 527-0518 (VERBAL)
+0011   0000             ;
+0012   0000             ;***********************************************************************
+0013   0000             ; Modified 2001/02/28 by Richard Cini for use in the Altair32 Emulator
+0014   0000             ;       Project
+0015   0000             ;
+0016   0000             ; Need to somehow connect this code to Windows so that failure messages
+0017   0000             ;       can be posted to Windows. Maybe just store error code in
+0018   0000             ;       Mem[0xffff]. Maybe trap NOP in the emulator code?
+0019   0000             ;
+0020   0000             ;***********************************************************************
+0021   0000             ; Modified 2006/11/16 by Scott Moore to work on CPU8080 FPGA core
+0022   0000             ;
+0023   0000             ;***********************************************************************
+0024   0000             ; Modified 2007/09/24 by Jose Ruiz for use in light8080 FPGA core
+0025   0000             ;
+0026   0000             ; 1.- Changed formatting for compatibility to CP/M's ASM
+0027   0000             ; 2.- Commented out all Altair / MITS hardware related stuff
+0028   0000             ; 3.- Set origin at 0H
+0029   0000             ; 
+0030   0000             ; Modified again in 2008 to make it compatible with TASM assembler.
+0031   0000             ;
+0032   0000             ; Modified 2012/02/12 to add a few CY checks.
+0033   0000             ; Flags go almost completely unchecked in this test.
+0034   0000             ;***********************************************************************
+0035   0000             
+0036   0000             ; DS pseudo-directive; reserve space in bytes, without initializing it
+0037   0000             ; (TASM does not have a DS directive)
+0038   0000             #define ds(n)    \.org $+n
+0039   0000             
+0040   0000             ;
+0041   0000             ; Select controller defines
+0042   0000             ; 
+0043   0000             ;selmain: equ    00H             ; offset of main control register
+0044   0000             ;sel1msk: equ    02H             ; offset of select 1 mask
+0045   0000             ;sel1cmp: equ    03H             ; offset of select 1 compare
+0046   0000             ;sel2msk: equ    04H             ; offset of select 1 mask
+0047   0000             ;sel2cmp: equ    05H             ; offset of select 1 compare
+0048   0000             ;sel3msk: equ    06H             ; offset of select 1 mask
+0049   0000             ;sel3cmp: equ    07H             ; offset of select 1 compare
+0050   0000             ;sel4msk: equ    08H             ; offset of select 1 mask
+0051   0000             ;sel4cmp: equ    09H             ; offset of select 1 compare
+0052   0000             ;
+0053   0000             ; bits
+0054   0000             ;
+0055   0000             ;selenb:  equ    01H             ; enable select
+0056   0000             ;selio:   equ    02H             ; I/O address or memory
+0057   0000             
+0058   0000             ;
+0059   0000             ; Note: select 1 is ROM, 2, is RAM, 3 is interrupt controller, 4 is serial I/O.
+0060   0000             ;
+0061   0000             
+0062   0000             ;
+0063   0000             ; Where to place ROM and RAM for this test
+0064   0000             ;
+0065   0000             ;rombas: equ     0000H
+0066   0000             ;rambas: equ     rombas+4*1024
+0067   0000             ;
+0068   0000             ; Interrupt controller defines
+0069   0000             ;
+0070   0000             ;intbas: equ     10H
+0071   0000             ;intmsk: equ     intbas+00H      ; mask
+0072   0000             ;intsts: equ     intbas+01H      ; status
+0073   0000             ;intact: equ     intbas+02H      ; active interrupt
+0074   0000             ;intpol: equ     intbas+03H      ; polarity select
+0075   0000             ;intedg: equ     intbas+04H      ; edge/level select
+0076   0000             ;intvec: equ     intbas+05H      ; vector base page      
+0077   0000             ;
+0078   0000             ; Mits Serial I/O card
+0079   0000             ;
+0080   0000             ;siobas: equ     20H
+0081   0000             ;sioctl: equ     siobas+00H      ; control register
+0082   0000             ;siodat: equ     siobas+01H      ; data
+0083   0000             
+0084   0000             ;
+0085   0000             ; Set up selectors
+0086   0000             ;
+0087   0000             
+0088   0000             ;
+0089   0000             ; ROM
+0090   0000             ;
+0091   0000             ;        mvi     a,rombas shr 8  ; enable select 1 to 4kb at base
+0092   0000             ;        out     sel1cmp
+0093   0000             ;        mvi     a,(0f000H shr 8) or selenb
+0094   0000             ;        out     sel1msk
+0095   0000             ;
+0096   0000             ; RAM
+0097   0000             ;
+0098   0000             ;        mvi     a,rambas shr 8  ; enable select 2 to 1kb at base
+0099   0000             ;        out     sel2cmp
+0100   0000             ;        mvi     a,(0fc00H shr 8) or selenb
+0101   0000             ;        out     sel2msk
+0102   0000             ;
+0103   0000             ; ROM and RAM set up, exit bootstrap mode
+0104   0000             ;
+0105   0000             ;        mvi     a,00H           ; exit bootstrap mode 
+0106   0000             ;        out     selmain
+0107   0000             ;
+0108   0000             ; Serial I/O
+0109   0000             ;
+0110   0000             ;        mvi     a,siobas        ; enable serial controller for 4 addresses
+0111   0000             ;        out     sel4cmp
+0112   0000             ;        mvi     a,0fcH or selio or selenb
+0113   0000             ;        out     sel4msk
+0114   0000             
+0115   0000             ;************************************************************
+0116   0000             ;                8080/8085 CPU TEST/DIAGNOSTIC
+0117   0000             ;************************************************************
+0118   0000             ;
+0119   0000             ;note: (1) program assumes "call",and "lxi sp" instructions work;
+0120   0000             ;
+0121   0000             ;      (2) instructions not tested are "hlt","di","ei",
+0122   0000             ;          and "rst 0" thru "rst 7"
+0123   0000             ;
+0124   0000             ;
+0125   0000             ;
+0126   0000             ;test jump instructions and flags
+0127   0000             ;
+0128   0000                     .org    0H
+0129   0000             
+0130   0000 31 1D 06    cpu:    lxi     sp,stack ;set the stack pointer
+0131   0003 3E 77               mvi     a,077H  ;@ initialize A to remove X values from simulation
+0132   0005 E6 00               ani     0       ;initialize a reg. and clear all flags
+0133   0007 CA 0D 00            jz      j010    ;test "jz"
+0134   000A CD 0A 05            call    cpuer
+0135   000D D2 13 00    j010:   jnc     j020    ;test "jnc"
+0136   0010 CD 0A 05            call    cpuer
+0137   0013 EA 19 00    j020:   jpe     j030    ;test "jpe"
+0138   0016 CD 0A 05            call    cpuer
+0139   0019 F2 1F 00    j030:   jp      j040    ;test "jp"
+0140   001C CD 0A 05            call    cpuer
+0141   001F C2 2E 00    j040:   jnz     j050    ;test "jnz"
+0142   0022 DA 2E 00            jc      j050    ;test "jc"
+0143   0025 E2 2E 00            jpo     j050    ;test "jpo"
+0144   0028 FA 2E 00            jm      j050    ;test "jm"
+0145   002B C3 31 00            jmp     j060    ;test "jmp" (it's a little late,but what the hell;
+0146   002E CD 0A 05    j050:   call    cpuer
+0147   0031 C6 06       j060:   adi     6       ;a=6,c=0,p=1,s=0,z=0
+0148   0033 C2 39 00            jnz     j070    ;test "jnz"
+0149   0036 CD 0A 05            call    cpuer
+0150   0039 DA 42 00    j070:   jc      j080    ;test "jc"
+0151   003C E2 42 00            jpo     j080    ;test "jpo"
+0152   003F F2 45 00            jp      j090    ;test "jp"
+0153   0042 CD 0A 05    j080:   call    cpuer
+0154   0045 C6 70       j090:   adi     70H     ;a=76h,c=0,p=0,s=0,z=0
+0155   0047 E2 4D 00            jpo     j100    ;test "jpo"
+0156   004A CD 0A 05            call    cpuer
+0157   004D FA 56 00    j100:   jm      j110    ;test "jm"
+0158   0050 CA 56 00            jz      j110    ;test "jz"
+0159   0053 D2 59 00            jnc     j120    ;test "jnc"
+0160   0056 CD 0A 05    j110:   call    cpuer
+0161   0059 C6 81       j120:   adi     81H     ;a=f7h,c=0,p=0,s=1,z=0
+0162   005B FA 61 00            jm      j130    ;test "jm"
+0163   005E CD 0A 05            call    cpuer
+0164   0061 CA 6A 00    j130:   jz      j140    ;test "jz"
+0165   0064 DA 6A 00            jc      j140    ;test "jc"
+0166   0067 E2 6D 00            jpo     j150    ;test "jpo"
+0167   006A CD 0A 05    j140:   call    cpuer
+0168   006D C6 FE       j150:   adi     0feH    ;a=f5h,c=1,p=1,s=1,z=0
+0169   006F DA 75 00            jc      j160    ;test "jc"
+0170   0072 CD 0A 05            call    cpuer
+0171   0075 CA 7E 00    j160:   jz      j170    ;test "jz"
+0172   0078 E2 7E 00            jpo     j170    ;test "jpo"
+0173   007B FA 81 00            jm      aimm    ;test "jm"
+0174   007E CD 0A 05    j170:   call    cpuer
+0175   0081             ;
+0176   0081             ;
+0177   0081             ;
+0178   0081             ;test accumulator immediate instructions
+0179   0081             ;
+0180   0081 FE 00       aimm:   cpi     0       ;a=f5h,c=0,z=0
+0181   0083 DA 99 00            jc      cpie    ;test "cpi" for re-set carry
+0182   0086 CA 99 00            jz      cpie    ;test "cpi" for re-set zero
+0183   0089 FE F5               cpi     0f5H    ;a=f5h,c=0,z=1
+0184   008B DA 99 00            jc      cpie    ;test "cpi" for re-set carry ("adi")
+0185   008E C2 99 00            jnz     cpie    ;test "cpi" for re-set zero
+0186   0091 FE FF               cpi     0ffH    ;a=f5h,c=1,z=0
+0187   0093 CA 99 00            jz      cpie    ;test "cpi" for re-set zero
+0188   0096 DA 9C 00            jc      acii    ;test "cpi" for set carry
+0189   0099 CD 0A 05    cpie:   call    cpuer
+0190   009C CE 0A       acii:   aci     00aH    ;a=f5h+0ah+carry(1)=0,c=1
+0191   009E CE 0A               aci     00aH    ;a=0+0ah+carry(0)=0bh,c=0
+0192   00A0 FE 0B               cpi     00bH
+0193   00A2 CA A8 00            jz      suii    ;test "aci"
+0194   00A5 CD 0A 05            call    cpuer
+0195   00A8 D6 0C       suii:   sui     00cH    ;a=ffh,c=0
+0196   00AA D6 0F               sui     00fH    ;a=f0h,c=1
+0197   00AC FE F0               cpi     0f0H
+0198   00AE CA B4 00            jz      sbii    ;test "sui"
+0199   00B1 CD 0A 05            call    cpuer
+0200   00B4 DE F1       sbii:   sbi     0f1H    ;a=f0h-0f1h-carry(0)=ffh,c=1
+0201   00B6 DE 0E               sbi     0eH    ;a=ffh-oeh-carry(1)=f0h,c=0
+0202   00B8 FE F0               cpi     0f0H
+0203   00BA CA C0 00            jz      anii    ;test "sbi"
+0204   00BD CD 0A 05            call    cpuer
+0205   00C0 E6 55       anii:   ani     055H    ;a=f0h<and>55h=50h,c=0,p=1,s=0,z=0
+0206   00C2 DC 0A 05            cc      cpuer
+0207   00C5 CC 0A 05            cz      cpuer
+0208   00C8 FE 50               cpi     050H
+0209   00CA CA D0 00            jz      orii    ;test "ani"
+0210   00CD CD 0A 05            call    cpuer
+0211   00D0 F6 3A       orii:   ori     03aH    ;a=50h<or>3ah=7ah,c=0,p=0,s=0,z=0
+0212   00D2 DC 0A 05            cc      cpuer
+0213   00D5 CC 0A 05            cz      cpuer
+0214   00D8 FE 7A               cpi     07aH
+0215   00DA CA E0 00            jz      xrii    ;test "ori"
+0216   00DD CD 0A 05            call    cpuer
+0217   00E0 EE 0F       xrii:   xri     00fH    ;a=7ah<xor>0fh=75h,c=0,p=0,s=0,z=0
+0218   00E2 DC 0A 05            cc      cpuer
+0219   00E5 CC 0A 05            cz      cpuer
+0220   00E8 FE 75               cpi     075H
+0221   00EA CA F0 00            jz      c010    ;test "xri"
+0222   00ED CD 0A 05            call    cpuer
+0223   00F0             ;
+0224   00F0             ;
+0225   00F0             ;
+0226   00F0             ;test calls and returns
+0227   00F0             ;
+0228   00F0 E6 00       c010:   ani     0H      ;a=0,c=0,p=1,s=0,z=1
+0229   00F2 DC 0A 05            cc      cpuer   ;test "cc"
+0230   00F5 E4 0A 05            cpo     cpuer   ;test "cpo"
+0231   00F8 FC 0A 05            cm      cpuer   ;test "cm"
+0232   00FB C4 0A 05            cnz     cpuer   ;test "cnz"
+0233   00FE FE 00               cpi     0H
+0234   0100 CA 06 01            jz      c020    ;a=0,c=0,p=0,s=0,z=1
+0235   0103 CD 0A 05            call    cpuer
+0236   0106 D6 77       c020:   sui     077H    ;a=89h,c=1,p=0,s=1,z=0
+0237   0108 D4 0A 05            cnc     cpuer   ;test "cnc"
+0238   010B EC 0A 05            cpe     cpuer   ;test "cpe"
+0239   010E F4 0A 05            cp      cpuer   ;test "cp"
+0240   0111 CC 0A 05            cz      cpuer   ;test "cz"
+0241   0114 FE 89               cpi     089H
+0242   0116 CA 1C 01            jz      c030    ;test for "calls" taking branch
+0243   0119 CD 0A 05            call    cpuer
+0244   011C E6 FF       c030:   ani     0ffH    ;set flags back;
+0245   011E E4 29 01            cpo     cpoi    ;test "cpo"
+0246   0121 FE D9               cpi     0d9H
+0247   0123 CA 86 01            jz      movi    ;test "call" sequence success
+0248   0126 CD 0A 05            call    cpuer
+0249   0129 E8          cpoi:   rpe             ;test "rpe"
+0250   012A C6 10               adi     010H    ;a=99h,c=0,p=0,s=1,z=0
+0251   012C EC 35 01            cpe     cpei    ;test "cpe"
+0252   012F C6 02               adi     002H    ;a=d9h,c=0,p=0,s=1,z=0
+0253   0131 E0                  rpo             ;test "rpo"
+0254   0132 CD 0A 05            call    cpuer
+0255   0135 E0          cpei:   rpo             ;test "rpo"
+0256   0136 C6 20               adi     020H    ;a=b9h,c=0,p=0,s=1,z=0
+0257   0138 FC 41 01            cm      cmi     ;test "cm"
+0258   013B C6 04               adi     004H    ;a=d7h,c=0,p=1,s=1,z=0
+0259   013D E8                  rpe             ;test "rpe"
+0260   013E CD 0A 05            call    cpuer
+0261   0141 F0          cmi:    rp              ;test "rp"
+0262   0142 C6 80               adi     080H    ;a=39h,c=1,p=1,s=0,z=0
+0263   0144 F4 4D 01            cp      tcpi    ;test "cp"
+0264   0147 C6 80               adi     080H    ;a=d3h,c=0,p=0,s=1,z=0
+0265   0149 F8                  rm              ;test "rm"
+0266   014A CD 0A 05            call    cpuer
+0267   014D F8          tcpi:   rm              ;test "rm"
+0268   014E C6 40               adi     040H    ;a=79h,c=0,p=0,s=0,z=0
+0269   0150 D4 59 01            cnc     cnci    ;test "cnc"
+0270   0153 C6 40               adi     040H    ;a=53h,c=0,p=1,s=0,z=0
+0271   0155 F0                  rp              ;test "rp"
+0272   0156 CD 0A 05            call    cpuer
+0273   0159 D8          cnci:   rc              ;test "rc"
+0274   015A C6 8F               adi     08fH    ;a=08h,c=1,p=0,s=0,z=0
+0275   015C DC 65 01            cc      cci     ;test "cc"
+0276   015F D6 02               sui     002H    ;a=13h,c=0,p=0,s=0,z=0
+0277   0161 D0                  rnc             ;test "rnc"
+0278   0162 CD 0A 05            call    cpuer
+0279   0165 D0          cci:    rnc             ;test "rnc"
+0280   0166 C6 F7               adi     0f7H    ;a=ffh,c=0,p=1,s=1,z=0
+0281   0168 C4 71 01            cnz     cnzi    ;test "cnz"
+0282   016B C6 FE               adi     0feH    ;a=15h,c=1,p=0,s=0,z=0
+0283   016D D8                  rc              ;test "rc"
+0284   016E CD 0A 05            call    cpuer
+0285   0171 C8          cnzi:   rz              ;test "rz"
+0286   0172 C6 01               adi     001H    ;a=00h,c=1,p=1,s=0,z=1
+0287   0174 CC 7D 01            cz      czi     ;test "cz"
+0288   0177 C6 D0               adi     0d0H    ;a=17h,c=1,p=1,s=0,z=0
+0289   0179 C0                  rnz             ;test "rnz"
+0290   017A CD 0A 05            call    cpuer
+0291   017D C0          czi:    rnz             ;test "rnz"
+0292   017E C6 47               adi     047H    ;a=47h,c=0,p=1,s=0,z=0
+0293   0180 FE 47               cpi     047H    ;a=47h,c=0,p=1,s=0,z=1
+0294   0182 C8                  rz              ;test "rz"
+0295   0183 CD 0A 05            call    cpuer
+0296   0186             ;
+0297   0186             ;
+0298   0186             ;
+0299   0186             ;test "mov","inr",and "dcr" instructions
+0300   0186             ;
+0301   0186 3E 77       movi:   mvi     a,077H
+0302   0188 3C                  inr     a
+0303   0189 47                  mov     b,a
+0304   018A 04                  inr     b
+0305   018B 48                  mov     c,b
+0306   018C 0D                  dcr     c
+0307   018D 51                  mov     d,c
+0308   018E 5A                  mov     e,d
+0309   018F 63                  mov     h,e
+0310   0190 6C                  mov     l,h
+0311   0191 7D                  mov     a,l     ;test "mov" a,l,h,e,d,c,b,a
+0312   0192 3D                  dcr     a
+0313   0193 4F                  mov     c,a
+0314   0194 59                  mov     e,c
+0315   0195 6B                  mov     l,e
+0316   0196 45                  mov     b,l
+0317   0197 50                  mov     d,b
+0318   0198 62                  mov     h,d
+0319   0199 7C                  mov     a,h     ;test "mov" a,h,d,b,l,e,c,a
+0320   019A 57                  mov     d,a
+0321   019B 14                  inr     d
+0322   019C 6A                  mov     l,d
+0323   019D 4D                  mov     c,l
+0324   019E 0C                  inr     c
+0325   019F 61                  mov     h,c
+0326   01A0 44                  mov     b,h
+0327   01A1 05                  dcr     b
+0328   01A2 58                  mov     e,b
+0329   01A3 7B                  mov     a,e     ;test "mov" a,e,b,h,c,l,d,a
+0330   01A4 5F                  mov     e,a
+0331   01A5 1C                  inr     e
+0332   01A6 43                  mov     b,e
+0333   01A7 60                  mov     h,b
+0334   01A8 24                  inr     h
+0335   01A9 4C                  mov     c,h
+0336   01AA 69                  mov     l,c
+0337   01AB 55                  mov     d,l
+0338   01AC 15                  dcr     d
+0339   01AD 7A                  mov     a,d     ;test "mov" a,d,l,c,h,b,e,a
+0340   01AE 67                  mov     h,a
+0341   01AF 25                  dcr     h
+0342   01B0 54                  mov     d,h
+0343   01B1 42                  mov     b,d
+0344   01B2 68                  mov     l,b
+0345   01B3 2C                  inr     l
+0346   01B4 5D                  mov     e,l
+0347   01B5 1D                  dcr     e
+0348   01B6 4B                  mov     c,e
+0349   01B7 79                  mov     a,c     ;test "mov" a,c,e,l,b,d,h,a
+0350   01B8 6F                  mov     l,a
+0351   01B9 2D                  dcr     l
+0352   01BA 65                  mov     h,l
+0353   01BB 5C                  mov     e,h
+0354   01BC 53                  mov     d,e
+0355   01BD 4A                  mov     c,d
+0356   01BE 41                  mov     b,c
+0357   01BF 78                  mov     a,b
+0358   01C0 FE 77               cpi     077H
+0359   01C2 C4 0A 05            cnz     cpuer   ;test "mov" a,b,c,d,e,h,l,a
+0360   01C5             ;
+0361   01C5             ;
+0362   01C5             ;
+0363   01C5             ;test arithmetic and logic instructions
+0364   01C5             ;
+0365   01C5 AF                  xra     a
+0366   01C6 06 01               mvi     b,001H
+0367   01C8 0E 03               mvi     c,003H
+0368   01CA 16 07               mvi     d,007H
+0369   01CC 1E 0F               mvi     e,00fH
+0370   01CE 26 1F               mvi     h,01fH
+0371   01D0 2E 3F               mvi     l,03fH
+0372   01D2 80                  add     b
+0373   01D3 81                  add     c
+0374   01D4 82                  add     d
+0375   01D5 83                  add     e
+0376   01D6 84                  add     h
+0377   01D7 85                  add     l
+0378   01D8 87                  add     a
+0379   01D9 FE F0               cpi     0f0H
+0380   01DB C4 0A 05            cnz     cpuer   ;test "add" b,c,d,e,h,l,a
+0381   01DE 90                  sub     b
+0382   01DF 91                  sub     c
+0383   01E0 92                  sub     d
+0384   01E1 93                  sub     e
+0385   01E2 94                  sub     h
+0386   01E3 95                  sub     l
+0387   01E4 FE 78               cpi     078H
+0388   01E6 C4 0A 05            cnz     cpuer   ;test "sub" b,c,d,e,h,l
+0389   01E9 97                  sub     a
+0390   01EA C4 0A 05            cnz     cpuer   ;test "sub" a
+0391   01ED 3E 80               mvi     a,080H
+0392   01EF 87                  add     a
+0393   01F0 06 01               mvi     b,001H
+0394   01F2 0E 02               mvi     c,002H
+0395   01F4 16 03               mvi     d,003H
+0396   01F6 1E 04               mvi     e,004H
+0397   01F8 26 05               mvi     h,005H
+0398   01FA 2E 06               mvi     l,006H
+0399   01FC 88                  adc     b
+0400   01FD 06 80               mvi     b,080H
+0401   01FF 80                  add     b
+0402   0200 80                  add     b
+0403   0201 89                  adc     c
+0404   0202 80                  add     b
+0405   0203 80                  add     b
+0406   0204 8A                  adc     d
+0407   0205 80                  add     b
+0408   0206 80                  add     b
+0409   0207 8B                  adc     e
+0410   0208 80                  add     b
+0411   0209 80                  add     b
+0412   020A 8C                  adc     h
+0413   020B 80                  add     b
+0414   020C 80                  add     b
+0415   020D 8D                  adc     l
+0416   020E 80                  add     b
+0417   020F 80                  add     b
+0418   0210 8F                  adc     a
+0419   0211 FE 37               cpi     037H
+0420   0213 C4 0A 05            cnz     cpuer   ;test "adc" b,c,d,e,h,l,a
+0421   0216 3E 80               mvi     a,080H
+0422   0218 87                  add     a
+0423   0219 06 01               mvi     b,001H
+0424   021B 98                  sbb     b
+0425   021C 06 FF               mvi     b,0ffH
+0426   021E 80                  add     b
+0427   021F 99                  sbb     c
+0428   0220 80                  add     b
+0429   0221 9A                  sbb     d
+0430   0222 80                  add     b
+0431   0223 9B                  sbb     e
+0432   0224 80                  add     b
+0433   0225 9C                  sbb     h
+0434   0226 80                  add     b
+0435   0227 9D                  sbb     l
+0436   0228 FE E0               cpi     0e0H
+0437   022A C4 0A 05            cnz     cpuer   ;test "sbb" b,c,d,e,h,l
+0438   022D 3E 80               mvi     a,080H
+0439   022F 87                  add     a
+0440   0230 9F                  sbb     a
+0441   0231 FE FF               cpi     0ffH
+0442   0233 C4 0A 05            cnz     cpuer   ;test "sbb" a
+0443   0236 3E FF               mvi     a,0ffH
+0444   0238 06 FE               mvi     b,0feH
+0445   023A 0E FC               mvi     c,0fcH
+0446   023C 16 EF               mvi     d,0efH
+0447   023E 1E 7F               mvi     e,07fH
+0448   0240 26 F4               mvi     h,0f4H
+0449   0242 2E BF               mvi     l,0bfH
+0450   0244 37                  stc
+0451   0245 A7                  ana     a
+0452   0246 DC 0A 05            cc      cpuer 
+0453   0249 A1                  ana     c
+0454   024A A2                  ana     d
+0455   024B A3                  ana     e
+0456   024C A4                  ana     h
+0457   024D A5                  ana     l
+0458   024E A7                  ana     a
+0459   024F FE 24               cpi     024H
+0460   0251 C4 0A 05            cnz     cpuer   ;test "ana" b,c,d,e,h,l,a
+0461   0254 AF                  xra     a
+0462   0255 06 01               mvi     b,001H
+0463   0257 0E 02               mvi     c,002H
+0464   0259 16 04               mvi     d,004H
+0465   025B 1E 08               mvi     e,008H
+0466   025D 26 10               mvi     h,010H
+0467   025F 2E 20               mvi     l,020H
+0468   0261 37                  stc
+0469   0262 B0                  ora     b
+0470   0263 DC 0A 05            cc      cpuer
+0471   0266 B1                  ora     c
+0472   0267 B2                  ora     d
+0473   0268 B3                  ora     e
+0474   0269 B4                  ora     h
+0475   026A B5                  ora     l
+0476   026B B7                  ora     a
+0477   026C FE 3F               cpi     03fH
+0478   026E C4 0A 05            cnz     cpuer   ;test "ora" b,c,d,e,h,l,a
+0479   0271 3E 00               mvi     a,0H
+0480   0273 26 8F               mvi     h,08fH
+0481   0275 2E 4F               mvi     l,04fH
+0482   0277 37                  stc
+0483   0278 A8                  xra     b
+0484   0279 DC 0A 05            cc      cpuer
+0485   027C A9                  xra     c
+0486   027D AA                  xra     d
+0487   027E AB                  xra     e
+0488   027F AC                  xra     h
+0489   0280 AD                  xra     l
+0490   0281 FE CF               cpi     0cfH
+0491   0283 C4 0A 05            cnz     cpuer   ;test "xra" b,c,d,e,h,l
+0492   0286 AF                  xra     a
+0493   0287 C4 0A 05            cnz     cpuer   ;test "xra" a
+0494   028A 06 44               mvi     b,044H
+0495   028C 0E 45               mvi     c,045H
+0496   028E 16 46               mvi     d,046H
+0497   0290 1E 47               mvi     e,047H
+0498   0292 26 05               mvi     h,temp0 / 0ffH        ;high byte of test memory location
+0499   0294 2E 16               mvi     l,temp0 & 0ffH        ;low byte of test memory location
+0500   0296 70                  mov     m,b
+0501   0297 06 00               mvi     b,0H
+0502   0299 46                  mov     b,m
+0503   029A 3E 44               mvi     a,044H
+0504   029C B8                  cmp     b
+0505   029D C4 0A 05            cnz     cpuer   ;test "mov" m,b and b,m
+0506   02A0 72                  mov     m,d
+0507   02A1 16 00               mvi     d,0H
+0508   02A3 56                  mov     d,m
+0509   02A4 3E 46               mvi     a,046H
+0510   02A6 BA                  cmp     d
+0511   02A7 C4 0A 05            cnz     cpuer   ;test "mov" m,d and d,m
+0512   02AA 73                  mov     m,e
+0513   02AB 1E 00               mvi     e,0H
+0514   02AD 5E                  mov     e,m
+0515   02AE 3E 47               mvi     a,047H
+0516   02B0 BB                  cmp     e
+0517   02B1 C4 0A 05            cnz     cpuer   ;test "mov" m,e and e,m
+0518   02B4 74                  mov     m,h
+0519   02B5 26 05               mvi     h,temp0 / 0ffH
+0520   02B7 2E 16               mvi     l,temp0 & 0ffH
+0521   02B9 66                  mov     h,m
+0522   02BA 3E 05               mvi     a,temp0 / 0ffH
+0523   02BC BC                  cmp     h
+0524   02BD C4 0A 05            cnz     cpuer   ;test "mov" m,h and h,m
+0525   02C0 75                  mov     m,l
+0526   02C1 26 05               mvi     h,temp0 / 0ffH
+0527   02C3 2E 16               mvi     l,temp0 & 0ffH
+0528   02C5 6E                  mov     l,m
+0529   02C6 3E 16               mvi     a,temp0 & 0ffH
+0530   02C8 BD                  cmp     l
+0531   02C9 C4 0A 05            cnz     cpuer   ;test "mov" m,l and l,m
+0532   02CC 26 05               mvi     h,temp0 / 0ffH
+0533   02CE 2E 16               mvi     l,temp0 & 0ffH
+0534   02D0 3E 32               mvi     a,032H
+0535   02D2 77                  mov     m,a
+0536   02D3 BE                  cmp     m
+0537   02D4 C4 0A 05            cnz     cpuer   ;test "mov" m,a
+0538   02D7 86                  add     m
+0539   02D8 FE 64               cpi     064H
+0540   02DA C4 0A 05            cnz     cpuer   ;test "add" m
+0541   02DD AF                  xra     a
+0542   02DE 7E                  mov     a,m
+0543   02DF FE 32               cpi     032H
+0544   02E1 C4 0A 05            cnz     cpuer   ;test "mov" a,m
+0545   02E4 26 05               mvi     h,temp0 / 0ffH
+0546   02E6 2E 16               mvi     l,temp0 & 0ffH
+0547   02E8 7E                  mov     a,m
+0548   02E9 96                  sub     m
+0549   02EA C4 0A 05            cnz     cpuer   ;test "sub" m
+0550   02ED 3E 80               mvi     a,080H
+0551   02EF 87                  add     a
+0552   02F0 8E                  adc     m
+0553   02F1 FE 33               cpi     033H
+0554   02F3 C4 0A 05            cnz     cpuer   ;test "adc" m
+0555   02F6 3E 80               mvi     a,080H
+0556   02F8 87                  add     a
+0557   02F9 9E                  sbb     m
+0558   02FA FE CD               cpi     0cdH
+0559   02FC C4 0A 05            cnz     cpuer   ;test "sbb" m
+0560   02FF 37                  stc
+0561   0300 A6                  ana     m
+0562   0301 DC 0A 05            cc      cpuer
+0563   0304 C4 0A 05            cnz     cpuer   ;test "ana" m
+0564   0307 3E 25               mvi     a,025H
+0565   0309 37                  stc
+0566   030A B6                  ora     m
+0567   030B DC 0A 05            cc      cpuer
+0568   030E FE 37               cpi     37H
+0569   0310 C4 0A 05            cnz     cpuer   ;test "ora" m
+0570   0313 37                  stc
+0571   0314 AE                  xra     m
+0572   0315 DC 0A 05            cc      cpuer
+0573   0318 FE 05               cpi     005H
+0574   031A C4 0A 05            cnz     cpuer   ;test "xra" m
+0575   031D 36 55               mvi     m,055H
+0576   031F 34                  inr     m
+0577   0320 35                  dcr     m
+0578   0321 86                  add     m
+0579   0322 FE 5A               cpi     05aH
+0580   0324 C4 0A 05            cnz     cpuer   ;test "inr","dcr",and "mvi" m
+0581   0327 01 FF 12            lxi     b,12ffH
+0582   032A 11 FF 12            lxi     d,12ffH
+0583   032D 21 FF 12            lxi     h,12ffH
+0584   0330 03                  inx     b
+0585   0331 13                  inx     d
+0586   0332 23                  inx     h
+0587   0333 3E 13               mvi     a,013H
+0588   0335 B8                  cmp     b
+0589   0336 C4 0A 05            cnz     cpuer   ;test "lxi" and "inx" b
+0590   0339 BA                  cmp     d
+0591   033A C4 0A 05            cnz     cpuer   ;test "lxi" and "inx" d
+0592   033D BC                  cmp     h
+0593   033E C4 0A 05            cnz     cpuer   ;test "lxi" and "inx" h
+0594   0341 3E 00               mvi     a,0H
+0595   0343 B9                  cmp     c
+0596   0344 C4 0A 05            cnz     cpuer   ;test "lxi" and "inx" b
+0597   0347 BB                  cmp     e
+0598   0348 C4 0A 05            cnz     cpuer   ;test "lxi" and "inx" d
+0599   034B BD                  cmp     l
+0600   034C C4 0A 05            cnz     cpuer   ;test "lxi" and "inx" h
+0601   034F 0B                  dcx     b
+0602   0350 1B                  dcx     d
+0603   0351 2B                  dcx     h
+0604   0352 3E 12               mvi     a,012H
+0605   0354 B8                  cmp     b
+0606   0355 C4 0A 05            cnz     cpuer   ;test "dcx" b
+0607   0358 BA                  cmp     d
+0608   0359 C4 0A 05            cnz     cpuer   ;test "dcx" d
+0609   035C BC                  cmp     h
+0610   035D C4 0A 05            cnz     cpuer   ;test "dcx" h
+0611   0360 3E FF               mvi     a,0ffH
+0612   0362 B9                  cmp     c
+0613   0363 C4 0A 05            cnz     cpuer   ;test "dcx" b
+0614   0366 BB                  cmp     e
+0615   0367 C4 0A 05            cnz     cpuer   ;test "dcx" d
+0616   036A BD                  cmp     l
+0617   036B C4 0A 05            cnz     cpuer   ;test "dcx" h
+0618   036E 32 16 05            sta     temp0
+0619   0371 AF                  xra     a
+0620   0372 3A 16 05            lda     temp0
+0621   0375 FE FF               cpi     0ffH
+0622   0377 C4 0A 05            cnz     cpuer   ;test "lda" and "sta"
+0623   037A 2A 14 05            lhld    tempp
+0624   037D 22 16 05            shld    temp0
+0625   0380 3A 14 05            lda     tempp
+0626   0383 47                  mov     b,a
+0627   0384 3A 16 05            lda     temp0
+0628   0387 B8                  cmp     b
+0629   0388 C4 0A 05            cnz     cpuer   ;test "lhld" and "shld"
+0630   038B 3A 15 05            lda     tempp+1
+0631   038E 47                  mov     b,a
+0632   038F 3A 17 05            lda     temp0+1
+0633   0392 B8                  cmp     b
+0634   0393 C4 0A 05            cnz     cpuer   ;test "lhld" and "shld"
+0635   0396 3E AA               mvi     a,0aaH
+0636   0398 32 16 05            sta     temp0
+0637   039B 44                  mov     b,h
+0638   039C 4D                  mov     c,l
+0639   039D AF                  xra     a
+0640   039E 0A                  ldax    b
+0641   039F FE AA               cpi     0aaH
+0642   03A1 C4 0A 05            cnz     cpuer   ;test "ldax" b
+0643   03A4 3C                  inr     a
+0644   03A5 02                  stax    b
+0645   03A6 3A 16 05            lda     temp0
+0646   03A9 FE AB               cpi     0abH
+0647   03AB C4 0A 05            cnz     cpuer   ;test "stax" b
+0648   03AE 3E 77               mvi     a,077H
+0649   03B0 32 16 05            sta     temp0
+0650   03B3 2A 14 05            lhld    tempp
+0651   03B6 11 00 00            lxi     d,00000H
+0652   03B9 EB                  xchg
+0653   03BA AF                  xra     a
+0654   03BB 1A                  ldax    d
+0655   03BC FE 77               cpi     077H
+0656   03BE C4 0A 05            cnz     cpuer   ;test "ldax" d and "xchg"
+0657   03C1 AF                  xra     a
+0658   03C2 84                  add     h
+0659   03C3 85                  add     l
+0660   03C4 C4 0A 05            cnz     cpuer   ;test "xchg"
+0661   03C7 3E CC               mvi     a,0ccH
+0662   03C9 12                  stax    d
+0663   03CA 3A 16 05            lda     temp0
+0664   03CD FE CC               cpi     0ccH
+0665   03CF 12                  stax    d
+0666   03D0 3A 16 05            lda     temp0
+0667   03D3 FE CC               cpi     0ccH
+0668   03D5 C4 0A 05            cnz     cpuer   ;test "stax" d
+0669   03D8 21 77 77            lxi     h,07777H
+0670   03DB 29                  dad     h
+0671   03DC 3E EE               mvi     a,0eeH
+0672   03DE BC                  cmp     h
+0673   03DF C4 0A 05            cnz     cpuer   ;test "dad" h
+0674   03E2 BD                  cmp     l
+0675   03E3 C4 0A 05            cnz     cpuer   ;test "dad" h
+0676   03E6 21 55 55            lxi     h,05555H
+0677   03E9 01 FF FF            lxi     b,0ffffH
+0678   03EC 09                  dad     b
+0679   03ED 3E 55               mvi     a,055H
+0680   03EF D4 0A 05            cnc     cpuer   ;test "dad" b
+0681   03F2 BC                  cmp     h
+0682   03F3 C4 0A 05            cnz     cpuer   ;test "dad" b
+0683   03F6 3E 54               mvi     a,054H
+0684   03F8 BD                  cmp     l
+0685   03F9 C4 0A 05            cnz     cpuer   ;test "dad" b
+0686   03FC 21 AA AA            lxi     h,0aaaaH
+0687   03FF 11 33 33            lxi     d,03333H
+0688   0402 19                  dad     d
+0689   0403 3E DD               mvi     a,0ddH
+0690   0405 BC                  cmp     h
+0691   0406 C4 0A 05            cnz     cpuer   ;test "dad" d
+0692   0409 BD                  cmp     l
+0693   040A C4 0A 05            cnz     cpuer   ;test "dad" b
+0694   040D 37                  stc
+0695   040E D4 0A 05            cnc     cpuer   ;test "stc"
+0696   0411 3F                  cmc
+0697   0412 DC 0A 05            cc      cpuer   ;test "cmc
+0698   0415 3E AA               mvi     a,0aaH
+0699   0417 2F                  cma     
+0700   0418 FE 55               cpi     055H
+0701   041A C4 0A 05            cnz     cpuer   ;test "cma"
+0702   041D B7                  ora     a       ;re-set auxiliary carry
+0703   041E 27                  daa
+0704   041F FE 55               cpi     055H
+0705   0421 C4 0A 05            cnz     cpuer   ;test "daa"
+0706   0424 3E 88               mvi     a,088H
+0707   0426 87                  add     a
+0708   0427 27                  daa
+0709   0428 FE 76               cpi     076H
+0710   042A C4 0A 05            cnz     cpuer   ;test "daa"
+0711   042D AF                  xra     a
+0712   042E 3E AA               mvi     a,0aaH
+0713   0430 27                  daa
+0714   0431 D4 0A 05            cnc     cpuer   ;test "daa"
+0715   0434 FE 10               cpi     010H
+0716   0436 C4 0A 05            cnz     cpuer   ;test "daa"
+0717   0439 AF                  xra     a
+0718   043A 3E 9A               mvi     a,09aH
+0719   043C 27                  daa
+0720   043D D4 0A 05            cnc     cpuer   ;test "daa"
+0721   0440 C4 0A 05            cnz     cpuer   ;test "daa"
+0722   0443 37                  stc
+0723   0444 3E 42               mvi     a,042H
+0724   0446 07                  rlc
+0725   0447 DC 0A 05            cc      cpuer   ;test "rlc" for re-set carry
+0726   044A 07                  rlc
+0727   044B D4 0A 05            cnc     cpuer   ;test "rlc" for set carry
+0728   044E FE 09               cpi     009H
+0729   0450 C4 0A 05            cnz     cpuer   ;test "rlc" for rotation
+0730   0453 0F                  rrc
+0731   0454 D4 0A 05            cnc     cpuer   ;test "rrc" for set carry
+0732   0457 0F                  rrc
+0733   0458 FE 42               cpi     042H
+0734   045A C4 0A 05            cnz     cpuer   ;test "rrc" for rotation
+0735   045D 17                  ral
+0736   045E 17                  ral
+0737   045F D4 0A 05            cnc     cpuer   ;test "ral" for set carry
+0738   0462 FE 08               cpi     008H
+0739   0464 C4 0A 05            cnz     cpuer   ;test "ral" for rotation
+0740   0467 1F                  rar
+0741   0468 1F                  rar
+0742   0469 DC 0A 05            cc      cpuer   ;test "rar" for re-set carry
+0743   046C FE 02               cpi     002H
+0744   046E C4 0A 05            cnz     cpuer   ;test "rar" for rotation
+0745   0471 01 34 12            lxi     b,01234H
+0746   0474 11 AA AA            lxi     d,0aaaaH
+0747   0477 21 55 55            lxi     h,05555H
+0748   047A AF                  xra     a
+0749   047B C5                  push    b
+0750   047C D5                  push    d
+0751   047D E5                  push    h
+0752   047E F5                  push    psw
+0753   047F 01 00 00            lxi     b,00000H
+0754   0482 11 00 00            lxi     d,00000H
+0755   0485 21 00 00            lxi     h,00000H
+0756   0488 3E C0               mvi     a,0c0H
+0757   048A C6 F0               adi     0f0H
+0758   048C F1                  pop     psw
+0759   048D E1                  pop     h
+0760   048E D1                  pop     d
+0761   048F C1                  pop     b
+0762   0490 DC 0A 05            cc      cpuer   ;test "push psw" and "pop psw"
+0763   0493 C4 0A 05            cnz     cpuer   ;test "push psw" and "pop psw"
+0764   0496 E4 0A 05            cpo     cpuer   ;test "push psw" and "pop psw"
+0765   0499 FC 0A 05            cm      cpuer   ;test "push psw" and "pop psw"
+0766   049C 3E 12               mvi     a,012H
+0767   049E B8                  cmp     b
+0768   049F C4 0A 05            cnz     cpuer   ;test "push b" and "pop b"
+0769   04A2 3E 34               mvi     a,034H
+0770   04A4 B9                  cmp     c
+0771   04A5 C4 0A 05            cnz     cpuer   ;test "push b" and "pop b"
+0772   04A8 3E AA               mvi     a,0aaH
+0773   04AA BA                  cmp     d
+0774   04AB C4 0A 05            cnz     cpuer   ;test "push d" and "pop d"
+0775   04AE BB                  cmp     e
+0776   04AF C4 0A 05            cnz     cpuer   ;test "push d" and "pop d"
+0777   04B2 3E 55               mvi     a,055H
+0778   04B4 BC                  cmp     h
+0779   04B5 C4 0A 05            cnz     cpuer   ;test "push h" and "pop h"
+0780   04B8 BD                  cmp     l
+0781   04B9 C4 0A 05            cnz     cpuer   ;test "push h" and "pop h"
+0782   04BC 21 00 00            lxi     h,00000H
+0783   04BF 39                  dad     sp
+0784   04C0 22 1B 05            shld    savstk  ;save the "old" stack-pointer;
+0785   04C3 31 1A 05            lxi     sp,temp4
+0786   04C6 3B                  dcx     sp
+0787   04C7 3B                  dcx     sp
+0788   04C8 33                  inx     sp
+0789   04C9 3B                  dcx     sp
+0790   04CA 3E 55               mvi     a,055H
+0791   04CC 32 18 05            sta     temp2
+0792   04CF 2F                  cma
+0793   04D0 32 19 05            sta     temp3
+0794   04D3 C1                  pop     b
+0795   04D4 B8                  cmp     b
+0796   04D5 C4 0A 05            cnz     cpuer   ;test "lxi","dad","inx",and "dcx" sp
+0797   04D8 2F                  cma
+0798   04D9 B9                  cmp     c
+0799   04DA C4 0A 05            cnz     cpuer   ;test "lxi","dad","inx", and "dcx" sp
+0800   04DD 21 1A 05            lxi     h,temp4
+0801   04E0 F9                  sphl
+0802   04E1 21 33 77            lxi     h,07733H
+0803   04E4 3B                  dcx     sp
+0804   04E5 3B                  dcx     sp
+0805   04E6 E3                  xthl
+0806   04E7 3A 19 05            lda     temp3
+0807   04EA FE 77               cpi     077H
+0808   04EC C4 0A 05            cnz     cpuer   ;test "sphl" and "xthl"
+0809   04EF 3A 18 05            lda     temp2
+0810   04F2 FE 33               cpi     033H
+0811   04F4 C4 0A 05            cnz     cpuer   ;test "sphl" and "xthl"
+0812   04F7 3E 55               mvi     a,055H
+0813   04F9 BD                  cmp     l
+0814   04FA C4 0A 05            cnz     cpuer   ;test "sphl" and "xthl"
+0815   04FD 2F                  cma
+0816   04FE BC                  cmp     h
+0817   04FF C4 0A 05            cnz     cpuer   ;test "sphl" and "xthl"
+0818   0502 2A 1B 05            lhld    savstk  ;restore the "old" stack-pointer
+0819   0505 F9                  sphl
+0820   0506 21 0F 05            lxi     h,cpuok
+0821   0509 E9                  pchl            ;test "pchl"
+0822   050A             
+0823   050A 3E AA       cpuer:  mvi     a, 0aaH ; set exit code (failure)
+0824   050C D3 20               out     20h
+0825   050E 76                  hlt             ; stop here
+0826   050F             
+0827   050F 3E 55       cpuok:  mvi     a, 55H  ;
+0828   0511 D3 20               out     20h
+0829   0513 76                  hlt             ; stop here - no trap
+0830   0514             
+0831   0514             
+0832   0514             ;
+0833   0514             ; Data area in program space
+0834   0514             ;
+0835   0514 16 05       tempp:  .dw    temp0   ;pointer used to test "lhld","shld",
+0836   0516                                     ; and "ldax" instructions
+0837   0516             ;
+0838   0516             ; Data area in variable space
+0839   0516             ;
+0840   0516             temp0:  ds(1)       ;temporary storage for cpu test memory locations
+0840   0517             
+0841   0517             temp1:  ds(1)       ;temporary storage for cpu test memory locations
+0841   0518             
+0842   0518             temp2:  ds(1)       ;temporary storage for cpu test memory locations
+0842   0519             
+0843   0519             temp3:  ds(1)       ;temporary storage for cpu test memory locations
+0843   051A             
+0844   051A             temp4:  ds(1)       ;temporary storage for cpu test memory locations
+0844   051B             
+0845   051B             savstk: ds(2)       ;temporary stack-pointer storage location
+0845   051D             
+0846   051D             
+0847   051D                     ds(256)     ;de-bug stack pointer storage area
+0847   061D             
+0848   061D 00 00       stack:  .dw 0        
+0849   061F             
+0850   061F                     .end
+0851   061F                     
+tasm: Number of errors = 0

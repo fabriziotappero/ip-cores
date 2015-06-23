@@ -1,0 +1,1 @@
+perl uasm.pl ..\ucode\light8080.m80 -rom_vhdl > ..\ucode\rom.txt 

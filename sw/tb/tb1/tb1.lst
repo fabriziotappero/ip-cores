@@ -1,0 +1,249 @@
+0001   0000             ;*******************************************************************************
+0002   0000             ; tb1.asm -- light8080 core test bench 1: interrupt & halt test
+0003   0000             ;*******************************************************************************
+0004   0000             ; Should be used with test bench template vhdl\test\tb_template.vhdl
+0005   0000             ; Assembler format compatible with TASM for DOS and Linux.
+0006   0000             ;*******************************************************************************
+0007   0000             ; This program will test a few different interrupt vectors and the interrupt
+0008   0000             ; enable/disable flag, but not exhaustively. 
+0009   0000             ; Besides, it will not test long intr assertions (more than 1 cycle). 
+0010   0000             ;*******************************************************************************
+0011   0000             
+0012   0000             ; DS pseudo-directive; reserve space in bytes, without initializing it
+0013   0000             #define ds(n)    \.org $+n
+0014   0000             
+0015   0000             ; OUTing some value here will trigger intr in the n-th cycle from the end of 
+0016   0000             ; the 'out' instruction. For example, writing a 0 will trigger intr in the 1st 
+0017   0000             ; cycle of the following instruction, and so on.
+0018   0000             intr_trigger: .equ 11h
+0019   0000             ; The value OUTput to this address will be used as the 'interrupt source' when
+0020   0000             ; the intr line is asserted. In the inta acknowledge cycle, the simulated 
+0021   0000             ; interrupt logic will feed the CPU the instruction at memory address
+0022   0000             ; 40h+source*4. See vhdl\test\tb_template.vhdl for details.
+0023   0000             intr_source:  .equ 10h
+0024   0000             ; The value OUTput to this port is the number of cycles the intr signal will 
+0025   0000             ; remain high after being asserted. By default this is 1 cycle.
+0026   0000             intr_width:   .equ 12h
+0027   0000             ; OUTing something here will stop the simulation. A 0x055 will signal a 
+0028   0000             ; success, a 0x0aa a failure.
+0029   0000             test_outcome: .equ 20h
+0030   0000             
+0031   0000             ;*******************************************************************************
+0032   0000             
+0033   0000                     .org    0H
+0034   0000 C3 60 00            jmp     start           ; skip the rst address area
+0035   0003                     
+0036   0003                     ; used to test that RST works
+0037   0020                     .org    20H
+0038   0020 C6 01               adi     1H
+0039   0022 FB                  ei
+0040   0023 C9                  ret
+0041   0024                     
+0042   0024                     ; used to test the RST instruction as intr vector
+0043   0028                     .org    28H
+0044   0028 3C                  inr     a
+0045   0029 FB                  ei
+0046   002A C9                  ret
+0047   002B                             
+0048   002B                     ;***** simulated interrupt vectors in area 0040h-005fh *****************
+0049   002B                     
+0050   0040                     .org    40h+(0*4)       ; simulated interrupt vector 0 
+0051   0040 3C                  inr     a
+0052   0044                     .org    40h+(1*4)       ; simulated interrupt vector 1
+0053   0044 EF                  rst     5
+0054   0048                     .org    40h+(2*4)       ; simulated interrupt vector 2
+0055   0048 23                  inx     h
+0056   004C                     .org    40h+(3*4)       ; simulated interrupt vector 3
+0057   004C 3E 42               mvi     a,42h
+0058   0050                     .org    40h+(4*4)       ; simulated interrupt vector 4
+0059   0050 21 34 12            lxi     h,1234h
+0060   0054                     .org    40h+(5*4)       ; simulated interrupt vector 5
+0061   0054 C3 2F 01            jmp     test_jump
+0062   0058                     .org    40h+(6*4)       ; simulated interrupt vector 6
+0063   0058 CD 34 01            call    test_call
+0064   005C                     .org    40h+(7*4)       ; simulated interrupt vector 7
+0065   005C CD 37 01            call    shouldnt_trigger
+0066   005F                             
+0067   005F                     
+0068   005F                     ;***** program entry point *********************************************
+0069   005F                             
+0070   0060             start:  .org    60H
+0071   0060 31 7A 01            lxi     sp,stack
+0072   0063                     
+0073   0063                     ; first of all, make sure the RST instruction works, we have a valid
+0074   0063                     ; simulated stack, etc.
+0075   0063 3E 13               mvi     a,13h
+0076   0065 E7                  rst     4               ; this should add 1 to ACC
+0077   0066 FE 14               cpi     14h
+0078   0068 C2 2A 01            jnz     fail
+0079   006B                     
+0080   006B                     ; now we'll try a few different interrupt vectors (single byte and 
+0081   006B                     ; multi-byte). Since interrupts are disabled upon acknowledge, we have
+0082   006B                     ; to reenable them after every test.
+0083   006B                     
+0084   006B                     ; try single-byte interrupt vector: INR A
+0085   006B 3E 00               mvi     a,0
+0086   006D D3 10               out     intr_source
+0087   006F FB                  ei
+0088   0070 3E 14               mvi     a,014h
+0089   0072 D3 11               out     intr_trigger
+0090   0074 3E 27               mvi     a,027h
+0091   0076 00                  nop                       ; the interrupt will hit in this nop area
+0092   0077 00                  nop
+0093   0078 00                  nop
+0094   0079 00                  nop
+0095   007A FE 28               cpi     028h
+0096   007C C2 2A 01            jnz     fail
+0097   007F                     
+0098   007F                     ; another single-byte vector: RST 5
+0099   007F 3E 01               mvi     a,1
+0100   0081 D3 10               out     intr_source
+0101   0083 FB                  ei
+0102   0084 3E 14               mvi     a,014h
+0103   0086 D3 11               out     intr_trigger      ; the interrupt vector will do a rst 5, and
+0104   0088 3E 20               mvi     a,020h            ; the rst routine will add 1 to the ACC 
+0105   008A 00                  nop                       ; and reenable interrupts
+0106   008B 00                  nop
+0107   008C 00                  nop
+0108   008D 00                  nop
+0109   008E FE 21               cpi     021h
+0110   0090 C2 2A 01            jnz     fail
+0111   0093                     
+0112   0093                     ; another single-byte code: INX H
+0113   0093 21 FF 13            lxi     h,13ffh
+0114   0096 3E 02               mvi     a,2
+0115   0098 D3 10               out     intr_source
+0116   009A FB                  ei
+0117   009B 3E 04               mvi     a,4
+0118   009D D3 11               out     intr_trigger
+0119   009F 00                  nop
+0120   00A0 00                  nop
+0121   00A1 7D                  mov     a,l
+0122   00A2 FE 00               cpi     0H
+0123   00A4 C2 2A 01            jnz     fail
+0124   00A7 7C                  mov     a,h
+0125   00A8 FE 14               cpi     14h
+0126   00AA C2 2A 01            jnz     fail
+0127   00AD                     
+0128   00AD                     ; a two-byte instruction: mvi a, 42h
+0129   00AD 3E 03               mvi     a,3
+0130   00AF D3 10               out     intr_source
+0131   00B1 FB                  ei
+0132   00B2 3E 04               mvi     a,4
+0133   00B4 D3 11               out     intr_trigger
+0134   00B6 00                  nop
+0135   00B7 00                  nop
+0136   00B8 FE 42               cpi     42h
+0137   00BA C2 2A 01            jnz     fail
+0138   00BD                     
+0139   00BD                     ; a three-byte instruction: lxi h,1234h
+0140   00BD 3E 04               mvi     a,4
+0141   00BF D3 10               out     intr_source
+0142   00C1 FB                  ei
+0143   00C2 3E 04               mvi     a,4
+0144   00C4 D3 11               out     intr_trigger
+0145   00C6 00                  nop
+0146   00C7 00                  nop
+0147   00C8 7C                  mov     a,h
+0148   00C9 FE 12               cpi     12h
+0149   00CB C2 2A 01            jnz     fail
+0150   00CE 7D                  mov     a,l
+0151   00CF FE 34               cpi     34h
+0152   00D1 C2 2A 01            jnz     fail
+0153   00D4                     
+0154   00D4                     ; a 3-byte jump: jmp test_jump
+0155   00D4                     ; if this fails, the test will probably derail
+0156   00D4 3E 05               mvi     a,5
+0157   00D6 D3 10               out     intr_source
+0158   00D8 FB                  ei
+0159   00D9 3E 04               mvi     a,4
+0160   00DB D3 11               out     intr_trigger
+0161   00DD 00                  nop
+0162   00DE 00                  nop
+0163   00DF             comeback:
+0164   00DF FE 79               cpi     79h
+0165   00E1 C2 2A 01            jnz     fail
+0166   00E4             
+0167   00E4                     ; a 3-byte call: call test_call
+0168   00E4                     ; if this fails, the test will probably derail
+0169   00E4 3E 06               mvi     a,6
+0170   00E6 D3 10               out     intr_source
+0171   00E8 FB                  ei
+0172   00E9 3E 04               mvi     a,4
+0173   00EB D3 11               out     intr_trigger
+0174   00ED 3C                  inr     a
+0175   00EE                     ; the interrupt will come back here, hopefully
+0176   00EE 00                  nop
+0177   00EF FE 05               cpi     05h
+0178   00F1 C2 2A 01            jnz     fail
+0179   00F4 78                  mov     a,b
+0180   00F5 FE 19               cpi     19h
+0181   00F7 C2 2A 01            jnz     fail
+0182   00FA                     
+0183   00FA                     ; now, with interrupts disabled, make sure interrupts are ignored
+0184   00FA F3                  di
+0185   00FB 3E 07               mvi     a,07h           ; source 7 catches any unwanted interrupts
+0186   00FD D3 10               out     intr_source
+0187   00FF 3E 04               mvi     a,04h
+0188   0101 D3 11               out     intr_trigger
+0189   0103 00                  nop
+0190   0104 00                  nop                     
+0191   0105 00                  nop
+0192   0106                     
+0193   0106                     ; Ok. So far we have tested only 1-cycle intr assertions. Now we'll
+0194   0106                     ; see what happens when we leave intr asserted for a long time (as would
+0195   0106                     ; happen intr was used for single-step debugging, for instance)
+0196   0106                     
+0197   0106                     ; try single-byte interrupt vector (INR A)
+0198   0106 3E 50               mvi     a, 80
+0199   0108 D3 12               out     intr_width
+0200   010A 3E 01               mvi     a,1
+0201   010C D3 10               out     intr_source
+0202   010E FB                  ei
+0203   010F 3E 14               mvi     a,014h
+0204   0111 D3 11               out     intr_trigger
+0205   0113 3E 27               mvi     a,027h
+0206   0115 00                  nop                       ; the interrupts will hit in this nop area
+0207   0116 00                  nop
+0208   0117 3C                  inr     a
+0209   0118 00                  nop
+0210   0119 00                  nop
+0211   011A 3C                  inr     a
+0212   011B 00                  nop
+0213   011C 00                  nop
+0214   011D 00                  nop
+0215   011E 00                  nop
+0216   011F 00                  nop
+0217   0120 FE 2B               cpi     02bh
+0218   0122 C2 2A 01            jnz     fail        
+0219   0125                     
+0220   0125                     
+0221   0125                     ; finished, run into the success outcome code
+0222   0125             
+0223   0125             success:
+0224   0125 3E 55               mvi     a,55h
+0225   0127 D3 20               out     test_outcome
+0226   0129 76                  hlt
+0227   012A 3E AA       fail:   mvi     a,0aah
+0228   012C D3 20               out     test_outcome
+0229   012E 76                  hlt        
+0230   012F                      
+0231   012F             test_jump:
+0232   012F 3E 79               mvi     a,79h
+0233   0131 C3 DF 00            jmp     comeback         
+0234   0134             
+0235   0134             test_call:
+0236   0134 06 19               mvi     b,19h
+0237   0136 C9                  ret
+0238   0137                             
+0239   0137             ; called when an interrupt has been acknowledged that shouldn't have 
+0240   0137             shouldnt_trigger:
+0241   0137 C3 2A 01            jmp     fail
+0242   013A                     
+0243   013A                     ; data space
+0244   013A                     ds(64)
+0244   017A             
+0245   017A             stack:  ds(2)
+0245   017C             
+0246   017C                     .end
+0247   017C                     tasm: Number of errors = 0

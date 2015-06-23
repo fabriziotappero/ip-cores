@@ -1,0 +1,186 @@
+0001   0000             ;*******************************************************************************
+0002   0000             ; tb1.asm -- light8080 core basic demo: 'Hello World!"
+0003   0000             ;*******************************************************************************
+0004   0000             ; Should be used with SoC vhdl\soc\l80soc.vhdl
+0005   0000             ; Assembler format compatible with TASM for DOS and Linux.
+0006   0000             ;*******************************************************************************
+0007   0000             ; This program will print a Hello message to a 9600/8/N/1 serial port, then 
+0008   0000             ; will loop forever copying the input port P1 to the output port P2. 
+0009   0000             ; This demo is meant to be used as a starting point for those wanting to play 
+0010   0000             ; with the l80soc core -- which in turn is little more than an usage example
+0011   0000             ; for the light8080 cpu core.
+0012   0000             ; See the readme file for instructions for setting up a project with this 
+0013   0000             ; program on Digilentic's DE-1 development board.
+0014   0000             ;*******************************************************************************
+0015   0000             
+0016   0000             ; DS pseudo-directive; reserve space in bytes, without initializing it
+0017   0000             #define ds(n)    \.org $+n
+0018   0000             
+0019   0000             MASK_RX_IRQ:  .equ 20h
+0020   0000             MASK_TX_IRQ:  .equ 10h
+0021   0000             MASK_RX_RDY:  .equ 02h
+0022   0000             MASK_TX_RDY:  .equ 01h
+0023   0000             
+0024   0000             UART_DATA:    .equ 80h
+0025   0000             UART_STATUS:  .equ 81h
+0026   0000             UART_BAUDL:   .equ 82h
+0027   0000             UART_BAUDH:   .equ 83h
+0028   0000             IRQ_ENABLE:   .equ 88h
+0029   0000             
+0030   0000             P1IN:         .equ 84h
+0031   0000             P2OUT:        .equ 86h
+0032   0000             
+0033   0000             
+0034   0000             ;*******************************************************************************
+0035   0000             
+0036   0000                       .org  0H              ; Reset entry point
+0037   0000 C3 60 00              jmp   start           ; Skip the rst address area
+0038   0003                                     
+0039   0003                     ;***** Interrupt vectors in area 0008h-0038h *****************
+0040   0003                     
+0041   0008                       .org  0h+(1*8)        ; interrupt vector 1
+0042   0008 C9                    ret
+0043   0010                       .org  0h+(2*8)        ; interrupt vector 2
+0044   0010 C9                    ret
+0045   0018                       .org  0h+(3*8)        ; interrupt vector 3
+0046   0018 C9                    ret
+0047   0020                       .org  0h+(4*8)        ; interrupt vector 4
+0048   0020 C9                    ret
+0049   0028                       .org  0h+(5*8)        ; interrupt vector 5
+0050   0028 C9                    ret
+0051   0030                       .org  0h+(6*8)        ; interrupt vector 6
+0052   0030 C9                    ret
+0053   0031                       
+0054   0038                       .org  0h+(7*8)        ; interrupt vector 7
+0055   0038 C3 A7 00    int38h:   jmp   irq_uart        ; UART interrupt 
+0056   003B                    
+0057   003B                       ;***** program entry point *******************************************
+0058   003B                             
+0059   0060             start:    .org  60H
+0060   0060 31 50 01              lxi   sp,stack
+0061   0063             
+0062   0063                       ; Initialize UART RX and TX buffers
+0063   0063 21 EB 00              lxi   h,void_buffer
+0064   0066 22 EC 00              shld  ptr_tx
+0065   0069 21 F0 00              lxi   h,rx_buffer
+0066   006C 22 EE 00              shld  ptr_rx
+0067   006F                       ; Set up UART baud rate to 9600 bauds @ 50MHz:
+0068   006F                       ; (50E6 / 9600) = 5208d = 1458h
+0069   006F 3E 14                 mvi   a,14h           
+0070   0071 D3 83                 out   UART_BAUDH
+0071   0073 3E 58                 mvi   a,58h
+0072   0075 D3 82                 out   UART_BAUDL
+0073   0077                       
+0074   0077                       ; Clear P2 port
+0075   0077 3E 00                 mvi   a,00h
+0076   0079 D3 86                 out   P2OUT
+0077   007B                       
+0078   007B                       ; Set up interrupts
+0079   007B 3E 08                 mvi   a,08h           ; Enable UART irq...
+0080   007D D3 88                 out   IRQ_ENABLE
+0081   007F FB                    ei                    ; ...and enable interrupts in the CPU
+0082   0080                     
+0083   0080                       ; print hello message to console
+0084   0080 21 96 00              lxi   h,msg_hello
+0085   0083 CD DE 00              call  print_string
+0086   0086             
+0087   0086             forever:          
+0088   0086 DB 84                 in    P1IN
+0089   0088 4F                    mov   c,a
+0090   0089 07                    rlc   
+0091   008A 07                    rlc
+0092   008B 81                    add   c
+0093   008C D3 86                 out   P2OUT
+0094   008E C3 86 00              jmp   forever
+0095   0091             
+0096   0091 F3                    di
+0097   0092 76                    hlt
+0098   0093 C3 93 00    done:     jmp   done 
+0099   0096             
+0100   0096 0A 0D 0A 48 msg_hello: .text "\n\r\nHello World!$\000"          
+0100   009A 65 6C 6C 6F 
+0100   009E 20 57 6F 72 
+0100   00A2 6C 64 21 24 
+0100   00A6 00 
+0101   00A7                       
+0102   00A7             ;irq_uart: UART interrupt processing 
+0103   00A7             irq_uart:
+0104   00A7 E5                    push  h
+0105   00A8 F5                    push  psw
+0106   00A9                       
+0107   00A9                       ; Deal with RX interrupt (if any) first and then the TX interrupt.
+0108   00A9 DB 81                 in    UART_STATUS     ; Is there new data in the RX register?
+0109   00AB E6 20                 ani   MASK_RX_IRQ
+0110   00AD CA C0 00              jz    irq_uart_rx_done ; If there isn't, process TX interrupt.
+0111   00B0                       
+0112   00B0                       ; Process UART RX interrupt
+0113   00B0             irq_uart_rx:     
+0114   00B0 3E 20                 mvi   a,MASK_RX_IRQ   ; Clear IRQ flag.
+0115   00B2 D3 81                 out   UART_STATUS     
+0116   00B4 DB 80                 in    UART_DATA       ; Get RX byte...
+0117   00B6 D3 86                 out   P2OUT           ; ...display it in the output port...
+0118   00B8 2A EE 00              lhld  ptr_rx          ; ...and store it in the rx buffer.
+0119   00BB 77                    mov   m,a
+0120   00BC 23                    inx   h
+0121   00BD 22 EE 00              shld  ptr_rx          ; Update the rx buffer pointer.
+0122   00C0                       ; Note there's no check for RX buffer overrun! 
+0123   00C0             
+0124   00C0             irq_uart_rx_done:
+0125   00C0                       ; Ok, RX is done. Now deal with TX irq, if any
+0126   00C0 DB 81                 in    UART_STATUS     ; Is the TX buffer re new data in the RX register?
+0127   00C2 E6 10                 ani   MASK_TX_IRQ
+0128   00C4 CA DA 00              jz    irq_uart_end    ; If there isn't, we're done.
+0129   00C7                       
+0130   00C7                       ; process UART TX interrupt
+0131   00C7             irq_uart_tx:
+0132   00C7 3E 10                 mvi   a,MASK_TX_IRQ   ; Clear IRQ flag.
+0133   00C9 D3 81                 out   UART_STATUS
+0134   00CB 2A EC 00              lhld  ptr_tx          ; Get next byte from the TX buffer 
+0135   00CE 7E                    mov   a,m
+0136   00CF FE 24                 cpi   '$'             ; Did we reach the end of the buffer?
+0137   00D1 CA DA 00              jz    irq_uart_tx_done ; If we did, we're done here...
+0138   00D4 23                    inx   h               ; ...otherwise increment the TX pointer...
+0139   00D5 22 EC 00              shld  ptr_tx
+0140   00D8 D3 80                 out   UART_DATA       ; ...and transmit the data byte.
+0141   00DA                       
+0142   00DA             irq_uart_tx_done:
+0143   00DA                     
+0144   00DA             irq_uart_end:
+0145   00DA F1                    pop   psw             ; Done, quit.
+0146   00DB E1                    pop   h
+0147   00DC FB                    ei
+0148   00DD C9                    ret                
+0149   00DE                       ; Note there's no check for RX buffer overrun! we shouldn't need it 
+0150   00DE                       ; in this program, anyway.
+0151   00DE                  
+0152   00DE                
+0153   00DE             ;print_string: print $-terminated string at HL
+0154   00DE             ; Returns as soon as the transmission has started; transmission proceeds in 
+0155   00DE             ; 'background' through the UART interrupt service routine.
+0156   00DE             print_string:
+0157   00DE                       ; We don't check if there's a transmission going on, we just start
+0158   00DE                       ; transmitting. Not suitable for real use!
+0159   00DE 7E                    mov   a,m             ; Get first character from string...
+0160   00DF 23                    inx   h               ; ...and move updated string pointer to TX  
+0161   00E0 22 EC 00              shld  ptr_tx          ; buffer pointer.
+0162   00E3 FE 24                 cpi   '$'             ; Kickstart transmission by sending 1st byte...
+0163   00E5 CA EA 00              jz    print_string_end; ...unless its the end of string marker.
+0164   00E8 D3 80                 out   UART_DATA       ; 
+0165   00EA             print_string_end:
+0166   00EA C9                    ret
+0167   00EB             
+0168   00EB                       
+0169   00EB                       ; data space, placed immediately after object code in memory
+0170   00EB 24          void_buffer:  .text "$"
+0171   00EC             ptr_tx:       ds(2)
+0171   00EE             
+0172   00EE             ptr_rx:       ds(2)
+0172   00F0             
+0173   00F0             rx_buffer:    ds(32)
+0173   0110             
+0174   0110                           ds(64)
+0174   0150             
+0175   0150             stack:        ds(2)
+0175   0152             
+0176   0152                       .end
+0177   0152                     tasm: Number of errors = 0

@@ -1,0 +1,311 @@
+#asm
+;
+;------------------------------------------------------------------
+;	Small-C  Run-time Librray
+;
+;	V4d	As of July 16, 1980 (gtf)
+;		   Added EXIT() function
+;------------------------------------------------------------------
+;
+;Fetch a single byte from the address in HL and sign extend into HL
+ccgchar: 
+	ld a,(hl)
+ccsxt:	
+	ld l,a
+	rlca
+	sbc	a
+	ld	h,a
+	ret
+;Fetch a full 16-bit integer from the address in HL
+ccgint: 
+	ld a,(hl)
+	inc	hl
+	ld	h,(hl)
+	ld l,a
+	ret
+;Store a single byte from HL at the address in DE
+ccpchar: 
+	ld	a,l
+	ld	(de),a
+	ret
+;Store a 16-bit integer in HL at the address in DE
+ccpint: 
+	ld	a,l
+	ld	(de),a
+	inc	de
+	ld	a,h
+	ld	(de),a
+	ret
+;Inclusive "or" HL and DE into HL
+ccor:	
+	ld	a,l
+	or	e
+	ld l,a
+	ld	a,h
+	or	d
+	ld	h,a
+	ret
+;Exclusive "or" HL and DE into HL
+ccxor:	
+	ld	a,l
+	xor	e
+	ld l,a
+	ld	a,h
+	xor	d
+	ld	h,a
+	ret
+;"And" HL and DE into HL
+ccand:	
+	ld	a,l
+	and	e
+	ld l,a
+	ld	a,h
+	and	d
+	ld	h,a
+	ret
+;Test if HL = DE and set HL = 1 if true else 0
+cceq:	
+	call cccmp
+	ret z
+	dec	hl
+	ret
+;Test if DE ~= HL
+ccne:	
+	call cccmp
+	ret nz
+	dec	hl
+	ret
+;Test if DE > HL (signed)
+ccgt:	
+	ex de,hl
+	call cccmp
+	ret c
+	dec	hl
+	ret
+;Test if DE <= HL (signed)
+ccle:	
+	call cccmp
+	ret z
+	ret c
+	dec hl
+	ret
+;Test if DE >= HL (signed)
+ccge:	
+	call cccmp
+	ret nc
+	dec hl
+	ret
+;Test if DE < HL (signed)
+cclt:	
+	call cccmp
+	ret c
+	dec hl
+	ret
+; Signed compare of DE and HL
+; Performs DE - HL and sets the conditions:
+;	Carry reflects sign of difference (set means DE < HL)
+;	Zero/non-zero set according to equality.
+cccmp:
+	ld	a,e
+	sub	l
+	ld	e,a
+	ld	a,d
+	sbc	h
+	ld	hl,1
+	jp	m,cccmp1
+	or	e	;"OR" resets carry
+	ret
+cccmp1: 
+	or	e
+	scf		;set carry to signal minus
+	ret
+;Test if DE >= HL (unsigned)
+ccuge:	
+	call ccucmp
+	ret nc
+	dec hl
+	ret	
+;Test if DE < HL (unsigned)
+ccult:	
+	call ccucmp
+	ret c
+	dec hl
+	ret
+;Test if DE > HL (unsigned)
+ccugt:	
+	ex de,hl
+	call ccucmp
+	ret c
+	dec hl
+	ret
+;Test if DE <= HL (unsigned)
+ccule:	
+	call ccucmp
+	ret z
+	ret c
+	dec hl
+	ret
+;Routine to perform unsigned compare
+;carry set if DE < HL
+;zero/nonzero set accordingly
+ccucmp: 
+	ld	a,d
+	cp	h
+	jp	nz,$+5
+	ld	a,e
+	cp	l
+	ld	hl,1
+	ret
+;Shift DE arithmetically right by HL and return in HL
+ccasr:	
+	ex	de,hl
+	ld	a,h
+	rla
+	ld	a,h
+	rra
+	ld	h,a
+	ld	a,l
+	rra
+	ld	l,a
+	dec	e
+	jp	nz,ccasr+1
+	ret
+;Shift DE arithmetically left by HL and return in HL
+ccasl:	
+	ex	de,hl
+	add	hl,hl
+	dec	e
+	jp	nz,ccasl+1
+	ret
+;Subtract HL from DE and return in HL
+ccsub:	
+	ld	a,e
+	sub	l
+	ld l,a
+	ld	a,d
+	sbc	h
+	ld	h,a
+	ret
+;Form the two's complement of HL
+ccneg:	
+	call cccom
+	inc	hl
+	ret
+;Form the one's complement of HL
+cccom:	
+	ld	a,h
+	cpl
+	ld	h,a
+	ld	a,l
+	cpl
+	ld l,a
+	ret
+;Multiply DE by HL and return in HL
+ccmult: 
+	ld	b,h
+	ld	c,l
+	ld	hl,0
+ccmult1: 
+	ld	a,c
+	rrca
+	jp	nc,$+4
+	add	hl,de
+	xor	a
+	ld	a,b
+	rra
+	ld	b,a
+	ld	a,c
+	rra
+	ld	c,a
+	or	b
+	ret z
+	xor	a
+	ld	a,e
+	rla
+	ld	e,a
+	ld	a,d
+	rla
+	ld	d,a
+	or	e
+	ret z
+	jp	ccmult1
+;Divide DE by HL and return quotient in HL, remainder in DE
+ccdiv:	
+	ld	b,h
+	ld	c,l
+	ld	a,d
+	xor	b
+	push af
+	ld	a,d
+	or	a
+	call m,ccdeneg
+	ld	a,b
+	or	a
+	call m,ccbcneg
+	ld	a,16
+	push af 
+	ex	de,hl
+	ld	de,0
+ccdiv1: 
+	add hl,hl 
+	call ccrdel
+	jp	z,ccdiv2
+	call cccmpbcde
+	jp	m,ccdiv2
+	ld	a,l
+	or	1
+	ld l,a
+	ld	a,e
+	sub	c
+	ld	e,a
+	ld	a,d
+	sbc	b
+	ld	d,a
+ccdiv2: 
+	pop af
+	dec	a
+	jp	z,ccdiv3
+	push af
+	jp	ccdiv1
+ccdiv3: 
+	pop af
+	ret	p
+	call ccdeneg
+	ex de,hl
+	call ccdeneg
+	ex de,hl
+	ret
+ccdeneg: 
+	ld	a,d
+	cpl
+	ld	d,a
+	ld	a,e
+	cpl
+	ld	e,a
+	inc	de
+	ret
+ccbcneg: 
+	ld	a,b
+	cpl
+	ld	b,a
+	ld	a,c
+	cpl
+	ld	c,a
+	inc	bc
+	ret
+ccrdel: 
+	ld	a,e
+	rla
+	ld	e,a
+	ld	a,d
+	rla
+	ld	d,a
+	or	e
+	ret
+cccmpbcde: 
+	ld	a,e
+	sub	c
+	ld	a,d
+	sbc	b
+	ret
+#endasm

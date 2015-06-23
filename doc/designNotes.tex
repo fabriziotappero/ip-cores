@@ -1,0 +1,616 @@
+\documentclass[11pt]{article}
+\usepackage{graphicx}    % needed for including graphics e.g. EPS, PS
+\usepackage{multirow}
+\usepackage{alltt}
+\topmargin -1.5cm        % read Lamport p.163
+\oddsidemargin -0.04cm   % read Lamport p.163
+\evensidemargin -0.04cm  % same as oddsidemargin but for left-hand pages
+\textwidth 16.59cm
+\textheight 21.94cm 
+%\pagestyle{empty}       % Uncomment if don't want page numbers
+\parskip 7.2pt           % sets spacing between paragraphs
+%\renewcommand{\baselinestretch}{1.5} % Uncomment for 1.5 spacing between lines
+\parindent 15pt		 % sets leading space for paragraphs
+
+\begin{document}         
+
+\section{Basic behavior}
+\label{basics}
+
+The microcoded machine ($\mu$M) is built around a register bank and an 8-bit
+ALU with registered operands T1 and T2. It performs all its operations in two
+cycles, so I have divided it in two stages: an operand stage and an ALU stage.
+This is nothing more than a 2-stage pipeline. \\
+
+In the operand stage, registers T1 and T2 are loaded with either the
+contents of the register bank (RB) or the input signal DI.\\
+In the ALU stage, the ALU output is written back into the RB or loaded
+into the output register DO. Besides, flags are updated, or not, according to 
+the microinstruction ($\mu$I) in execution.\\
+
+Every microinstruction controls the operation of the operand stage
+and the succeeding ALU stage; that is, the execution of a $\mu$I extends over 2
+succeeding clock cycles, and microinstructions overlap each other. This means
+that the part of the $\mu$I that controls the 2nd stage has to be pipelined; in 
+the VHDL code, I have divided the $\mu$I in a field\_1 and a field\_2, the 
+latter of which is registered (pipelined) and controls the 2nd $\mu$M stage 
+(ALU). \\
+Many of the control signals are encoded in the microinstructions in what I
+have improperly called flags. You will see many references to flags in the
+following text (\#end,\#decode, etc.). They are just signals that you can 
+activate individually in each $\mu$I, some are active in the 1st stage, some in
+the 2nd. They are all explained in section ~\ref{ucodeFlags}. \\
+
+Note that microinstructions are atomic: both stages are guaranteed to
+execute in all circumstances. Once the 1st stage of a $\mu$I has executed, 
+the only thing that can prevent the execution of the 2nd stage is a reset.\\
+It might have been easier to design the machine so that microinstructions
+executed in one cycle, thus needing no pipeline for the $\mu$I itself. I 
+arbitrarily chose to 'split' the microcode execution, figuring that it would be 
+easier for me to understand and program the microcode; in hindsight it may have 
+been a mistake but in the end, once the debugging is over, it makes little 
+difference.\\
+
+The core as it is now does not support wait states: it does all its
+external accesses (memory or i/o, read or write) in one clock cycle. It would
+not be difficult to improve this with some little modification to the
+micromachine, without changes to the microcode.\\
+Since the microcode rom is the same type of memory as will be used for program 
+memory, the main advantage of microprogramming is lost. Thus, it would make 
+sense to develop the core a bit further with support for wait states, so it 
+could take advantage of the speed difference between the FPGA and external slow 
+memory.\\
+The register bank reads asynchronously, while writes are synchronous. This
+is the standard behaviour of a Spartan LUT-based RAM. The register bank holds
+all the 8080 registers, including the accumulator, plus temporary, 'hidden'
+registers (x,y,w,z). Only the PSW register is held out of the register bank, in
+a DFF-8 register.
+
+\section{Micromachine control}
+\label{umachineControl}
+
+\subsection{Microcode operation}
+\label{ucodeOperation}
+
+There is little more to the core that what has already been said; all the
+CPU operations are microcoded, including interrupt response, reset and
+instruction opcode fetch. The microcode source code can be seen in file
+\texttt{ucode/light8080.m80}, in a format I expect will be less obscure than a 
+plain vhdl constant table.\\
+
+The microcode table is a synchronous ROM with 512 32-bit words, designed
+to fit in a Spartan 3 block ram. Each 32-bit word makes up a microinstruction.
+The microcode 'program counter' (uc\_addr in the VHDL code) thus is a 9-bit
+register.\\
+Out of those 512 words, 256 (the upper half of the table) are used as a
+jump-table for instruction decoding. Each entry at 256+NN contains a 'JSR' 
+$\mu$I to the start of the microcode for the instruction whose opcode is NN. 
+This seemingly unefficient use of RAM is in fact an optimization for the 
+Spartan-3 architecture to which this design is tailored –-- the 2KB RAM blocks 
+are too large for the microcode so I chose to fill them up with the decoding 
+table.\\
+This scheme is less than efficient where smaller RAM blocks are available (e.g.
+Altera Stratix).\\
+The jump table is built automatically by the microcode 
+assembler, as explained in section ~\ref{ucodeAssembler}.\\
+The upper half of the table can only be used for decoding; JSR
+instructions can only point to the lower half, and execution from address 0x0ff
+rolls over to 0x00 (or would; the actual microcode does not use this 
+'feature').\\
+
+The ucode address counter uc\_addr has a number of possible sources: the 
+micromachine supports one level of micro-subroutine calls; it can also
+return from those calls; the uc\_addr gets loaded with some constant values upon
+reset, interrupt or instruction fetch. And finally, there is the decoding jump 
+table mentioned above. So, in summary, these are the possible sources of 
+uc\_addr each cycle:
+
+\begin{itemize}
+\item Constant value of 0x0001 at reset (see VHDL source for details).
+\item Constant value of 0x0003 at the beginning (fetch cycle) of every
+instruction.
+\item Constant value of 0x0007 at interrupt acknowledge.
+\item uc\_addr + 1 in normal microinstruction execution
+\item Some 8-bit value included in JSR microinstructions (calls).
+\item The return value preserved in the last JSR (used when flag \#ret is
+raised)
+\end{itemize}
+
+All of this is readily apparent, I hope, by inspecting the VHDL source.
+Note that there is only one jump microinstruction (JSR) which doubles as 'call';
+whenever a jump is taken the the 1-level-deep 'return stack' is loaded with
+the return address (address of the $\mu$I following the jump). You just have to
+ignore the return address when you don't need it (e.g. the jumps in the decoding
+jump table). I admit this scheme is awkward and inflexible; but it was the first
+I devised, it works and fits the area budget: more than enough in this project.
+A list of all predefined, 'special' microcode addresses follows.\\
+\begin{itemize}
+\item \textbf{0x001 –-- reset}\\
+After reset, the $\mu$I program counter (uc\_addr in the VHDL code) is
+initialized to 0x00. The program counter works as a pre-increment counter when
+reading the microcode rom, so the $\mu$I at address 0 never gets executed (unless
+'rolling over' from address 0x0ff, which the actual microcode does not). Reset
+starts at address 1 and takes 2 microinstructions to clear PC to 0x0000. It does
+nothing else. After clearing the PC the microcode runs into the fetch routine.
+\item \textbf{0x003 –-- fetch}\\
+The fetch routine places the PC in the address output lines while postincrementing
+it, and then enables a memory read cycle. In doing so it relies on
+T2 being 0x00 (necessary for the ADC to behave like an INC in the oversimplified
+ALU), which is always true by design. After the fetch is done, the \#decode flag
+is raised, which instructs the micromachine to take the value in the DI signal
+(data input from external memory) and load it into the IR and the microcode
+address counter, while setting the high address bit to 1. At the resulting
+address there will be a JSR $\mu$I pointing to the microcode for the 8080 opcode in
+question (the microcode assembler will make sure of that). The \#decode flag will
+also clear registers T1 and T2.
+\item \textbf{0x007 –-- halt}\\
+Whenever a HALT instruction is executed, the \#halt flag is raised, which
+when used in the same $\mu$I as flag \#end, makes the the micromachine jump to this
+address. The $\mu$I at this address does nothing but raise flags \#halt and \#end. The
+micromachine will keep jumping to this address until the halt state is left,
+something which can only happen by reset or by interrupt. The \#halt flag, when
+raised, sets the halt output signal, which will be cleared when the CPU exits
+the halt state.
+\end{itemize}
+
+\subsection{Conditional jumps}
+\label{conditionalJumps}
+
+There is a conditional branch microinstruction: TJSR. This instruction
+tests certain condition and, if the condition is true, performs exactly as JSR.
+Otherwise, it ends the microcode execution exactly as if the flag \#end had been
+raised. This microinstruction has been made for the conditional branches and
+returns of the 8080 CPU and is not flexible enough for any other use.
+The condition tested is encoded in the register IR, in the field ccc (bits
+5..3), as encoded in the conditional instructions of the 8080 –-- you can look
+them up in any 8080 reference. Flags are updated in the 2nd stage, so a TJSR
+cannot test the flags modified by the previous $\mu$I. But it is not necessary; this
+instruction will always be used to test conditions set by previous 8080
+instructions, separated at least by the opcode fetch $\mu$Is, and probably many
+more. Thus, the condition flags will always be valid upon testing.
+
+\subsection{Implicit operations}
+\label{implicitOperations}
+
+Most micromachine operations happen only when explicitly commanded. But
+some happen automatically and have to be taken into account when coding the
+microprogram:
+
+\begin{enumerate}
+\item Register IR is loaded automatically when the flag \#decode is raised. The
+microcode program counter is loaded automatically with the same value as
+the IR, as has been explained above. From that point on, execution resumes
+normally: the jump table contains normal JSR microinstructions.
+\item T1 is cleared to 0x00 at reset, when the flag \#decode is active or when
+the flag \#clrt1 is used.
+\item T2 is cleared to 0x00 at reset, when the flag \#decode is active or when
+the flag \#end is used.
+\item Microcode flow control:
+  \begin{enumerate}
+  \item When flag \#end is raised, execution continues at $\mu$code address 
+        0x0003.
+  \item When both flags \#halt and \#end are raised, execution continues at 
+        $\mu$code address 0x0007, unless there is an interrupt pending.
+  \item Otherwise, when flag \#ret is raised, execution continues in the address 
+        following the last JSR executed. If such a return is tried before a JSR 
+        has executed since the last reset, the results are undefined –-- this 
+        should never happen with the microcode source as it is now.
+  \item If none of the above flags are used, the next $\mu$I is executed.
+  \end{enumerate}
+\end{enumerate} 
+
+Notice that both T1 and T2 are cleared at the end of the opcode fetch, so
+they are guaranteed to be 0x00 at the beginning of the instruction microcode.
+And T2 is cleared too at the end of the instruction microcode, so it is
+guaranteed clear for its use in the opcode fetch microcode. T1 can be cleared 
+if a microinstruction so requires. Refer to the section on microinstruction 
+flags.
+
+
+\section{Microinstructions}
+\label{uinstructions}
+
+The microcode for the CPU is a source text file encoded in a format
+described below. This 'microcode source' is assembled by the microcode assembler
+(described later) which then builds a microcode table in VHDL format. There's
+nothing stopping you from assembling the microcode by hand directly on the VHDL
+source, and in a machine this simple it might have been better.
+
+
+\subsection{Microcode source format}
+\label{ucodeFormat}
+
+The microcode source format is more similar to some early assembly language 
+that to other microcodes you may have seen. Each non-blank,
+non-comment line of code contains a single microinstruction in the format
+informally described below:
+
+% there must be some cleaner way to do this in TeX...
+
+\begin{alltt}
+\textless microinstruction line \textgreater :=
+    [\textless label \textgreater]\footnote{Labels appear alone by themselves in a line} \textbar 
+    \textless operand stage control \textgreater ; \textless ALU stage control \textgreater [; [\textless flag list \textgreater]] \textbar
+    JSR \textless destination address \textgreater\textbar TJSR \textless destination address \textgreater
+    \\
+    \textless label \textgreater := \{':' immediately followed by a common identifier\}
+    \textless destination address \textgreater := \{an identifier defined as a label anywhere in the file\}
+    \textless operand stage control \textgreater := \textless op\_reg \textgreater = \textless op\_src \textgreater \textbar NOP
+    \textless op\_reg \textgreater := T1 \textbar T2
+    \textless op\_src \textgreater := \textless register \textgreater \textbar DI \textbar \textless IR register \textgreater
+    \textless IR register \textgreater := \{s\}\textbar\{d\}\textbar\{p\}0\textbar\{p\}1\footnote{Registers are specified by IR field}
+    \textless register \textgreater := \_a\textbar\_b\textbar\_c\textbar\_d\textbar\_e\textbar\_h\textbar\_l\textbar\_f\textbar\_a\textbar\_ph\textbar\_pl\textbar\_x\textbar\_y\textbar\_z\textbar\_w\textbar\_sh\textbar\_sl
+    \textless ALU stage control \textgreater := \textless alu\_dst \textgreater = \textless alu\_op \textgreater \textbar NOP
+    \textless alu\_dst \textgreater := \textless register \textgreater \textbar DO
+    \textless alu\_op \textgreater := add\textbar adc\textbar sub\textbar sbb\textbar and\textbar orl\textbar not\textbar xrl\textbar rla\textbar rra\textbar rlca\textbar rrca\textbar aaa\textbar
+    t1\textbar rst\textbar daa\textbar cpc\textbar sec\textbar psw
+    \textless flag list \textgreater := \textless flag \textgreater [, \textless flag \textgreater ...]
+    \textless flag \textgreater := \#decode\textbar\#di\textbar\#ei\textbar\#io\textbar\#auxcy\textbar\#clrt1\textbar\#halt\textbar\#end\textbar\#ret\textbar\#rd\textbar\#wr\textbar\#setacy 
+          \#ld\_al\textbar\#ld\_addr\textbar\#fp\_c\textbar\#fp\_r\textbar\#fp\_rc\textbar\#clr\_acy \footnote{There are some restrictions on the flags that can be used together} \\
+\end{alltt}
+
+
+Please bear in mind that this is just an informal description; I made
+it up from my personal notes and the assembler source. The ultimate reference is
+the microcode source itself and the assembler source.\\
+Due to the way that flags have been encoded (there's less than one bit per
+flag in the microinstruction), there are restrictions on what flags can be used
+together. See section ~\ref{ucodeFlags}.
+
+The assembler will complain if the source does not comply with the
+expected format; but syntax check is somewhat weak.
+In the microcode source you will see words like \_\_reset, \_\_fetch, etc.
+which don't fit the above syntax. Those were supposed to be assembler pragmas,
+which the assembler would use to enforce the alignment of the microinstructions
+to certain addresses. I finally decided not to use them and align the
+instructions myself. The assembler ignores them but I kept them as a reminder.
+
+The 1st part of the $\mu$I controls the ALU operand stage; we can load either
+T1 or T2 with either the contents of the input signal DI, or the selected
+register from the register bank. Or, we can do nothing (NOP).\\
+The 2nd part of the $\mu$I controls the ALU stage; we can instruct the ALU to
+perform some operation on the operands T1 and T2 loaded by this same
+instruction, in the previous stage; and we can select where to load the ALU
+result, eiher in the output register DO or in the register bank. Or we can do
+nothing of the above (NOP).
+
+The write address for the register bank used in the 2nd stage has to be the
+same as the read address used in the 1st stage; that is, if both $\mu$I parts use the
+RB, both have to use the same address (the assembler will enforce this
+restriction). This is due to an early, silly mistake that I chose not to fix:
+there is a single $\mu$I field that holds both addresses.\\
+This is a very annoying limitation that unduly complicates the microcode
+and wastes many microcode slots for no saving in hardware; I just did not want 
+to make any major refactors until the project is working. As
+you can see in the VHDL source, the machine is prepared to use 2 independent
+address fields with little modification. I may do this improvement and others
+in a later version, but only when I deem the design 'finished' (since the design
+as it is already exceeds my modest performance target).
+
+
+\subsection{Microcode ALU operations}
+\label{ucodeAluOps}
+
+\begin{tabular}{|l|l|l|l|}
+\hline
+\multicolumn{4}{|c|}{ALU operations} \\
+\hline
+Operation & encoding & result & notes \\ 
+
+\hline ADD & 001100 & T2 + T1 & \\
+\hline ADC & 001101 & T2 + T1 + CY & \\
+\hline SUB & 001110 & T2 - T1 & \\
+\hline SBB & 001111 & T2 – T1 - CY & \\
+\hline AND & 000100 & T1 AND T2 & \\
+\hline ORL & 000101 & T1 OR T2 & \\
+\hline NOT & 000110 & NOT T1 & \\
+\hline XRL & 000111 & T1 XOR T2 & \\
+\hline RLA & 000000 & 8080 RLC & \\
+\hline RRA & 000001 & 8080 RRC & \\
+\hline RLCA & 000010 & 8080 RAL & \\
+\hline RRCA & 000011 & 8080 RAR & \\
+\hline T1 & 010111 & T1 & \\
+\hline RST & 011111 & 8*IR(5..3) & as per RST instruction \\
+\hline DAA & 101000 & DAA T1 & but only after executing 2 in a row \\
+\hline CPC & 101100 & UNDEFINED & CY complemented \\
+\hline SEC & 101101 & UNDEFINED & CY set \\
+\hline PSW & 110000 & PSW & \\
+\hline
+
+\end{tabular}
+
+
+
+Notice that ALU operation DAA takes two cycles to complete; it uses a
+dedicated circuit with an extra pipeline stage. So it has to be executed twice
+in a row before taking the result -- refer to microcode source for an example.\\
+The PSW register is updated with the ALU result at every cycle, whatever
+ALU operation is executed –- though every ALU operation computes flags by
+different means, as it is apparent in the case of CY. Which flags are updated,
+and which keep their previous values, is defined by a microinstruction field
+named flag\_pattern. See the VHDL code for details.
+
+
+\subsection{Microcode binary format}
+\label{ucodeBinFormat}
+
+\begin{tabular}{|l|l|l|}
+\hline
+\multicolumn{3}{|c|}{Microcode word bitfields} \\ \hline
+POS & VHDL NAME & PURPOSE \\ \hline
+31..29 & uc\_flags1 & Encoded flag of group 1 (see section on flags) \\ \hline 
+28..26 & uc\_flags2 & Encoded flag of group 2 (see section on flags) \\ \hline
+25 & load\_addr & Address register load enable (note 1) \\ \hline
+24 & load\_al & AL load enable (note 1) \\ \hline
+23 & load\_t1 & T1 load enable \\ \hline
+22 & load\_t2 & T2 load enable \\ \hline
+21 & mux\_in & T1/T2 source mux control (0 for DI, 1 for reg bank) \\ \hline
+20..19 & rb\_addr\_sel & Register bank address source control (note 2) \\ \hline
+18..15 & ra\_field & Register bank address (used both for write and read) \\ \hline
+14 & clr\_acy & Clear CY and AC -- see explaination below (pipelined signal) \\ \hline
+13..10 & (unused) & Reserved for write register bank address, unused yet \\ \hline
+11..10 & uc\_jmp\_addr(7..6) & JSR/TJSR jump address, higher 2 bits \\ \hline
+9..8 & flag\_pattern & PSW flag update control (note 3) (pipelined signal) \\ \hline
+7 & load\_do & DO load enable (note 4) (pipelined signal) \\ \hline
+6 & we\_rb & Register bank write enable (pipelined signal) \\ \hline
+5..0 & uc\_jmp\_addr(5..0) & JSR/TJSR jump address, lower 6 bits \\ \hline
+5..0 & (several) & Encoded ALU operation \\ \hline
+\end{tabular}
+
+\begin{itemize}
+\item {\bf Note 1: load\_al}\\
+AL is a temporary register for the lower byte of the external 16 bit
+address. The memory interface (and the IO interface) assumes external
+synchronous memory, so the 16 bit address has to be externally loaded as
+commanded by load\_addr.
+Note that both halves of the address signal load directly from the
+register bank output; you can load AL with PC, for instance, in the same cycle
+in which you modify the PC –- AL will load with the pre-modified value.
+
+\item {\bf Note 2 : rb\_addr\_sel}\\
+A microinstruction can access any register as specified by ra\_field, or
+the register fields in the 8080 instruction opcode: S, D and RP (the
+microinstruction can select which register of the pair). In the microcode source
+this is encoded like this:
+\begin{description}
+\item[\{s\}] $\Rightarrow$ 0 \& SSS
+\item[\{d\}] $\Rightarrow$ 0 \& DDD
+\item[\{p\}0] $\Rightarrow$ 1 \& PP \& 0 (HIGH byte of register pair)
+\item[\{p\}1] $\Rightarrow$ 1 \& PP \& 1 (LOW byte of register pair)
+\end{description}
+\small SSS = IR(5 downto 3) (source register)\\
+\small DDD = IR(2 downto 0) (destination register)\\
+\small PP = IR(5 downto 4) (register pair)\\
+
+\item {\bf Note 3 : flag\_pattern}\\
+Selects which flags of the PSW, if any, will be updated by the
+microinstruction:
+\begin{itemize}
+\item When flag\_pattern(0)='1', CY is updated in the PSW.
+\item When flag\_pattern(1)='1', all flags other than CY are updated in the PSW.
+\end{itemize}
+
+\item {\bf Note 4 : load\_do}\\
+DO is the data ouput register that is loaded with the ALU output, so the
+load enable signal is pipelined.
+
+\item {\bf Note 5 : JSR-H and JSR-L}\\
+These fields overlap existing fields which are unused in JSR/TJSR
+instructions (fields which can be used with no secondary effects).
+
+\end{itemize}
+
+\subsection{Microcode flags}
+\label{ucodeFlags}
+
+
+Flags is what I have called those signals of the microinstruction that you
+assert individually in the microcode source. Due to the way they have been
+encoded, I have separated them in two groups. Only one flag in each group can be
+used in any instruction. These are all the flags in the format thay appear in
+the microcode source:
+
+\begin{itemize}
+\item Flags from group 1: use only one of these
+  \begin{itemize}
+  \item \#decode : Load address counter and IR with contents of data input
+  lines, thus starting opcode decoging.
+  \item \#ei : Set interrupt enable register.
+  \item \#di : Reset interrupt enable register.
+  \item \#io : Activate io signal for 1st cycle.
+  \item \#auxcy : Use aux carry instead of regular carry for this $\mu$I.
+  \item \#clrt1 : Clear T1 at the end of 1st cycle.
+  \item \#halt : Jump to microcode address 0x07 without saving return value,
+  when used with flag \#end, and only if there is no interrupt
+  pending. Ignored otherwise.
+  \end{itemize} 
+  
+\item Flags from group 2: use only one of these
+  \begin{itemize}
+  \item \#setacy : Set aux carry at the start of 1st cycle (used for ++).
+  \item \#end : Jump to microinstruction address 3 after the present m.i.
+  \item \#ret : Jump to address saved by the last JST or TJSR m.i.
+  \item \#rd : Activate rd signal for the 2nd cycle.
+  \item \#wr : Activate wr signal for the 2nd cycle.
+  \end{itemize} 
+
+\item Independent flags: no restrictions
+  \begin{itemize}
+  \item \#ld\_al : Load AL register with register bank output as read by opn. 1
+  (used in memory and io access).
+  \item \#ld\_addr : Load address register (H byte = register bank output as read
+  by operation 1, L byte = AL).
+  Activate vma signal for 1st cycle.  
+  \item \#clr\_acy : Clear PSW flags AC and CY, except for AND instructions 
+  (ALU operation = 000100), where AC is set.
+  Meant to be used with flag \#fp\_rc for the logic instructions (AND, OR, XOR).
+  See \ref{compatibility} for a note about compatibility to the original 8080.
+  \end{itemize}  
+
+\item PSW update flags: use only one of these
+  \begin{itemize}
+  \item \#fp\_r : This instruction updates all PSW flags except for C.
+  \item \#fp\_c : This instruction updates only the C flag in the PSW.
+  \item \#fp\_rc : This instruction updates all the flags in the PSW.
+  \end{itemize}
+  
+\end{itemize}
+
+\section{Notes on the microcode assembler}
+\label{ucodeAssembler}
+
+The microcode assembler is a Perl script (\texttt{util/uasm.pl}). Please refer 
+to the comments in the script for a reference on the usage of the assembler.\\
+I will admit up front that the microcode source format and the assembler
+program itself are a mess. They were hacked quickly and then often retouched 
+but never redesigned, in order to avoid the 'never ending project' syndrome.\\
+Please note that use of the assembler, and the microcode assembly source,
+is optional and perhaps overkill for this simple core. All you need to build the
+core is the vhdl source file.\\
+
+The perl assembler itself accounted for more than half of all the bugs I caught 
+during development. 
+Though the assembler certainly saved me a lot of mistakes in the hand-assembly 
+of the microcode, a half-cooked assembler like
+this one may do more harm than good. I expect that the program now behaves
+correctly; I have done a lot of modifications to the microcode source for
+testing purposes and I have not found any more bugs in the assembler. But you
+have been warned: don't trust the assembler too much (in case someone actually
+wants to mess with these things at all).\\
+The assembler is a Perl program (\texttt{util/uasm.pl}) that will read a 
+microcode text source file and write to stdout a microcode table in the form of 
+a chunk of VHDL code. You are supposed to capture that output and paste it into 
+the VHDL source (Actually, I used another perl script to do that, but I don't 
+want to overcomplicate an already messy documentation).\\
+The assembler can do some other simple operations on the source, for debug 
+purposes. The invocation options are documented in the program file.\\
+You don't need any extra Perl modules or libraries, any distribution of Perl 5 
+will do -– earlier versions should too but might not, I haven't
+tested.
+
+\section{CPU details}
+\label{cpuDetails}
+
+\subsection{Synchronous memory and i/o interface}
+\label{syncMem}
+
+The core is designed to connect to external synchronous memory similar to
+the internal fpga ram blocks found in the Spartan series. It can be used with
+asynchronous ram provided that you add the necessary registers (I have used it
+with external SRAM included on a development board with no trouble).
+
+Signal 'vma' is the master read/write enable. It is designed to be used as
+a synchronous rd/wr enable. All other memory/io signals are only valid when vma
+is active. Read data is sampled in the positive clock edge following deassertion
+of vma. Than is, the core expects external memory and io to behave as an
+internal fpga block ram would.\\
+I think the interface is simple enough to be fully described by the
+comments in the header of the VHDL source file.
+
+\subsection{Interrupt response}
+\label{irqResponse}
+
+Interrupt response has been greatly simplified, but it follows the outline
+of the original procedure. The biggest difference is that inta is
+active for the entire duration of the instruction, and not only the opcode fetch
+cycle.
+
+Whenever a high value is sampled in line intr in any positive clock edge,
+an interrupt pending flag is internally raised. After the current instruction
+finishes execution, the interrupt pending flag is sampled. If active, it is
+cleared, interrupts are disabled and the processor enters an inta cycle. If
+inactive, the processor enters a fetch cycle as usual.
+The inta cycle is identical to a fetch cycle, with the exception that inta
+signal is asserted high.
+
+The processor will fetch an opcode during the first inta cycle and will
+execute it normally, except the PC increment will not happen and inta will be
+high for the duration of the instruction. Note that though pc increment is
+inhibited while inta is high, pc can be explicitly changed (rst, jmp, etc.).
+After the special inta instruction execution is done, the processor
+resumes normal execution, with interrupts disabled.\\
+The above means that any instruction (even XTHL, which the original 8080
+forbids) can be used as an interrupt vector and will be executed normally. The
+core has been tested with rst, lxi and inr, for example.
+
+Since there's no M1 signal available, feeding multi-byte instructions as
+interrupt vectors can be a little complicated. It is up to you to deal with this
+situation (i.e. use only single-byte vectors or make up some sort of cycle 
+counter). 
+
+\subsection{Instruction timing}
+\label{timing}
+
+This core is slower than the original in terms of clocks per instruction.
+Since the original 8080 was itself one of the slowest micros ever, this does not
+say much for the core. Yet, one of these clocked at 50MHz would outperform an
+original 8080 at 25 Mhz, which is fast enough for many control applications ---
+except that there are possibly better alternatives.\\
+A comparative table follows.
+
+
+\begin{tabular}{|l|l|l|l|l|l|l|}
+\hline
+\multicolumn{7}{|c|}{Instruction timing (core vs. original)} \\ \hline
+
+Opcode & Intel 8080 & Light8080 & & Opcode & Intel 8080 & Light8080 \\ \hline
+
+MOV r1, r2 & 5 & 6 & &        XRA M & 7 & 9 \\ \hline
+MOV r, M & 7 & 9 & &          XRI data & 7 & 9 \\ \hline
+MOV M, r & 7 & 9 & &          ORA r & 4 & 6 \\ \hline
+MVI r, data & 7 & 9 & &       ORA M & 7 & 9 \\ \hline
+MVI M, data & 10 & 12 & &     ORI data & 7 & 9 \\ \hline
+LXI rp, data16 & 10 & 14 & &  CMP r & 4 & 6 \\ \hline
+LDA addr & 13 & 16 & &        CMP M & 7 & 9 \\ \hline
+STA addr & 13 & 16 & &        CPI data & 7 & 9 \\ \hline
+LHLD addr & 16 & 19 & &       RLC & 4 & 5 \\ \hline
+SHLD addr & 16 & 19 & &       RRC & 4 & 5 \\ \hline
+LDAX rp & 7 & 9 & &           RAL & 4 & 5 \\ \hline
+STAX rp & 7 & 9 & &           RAR & 4 & 5 \\ \hline
+XCHG & 4 & 16 & &             CMA & 4 & 5 \\ \hline
+ADD r & 4 & 6 & &             CMC & 4 & 5 \\ \hline
+ADD M & 7 & 9 & &             STC & 4 & 5 \\ \hline
+ADI data & 7 & 9 & &          JMP & 10 & 15 \\ \hline
+ADC r & 4 & 6 & &             Jcc & 10 & 12/16 \\ \hline
+ADC M & 7 & 9 & &             CALL & 17 & 29 \\ \hline
+ACI data & 7 & 9 & &          Ccc & 11/17 & 12/30 \\ \hline
+SUB r & 4 & 6 & &             RET & 10 & 14 \\ \hline
+SUB M & 7 & 9 & &             Rcc & 5/11 & 5/15 \\ \hline
+SUI data & 7 & 9 & &          RST n & 11 & 20 \\ \hline
+SBB r & 4 & 6 & &             PCHL & 5 & 8 \\ \hline
+SBB M & 7 & 9 & &             PUSH rp & 11 & 19 \\ \hline
+SBI data & 7 & 9 & &          PUSH PSW & 11 & 19 \\ \hline
+INR r & 5 & 6 & &             POP rp & 10 & 14 \\ \hline
+INR M & 10 & 13 & & POP PSW & 10 & 14 \\ \hline
+INX rp & 5 & 6 & & XTHL & 18 & 32 \\ \hline
+DCR r & 5 & 6 & & SPHL & 5 & 8 \\ \hline
+DCR M & 10 & 14 & & EI & 4 & 5 \\ \hline
+DCX rp & 5 & 6 & & DI & 4 & 5 \\ \hline
+DAD rp & 10 & 8 & & IN port & 10 & 14 \\ \hline
+DAA & 4 & 6 & & OUT port & 10 & 14 \\ \hline
+ANA r & 4 & 6 & & HLT & 7 & 5 \\ \hline
+ANA M & 7 & 9 & & NOP & 4 & 5 \\ \hline
+ANI data & 7 & 9 & & & & \\ \hline
+XRA r & 4 & 6 & & & & \\ \hline
+
+\end{tabular}
+
+\clearpage
+
+\subsection{Binary compatibility to original 8080}
+\label{compatibility}
+
+Flag AC (auxiliary carry) does not work exactly as in the original 8080. In the 
+original 8080, ANI and ANA don't clear AC but set it to the OR'ing of
+bits 3 of the ALU operands.
+
+In this core, these two instructions instead set the AC flag to 1. In this, the
+core is compatible to the 8085 ad not to the 8080.
+
+That is the only difference to the original 8080 that I am aware of. 
+Unfortunately, the only test bench that I have available right now is not 
+exhaustive enough to pick that kind of detail. Until I develop a stronger test 
+bench, full compatibility to the 8080 can't be guaranteed.
+ 
+\end{document}
+

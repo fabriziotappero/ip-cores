@@ -1,0 +1,760 @@
+////////////////////////////////////////////////////////////////////////////////
+// LIGHT8080 CORE MICROCODE (V.2 February 12th 2012)
+////////////////////////////////////////////////////////////////////////////////
+// NOTE: Except for bug fixing, there's no need to tinker with the microcode. 
+// Once the microcode table has been generated, this file is is not needed to 
+// synthesize or use the core.
+////////////////////////////////////////////////////////////////////////////////
+//
+// ***** FORMAT AND OPERATION:
+//
+// operation 1 ; operation 2 ; flags
+//
+// Operation 1 sets up the ALU input registers; operation 2 takes the ALU result
+// and writes it back somewhere; and the flags group all other microinstruction 
+// control signals.
+//  
+// For any given microinstruction, operation 2 takes place in the cycle after 
+// operation 1. It happens concurrently with the next microinstruction's 
+// operation 1, so whenever a register is written to in an operation 2 it will 
+// NOT be available for the next microinstruction.
+//
+// In operation 1, you may load any one of T1 or T2 from the register bank or
+// from DI which is simply the unregistered signal data_in.
+//  
+// In operation 2, you specify the ALU operation and assign the ALU result to 
+// the register bank or the register DO, which feeds the signal data_out. 
+//  
+// You cannot address two different registers from the register bank in 
+// operations 1 and 2 (see the design notes on this).
+//  
+// *** Some other elements found in the microcode source:
+//
+// labels: must be in a line by themselves, otherwise work like any assembler.
+// __code pragmas: used by assembler to automatically generate the decode table.
+// __asm pragmas: not used, but can be handy as a reference.
+//
+//
+// ***** FLAGS:
+//
+// Note: '1st cycle' and '2nd cycle' denote both cycles of the present 
+// microinstruction (m.i.); cycle 2 of m.i. N overlaps cycle 1 of m.i. N+1.
+//
+// #ld_al :   Load AL register with register bank output as read by operation 1.
+//            (used in memory and io access). 
+// #ld_addr : Load address register (H byte = register bank output as read by 
+//            operation 1, L byte = AL). 
+//            Activate vma signal for 1st cycle.
+// #auxcy :   Use aux carry instead of regular carry for this operation. 
+// #setacy :  Set aux carry at the start of 1st cycle (used for ++).
+// #end :     Jump to microinstruction address 3 after the present m.i.
+// #ret :     Jump to address saved by the last JST or TJSR m.i.
+// #rd :      Activate rd signal for the 2nd cycle.
+// #wr :      Activate wr signal for the 2nd cycle.
+// #fp_r :    This microinstruction updates all PSW flags except for C.
+// #fp_c :    This microinstruction updates only the C flag in the PSW.
+// #fp_rc :   This microinstruction updates all the flags in the PSW.
+// #clrt1 :   Clear T1 at the end of 1st cycle.
+// #io :      Activate io signal for 1st cycle.
+// #ei :      Set interrupt enable register.
+// #di :      Reset interrupt enable register.
+// #halt :    Jump to microcode address 0x07 without saving return value.
+//
+////////////////////////////////////////////////////////////////////////////////
+// V.1 November 1st 2007    -- Original version
+// V.2 February 12th 2012   -- Fixed CY/AC clear bug with clr_acy flag
+////////////////////////////////////////////////////////////////////////////////
+
+
+// RESET ucode: from 0 to 2, but uinst at address 0 is never executed
+__reset 
+
+NOP           ; NOP                     
+NOP           ; _pl = AND     ;                 // T1 & T2 = 0x00
+NOP           ; _ph = AND     ;                 // T1 & T2 = 0x00
+
+// FETCH ucode: from 3 to 6 
+// (executed in INTA cycles too, with pc increment inhibited to preserve PC)
+__fetch
+
+T1 = _pl      ; _pl = ADC     ; #ld_al, #auxcy, #setacy
+T1 = _ph      ; _ph = ADC     ; #ld_addr, #rd, #auxcy
+NOP           ; NOP           ; #decode
+
+// free uinst slot
+NOP           ; NOP           ;
+
+// HALT ucode: address 7
+__halt
+NOP           ; NOP           ; #halt, #end
+
+
+// NOTE: ALU single_operand ops work on T1
+// ALU 2-operands work with 'A' on T2 (e.g. SUB == T2 - T1)
+
+
+__code  "01dddsss"
+__asm   MOV {d},{s}
+
+T1 = {s}      ; NOP
+NOP           ; {d} = T1      ; #end
+
+
+__code  "01ddd110"
+__asm   MOV {d},M 
+
+JSR read_m    ;
+NOP           ; {d} = T1      ; #end  
+
+
+__code  "01110sss"
+__asm   MOV M,{s}
+
+T1 = {s}      ; DO = T1
+JSR write_m                   // does not return
+
+
+__code  "00ddd110"
+__asm   MVI {d},#imm
+
+JSR read_imm
+NOP           ; {d} = T1      ; #end
+
+
+__code  "00110110"
+__asm   MVI M,#imm
+
+JSR read_imm 
+JSR write_m
+
+
+__code  "00pp0001"
+__asm   LXI [p]
+
+JSR read_imm
+NOP           ; {p}1 = T1
+JSR read_imm
+NOP           ; {p}0 = T1     ; #end
+
+
+__code  "00111010"
+__asm   LDA addr
+
+JSR read_imm_wz
+JSR read_wz 
+NOP           ; _a = T1       ; #end
+
+
+__code  "00110010"
+__asm   STA addr
+
+JSR read_imm_wz
+T1 = _a       ; DO = T1       ;
+JSR write_wz                    //does not return
+
+
+__code  "00101010"
+__asm   LHLD 
+
+
+JSR read_imm_wz
+T1 = _z       ; _z = ADC      ; #ld_al, #auxcy, #setacy // L = (WZ++)
+T1 = _w       ; _w = ADC      ; #ld_addr, #rd, #auxcy
+T1 = DI       ; _l = T1
+JSR read_wz                                             // H = (WZ)
+NOP           ; _h = T1       ; #end           
+
+
+__code  "00100010"
+__asm   SHLD 
+
+JSR read_imm_wz
+T1 = _l       ; DO = T1
+T1 = _z       ; _z = ADC      ; #ld_al, #auxcy, #setacy
+T1 = _w       ; _w = ADC      ; #ld_addr, #wr, #auxcy
+T1 = _h       ; DO = T1                             
+JSR write_wz
+
+
+__code  "00pp1010"
+__asm   LDAX [p]
+
+JSR read_p
+NOP           ; _a = T1       ; #end
+
+
+__code  "00pp0010"
+__asm   STAX [p]
+
+T1 = _a       ; DO = T1
+JSR write_p
+
+
+__code  "11101011"
+__asm   XCHG
+
+// 16 T cycles vs. 10 for the original 8080...
+T1 = _d       ; NOP
+NOP           ; _x = T1
+T1 = _e       ; NOP
+NOP           ; _y = T1
+T1 = _h       ; NOP
+NOP           ; _d = T1
+T1 = _l       ; NOP
+NOP           ; _e = T1
+T1 = _x       ; NOP
+NOP           ; _h = T1
+T1 = _y       ; NOP
+NOP           ; _l = T1         ; #end
+
+
+__code  "11000110"
+__asm   ADI #imm
+
+JSR read_imm
+T2 = _a       ; _a = ADD      ; #end, #fp_rc
+
+__code  "11001110"
+__asm   ACI #imm
+
+JSR read_imm
+T2 = _a       ; _a = ADC      ; #end, #fp_rc
+
+__code  "11010110"
+__asm   SUI #imm
+
+JSR read_imm
+T2 = _a       ; _a = SUB      ; #end, #fp_rc
+
+__code  "11011110"
+__asm   SBI #imm
+
+JSR read_imm
+T2 = _a       ; _a = SBB      ; #end, #fp_rc
+
+
+__code  "11100110"
+__asm   ANI #imm
+
+JSR read_imm
+T2 = _a       ; _a = AND      ; #end, #fp_rc, #clr_acy
+
+__code  "11101110"
+__asm   XRI #imm
+
+JSR read_imm
+T2 = _a       ; _a = XRL      ; #end, #fp_rc, #clr_acy
+
+
+__code  "11110110"
+__asm   ORI #imm
+
+JSR read_imm
+T2 = _a       ; _a = ORL      ; #end, #fp_rc, #clr_acy
+
+
+__code  "11111110"
+__asm   CPI #imm
+
+JSR read_imm
+T2 = _a       ; DO = SUB      ; #end, #fp_rc
+
+
+
+__code  "10000sss"
+__asm   ADD {s}
+
+T1 = {s}      ; NOP   
+T2 = _a       ; _a = ADD      ; #end, #fp_rc
+
+__code  "10001sss"
+__asm   ADC {s}
+
+T1 = {s}      ; NOP   
+T2 = _a       ; _a = ADC      ; #end, #fp_rc
+
+__code  "10010sss"
+__asm   SUB {s}
+
+T1 = {s}      ; NOP   
+T2 = _a       ; _a = SUB      ; #end, #fp_rc
+
+__code  "10011sss"
+__asm   SBB {s}
+
+T1 = {s}      ; NOP   
+T2 = _a       ; _a = SBB      ; #end, #fp_rc
+
+__code  "10100sss"
+__asm   ANA {s}
+
+T1 = {s}      ; NOP   
+T2 = _a       ; _a = AND      ; #end, #fp_rc, #clr_acy
+
+__code  "10101sss"
+__asm   XRA {s}
+
+T1 = {s}      ; NOP   
+T2 = _a       ; _a = XRL      ; #end, #fp_rc, #clr_acy
+
+__code  "10110sss"
+__asm   ORA {s}
+
+T1 = {s}      ; NOP   
+T2 = _a       ; _a = ORL      ; #end, #fp_rc, #clr_acy
+
+__code  "10111sss"
+__asm   CMP {s}
+
+T1 = {s}      ; NOP   
+T2 = _a       ; DO = SUB      ; #end, #fp_rc
+
+
+__code  "10000110"
+__asm   ADD M
+
+JSR read_m
+T2 = _a       ; _a = ADD      ; #end, #fp_rc
+
+__code  "10001110"
+__asm   ADC M
+
+JSR read_m
+T2 = _a       ; _a = ADC      ; #end, #fp_rc
+
+__code  "10010110"
+__asm   SUB M
+
+JSR read_m
+T2 = _a       ; _a = SUB      ; #end, #fp_rc
+
+__code  "10011110"
+__asm   SBB M
+
+JSR read_m
+T2 = _a       ; _a = SBB      ; #end, #fp_rc
+
+__code  "10100110"
+__asm   ANA M
+
+JSR read_m
+T2 = _a       ; _a = AND      ; #end, #fp_rc, #clr_acy
+
+__code  "10101110"
+__asm   XRA M
+
+JSR read_m
+T2 = _a       ; _a = XRL      ; #end, #fp_rc, #clr_acy
+
+__code  "10110110"
+__asm   ORA M
+
+JSR read_m
+T2 = _a       ; _a = ORL      ; #end, #fp_rc, #clr_acy
+
+
+__code  "10111110"
+__asm   CMP M
+
+JSR read_m
+T2 = _a       ; DO = SUB      ; #end, #fp_rc
+
+
+__code  "00ddd100"
+__asm   INR {d}
+
+T1 = {d}      ; {d} = ADC     ; #auxcy, #setacy, #fp_r
+NOP           ; NOP           ; #end  // extra line, flag clash
+
+
+__code  "00110100"
+__asm   INR M
+
+JSR read_m
+NOP           ; DO = ADC      ; #auxcy, #setacy, #fp_r
+JSR write_m
+
+
+__code  "00ddd101"
+__asm   DCR {d}
+
+T2 = {d}      ; {d} = SBB     ; #auxcy, #setacy, #fp_r
+NOP           ; NOP           ; #end   // extra line, flag clash
+
+
+__code  "00110101"
+__asm   DCR M
+
+JSR read_m // T1 = _x = (HL); but we need it in T2!
+NOP           ; NOP           ; #clrt1 // flag clash
+T2 = _x       ; DO = SBB      ; #auxcy, #setacy, #fp_r
+JSR write_m
+
+
+__code  "00pp0011"
+__asm   INX [p]
+
+T1 = {p}1     ; {p}1 = ADC      ; #auxcy, #setacy
+T1 = {p}0     ; {p}0 = ADC      ; #end, #auxcy 
+
+
+__code  "00pp1011"
+__asm   DCX [p]
+
+T2 = {p}1     ; {p}1 = SBB      ; #auxcy, #setacy  // T2 because SUB -> T2 - T1
+T2 = {p}0     ; {p}0 = SBB      ; #end, #auxcy 
+
+
+__code  "00pp1001"
+__asm   DAD [p]
+
+T2 = {p}1     ; NOP
+T1 = _l       ; _l = ADD      ; #fp_c // we need this cy
+T2 = {p}0     ; NOP           ; 
+T1 = _h       ; _h = ADC      ; #end, #fp_c
+
+
+__code  "00100111"
+__asm   DAA
+
+// DAA result is only valid after the 2nd cycle;
+T1 = _a       ; DO = DAA        ; //DO value ignored
+T1 = _a       ; _a = DAA        ; #end, #fp_rc
+
+
+__code  "00000111"
+__asm   RLC
+
+T1 = _a       ; _a = rla       ; #end, #fp_c
+
+
+__code  "00001111"
+__asm   RRC
+
+T1 = _a       ; _a = rra       ; #end, #fp_c
+
+
+__code  "00010111"
+__asm   RAL
+
+T1 = _a       ; _a = rlca      ; #end, #fp_c
+
+
+__code  "00011111"
+__asm   RAR
+
+T1 = _a       ; _a = rrca      ; #end, #fp_c
+
+
+__code  "00101111"
+__asm   CMA
+
+T1 = _a       ; _a = NOT        ; #end
+
+
+__code  "00111111"
+__asm   CMC
+
+NOP           ; cpc              ; #end, #fp_c
+
+
+__code  "00110111"
+__asm   STC
+
+NOP           ; sec              ; #end, #fp_c
+
+
+__code  "11000011"
+__asm   JMP addr
+
+JSR read_imm_wz
+:jmp_addr
+T1 = _z       ; NOP 
+NOP           ; _pl = T1
+T1 = _w       ; NOP 
+NOP           ; _ph = T1      ; #end
+
+
+
+__code  "00000000"
+__asm   NOP
+
+NOP           ; NOP           ; #end
+
+
+__code  "11ccc010"
+__asm   {JZ,JNZ,JC,JNC,JPO,JPE,JP,JM} addr
+
+JSR read_imm_wz
+TJSR jmp_addr           // TJSR does the JSR or does #end the instruction.
+
+
+__code  "11001101"
+__asm   CALL addr
+
+//:call_addr
+JSR read_imm_wz
+:call_addr //@@
+T1 = _ph      ; DO = T1         ; #clrt1
+JSR push
+T1 = _pl      ; DO = T1         ; #clrt1
+JSR push
+T1 = _z       ; NOP
+NOP           ; _pl = T1
+T1 = _w       ; NOP
+NOP           ; _ph = T1        ; #end
+
+
+
+__code  "11ccc100"
+__asm   {CZ,CNZ,CC,CNC,CPO,CPE,CP,CM} addr
+
+JSR read_imm_wz     // skip next 2 bytes
+TJSR call_addr      // TJSR does the JSR or does #end the instruction.            
+
+
+__code  "11001001"
+__asm   RET
+
+:ret
+JSR pop
+NOP           ; _pl = T1
+JSR pop
+NOP           ; _ph = T1        ; #end
+
+
+__code  "11ccc000"
+__asm   {RZ,RNZ,RC,RNC,RPO,RPE,RP,RM}
+
+
+TJSR ret      // TJSR does the JSR or does #end the instruction.
+
+
+
+__code  "11nnn111"
+__asm   {RST 0h,RST 8h,RST 10h,RST 18h,RST 20h,RST 28h,RST 30h,RST 38h}
+
+T1 = _ph      ; DO = T1       ; #clrt1
+JSR push
+T1 = _pl      ; DO = T1       ; #clrt1
+JSR push
+NOP           ; _pl = rst     ; #clrt1
+NOP           ; _ph = AND     ; #end  // T1 & T2 = 0, because T2=0
+// No extra cycle needed, _ph is not used in the next microinstruction
+
+__code  "11101001"
+__asm   PCHL
+
+T1 = _l       ; NOP
+NOP           ; _pl = T1
+T1 = _h       ; NOP
+NOP           ; _ph = T1        ; #end
+
+
+__code  "11pp0101"  //Except for PUSH PSW
+__asm   PUSH [p]
+
+T1 = {p}0     ; DO = T1         ; #clrt1  // H first...
+JSR push 
+T1 = {p}1     ; DO = T1         ; #clrt1  // ...L last
+JSR push 
+NOP           ; NOP             ; #end
+
+
+__code  "11110101"
+__asm   PUSH PSW
+
+T1 = _a       ; DO = T1         ; #clrt1
+JSR push      
+NOP           ; DO = PSW        ; #clrt1
+JSR push 
+NOP           ; NOP             ; #end
+
+
+__code  "11pp0001"  //Except for POP PSW
+__asm   POP [p]
+
+JSR pop
+NOP           ; {p}1 = T1
+JSR pop
+NOP           ; {p}0 = T1       ; #end
+
+
+__code  "11110001"
+__asm   POP PSW
+
+JSR pop
+NOP           ; _f = T1         ; #fp_rc //F<-(SP); F f-fs load automatically
+JSR pop
+NOP           ; _a = T1         ; #end
+
+
+__code  "11100011"
+__asm   XTHL
+
+JSR pop
+NOP           ; _z = T1
+JSR pop
+NOP           ; _w = T1         
+T1 = _h       ; DO = T1         ; #clrt1
+JSR push 
+T1 = _l       ; DO = T1         ; #clrt1
+JSR push 
+T1 = _z       ; NOP
+NOP           ; _l = T1
+T1 = _w       ; NOP
+NOP           ; _h = T1         ; #end
+
+
+__code  "11111001"
+__asm   SPHL
+
+T1 = _l       ; NOP
+NOP           ; _sl = T1
+T1 = _h       ; NOP
+NOP           ; _sh = T1           ; #end
+
+
+__code  "11111011"
+__asm   EI
+
+NOP           ; NOP                ; #ei, #end
+
+
+__code  "11110011"
+__asm   DI
+
+NOP           ; NOP                ; #di, #end
+
+
+__code  "11011011"
+__asm   IN port
+
+NOP           ; _w = T1             // _w = 0
+JSR read_imm                        // T1 = port
+NOP           ; _z = T1             // #ld_al reads from mux...
+NOP           ; NOP
+T1 = _z       ; NOP           ; #ld_al
+T1 = _w       ; NOP           ; #ld_addr, #rd, #io
+T1 = DI       ; _a = T1       ; #end
+
+
+// Can be reduced to 11 states by removing 1st uinst
+// Then, _b might be put on high addr byte as in the original...
+__code  "11010011"
+__asm   OUT port
+
+
+NOP           ; _w = T1             // _w = 0, put on high byte of io address
+JSR read_imm                        // T1 = port
+NOP           ; _z = T1             // #ld_al reads from mux...
+T1 = _a       ; DO = T1
+T1 = _z       ; NOP           ; #ld_al
+T1 = _w       ; NOP           ; #ld_addr, #wr, #io
+NOP           ; NOP           ; #end
+
+
+__code  "01110110"
+__asm   HLT
+//TODO doc: #halt has to be in the same cycle as #end
+NOP           ; NOP           ; #halt, #end
+
+
+
+
+//********************************************
+
+// T1 = (HL)
+
+:read_m
+
+T1 = _l       ; NOP           ; #ld_al
+T1 = _h       ; NOP           ; #ld_addr, #rd
+T1 = DI       ; _x = T1       ; #ret
+
+// (HL) = DO, does not return
+// TODO extra uinst is for wait state, which is not implemented
+
+:write_m
+
+T1 = _l       ; NOP           ; #ld_al
+T1 = _h       ; NOP           ; #ld_addr, #wr
+NOP           ; NOP           ; #end
+
+
+// T1 = (PC++), DO = T1
+// T2 must be 0 on entry
+:read_imm
+
+T1 = _pl      ; _pl = ADC     ; #ld_al, #auxcy, #setacy
+T1 = _ph      ; _ph = ADC     ; #ld_addr, #rd, #auxcy
+T1 = DI       ; DO = T1       ; #ret
+
+
+// T1 = (WZ)
+
+:read_wz
+
+T1 = _z       ; NOP           ; #ld_al
+T1 = _w       ; NOP           ; #ld_addr, #rd
+T1 = DI       ; NOP           ; #ret
+
+
+// (WZ) = DO, does not return
+// TODO extra uinst is for wait state, which is not implemented
+
+:write_wz
+
+T1 = _z       ; NOP           ; #ld_al
+T1 = _w       ; NOP           ; #ld_addr, #wr
+NOP           ; NOP           ; #end
+
+// T1 = (RP)
+
+:read_p
+
+T1 = {p}1     ; NOP           ; #ld_al
+T1 = {p}0     ; NOP           ; #ld_addr, #rd
+T1 = DI       ; NOP           ; #ret
+
+
+// (RP) = DO, does not return
+// TODO extra uinst is for wait state, which is not implemented
+
+:write_p
+
+T1 = {p}1     ; NOP           ; #ld_al
+T1 = {p}0     ; NOP           ; #ld_addr, #wr
+NOP           ; NOP           ; #end
+
+// WZ = imm16
+
+:read_imm_wz
+
+T1 = _pl      ; _pl = ADC     ; #ld_al, #auxcy, #setacy
+T1 = _ph      ; _ph = ADC     ; #ld_addr, #rd, #auxcy
+T1 = DI       ; _z = T1      
+T1 = _pl      ; _pl = ADC     ; #ld_al, #auxcy, #setacy
+T1 = _ph      ; _ph = ADC     ; #ld_addr, #rd, #auxcy
+T1 = DI       ; _w = T1       ; #ret
+
+// push DO
+// no wait cycle! 
+
+:push
+T2 = _sl      ; _sl = SBB     ; #auxcy, #setacy 
+T2 = _sh      ; _sh = SBB     ; #auxcy 
+T1 = _sl      ; NOP           ; #ld_al
+T1 = _sh      ; NOP           ; #ld_addr, #wr,
+NOP           ; NOP           ; #ret   // extra line, flag clash
+
+
+// POP T1
+
+:pop
+T1 = _sl      ; _sl = ADC     ; #ld_al, #auxcy, #setacy
+T1 = _sh      ; _sh = ADC     ; #ld_addr, #rd, #auxcy
+T1 = DI       ; NOP           ; #ret  // extra line, flag clash
+
+
+// End of file

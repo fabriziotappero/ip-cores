@@ -1,0 +1,295 @@
+0001   0000             ;*******************************************************************************
+0002   0000             ; soc_tb.asm -- light8080 SoC basic test bench.
+0003   0000             ;*******************************************************************************
+0004   0000             ; Should be used with SoC core test bench entity vhdl\test\l80soc_tb.vhdl.
+0005   0000             ; Assembler format compatible with TASM for DOS and Linux.
+0006   0000             ;*******************************************************************************
+0007   0000             ; This program will send a few bytes over a looped-back UART, using the UART 
+0008   0000             ; interrupt capability and verifying that received and transmitted data match.
+0009   0000             ; It will then try one of the external interrupts, connected to one of the 
+0010   0000             ; general purpose outputs.
+0011   0000             ; This minimal test bench relies on an already tested CPU core to do a 
+0012   0000             ; This program does not deserve to even be called a 'test' but if if works it 
+0013   0000             ; will at least rule out many obvious bug in the SoC core.
+0014   0000             ;*******************************************************************************
+0015   0000             
+0016   0000             ; DS pseudo-directive; reserve space in bytes, without initializing it
+0017   0000             #define ds(n)    \.org $+n
+0018   0000             
+0019   0000             MASK_RX_IRQ:  .equ 20h
+0020   0000             MASK_TX_IRQ:  .equ 10h
+0021   0000             MASK_RX_RDY:  .equ 02h
+0022   0000             MASK_TX_RDY:  .equ 01h
+0023   0000             
+0024   0000             UART_DATA:    .equ 80h
+0025   0000             UART_STATUS:  .equ 81h
+0026   0000             UART_BAUDL:   .equ 82h
+0027   0000             UART_BAUDH:   .equ 83h
+0028   0000             IRQ_ENABLE:   .equ 88h
+0029   0000             
+0030   0000             P1IN:         .equ 84h
+0031   0000             P2OUT:        .equ 86h
+0032   0000             
+0033   0000             
+0034   0000             ;*******************************************************************************
+0035   0000             
+0036   0000                       .org  0H              ; Reset entry point
+0037   0000 C3 60 00              jmp   start           ; Skip the rst address area
+0038   0003                                     
+0039   0003                     ;***** Interrupt vectors in area 0008h-0038h *****************
+0040   0003                       
+0041   0008                       .org  0h+(1*8)        ; interrupt vector 1 (IRQ0)
+0042   0008 C3 12 01              jmp   isr0
+0043   0010                       .org  0h+(2*8)        ; interrupt vector 2
+0044   0010 FB                    ei
+0045   0011 C9                    ret
+0046   0018                       .org  0h+(3*8)        ; interrupt vector 3 (IRQ1)
+0047   0018 C3 1E 01              jmp   isr1
+0048   0020                       .org  0h+(4*8)        ; interrupt vector 4
+0049   0020 FB                    ei
+0050   0021 C9                    ret
+0051   0028                       .org  0h+(5*8)        ; interrupt vector 5 (IRQ2)
+0052   0028 FB                    ei
+0053   0029 C9                    ret
+0054   0030                       .org  0h+(6*8)        ; interrupt vector 6
+0055   0030 FB                    ei
+0056   0031 C9                    ret
+0057   0032                       
+0058   0038                       .org  0h+(7*8)        ; interrupt vector 7 (IRQ3, UART)
+0059   0038 C3 2A 01    int38h:   jmp   irq_uart        ; UART interrupt 
+0060   003B                    
+0061   003B                       ;***** program entry point *******************************************
+0062   003B                             
+0063   0060             start:    .org  60H
+0064   0060 31 DA 01              lxi   sp,stack
+0065   0063             
+0066   0063                       ; Initialize UART RX and TX buffers
+0067   0063 21 74 01              lxi   h,void_buffer
+0068   0066 22 75 01              shld  ptr_tx
+0069   0069 21 7A 01              lxi   h,rx_buffer
+0070   006C 22 77 01              shld  ptr_rx
+0071   006F 3E 00                 mvi   a,00h
+0072   0071 32 79 01              sta   len_rx
+0073   0074                       
+0074   0074                       ; Clear all P2 output lines (used to simulate external interrupts)
+0075   0074 3E 00                 mvi   a,00h
+0076   0076 D3 86                 out   P2OUT
+0077   0078                       
+0078   0078                       ; Set up interrupts
+0079   0078 3E 0B                 mvi   a,0bh           ; Enable UART irq plus IRQ0 and IRQ1...
+0080   007A D3 88                 out   IRQ_ENABLE
+0081   007C FB                    ei                    ; ...and enable interrupts in the CPU
+0082   007D                     
+0083   007D                       ; print hello message to console
+0084   007D 21 02 01              lxi   h,msg_hello
+0085   0080 CD 66 01              call  print_string
+0086   0083                       ; Ok, now the message is being transferred through the looped back
+0087   0083                       ; UART, using the UART interrupts, which have the lowest priority.
+0088   0083                       ; We have plenty of time to make a few tests on the external interrupt
+0089   0083                       ; lines before the message transmission is finished.
+0090   0083                       
+0091   0083                       ; The irq routines will leave some data at 'irq_data, each routine a
+0092   0083                       ; different value and all non-zero. This is how we know what irq 
+0093   0083                       ; routines have executed and in which order.
+0094   0083                       
+0095   0083                       ; Test IRQ0 alone 
+0096   0083 3E 01                 mvi   a,01h           ; Initialize irq data 
+0097   0085 32 73 01              sta   irq_data
+0098   0088 3E 01                 mvi   a,01h           ; Trigger IRQ0
+0099   008A D3 86                 out   P2OUT
+0100   008C             test_irq0:
+0101   008C 3A 73 01              lda   irq_data        
+0102   008F FE 04                 cpi   004h            ; Do we see the IRQ test data?
+0103   0091 CA 9C 00              jz    done_irq0       ; If we do, proceed to next test 
+0104   0094 FE 01                 cpi   001h            ; Do we see some other IRQ test data instead?
+0105   0096 C2 FB 00              jnz   test_fail       ; If we do, there's trouble with the irqs
+0106   0099 C3 8C 00              jmp   test_irq0       ; Keep waiting for some IRQ test data
+0107   009C             done_irq0: 
+0108   009C 3E 00                 mvi   a,00h           ; Deassert all interrupt lines
+0109   009E D3 86                 out   P2OUT
+0110   00A0                       
+0111   00A0                       ; Test IRQ1 alone 
+0112   00A0 3E 01                 mvi   a,01h           ; Initialize irq data 
+0113   00A2 32 73 01              sta   irq_data
+0114   00A5 3E 02                 mvi   a,02h           ; Trigger IRQ1
+0115   00A7 D3 86                 out   P2OUT
+0116   00A9             test_irq1:
+0117   00A9 3A 73 01              lda   irq_data        
+0118   00AC FE 02                 cpi   002h            ; Do we see the IRQ test data?
+0119   00AE CA B9 00              jz    done_irq1       ; If we do, proceed to next test 
+0120   00B1 FE 01                 cpi   001h            ; Do we see some other IRQ test data instead?
+0121   00B3 C2 FB 00              jnz   test_fail       ; If we do, there's trouble with the irqs
+0122   00B6 C3 A9 00              jmp   test_irq1       ; Keep waiting for some IRQ test data
+0123   00B9             done_irq1: 
+0124   00B9 AF                    xra   a               ; Deassert all interrupt lines
+0125   00BA D3 86                 out   P2OUT
+0126   00BC                       
+0127   00BC                       ; Test IRQ0 and IRQ1 simultaneously
+0128   00BC 3E 01                 mvi   a,01h           ; Initialize irq data 
+0129   00BE 32 73 01              sta   irq_data
+0130   00C1 3E 03                 mvi   a,03h           ; Trigger IRQ0 and IRQ1 
+0131   00C3 D3 86                 out   P2OUT
+0132   00C5                       
+0133   00C5                       ; Sequence IRQ0->IRQ1 will result in (1 << 2) + 1 = 5
+0134   00C5                       ; Sequence IRQ1->IRQ0 would result in (1 + 1) << 2 = 6
+0135   00C5                       ; We expect IRQ0->IRQ1, since IRQ0 has higher priority
+0136   00C5             test_irq01:
+0137   00C5 3A 73 01              lda   irq_data        
+0138   00C8 FE 05                 cpi   005h            ; Do we see the IRQ0->IRQ1 test data?
+0139   00CA CA D5 00              jz    done_irq01      ; If we do, proceed to next test 
+0140   00CD FE 01                 cpi   001h            ; Do we see some other IRQ test data instead?
+0141   00CF C2 FB 00              jnz   test_fail       ; If we do, there's trouble with the irqs
+0142   00D2 C3 C5 00              jmp   test_irq01      ; Keep waiting for some IRQ test data
+0143   00D5             done_irq01: 
+0144   00D5 AF                    xra   a               ; Deassert all interrupt lines
+0145   00D6 D3 86                 out   P2OUT
+0146   00D8                       
+0147   00D8                       ; Ok, the external interrupts have been tested (well, 'tested'). Now
+0148   00D8                       ; wait for the UART looped-back transmission to end and compare 
+0149   00D8                       ; the data.
+0150   00D8             
+0151   00D8                       ; Wait until the number of UART received characters equals the length 
+0152   00D8                       ; of the test message.
+0153   00D8             wait_for_message:          
+0154   00D8 3A 79 01              lda   len_rx
+0155   00DB FE 0F                 cpi   msg_len
+0156   00DD C2 D8 00              jnz   wait_for_message
+0157   00E0                       
+0158   00E0                       ; Compare the TX and RX strings
+0159   00E0 21 7A 01              lxi   h,rx_buffer
+0160   00E3 11 02 01              lxi   d,msg_hello
+0161   00E6             compare_loop:
+0162   00E6 1A                    ldax  d
+0163   00E7 FE 24                 cpi   '$'
+0164   00E9 CA F5 00              jz    test_ok
+0165   00EC BE                    cmp   m
+0166   00ED C2 FB 00              jnz   test_fail
+0167   00F0 23                    inx   h
+0168   00F1 13                    inx   d
+0169   00F2 C3 E6 00              jmp   compare_loop
+0170   00F5                       
+0171   00F5                       
+0172   00F5                       
+0173   00F5                       
+0174   00F5                       
+0175   00F5             test_ok:          
+0176   00F5 3E 80                 mvi   a,80h           ; Raise 'success' output flag...
+0177   00F7 D3 86                 out   P2OUT
+0178   00F9 F3          done:     di                    ; ...and block here.
+0179   00FA 76                    hlt                   
+0180   00FB             
+0181   00FB             test_fail:
+0182   00FB 3E 40                 mvi   a,40h           ; Raise 'failure' flag...
+0183   00FD D3 86                 out   P2OUT
+0184   00FF C3 F9 00              jmp   done            ; ...and block.
+0185   0102                       
+0186   0102                       
+0187   0102             
+0188   0102 0A 0D 0A 48 msg_hello: .text "\n\r\nHello World!$"     
+0188   0106 65 6C 6C 6F 
+0188   010A 20 57 6F 72 
+0188   010E 6C 64 21 24 
+0189   0112             msg_end:  .equ $
+0190   0112             msg_len:  .equ msg_end - msg_hello - 1    
+0191   0112             
+0192   0112 F5          isr0:     push  psw
+0193   0113 3A 73 01              lda   irq_data
+0194   0116 07                    rlc
+0195   0117 07                    rlc
+0196   0118 32 73 01              sta   irq_data
+0197   011B F1                    pop   psw
+0198   011C FB                    ei
+0199   011D C9                    ret
+0200   011E             
+0201   011E F5          isr1:     push  psw
+0202   011F 3A 73 01              lda   irq_data
+0203   0122 C6 01                 adi   1
+0204   0124 32 73 01              sta   irq_data
+0205   0127 F1                    pop   psw
+0206   0128 FB                    ei
+0207   0129 C9                    ret
+0208   012A                       
+0209   012A             ;irq_uart: UART interrupt processing 
+0210   012A             irq_uart:
+0211   012A E5                    push  h
+0212   012B F5                    push  psw
+0213   012C                       
+0214   012C                       ; Deal with RX interrupt (if any) first and then the TX interrupt.
+0215   012C DB 81                 in    UART_STATUS     ; Is there new data in the RX register?
+0216   012E E6 20                 ani   MASK_RX_IRQ
+0217   0130 CA 48 01              jz    irq_uart_rx_done ; If there isn't, process TX interrupt.
+0218   0133                       
+0219   0133                       ; Process UART RX interrupt
+0220   0133             irq_uart_rx:     
+0221   0133 3E 20                 mvi   a,MASK_RX_IRQ   ; Clear IRQ flag.
+0222   0135 D3 81                 out   UART_STATUS     
+0223   0137 DB 80                 in    UART_DATA       ; Get RX byte...
+0224   0139 2A 77 01              lhld  ptr_rx          ; ...and store it in the rx buffer.
+0225   013C 77                    mov   m,a
+0226   013D 23                    inx   h
+0227   013E 22 77 01              shld  ptr_rx          ; Update the rx buffer pointer.
+0228   0141 3A 79 01              lda   len_rx          ; Update RX buffer length
+0229   0144 3C                    inr   a
+0230   0145 32 79 01              sta   len_rx 
+0231   0148                       
+0232   0148                       ; Note there's no check for RX buffer overrun! we shouldn't need it 
+0233   0148                       ; here, a runaway condition would be readily apparent in the 
+0234   0148                       ; simulation, anyway.
+0235   0148             
+0236   0148             irq_uart_rx_done:
+0237   0148                       ; Ok, RX is done. Now deal with TX irq, if any
+0238   0148 DB 81                 in    UART_STATUS     ; Is the TX buffer re new data in the RX register?
+0239   014A E6 10                 ani   MASK_TX_IRQ
+0240   014C CA 62 01              jz    irq_uart_end    ; If there isn't, we're done.
+0241   014F                       
+0242   014F                       ; process UART TX interrupt
+0243   014F             irq_uart_tx:
+0244   014F 3E 10                 mvi   a,MASK_TX_IRQ   ; Clear IRQ flag.
+0245   0151 D3 81                 out   UART_STATUS
+0246   0153 2A 75 01              lhld  ptr_tx          ; Get next byte from the TX buffer 
+0247   0156 7E                    mov   a,m
+0248   0157 FE 24                 cpi   '$'             ; Did we reach the end of the buffer?
+0249   0159 CA 62 01              jz    irq_uart_tx_done ; If we did, we're done here...
+0250   015C 23                    inx   h               ; ...otherwise increment the TX pointer...
+0251   015D 22 75 01              shld  ptr_tx
+0252   0160 D3 80                 out   UART_DATA       ; ...and transmit the data byte.
+0253   0162                       
+0254   0162             irq_uart_tx_done:
+0255   0162                     
+0256   0162             irq_uart_end:
+0257   0162 F1                    pop   psw             ; Done, quit.
+0258   0163 E1                    pop   h
+0259   0164 FB                    ei
+0260   0165 C9                    ret                
+0261   0166                     
+0262   0166             ;print_string: print $-terminated string at HL
+0263   0166             print_string:
+0264   0166                       ; We don't check if there's a transmission going on
+0265   0166 7E                    mov   a,m             ; Get first character from string...
+0266   0167 23                    inx   h               ; ...and move updated string pointer to TX  
+0267   0168 22 75 01              shld  ptr_tx          ; buffer pointer.
+0268   016B FE 24                 cpi   '$'             ; Kickstart transmission by sending 1st byte...
+0269   016D CA 72 01              jz    print_string_end; ...unless its the end of string marker.
+0270   0170 D3 80                 out   UART_DATA       ; 
+0271   0172             print_string_end:
+0272   0172 C9                    ret
+0273   0173             
+0274   0173                       
+0275   0173                       ; data space, placed immediately after object code in memory
+0276   0173             irq_data:     ds(1)
+0276   0174             
+0277   0174 24          void_buffer:  .text "$"
+0278   0175             ptr_tx:       ds(2)
+0278   0177             
+0279   0177             ptr_rx:       ds(2)
+0279   0179             
+0280   0179             len_rx:       ds(1)
+0280   017A             
+0281   017A             rx_buffer:    ds(32)
+0281   019A             
+0282   019A                           ds(64)
+0282   01DA             
+0283   01DA             stack:        ds(2)
+0283   01DC             
+0284   01DC                       .end
+0285   01DC                     tasm: Number of errors = 0
