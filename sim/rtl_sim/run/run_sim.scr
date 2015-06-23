@@ -1,0 +1,82 @@
+#!/bin/csh -f
+
+if ( $# < 1 ) then
+    echo "First argument must be a top level module name!"
+    exit
+else
+    set SIM_TOP = $1
+endif
+
+set current_par = 1
+set output_waveform = 0
+while ( $current_par < $# )
+    @ current_par = $current_par + 1
+    case wave:
+        @ output_waveform = 1
+        breaksw
+    default:
+        echo 'Unknown option "'$argv[$current_par]'"!'
+        exit
+        breaksw
+    endsw
+end
+
+echo "-CDSLIB ../bin/cds.lib"          > ncvlog.args
+echo "-HDLVAR ../bin/hdl.var"         >> ncvlog.args
+echo "-MESSAGES"                      >> ncvlog.args
+echo "-INCDIR ../../../bench/verilog" >> ncvlog.args
+echo "-INCDIR ../../../rtl/verilog"   >> ncvlog.args
+echo "-NOCOPYRIGHT"                   >> ncvlog.args
+echo "-LOGFILE ../log/ncvlog.log"     >> ncvlog.args
+
+foreach filename ( `cat ../bin/rtl_file_list` )
+    echo "../../../rtl/verilog/"$filename >> ncvlog.args
+#    echo "../../../rtl/can_strip_down/rtl/verilog/"$filename >> ncvlog.args
+end
+
+#foreach filename ( `cat ../bin/memory_file_list` )
+#    echo "../../../bench/verilog/"$filename >> ncvlog.args
+#end
+
+foreach filename ( `cat ../bin/sim_file_list` )
+    echo "../../../bench/verilog/"$filename >> ncvlog.args
+end
+
+#echo "../../../../bist/rtl/verilog/bist.v" >> ncvlog.args
+#echo "../../../../bist/rtl/verilog/bist_dp_top.v" >> ncvlog.args
+#echo "../../../../bist/rtl/verilog/bist_sp_top.v" >> ncvlog.args
+#echo "../../../../bist/rtl/verilog/bist_tp_top.v" >> ncvlog.args
+
+ncvlog -f ncvlog.args
+
+echo "-MESSAGES"                             > ncelab.args
+echo "-NOCOPYRIGHT"                         >> ncelab.args
+echo "-CDSLIB ../bin/cds.lib"               >> ncelab.args
+echo "-HDLVAR ../bin/hdl.var"               >> ncelab.args
+echo "-LOGFILE ../log/ncelab.log"           >> ncelab.args
+echo "-SNAPSHOT worklib.bench:rtl"          >> ncelab.args
+echo "-NO_TCHK_MSG"                         >> ncelab.args
+echo "-ACCESS +RWC"                         >> ncelab.args
+echo worklib.$SIM_TOP                       >> ncelab.args
+
+ncelab -f ncelab.args
+
+echo "-MESSAGES"                   > ncsim.args
+echo "-NOCOPYRIGHT"               >> ncsim.args
+echo "-CDSLIB ../bin/cds.lib"     >> ncsim.args
+echo "-HDLVAR ../bin/hdl.var"     >> ncsim.args
+echo "-INPUT ncsim.tcl"           >> ncsim.args
+echo "-LOGFILE ../log/ncsim.log"  >> ncsim.args
+echo "worklib.bench:rtl"          >> ncsim.args
+
+if ( $output_waveform ) then
+    echo "database -open waves -shm -into ../out/waves.shm"             > ./ncsim.tcl
+    echo "probe -create -database waves $SIM_TOP -shm -all -depth all" >> ./ncsim.tcl
+    echo "run"                                                         >> ./ncsim.tcl
+else
+    echo "run"  > ./ncsim.tcl
+endif
+
+echo "quit" >> ncsim.tcl
+
+ncsim -LICQUEUE -f ./ncsim.args
