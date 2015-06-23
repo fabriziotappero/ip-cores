@@ -1,0 +1,50 @@
+# -*- mode: python; coding: utf-8; -*-
+#
+#  Codezero -- a microkernel for embedded systems.
+#
+#  Copyright © 2009  B Labs Ltd
+#
+import os, sys
+
+PROJRELROOT = '../..'
+
+sys.path.append(PROJRELROOT)
+
+from config.projpaths import *
+from config.configuration import *
+
+config = configuration_retrieve()
+gcc_arch_flag = config.gcc_arch_flag
+arch = config.arch
+
+# We assume we are compiling for userspace.
+# variant can be specified from cmdline using
+# scons variant=xxx
+variant = ARGUMENTS.get('variant', 'userspace')
+print '\nCompiling for variant: ' + variant + '\n'
+
+# Needed by fputc(), for declaration of uart_tx()
+LIBDEV_RELDIR = 'conts/libdev'
+LIBDEV_DIR = join(PROJROOT, LIBDEV_RELDIR)
+LIBDEV_INC = join(LIBDEV_DIR, 'include')
+
+env = Environment(CC = config.toolchain_userspace + 'gcc',
+		  CCFLAGS = ['-g', '-nostdlib', '-ffreestanding', '-std=gnu99', \
+                     '-nostdinc', '-Wall', '-Werror'],
+		  LINKFLAGS = ['-nostdlib'],
+		  ASFLAGS = ['-D__ASSEMBLY__'],
+		  ENV = {'PATH' : os.environ['PATH']},
+		  CPPPATH = ['include', LIBDEV_INC, join(PROJROOT,'include'), \
+                     'include/sys-' + variant + '/arch-' + arch])
+
+source = \
+    Glob('src/*.[cS]') + \
+    Glob('src/sys-' + variant + '/*.c') + \
+    Glob('src/sys-' + variant + '/arch-' + arch + '/*.c') + \
+    Glob('src/arch-' + arch + '/*.c') + \
+    Glob('src/arch-' + arch + '/*.S') + \
+    Glob('crt/sys-' + variant + '/arch-' + arch + '/*.[cS]')
+
+objects = env.StaticObject(source)
+library = env.StaticLibrary('c-' + variant, objects)
+

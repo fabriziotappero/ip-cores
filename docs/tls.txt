@@ -1,0 +1,50 @@
+	Thread Local Storage and UTCB Access
+
+In an L4-like microkernel such as Codezero, there needs to be a way of
+accessing the User Thread Control Block (UTCB) in order to push argument
+registers and write the IPC payload. This necessitates a convenient method
+of accessing the thread-specific utcb structure. Here are some of the
+possible methods of accessing a thread local storage in general:
+
+1.) Map the private physical TLS page to thread address space at same virtual
+offset, everytime there is a context switch.
+
+2.) Keep a global pointer to it. The scheduler updates the pointer to TLS
+upon every context switch.
+
+3.) Manage everything by the run-time library in the application. This includes
+the following:
+
+ * Predefine a fixed TLS table area on the address space.
+ * Possibly allocate local thread ids E.g. [1..n]
+ * Get current thread id
+ * Take a lock (on the TLS table)
+ * Lookup the pointer to the TLS block by thread id
+ * Release the lock
+ * Return that pointer
+
+The third one is least flexible solution since it requires management of the
+TLS area, has concurrency issues, and limits the number of TLS areas available.
+
+Since UTCB concept is at the heart of Codezero IPC mechanisms, it has to be
+done neatly and flexibly. In that respect lets evaluate solutions:
+
+1.) This is most convenient since user applications can simply reference a
+pointer to get their unique TLS. By this approach no need to spend excessive
+memory by using a page per TLS (in case TLS is less than a page). The downside
+is the UTCB region still needs to be defined by a limit in the address space
+and managed by the pager, if not by the application. This is because every UTCB
+shall be part of an array or a table of unique UTCBs.
+
+2.) Mapping a per-thread physical page to a fixed virtual address upon a context
+switch is the most flexible, since the pager can simply allocate a physical page
+as new threads come to life, and map this when they run, without managing utcb
+table size. The downside is that a page is wasted per-thread.
+
+The solution Codezero uses includes a mixture of both (1) and (2). Upon a
+context switch, a page private to each context is mapped by the pager, but also
+the UTCB pointer is updated to point at an offset in this page. As an example,
+if a UTCB is sized 1/4th of a page, a single page is used by 4 UTCBs. This way,
+the pager needs to manage 4 entries per-private page, utcbs utilise page memory
+fully, and there is no need for a fixed table of utcbs per address space. Of
+course, utcb pages are only shared by threads in the same address space.

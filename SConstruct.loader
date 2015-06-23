@@ -1,0 +1,64 @@
+# -*- mode: python; coding: utf-8; -*-
+#
+#  Codezero -- a microkernel for embedded systems.
+#
+#  Copyright © 2009  B Labs Ltd
+
+import os, sys, shelve
+from os.path import join
+
+from config.configuration import *
+from config.projpaths import *
+
+config = configuration_retrieve()
+arch = config.arch
+platform = config.platform
+gcc_arch_flag = config.gcc_arch_flag
+
+variant = 'baremetal'
+
+# Locally important paths are here
+LIBC_PATH = 'loader/libs/c'
+LIBC_LIBPATH = LIBC_PATH
+LIBC_INCPATH = ['#' + join(LIBC_PATH, 'include'), \
+                '#' + join(LIBC_PATH, 'include/arch/' + arch)]
+
+LIBDEV_PATH = 'conts/libdev'
+LIBDEV_INCPATH = ['#' + join(LIBDEV_PATH, 'include'),]
+
+LIBELF_PATH = 'loader/libs/elf'
+LIBELF_LIBPATH = LIBELF_PATH
+LIBELF_INCPATH = '#' + join(LIBELF_PATH, 'include')
+
+env = Environment(CC = config.toolchain_kernel + 'gcc',
+		  AR = config.toolchain_kernel + 'ar',
+		  RANLIB = config.toolchain_kernel + 'ranlib',
+		  # We don't use -nostdinc because sometimes we need standard headers,
+		  # such as stdarg.h e.g. for variable args, as in printk().
+		  CCFLAGS = ['-g', '-nostdlib', '-ffreestanding', '-std=gnu99', '-Wall', \
+                     '-Werror'],
+		  LINKFLAGS = ['-nostdlib', '-T' + join(BUILDDIR, 'loader/linker.lds'), "-u_start"],
+		  ASFLAGS = ['-D__ASSEMBLY__'],
+		  PROGSUFFIX = '.elf',
+		  ENV = {'PATH' : os.environ['PATH']},
+		  LIBS = ['gcc', 'elf', 'libdev-baremetal', 'c-baremetal', 'gcc'],
+          LIBPATH = [join(join('build', LIBDEV_PATH), 'sys-' + variant), \
+                     join('build', LIBELF_PATH), join('build', LIBC_PATH)],
+          CPPPATH = ['#include', LIBDEV_INCPATH, LIBC_INCPATH, LIBELF_INCPATH],
+          CPPFLAGS = '-include l4/config.h -include l4/macros.h -include l4/types.h -D__KERNEL__')
+
+libdev = SConscript('conts/libdev/SConscript', \
+                    exports = { 'env' : env, 'arch' : arch, 'platform' : platform, 'type' : variant}, \
+                    duplicate = 0, variant_dir = 'build/conts/libdev/sys-' + variant)
+libc = SConscript('loader/libs/c/SConscript', \
+                  exports = { 'env' : env, 'arch' : arch, 'platform' : platform, 'type' : variant}, \
+                  duplicate = 0, variant_dir = 'build/loader/libs/c')
+libelf = SConscript('loader/libs/elf/SConscript', exports = { 'env' : env }, \
+                    duplicate = 0, variant_dir = 'build/loader/libs/elf')
+
+loader_objs = SConscript('loader/SConscript', exports = { 'env' : env }, \
+                         duplicate = 0, variant_dir = 'build/loader')
+
+final_elf = env.Program('build/final.elf', [libelf + libc + loader_objs])
+Depends(loader_objs, libelf)
+Depends(loader_objs, libc)

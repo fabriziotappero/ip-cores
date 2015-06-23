@@ -1,0 +1,17 @@
+/*
+ * Generic macros for cache operations
+ *
+ * Copyright (C) 2009 B Labs Ltd.
+ */
+#ifndef __CACHE_CONTROL_H__
+#define __CACHE_CONTROL_H__
+
+#include INC_GLUE(cache.h)
+
+#define L4_INVALIDATE_ICACHE		ARCH_INVALIDATE_ICACHE
+#define L4_INVALIDATE_DCACHE		ARCH_INVALIDATE_DCACHE
+#define L4_CLEAN_DCACHE			ARCH_CLEAN_DCACHE
+#define L4_CLEAN_INVALIDATE_DCACHE	ARCH_CLEAN_INVALIDATE_DCACHE
+#define L4_INVALIDATE_TLB		ARCH_INVALIDATE_TLB
+
+#endif /* __CACHE_CONTROL_H__ */

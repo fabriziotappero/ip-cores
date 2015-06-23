@@ -1,0 +1,59 @@
+# -*- mode: python; coding: utf-8; -*-
+#
+#  Codezero -- a microkernel for embedded systems.
+#
+#  Copyright © 2009  B Labs Ltd
+#
+import os, sys
+
+PROJRELROOT = '../..'
+
+sys.path.append(PROJRELROOT)
+
+from config.projpaths import *
+from config.configuration import *
+
+config = configuration_retrieve()
+gcc_arch_flag = config.gcc_arch_flag
+platform = config.platform
+
+# We assume we are compiling for userspace.
+# variant can be specified from cmdline using
+# scons variant=xxx
+variant = ARGUMENTS.get('variant', 'userspace')
+print '\nCompiling for variant: ' + variant + '\n'
+
+# To include setbit/clrbit functions
+LIBL4_RELDIR = 'conts/libl4'
+LIBL4_DIR = join(PROJROOT, LIBL4_RELDIR)
+LIBL4_INC = join(LIBL4_DIR, 'include')
+
+LIBC_RELDIR = 'conts/libc'
+LIBC_DIR = join(PROJROOT, LIBC_RELDIR)
+LIBC_INC = join(LIBC_DIR, 'include')
+
+env = Environment(CC = config.toolchain_userspace + 'gcc',
+		  CCFLAGS = ['-g', '-nostdlib', '-ffreestanding', '-std=gnu99', \
+                     '-nostdinc', '-Wall', '-DVARIANT_' + variant.upper(), \
+                      '-Werror'],
+		  LINKFLAGS = ['-nostdlib'],
+		  ASFLAGS = ['-D__ASSEMBLY__'],
+		  ENV = {'PATH' : os.environ['PATH']},
+		  CPPPATH = ['#include', LIBC_INC, LIBL4_INC, join(PROJROOT,'include')])
+
+objects = []
+objects += SConscript('uart/pl011/SConscript', duplicate=0, \
+                      exports = {'platform' : platform, 'env' : env})
+objects += SConscript('timer/sp804/SConscript', duplicate=0, \
+                      exports = {'platform' : platform, 'env' : env})
+objects += SConscript('kmi/pl050/SConscript', duplicate=0, \
+                      exports = {'platform' : platform, 'env' : env})
+objects += SConscript('clcd/pl110/SConscript', duplicate=0, \
+		      exports = {'platform' : platform, 'env' : env})
+
+objects += SConscript('uart/omap/SConscript', duplicate=0, \
+                      exports = {'platform' : platform, 'env' : env})
+objects += SConscript('timer/omap/SConscript', duplicate=0, \
+                      exports = {'platform' : platform, 'env' : env})
+
+library = env.StaticLibrary('libdev-' + variant, objects)

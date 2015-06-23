@@ -1,0 +1,165 @@
+.TH CAPABILITY 7 2009-11-07 "Codezero" "Codezero Programmer's Manual"
+.SH NAME
+.nf
+.BR "Capability" " - Overview of Capabilities in Codezero"
+
+.SH SYNOPSIS
+.nf
+.B #include <l4/api/capability.h>
+.B #include <l4/generic/cap-types.h>
+
+
+.SH DESCRIPTION
+A capability is a unique representation of security qualifiers on a particular resource.
+Each thread, address space and container is associated with its own capability list represented by the below structure.
+
+The capability structure is defined as follows:
+.nf
+.B struct capability {
+.BI "	   struct link " "list" ";"
+.BI ""
+ 	   /* Capability identifiers */
+.BI "	   l4id_t " "capid" ";         /* Unique capability ID */"
+.BI "	   l4id_t "  "owner" ";         /* Capability owner ID */"
+.BI "	   l4id_t " "resid" ";         /* Targeted resource ID */"
+.BI "	   unsigned int " "type" ";    /* Capability and target resource type */"
+.BI ""
+	   /* Capability permissions */
+.BI "	   u32 " "access" ";           /* Permitted operations */"
+.BI ""
+	   /* Other Limits/Attributes of the resource */
+.BI "	   unsigned long " "start" ";  /* Resource start value */"
+.BI "	   unsigned long " "end" ";    /* Resource end value */"
+.BI "	   unsigned long " "size" ";   /* Resource size */"
+.BI ""
+.BI "	   unsigned long " "used" ";   /* Resource used size */"
+.BI "	   unsigned int " "attr" ";    /* User-defined attribute. (Device index and type on devices) */"
+.BI "	   l4id_t " "irq" ";	/* Device irq (Devices Only) */"
+.B };
+
+.TP
+.fi
+.I capid
+denotes the unique capability ID.
+
+.TP
+.fi
+.I resid
+denotes the unique ID of targeted resource. The smallest resource targetable by a capability is a thread. There are also collections of targetable resources such as an address space or a container. An address space target resource implies all threads inside that address space, and a container target resource implies all threads inside that container. Quantitative capabilities such as typed memory pools do not possess a target, and therefore have an invalid resource ID.
+
+.TP
+.fi
+.I owner
+denotes the unique ID of the one and only capability owner. This is always a thread ID. The ownership of a capability determines who has the right to practise the capability modification privileges available over the capability, such as sharing, granting, spliting, reducing or destruction of the capability.
+
+.TP
+.fi
+.I type
+field contains the capability type or targeted resource type. The capability type determines the generic operations that the capability describes. For example a capability describing a system call would likely have a type name that resembles the name of that system call. See the
+.B CAPABILITY TYPES
+section below, for a list of valid capability types. The resource type denotes the type of targeted resources. In case this is a thread or a collection of threads, the type may be one of thread, address space, or container. Quantitative resources also have different types, describing the resource. Since quantitative resources such as memory pools, or memory regions are not associated with a target id, the resource types have no meaning for the resid field for these capabilities. See the CAPABILITY RESOURCE TYPES section below for the full list of valid resource types.
+
+.TP
+.fi
+.I access
+field denotes the fine-grain operations available on a particular resource. The meaning of each bitfield differs according to the type of the capability. For example, for a capability type thread_control, the bitfields may mean suspend, resume, create, delete etc. See below for the full list of capability bits.
+
+.SH CAPABILITY TYPES
+.TP
+.B CAP_TYPE_TCTRL
+.RB "Defines the capability to make the " "l4_thread_control " "system call. It is usually owned by the pager and targets the container so that the pager can issue the call on all threads in the container. "
+.TP
+.B CAP_TYPE_EXREGS
+.RB "Defines the capability to make the " "l4_exchange_registers " "system call. "
+.I rtype
+.RB "field is usually expected to target the complete container, similar to " "CAP_TYPE_TCTRL " "capabilities."
+.TP
+.B CAP_TYPE_MAP_PHYSMEM
+.RB "Defines a physical memory region. A thread who owns this capability would be always expected to use the " "l4_map " "system call, to map the physical area to its address space. As an optimisation there is no separate mapping capability defined for the " "l4_map " "system call. As a physical memory capability, it may also define fields for devices such as device types, numbers and irqs."
+.TP
+.B CAP_TYPE_MAP_VIRTMEM
+.RB "Similar to the " " CAP_TYPE_MAP_PHYSMEM " "capability, it defines a virtual memory range that can be mapped using the " "l4_map " "system call."
+
+.TP
+.B CAP_TYPE_IPC
+.RB "This is the most fundamentally used capability in the system. " "CAP_TYPE_IPC " "defines the ability to make ipc calls to threads in the system. By its "
+.I rtype
+.RB " field, it may be defined such that it enables inter-container ipc, i.e. the ability to send messages to a thread or all threads in another container. Ipc operations always have a valid target if it is a " " send " "operation. By this fact, ipc capability checks are done only during the send phase."
+.TP
+.B CAP_TYPE_IRQCTRL
+.RB "Defines a thread's privilege to set up and handle irqs. A separate " "CAP_TYPE_MAP_PHYSMEM " "capability would also be necessary on each individual device, to gain access to its irqs."
+.TP
+.B CAP_TYPE_UMUTEX
+.RB "Defines a thread's privilege to use kernel-supported userspace mutexes. A thread who has access to a " "mutexpool " "would have to have this capability to use it. In future versions, this capability may be removed, assuming the " "mutexpool " "capability is in itself sufficient for having access to mutexes."
+.TP
+.B CAP_TYPE_QUANTITY
+.RB "There are various typed, fixed-size memory pools that have this capability type. Fixed-size memory pools such as " "mappool" ", " "cappool" ", " "threadpool" ", and similar capabilities are some of the examples. A quantitative capability has no valid target resource id type, because they are themselves resources to be consumed by their owner. Since they already have a unique capability ID, the target resource id does not provide any better identification. As a result normally the
+.I resid
+.RB "field is set to " "CAP_RESID_NONE" " on quantitative capabilities."
+
+Quantitative capabilities have been introduced for allocation of structures that are fundamentally and minimally needed in the system. Any further abstraction of memory resources would make the design too generic, requiring much effort from userspace. The choice of which mechanisms need to be kept inside and out of the kernel is a subtle one. In this particular case, it was decided that a minimal set of typed resources would be always useful to keep in the kernel.
+
+.TP
+.B CAP_TYPE_CAP
+.RB "Defines the capability to manipulate existing capabilities. Any thread who attempts to share, grant, modify, or replicate its capabilities must make a call to the " "l4_capability_control " "system call. This capability defines the operations available making this call. A caller must own this capability, and also own all other capabilities that are going to be modified."
+
+.SH CAPABILITY RESOURCE TYPES
+Capability resource types define the type of resource id stored in the
+.I resid
+field.
+.TP
+.B CAP_RTYPE_THREAD
+Threads are the smallest resource entities in the system, targetable by a system call. A capability with this resource type defines the ability to manipulate a single thread. E.g.
+.BR "l4_thread_control " "or " "l4_ipc " "syscalls could only operate on the single thread, whose id is defined by the "
+.I resid
+field.
+.TP
+.B CAP_RTYPE_SPACE
+Address spaces contain one or more threads. A capability with this resource type may act on any thread inside the defined address space, defined by the
+.I resid
+field of the capability.
+.TP
+.B CAP_RTYPE_CONTAINER
+Containers provide the outermost isolation level on the system. A capability with this resource type would have the most comprehensive privileges, since a container defines the largest collection of entities, containing threads and address spaces. As an example, a thread having a capability with a container resource type, could issue that system call on all the address spaces and threads that exist in that container.
+
+.fi
+.in 7
+The rest of the resources in the system are defined as quantitative resources, and they consist of different types of memory pools. As mentioned earlier, their
+.I resid
+fields invalid, and they get used and checked implicitly as part of other capability operations.
+
+.TP
+.B CAP_RTYPE_CPUPOOL
+Defines the CPU resources of a thread. Depending on the underlying scheduler, it may mean cpu time percentage or a priority. Also, real-time threads may invalidate the value of these capabilities.
+
+.TP
+.B CAP_RTYPE_THREADPOOL
+Defines the maximum number of threads that may be created by its possessor. Implicitly used and checked as part of the
+.B l4_thread_control
+system call.
+
+.TP
+.B CAP_RTYPE_SPACEPOOL
+Defines the maximum number of address spaces (e.g. page tables, and any other related structures) that may be created by its possessor. Similarly affects success of
+.B l4_thread_control
+system call by providing address space accounting.
+
+.TP
+.B CAP_RTYPE_MUTEXPOOL
+Defines the maximum number of mutexes that may be contended and get temporarily created inside the kernel at any one time. Normally userspace mutex operations are resolved in userspace, but on contended mutexes, kernel internally creates and consumes mutex structures for the userspace.
+
+.TP
+.B CAP_RTYPE_MAPPOOL
+On some cpu architectures such as ARM, a virtual to physical memory mapping may require the kernel to allocate intermediate page table structures. This capability defines and enables resource accounting for the allocation of such structures.
+
+.TP
+.B CAP_RTYPE_CAPPOOL
+When capabilities are manipulated at run-time, some operations may result in allocation of new capability structures. For example, a
+.B replicate
+or a
+.B split
+operation may create new capabilities in the system. This capability accounts for such operations that result in creation of a new capability.
+
+
+.SH SEE ALSO
+.BR "l4_capability_control"(7)

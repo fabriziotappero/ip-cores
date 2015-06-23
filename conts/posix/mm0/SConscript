@@ -1,0 +1,62 @@
+
+Import('config', 'env', 'contid')
+
+import os, sys
+
+arch = config.arch
+subarch = config.subarch
+
+sys.path.append('../../../../')
+from config.lib import *
+
+container = next((c for c in config.containers if int(c.id) == int(contid)), None)
+
+def generate_container_h(target, source, env):
+    base_value_dict = {}
+    with open(source[0].path, 'r') as ch_in:
+        with open(target[0].path, 'w+') as ch_out:
+            container_h = ch_in.read()
+            assert container.pager_task_region_start != 0
+            assert container.pager_task_region_end != 0
+            assert container.pager_shm_region_start != 0
+            assert container.pager_shm_region_end != 0
+            assert container.pager_utcb_region_start != 0
+            assert container.pager_utcb_region_end != 0
+
+            base_value_dict = { 'task_start' : conv_hex(container.pager_task_region_start), \
+                                'task_end' : conv_hex(container.pager_task_region_end), \
+                                'shmem_start' : conv_hex(container.pager_shm_region_start), \
+                                'shmem_end' : conv_hex(container.pager_shm_region_end), \
+                                'utcb_start' : conv_hex(container.pager_utcb_region_start), \
+                                'utcb_end' : conv_hex(container.pager_utcb_region_end) }
+            ch_out.write(container_h % base_value_dict)
+
+def generate_vma_lma_lds(target, source, env):
+    with open(source[0].path, 'r') as lds_in:
+        with open(target[0].path, 'w+') as lds_out:
+            linker_script = lds_in.read()
+            assert container.pager_lma != 0
+            assert container.pager_vma != 0
+            lds_out.write(linker_script % (conv_hex(container.pager_vma), \
+                          conv_hex(container.pager_lma)))
+
+lma_lds = Command('include/linker.lds', 'include/linker.lds.in', generate_vma_lma_lds)
+
+container_h = Command('include/container.h', 'include/container.h.in', generate_container_h)
+src = [Glob('*.c') + Glob('mm/*.c') + Glob('lib/*.c') + Glob('fs/*.c') + \
+       Glob('fs/memfs/*.c') + Glob('lib/elf/*.c') + Glob('mm/arch/' + arch + '/*.[Sc]') +
+       Glob('mm/arch/' + arch + '/' + subarch + '/*.[Sc]')]
+
+e = env.Clone()
+
+e.Append(LINKFLAGS = ['-T' + lma_lds[0].path, '-u_start'])
+e.Append(LIBS = 'posix')
+e.Append(CPPFLAGS = ' -include ' + container_h[0].path + ' -include macros.h  -include l4lib/macros.h ')
+objs = e.Object(src)
+mm0 = e.Program('mm0.elf', objs)
+Depends(objs, container_h)
+Depends(mm0, lma_lds)
+Depends(mm0, container_h)
+AlwaysBuild(container_h)
+Return('mm0')
+

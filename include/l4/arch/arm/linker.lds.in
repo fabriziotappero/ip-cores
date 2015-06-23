@@ -1,0 +1,90 @@
+/*
+ * Simple linker script
+ *
+ * Copyright (C) 2007 Bahadir Balban
+ */
+#if !defined (CONFIG_NCPU)
+#define CONFIG_NCPU	1
+#endif
+
+phys_ram_start		= PLATFORM_PHYS_MEM_START;
+
+#if !defined(kernel_offset)
+kernel_offset		= KERNEL_AREA_START - phys_ram_start;
+#endif
+
+kernel_physical		= 0x8000 + phys_ram_start;
+kernel_virtual		= kernel_physical + kernel_offset;
+
+/* A temporary boot stack is used before a proper kernel stack is set up */
+_bootstack_physical	= _end_bootstack - kernel_offset;
+
+/* The symbols are linked at virtual addresses. So is _start.
+ * We must set the entry point to a physical address, so that
+ * when the image is loaded, it doesn't jump to a non existing
+ * virtual address.
+ */
+ENTRY(kernel_physical)
+
+SECTIONS
+{
+	. = kernel_virtual;
+	_start_kernel = .;
+	.text : AT (ADDR(.text) - kernel_offset)
+	{
+		_start_text = .;
+		/* Make sure head.S comes first */
+		/* *head.o(.text) This only works when given its full path. Bad limitation. */
+		*(.text.head)
+		*(.text)
+		_end_text = .;
+	}
+	. = ALIGN(4);
+	/* rodata is needed else your strings will link at physical! */
+	.rodata : AT (ADDR(.rodata) - kernel_offset) { *(.rodata) }
+	.rodata1 : AT (ADDR(.rodata1) - kernel_offset) { *(.rodata1) }
+	.data : AT (ADDR(.data) - kernel_offset)
+	{
+		_start_data = .;
+		*(.data)
+		/* Best alignment because we need 4 x (4K) and 1 x 16K block */
+		. = ALIGN(16K);
+		_start_vectors = .;
+		*(.data.vectors)
+		. = ALIGN(4K);
+		_end_vectors = .;
+		_start_kip = .;
+		*(.data.kip)
+		. = ALIGN(4K);
+		_end_kip = .;
+		_start_syscalls = .;
+		*(.data.syscalls)
+		. = ALIGN(4K);
+		_end_syscalls = .;
+		_start_init_pgd = .;
+		*(.data.pgd);
+		_end_init_pgd = .;
+		_start_bootstack = .;
+		. = ALIGN(4K);
+		. += PAGE_SIZE * CONFIG_NCPU;
+		_end_bootstack = .;
+		_end_data = .;
+	}
+	.bss : AT (ADDR(.bss) - kernel_offset)
+	{
+		*(.bss)
+	}
+	. = ALIGN(4K);
+
+	/* Below part is to be discarded after boot */
+	_start_init = .;
+	.init : AT (ADDR(.init) - kernel_offset)
+	{
+		*(.init.task.pgd) 	/* Non-global task table on split tables, otherwise nil */
+		*(.init.bootmem)
+		*(.init.data)
+	}
+	_end_init = .;
+	_end_kernel = .;
+	_end = .;
+}

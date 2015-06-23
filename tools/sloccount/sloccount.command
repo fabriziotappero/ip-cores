@@ -1,0 +1,1 @@
+sloccount src/api/ src/arch/arm/v5 src/arch/arm/*.[cS] src/glue/arm src/platform/pb926/* src/drivers/* src/generic/* src/lib/* include/l4/api include/l4/arch/arm/*.h include/l4/arch/arm/v5 include/l4/glue/arm/* include/l4/drivers/* include/l4/generic/* include/l4/lib/* include/l4/platform/pb926/*

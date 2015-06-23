@@ -1,0 +1,213 @@
+start main_menu
+
+#############
+#  SYMBOLS  #
+#############
+symbols
+
+ARCH_OR1K		'OR1K'
+
+or1k_cpu_type		'OR1K Processor Type'
+CPU_OR1K1136		'OR1K1136 - Experimental'
+CPU_OR1K11MPCORE		'OR1K11 MPCore - Experimental'
+CPU_OR1K926		'OR1K926EJ-S'
+CPU_CORTEXA8		'OR1K Cortex-A8'
+CPU_CORTEXA9            'OR1K Cortex-A9'
+
+or1k_platform_type	'OR1K Platform Type'
+PLATFORM_EB		'Realview EB Platform'
+PLATFORM_PBA8           'Realview PB-A8 Platform, To be added'
+PLATFORM_PB926		'Versatile PB926 Platform'
+PLATFORM_PB11MPCORE	'Realview PB11MPCore Platform'
+PLATFORM_BEAGLE		'OMAP3530/Cortex-A8 Beagle Board'
+PLATFORM_PBA9		'Realview Express Cortex-A9'
+
+main_menu		'Codezero Microkernel Configurator'
+or1k_menu		'OR1K Architecture Configuration'
+or1k_cpu_menu		'OR1K CPU type'
+or1k_platform_menu	'OR1K Platform Type'
+processor_properties	'Generic Processor Properties'
+kernel_generic_options	'Generic Kernel Properties'
+toolchain_menu		'Toolchain Prefix'
+containers_menu		'Container Setup'
+arch_type		'Main architecture'
+
+SMP			'Enable SMP Support'
+NCPU			'Number of SMP CPUs'
+DEBUG_ACCOUNTING	'Enable system operations accounting'
+DEBUG_PERFMON		'Enable performance monitoring'
+DEBUG_PERFMON_USER	'Userspace access to perfmon registers (in-kernel measurements disabled)'
+DEBUG_SPINLOCKS		'Debug spinlocks, e.g. detect recursive locks, double unlocks'
+SCHED_TICKS		'Scheduler ticks per second'
+ICACHE_DISABLE		'Disable the L1 instruction cache'
+DCACHE_DISABLE		'Disable the L1 data cache'
+PREEMPT_DISABLE		'Disable Kernel Preemption'
+TOOLCHAIN_USERSPACE	'Toolchain prefix for userspace'
+TOOLCHAIN_KERNEL     	'Toolchain prefix for kernel'
+
+CAPABILITIES		'Enable capability checking'
+
+#############
+#  CHOICES  #
+#############
+
+choices arch_type
+	ARCH_OR1K
+	default ARCH_OR1K
+
+choices or1k_platform_type
+        PLATFORM_EB
+	PLATFORM_PBA8
+	PLATFORM_PB926
+	PLATFORM_PB11MPCORE
+	PLATFORM_BEAGLE
+	PLATFORM_PBA9
+        default PLATFORM_PB926
+
+choices or1k_cpu_type
+	CPU_OR1K926
+	CPU_OR1K1136
+	CPU_OR1K11MPCORE
+	CPU_CORTEXA8
+	CPU_CORTEXA9
+        default CPU_OR1K926
+
+#############
+#   MENUS   #
+#############
+
+menu or1k_cpu_menu
+	or1k_cpu_type
+
+menu or1k_platform_menu
+	or1k_platform_type
+
+menu or1k_menu
+	or1k_platform_menu
+	or1k_cpu_menu
+
+menu processor_properties
+	SMP
+	NCPU%
+	ICACHE_DISABLE
+	DCACHE_DISABLE
+
+menu kernel_generic_options
+	PREEMPT_DISABLE
+	DEBUG_ACCOUNTING
+	DEBUG_PERFMON
+	DEBUG_PERFMON_USER
+	DEBUG_SPINLOCKS
+	SCHED_TICKS%
+
+menu toolchain_menu
+	TOOLCHAIN_USERSPACE$
+	TOOLCHAIN_KERNEL$
+
+menu main_menu
+	arch_type
+	or1k_menu
+	processor_properties
+	kernel_generic_options
+	toolchain_menu
+	containers_menu
+
+#############
+#   RULES   #
+#############
+#Capability/Container rules:
+default CAPABILITIES from y
+default DEBUG_ACCOUNTING from n
+default DEBUG_PERFMON from n
+default DEBUG_PERFMON_USER from n
+default DEBUG_SPINLOCKS from n
+default SCHED_TICKS from 1000
+derive DEBUG_PERFMON_KERNEL from DEBUG_PERFMON == y and DEBUG_PERFMON_USER != y
+
+#Subarch Derivation Rules
+derive SUBARCH_V5 from CPU_OR1K926
+
+derive SUBARCH_V6 from CPU_OR1K1136 or
+		       CPU_OR1K11MPCORE
+
+derive SUBARCH_V7 from CPU_CORTEXA8 or
+		       CPU_CORTEXA9
+
+#CPU rules:
+unless PLATFORM_PB926                          suppress        CPU_OR1K926
+unless PLATFORM_PB11MPCORE or PLATFORM_EB      suppress        CPU_OR1K11MPCORE
+unless PLATFORM_EB                             suppress        CPU_OR1K1136
+unless PLATFORM_PBA9 or PLATFORM_EB            suppress        CPU_CORTEXA9
+
+unless PLATFORM_BEAGLE or
+       PLATFORM_PBA8 or
+       PLATFORM_EB           suppress        CPU_CORTEXA8
+
+#SMP support rules
+unless CPU_CORTEXA9 or CPU_OR1K11MPCORE suppress SMP
+unless CPU_CORTEXA9 or CPU_OR1K11MPCORE suppress NCPU
+unless SMP suppress NCPU
+unless DEBUG_ACCOUNTING suppress DEBUG_PERFMON
+				 DEBUG_PERFMON_USER
+unless DEBUG_PERFMON suppress DEBUG_PERFMON_USER
+
+# NOTE: Unlike menus, choices dont take { sym } model of visibility
+# dependencies. Instead, a choice symbol is declared in a menu, and
+# suppress statement is used to make sym visible, instead of a
+# { sym } model under the choices. (See manual for { sym } usage).
+
+unless ARCH_OR1K suppress or1k_menu
+derive DRIVER_UART_PL011 from PLATFORM_PB926 or
+			      PLATFORM_PB11MPCORE or
+			      PLATFORM_PBA9 or
+			      PLATFORM_EB or
+			      PLATFORM_PBA8
+
+derive DRIVER_TIMER_SP804 from PLATFORM_PB926 or
+	       		       PLATFORM_PB11MPCORE or
+			       PLATFORM_PBA9 or
+			       PLATFORM_EB or
+			       PLATFORM_PBA8
+
+derive DRIVER_IRQ_PL190 from PLATFORM_PB926
+
+derive DRIVER_IRQ_GIC from PLATFORM_PB11MPCORE or
+	       		   PLATFORM_PBA9 or
+			   PLATFORM_EB or
+			   PLATFORM_PBA8
+
+derive DRIVER_UART_OMAP from PLATFORM_BEAGLE
+derive DRIVER_TIMER_OMAP from PLATFORM_BEAGLE
+derive DRIVER_INTC_OMAP from PLATFORM_BEAGLE
+
+#SMP default value
+default SMP from y
+default NCPU from 4
+default ICACHE_DISABLE from n
+default DCACHE_DISABLE from n
+default PREEMPT_DISABLE from n
+
+require NCPU <= 4
+
+# Derive Ram base address depending on platform selected
+# we use this in setting containers physical regions
+# default values
+# FIXME: Find a better solution
+derive RAM_BASE_PLAT from  PLATFORM_BEAGLE ? 0x80000000 : 0x00000000
+
+# Toolchains:
+default TOOLCHAIN_USERSPACE from 'or32-elf-'
+default TOOLCHAIN_KERNEL from 'or32-elf-'
+
+prefix CONFIG_
+
+# Checklist for correct CML2
+# 1) Have you defined a prompt for each menu, choice_type?
+# 2) Have you defined a default for each symbol?
+# 3) Have you put 'symbols' keyword before each symbol, menu and choice?
+
+
+# Important note on derived symbols
+# DO NOT place any declaration for derived symbols like normal symbols,
+# otherwise the derivation will be silently ignored, and you will be left
+# wondering why.

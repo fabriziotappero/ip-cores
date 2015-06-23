@@ -1,0 +1,105 @@
+.TH L4_IPC 7 2009-11-02 "Codezero" "Codezero Programmer's Manual"
+.SH NAME
+.nf
+.BR "l4_ipc" " - Inter-process communication"
+
+.SH SYNOPSIS
+.nf
+.B #include <l4lib/arch/syscalls.h>
+.B #include <l4lib/arch/syslib.h>
+
+.BI "int l4_ipc(l4id_t " "to, " "l4id_t " "from, " "unsigned int " "flags" ")"
+.SH DESCRIPTION
+.BR l4_ipc()  " call provides the main inter-process communication mechanism on Codezero. Upon an ipc call between two threads, message registers that are stored in one thread's UTCB block are transferred to the other thread's UTCB block, in synchronous fashion. The amount and nature of the data transferred depends on the type of ipc call. See below for details.
+
+The UTCB is a memory block that is private to each thread's address space and it's purpose is to provide thread-local storage to each thread. See
+.BR "utcb " "(7) "
+for more details.
+
+.IR "to " " and " "from " "fields  jointly determine whether the ipc is going to be a
+.B send
+or a
+.B receive.
+.RI "A valid thread id in the " " to " " field, and an"
+.B L4_NILTHREAD
+.RB " value in the "
+.I from
+.RB "field denotes the ipc is a " "send" ", and when the fields are vice versa, it denotes the ipc is a " "receive" "."
+
+.RI "If both " "from " "and " "to " "fields have valid thread ids, the ipc becomes a joint"
+.B send
+and
+.BR "receive" ","
+.RB "i.e. a " "send " "operation is followed by a " "receive " "operation during a single call."
+This particular variant is useful for calling server-like services, where the request would be received, processed, and a result reply would be sent back.
+
+.RB "There is also an " "L4_ANYTHREAD " "parameter that may be used in the"
+.IR "from " "field. This parameter allows a receiver to receive from any thread in the system. This notion is useful for implementing server-like services, where any sender may be accepted and served on a first-come, first-served basis. It is also worth noting that in such a scenario, the sender must possess the capabilities to call the receiver."
+.RB "For more information on capabilities, see " "capability" "(7)."
+
+.RI "The " "flags " "field determines what type of ipc is going to be initiated. In Codezero, there are three types of IPC defined as shown below:"
+.TP
+.B Short IPC
+.RB "This is the shortest and simplest form of ipc where only the " "Primary Message Registers " " are transferred. Primary message registers are a handful of registers that are resident on the first few slots of the UTCB. During an ipc, these registers may be optionally mapped to real registers on the cpu as an optimisation, but this notion is transparent of the API. It is worth noting that the number of these registers may be variable depending on the configuration and the platform. See the section " "MESSAGE REGISTERS" " below for a detailed explanation of the possible set of roles each register may take in an ipc."
+
+.TP
+.B Full IPC
+A full ipc transfers the complete set of message registers resident on the UTCB of the thread, including the primary MRs. The total number of these registers may be variable depending on the configuration and the platform, although a good estimate would be the total size of the UTCB minus the size of the thread-local fields defined on the UTCB.
+
+.TP
+.B Extended IPC
+This is a special type of ipc where the UTCB is not involved at all. It is the most flexible type of ipc provided by Codezero. On an extended ipc,
+.I any
+buffer in a thread's address space may be transferred to
+.I any
+buffer on another thread's address space. Page faults are also allowed to occur on the buffers, provided that a third party thread not involved in the ipc is ready to handle the faults. An extended ipc also defines a variable size for the transfer, and transfers may be of up to 2 Kilobytes in size. An extended ipc is smp-safe and brings no negative timing burden on system in overall, although the parties involved in the ipc may block for an unpredictable amount of time due to the possibility of page faults.
+.ti 7
+
+It is recommended that for transfers larger than 2KB in size, shared memory is used.
+
+.SH MESSAGE REGISTERS
+.TP
+.RB "On " "short " "and " "full " "ipc, all primary message registers are available for transferring raw data. Particularly, the kernel imposes no restriction on these registers, and has no interference with their contents. However, almost always some of these registers may be used for designated purposes in userspace. Some of them are listed below:"
+
+.ti 16
+.TP
+.B MR_TAG
+The tag register allows the caller to define a label for the ipc. It defines the primary reason for an ipc call.
+.TP
+.B MR_SENDER
+The sender register is only meaningful for a thread that has done a receive on any thread, via the
+.B L4_ANTHREAD
+special thread id. Also, this is the only exception where the kernel interferes with the contents of a message register, such that the kernel indicates the thread id of the sender to the caller. This exception must be made, since otherwise a sender could disguise its identity by placing arbitrary values into one of the MRs that the receiver expects to find the sender information.
+.TP
+.B MR_RETURN
+This register is used for sending back a result when handling a joint
+.B send/receive
+request. Since it is only relevant on the return phase of an ipc call, it may well be the same register that was designated for the receive phase of a call.
+
+.in 7
+The above registers may also be called as 
+.B system registers. 
+Note that they are solely defined by the
+.B libl4
+library, and their designated labels have no meaning outside of the userspace context. Since they are used by their label on most ipc calls, further registers have been defined to identify a set that lies outside the above set.
+.RB "These are the system call argument registers, and they are labelled as " "L4SYS_ARG0" ", " " L4SYS_ARG1" ", and " "L4SYS_ARG2 " "respectively."
+
+
+.SH L4 USERSPACE LIBRARY
+
+.nf
+/* Short IPC Calls */
+.BI "static inline int l4_send(l4id_t " "to" ", unsigned int " "tag" ");"
+.BI "static inline int l4_receive(l4id_t " "from" ");"
+.BI "static inline int l4_sendrecv(l4id_t " "to" ", l4id_t " "from" ", unsigned int " "tag" ");"
+
+.nf
+/* Full IPC Calls */
+.BI "static inline int l4_send_full(l4id_t " "to" ", unsigned int " "tag" ");"
+.BI "static inline int l4_receive_full(l4id_t " "from" ");"
+.BI "static inline int l4_sendrecv_full(l4id_t " "to" ", l4id_t " "from" ", unsigned int " "tag" ");"
+
+.nf
+/* Extended IPC Calls */
+.BI "static inline int l4_send_extended(l4id_t " "to" ", unsigned int " "tag" ", unsigned int " "size" ", void " "*buf" ");"
+.BI "static inline int l4_receive_extended(l4id_t " "from" ", unsigned int " "size" ", void " "*buf" ");"

@@ -1,0 +1,83 @@
+.TH UTCB 7 2009-11-02 "Codezero" "Codezero Programmer's Manual"
+.SH NAME
+.nf
+.BR "UTCB" " - Userspace Thread Control Block"
+
+.SH SYNOPSIS
+
+.B #include <l4lib/arch/utcb.h>
+
+
+.fi
+.SH DESCRIPTION
+
+UTCB is a per-thread data structure designated as thread local storage for IPC message registers and private data. The UTCB area in a thread's address space is a virtual address region that is unique for each thread available on the system. It is discovered at run-time by reading the
+.BR "Kernel Interface Page"
+utcb field.
+
+The UTCB stores message registers that are transferred between threads during an IPC. Depending on whether the IPC is a send or a receive, the message register fields are either transferred to other threads, or overwritten by message registers of other threads. For details on IPC behaviour please refer to the
+.BR l4_ipc ()
+system call reference page.
+
+.RI "UTCB may also be used for any thread-local information that is private to each thread in an address space. For example on stacked IPCs where a new IPC is initiated before the current IPC has been completed, " "saved_tag " "and " "saved_sender " "fields serve the purpose of saving the unfinished IPC information. For a full description of each field please refer to below. "
+.fi
+
+.nf
+.B struct utcb {
+.BI "	   u32 "  "mr[MR_TOTAL]" ";       /* MRs that are mapped to real registers */"
+.BI "	   u32 "  "saved_tag" ";          /* Saved tag field for stacked ipc */"
+.BI "	   u32 "  "saved_sender" ";       /* Saved sender field for stacked ipc */"
+.BI "	   u32 "  "mr_rest[MR_REST]" ";   /* Complete the utcb to 64 words */"
+};
+
+.TP
+.fi
+.I mr[MR_TOTAL]
+.RB "Primary message registers. On the ARM Architecture there are 6 of these registers, named as " "MR0 - MR5" ". As an optimisation, these registers may be mapped to real registers by the kernel during an ipc. However this behaviour is not warranted by the kernel API."
+
+.TP
+.fi
+.I saved_tag
+Saved IPC tag field on a stacked IPC.
+.TP
+.fi
+.I saved_sender
+Saved sender id on a stacked IPC.
+.TP
+.fi
+.I mr_rest[MR_REST]
+.RB "Rest of the message registers located on the UTCB. These registers are transferred upon an ipc only if the ipc type is a " "full ipc" ". See " "l4_ipc" "(7) for more details."
+
+.SH UTCB ALLOCATION
+UTCB address and memory allocation is not maintained by Codezero Microkernel. Both UTCB allocation and maintainence is expected to be handled in userspace.
+As an example, a pager for a group of threads may use the UTCB management functions to allocate and manage multiple UTCBs. This would be a more complicated but well-addressed approach, since this library would maintain multiple utcb areas across different address spaces, and differentiate between address spaces upon allocation. Otherwise a single address space multi-threaded application may simply use a pool of memory and virtual addresses to manage per-thread UTCB areas.
+
+UTCB addresses may be any virtual address, however there is a restriction that the utcb address region must lie in a disjoint virtual memory region. This is required because when an IPC is established, the kernel does a direct copy between UTCB regions, without the need for page-table manipulation.
+
+The simplest solution to create a UTCB is to simply declare a UTCB size aligned array of utcb structures statically by the below macro:
+
+.BI "#define DECLARE_UTCB(" name ")
+.B struct utcb name ALIGN(sizeof(struct utcb))
+
+and use it by:
+
+.B DECLARE_UTCB(utcb);
+
+While this works, it requires the statically allocated structure to lie in a virtual address area that is disjoint from any other virtual address in the system.
+
+.RB "Pagers may set a thread's utcb by the " "l4_exchange_registers() " "system call. Please see " "l4_exchange_registers" "(7) for more details."
+
+.fi
+The UTCB structure may be of variable size, and has been set to a total of 256 bytes on an ARM system. The UTCB structure is subject to change. New fields may be reserved on the UTCB as needed.
+
+
+.in 8
+.SH L4 USERSPACE LIBRARY
+.nf
+
+/* Functions to read/write utcb registers */
+.BI "static inline unsigned int read_mr(int " "offset");
+.BI "static inline void write_mr(unsigned int " "offset" ", unsigned int " "val" ")"
+
+.SH SEE ALSO
+.BR "l4_ipc"(7), " l4_exchange_registers"(7)

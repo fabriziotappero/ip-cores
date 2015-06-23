@@ -1,0 +1,59 @@
+# -*- mode: python; coding: utf-8; -*-
+#
+#  Codezero -- Virtualization microkernel for embedded systems.
+#
+#  Copyright © 2009 B Labs Ltd
+#
+import os, shelve
+import configure
+from configure import *
+from os.path import *
+
+config = configuration_retrieve()
+arch = config.arch
+subarch = config.subarch
+platform = config.platform
+gcc_arch_flag = config.gcc_arch_flag
+all_syms = config.all
+
+env = Environment(CC = config.toolchain_userspace + 'gcc',
+		  AR = config.toolchain_userspace + 'ar',
+		  RANLIB = config.toolchain_userspace + 'ranlib',
+                  # We don't use -nostdinc because sometimes we need standard headers,
+                  # such as stdarg.h e.g. for variable args, as in printk().
+                  CCFLAGS = ['-g', '-nostdlib', '-ffreestanding', '-std=gnu99', '-Wall',
+                             '-Werror'],
+                  LINKFLAGS = ['-nostdlib'],
+                  ASFLAGS = ['-D__ASSEMBLY__'],
+                  ENV = {'PATH' : os.environ['PATH']},	# Inherit shell path
+                  LIBS = 'gcc',				# libgcc.a - This is required for division routines.
+                  CPPPATH = "#include",
+                  CPPFLAGS = '-include l4/config.h -include l4/macros.h -include l4/types.h')
+
+libl4 = SConscript('conts/libl4/SConscript', \
+                   exports = { 'env' : env, 'arch' : arch, 'subarch' : subarch }, duplicate = 0, \
+                   variant_dir = join(BUILDDIR, os.path.relpath('conts/libl4', PROJROOT)))
+
+e = env.Clone()
+e.Replace(CPPFLAGS = '')
+type = 'userspace'
+libdev = SConscript('conts/libdev/SConscript', \
+                    exports = { 'env' : e, 'arch' : arch, 'platform' : platform, 'type' : 'userspace' }, \
+                    duplicate = 0, variant_dir = \
+                    join(join(BUILDDIR, os.path.relpath('conts/libdev', PROJROOT)), 'sys-' + type))
+
+libc = SConscript('conts/libc/SConscript', \
+                  exports = { 'env' : env, 'arch' : arch, 'type' : 'userspace' }, \
+                  duplicate = 0, variant_dir = \
+                  join(BUILDDIR, os.path.relpath('conts/libc', PROJROOT)))
+
+libmm, libmc, libmalloc = SConscript('conts/libmem/SConscript', \
+                         exports = { 'env' : env, }, duplicate = 0, variant_dir = \
+                         join(BUILDDIR, os.path.relpath('conts/libmem', PROJROOT)))
+
+Alias('libl4', libl4)
+Alias('libdev', libdev)
+Alias('libc', libc)
+Alias('libmm', libmm)
+Alias('libmc', libmc)
+Alias('libmalloc', libmalloc)

@@ -1,0 +1,79 @@
+# -*- mode: python; coding: utf-8; -*-
+#
+#  Codezero -- a microkernel for embedded systems.
+#
+#  Copyright © 2009  B Labs Ltd
+
+import os, sys, shelve
+from os.path import join
+
+Import('env')
+
+###
+### FIXME: We are missing the dependency on containers.elf
+###
+PROJRELROOT = '../../'
+
+from config.projpaths import *
+from scripts.loader.generate_loader_asm import *
+from config.lib import *
+
+# Function to determine the LMA for 'final.elf'
+def find_loader_load_address(target, source, env):
+    # Start/end addresses of various physical memory regions defined
+    array_start = []
+    array_end = []
+
+    with open(join(PROJROOT, CONFIG_H), 'r')as file:
+        for line in file:
+            begin = line.rfind(" ")
+            end = len(line)
+            if re.search("(PHYS)([0-9]){1,4}(_START)", line):
+                array_start.append(int(line[begin : end], 16))
+            elif re.search("(PHYS)([0-9]){1,4}(_END)", line):
+                array_end.append(int(line[begin : end], 16))
+    array_start.sort()
+    array_end.sort()
+
+    # Size of physical memory hole we need for 'final.elf' say 16MB
+    mem_needed = 0x1000000
+    # Default LMA = 32MB, if we have no container
+    loadaddr = 0x1000000
+    for index,end in enumerate(array_end):
+        loadaddr = end
+        if (index+1) >= len(array_start):
+            # Reached end of start_array
+            break
+        else:
+            start = array_start[index+1]
+        if start-end >= mem_needed:
+            break
+
+    # Create target file
+    with open(source[1].path, 'r') as input:
+        buffer = input.read()
+        #print 'Load address for final.elf: ' + str(conv_hex(loadaddr))
+        with open(target[0].path, 'w+') as output:
+            output.write(buffer % str(conv_hex(loadaddr)))
+
+def ksym_to_loader(target, source, env):
+    generate_ksym_to_loader(target[0].path, source[0].path)
+
+def gen_loader_images_S(target, source, env):
+        generate_image_S(target[0].path, source)
+
+loader_ksyms = Command(join(PROJROOT, 'loader/ksyms.S'), join(BUILDDIR, 'kernel.elf'), ksym_to_loader)
+loader_image_S = Command(join(PROJROOT, 'loader/images.S'), [join(BUILDDIR, 'kernel.elf'), join(BUILDDIR, 'conts/containers.elf')], \
+                         gen_loader_images_S)
+lma_lds = Command(join(BUILDDIR, 'loader/linker.lds'), \
+                  [join(BUILDDIR, 'kernel.elf'), \
+                   join(PROJROOT, 'loader/linker.lds.in')], find_loader_load_address)
+src = Glob('*.[cS]')
+objs = env.Object(src)
+
+Depends(src, lma_lds)
+Depends(src, loader_ksyms)
+Depends(src, loader_image_S)
+Depends(objs, join(BUILDDIR, 'conts/containers.elf'))
+Depends(objs, join(BUILDDIR, 'kernel.elf'))
+Return('objs', 'loader_image_S')

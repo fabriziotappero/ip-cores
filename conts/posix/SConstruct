@@ -1,0 +1,114 @@
+# -*- mode: python; coding: utf-8; -*-
+#
+#  Codezero -- Virtualization microkernel for embedded systems.
+#
+#  Copyright © 2009  B Labs Ltd
+#
+import os, shelve, sys
+from os.path import *
+
+PROJRELROOT = '../../'
+
+sys.path.append(PROJRELROOT)
+sys.path.append('../../../../')
+
+from config.projpaths import *
+from config.configuration import *
+from config.lib import *
+
+config = configuration_retrieve()
+arch = config.arch
+gcc_arch_flag = config.gcc_arch_flag
+
+LIBL4_RELDIR = 'conts/libl4'
+KERNEL_INCLUDE = join(PROJROOT, 'include')
+LIBL4_DIR = join(PROJROOT, LIBL4_RELDIR)
+LIBL4_INCLUDE = join(LIBL4_DIR, 'include')
+LIBL4_LIBPATH = join(BUILDDIR, LIBL4_RELDIR)
+
+# Locally important paths are here
+LIBC_RELDIR = 'conts/libc'
+LIBC_DIR = join(PROJROOT, LIBC_RELDIR)
+LIBC_LIBPATH = join(BUILDDIR, LIBC_RELDIR)
+LIBC_INCLUDE = [join(LIBC_DIR, 'include'), \
+                join(LIBC_DIR, 'include/arch' + '/' + arch)]
+
+LIBDEV_RELDIR = 'conts/libdev'
+LIBDEV_DIR = join(PROJROOT, LIBDEV_RELDIR)
+LIBDEV_LIBPATH = join(join(BUILDDIR, LIBDEV_RELDIR), 'sys-userspace')
+LIBDEV_INCLUDE = join(LIBDEV_DIR, 'uart/include')
+
+LIBMEM_RELDIR = 'conts/libmem'
+LIBMEM_DIR = join(PROJROOT, LIBMEM_RELDIR)
+LIBMEM_LIBPATH = join(BUILDDIR, LIBMEM_RELDIR)
+LIBMEM_INCLUDE = LIBMEM_DIR
+
+LIBPOSIX_RELDIR = 'conts/posix/libposix'
+LIBPOSIX_DIR = join(PROJROOT, LIBPOSIX_RELDIR)
+LIBPOSIX_INCLUDE_SERVER = join(LIBPOSIX_DIR, 'include')
+LIBPOSIX_INCLUDE_USERSPACE = join(LIBPOSIX_DIR, 'include/posix')
+LIBPOSIX_LIBPATH = join(BUILDDIR, LIBPOSIX_RELDIR)
+
+env = Environment(CC = config.toolchain_userspace + 'gcc',
+		  AR = config.toolchain_userspace + 'ar',
+		  RANLIB = config.toolchain_userspace + 'ranlib',
+		  CCFLAGS = ['-g','-nostdinc', '-nostdlib', '-ffreestanding',
+		              '-std=gnu99', '-Wall', '-Werror'],
+		  LINKFLAGS = ['-nostdlib'],
+		  ASFLAGS = ['-D__ASSEMBLY__'],
+		  PROGSUFFIX = '.elf',
+		  ENV = {'PATH' : os.environ['PATH']},
+		  LIBS = ['libl4', 'libdev-userspace', 'gcc', 'c-userspace', \
+                  'gcc', 'libmm', 'libmc', 'libmalloc'],
+          CPPPATH = ['include', LIBDEV_INCLUDE, LIBC_INCLUDE, KERNEL_INCLUDE,
+                     LIBL4_INCLUDE, LIBMEM_INCLUDE, LIBPOSIX_INCLUDE_USERSPACE],
+          LIBPATH = [LIBDEV_LIBPATH, LIBC_LIBPATH, LIBL4_LIBPATH,
+                     LIBMEM_LIBPATH, LIBPOSIX_LIBPATH],
+          CPPFLAGS = '-include l4/config.h -include l4/macros.h -include l4/types.h')
+
+contid = ARGUMENTS.get('cont', '0')
+
+libposix_env = env.Clone()
+libposix_env.Replace(CPPPATH = [LIBPOSIX_INCLUDE_USERSPACE, 'include', KERNEL_INCLUDE, LIBL4_INCLUDE, LIBMEM_INCLUDE, LIBC_INCLUDE])
+libposix = SConscript('libposix/SConscript', \
+                      exports = { 'config' : config,  'env' : libposix_env, 'contid' : contid}, duplicate = 0, \
+                      variant_dir = join(BUILDDIR, 'conts' + '/posix' + '/libposix'))
+
+mm0_env = env.Clone()
+mm0_env.Append(CPPPATH = LIBPOSIX_INCLUDE_SERVER)
+mm0 = SConscript('mm0/SConscript', \
+                 exports = { 'config' : config,  'env' : mm0_env, 'contid' : contid }, duplicate = 0, \
+                 variant_dir = join(BUILDDIR, 'cont' + str(contid) + '/posix' + '/mm0'))
+
+rootfs = SConscript('rootfs/SConscript', \
+                   exports = { 'config' : config,  'environment' : env, 'contid' : contid, 'previmage' : mm0 }, duplicate = 0, \
+                   variant_dir = join(BUILDDIR, 'cont' + str(contid) + '/posix' + '/rootfs'))
+
+# No libposix reference because it conflicts with the compiler C library + the cluncky libc we have.
+test0_env = env.Clone()
+test0_env.Replace(CPPPATH = ['include', KERNEL_INCLUDE, LIBL4_INCLUDE, LIBMEM_INCLUDE, LIBC_INCLUDE, LIBPOSIX_INCLUDE_USERSPACE])
+test0 = SConscript('test0/SConscript', \
+                   exports = { 'config' : config,  'environment' : test0_env, 'contid' : contid, 'previmage' : rootfs }, duplicate = 0, \
+                   variant_dir = join(BUILDDIR, 'cont' + str(contid) + '/posix' + '/test0'))
+
+images = [mm0, rootfs, test0]
+bootdesc_env = env.Clone()
+bootdesc_env['bootdesc_dir'] = 'bootdesc'
+
+bootdesc = SConscript('bootdesc/SConscript', \
+                      exports = { 'config' : config,  'environment' : bootdesc_env, \
+                      'contid' : contid, 'images' : images }, duplicate = 0, \
+                      variant_dir = join(BUILDDIR, 'cont' + str(contid) + '/posix' + '/bootdesc'))
+
+Depends(mm0, libposix)
+Depends(test0, libposix)
+Depends(rootfs, mm0)
+Depends(test0, rootfs)
+Depends(bootdesc, [test0, mm0, rootfs])
+
+Alias('libposix', libposix)
+Alias('mm0', mm0)
+Alias('test0', test0)
+Alias('bootdesc', bootdesc)
+Alias('rootfs', rootfs)
+Default([mm0, libposix, test0, bootdesc])

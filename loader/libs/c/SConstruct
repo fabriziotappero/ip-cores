@@ -1,0 +1,42 @@
+# -*- mode: python; coding: utf-8; -*-
+#
+#  Codezero -- a microkernel for embedded systems.
+#
+#  Copyright © 2009  B Labs Ltd
+
+import os, sys, shelve
+from configure import *
+
+variant = "baremetal"
+config = configuration_retrieve()
+arch = config.arch
+subarch = config.subarch
+gcc_arch_flag = config.gcc_arch_flag
+
+env = Environment(CC = config.toolchain_kernel + 'gcc',
+		  # We don't use -nostdinc because sometimes we need standard headers,
+		  # such as stdarg.h e.g. for variable args, as in printk().
+		  CCFLAGS = ['-g', '-nostdlib', '-ffreestanding', '-std=gnu99', '-Wall', \
+                     '-Werror'],
+		  LINKFLAGS = ['-nostdlib', '-T' + "include/l4/arch/arm/linker.lds"],
+		  ASFLAGS = ['-D__ASSEMBLY__'],
+		  PROGSUFFIX = '.elf',			# The suffix to use for final executable
+		  ENV = {'PATH' : os.environ['PATH']},	# Inherit shell path
+		  LIBS = 'gcc',				# libgcc.a - This is required for division routines.
+		  CPPFLAGS = ['-include l4/config.h'])
+
+e = env.Clone()
+e.Append(CPPPATH = ['include/sys-' + variant + '/arch-' + arch])
+e.Append(CCFLAGS = '-nostdinc')
+
+source = \
+        Glob('src/*.c') + \
+        Glob('src/sys-' + variant + '/*.c') + \
+        Glob('src/sys-' + variant + '/arch-' + arch + '/*.c') + \
+        Glob('src/arch-' + arch + '/*.c') + \
+        Glob('src/arch-' + arch + '/*.S') + \
+        Glob('crt/sys-' + variant + '/arch-' + arch + '/*.[cS]')
+
+objects = e.StaticObject(source)
+library = e.StaticLibrary('c-' + variant, objects)
+#runtime = e.StaticObject('crt/sys-' + variant + '/arch-' + arch + '/crt0.S')

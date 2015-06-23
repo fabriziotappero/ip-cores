@@ -1,0 +1,75 @@
+#
+# Copyright (C) 2007 Bahadir Balban
+#
+
+import os, glob, sys
+from os.path import join
+from string import split
+
+PROJRELROOT = '../..'
+sys.path.append(PROJRELROOT)
+
+from configure import *
+from config.projpaths import *
+config = configuration_retrieve()
+gcc_arch_flag = config.gcc_arch_flag
+
+headers_root = join(PROJRELROOT, "include/l4")
+config_h = join(headers_root, "config.h")
+
+mm = "mm"
+kmalloc = "kmalloc"
+memcache = "memcache"
+tests = "tests"
+
+mm_dir = mm
+kmalloc_dir = kmalloc
+memcache_dir = memcache
+tests_dir = tests
+
+LIBL4_RELDIR = 'conts/libl4'
+LIBL4_DIR = join(PROJROOT, LIBL4_RELDIR)
+LIBL4_INCLUDE = join(LIBL4_DIR, 'include')
+
+# This does not work, need to check
+test_env = Environment(CC = config.toolchain_userspace + 'gcc',
+		  CCFLAGS = ['-g', '-nostdlib', '-ffreestanding', '-std=gnu99', '-Wall', \
+                     '-nostdinc', '-Werror'],
+		  ENV = {'PATH' : os.environ['PATH']},
+		  LIBS = ['mm', 'km', 'mc'],
+		  LIBPATH = ['#'],
+		  CPPPATH = ['#include', join(PROJRELROOT, "include"), "#", LIBL4_INCLUDE])
+
+env = Environment(CC = config.toolchain_userspace + 'gcc',
+            CCFLAGS = ['-g', '-nostdlib', '-ffreestanding', '-std=gnu99', \
+                       '-Wall', '-Werror'],
+            LINKFLAGS = ['-nostdlib'],
+            ASFLAGS = ['-D__ASSEMBLY__'],
+            ENV = {'PATH' : os.environ['PATH']},
+            LIBS = 'gcc',
+            CPPPATH = ['.', join(PROJROOT, 'include'), LIBL4_INCLUDE])
+
+if os.path.exists(config_h) is False:
+	print "\nThis build requires a valid kernel configuration header."
+	print "Please run `scons configure' in the kernel root directory."
+	print "Choose the `tests' target to build memory allocator tests,"
+	print "or any other target for real use.\n"
+	sys.exit()
+
+mm_src = glob.glob("%s/*.c" % mm_dir)
+kmalloc_src = glob.glob("%s/*.c" % kmalloc_dir)
+memcache_src = glob.glob("%s/*.c" % memcache_dir)
+tests_src = glob.glob ("%s/*.c" % tests_dir)
+
+if "tests" in COMMAND_LINE_TARGETS:
+	print "WARNING!!! Did you configure the kernel with test target first???"
+	libmm = test_env.StaticLibrary(mm, mm_src)
+	libkmalloc = test_env.StaticLibrary("km", kmalloc_src)
+	libmemcache = test_env.StaticLibrary("mc", memcache_src)
+	test_prog = test_env.Program("test", tests_src)
+	env.Alias("tests", test_prog)
+else:
+	libmm = env.StaticLibrary(mm, mm_src)
+	libkmalloc = env.StaticLibrary("km", kmalloc_src)
+	libmemcache = env.StaticLibrary("mc", memcache_src)
+

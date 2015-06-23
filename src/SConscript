@@ -1,0 +1,56 @@
+# -*- mode: python; coding: utf-8; -*-
+
+#  Codezero -- a microkernel for embedded systems.
+#
+#  Copyright © 2009  B Labs Ltd
+#
+#  This program is free software: you can redistribute it and/or modify it under the terms of the GNU
+#  General Public License as published by the Free Software Foundation, either version 3 of the License, or
+#  (at your option) any later version.
+#
+#  This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even
+#  the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public
+#  License for more details.
+#
+#  You should have received a copy of the GNU General Public License along with this program.  If not, see
+#  <http://www.gnu.org/licenses/>.
+#
+#  Author: Russel Winder
+
+import os.path
+
+Import('environment')
+
+e = environment.Clone()
+e['CC'] = e['toolchains'][e['ARCH']][e['CPU']]['kernelCompiler']
+e.Append(CPPPATH = ['#' + e['buildDirectory'], '#' + e['buildDirectory'] + '/l4', '#' + e['includeDirectory'], '#' + e['includeDirectory'] + '/l4'])
+e.Append(LINKFLAGS = ['-T' +  e['includeDirectory'] + '/l4/arch/' + e['ARCH'] + '/linker.lds'])
+####
+####  TODO:  Why are these files forcibly included, why not just leave it up to the C code to include things?
+####
+e.Append(CPPFLAGS = ['-include', 'config.h', '-include', 'cml2Config.h', '-include', 'macros.h', '-include', 'types.h', '-D__KERNEL__'])
+e.Append(LIBS = ['gcc'])
+
+sources = \
+        Glob('api/*.[cS]') + \
+        Glob('generic/*.[cS]') + \
+        Glob('lib/*.[cS]') + \
+        Glob('arch/' + e['ARCH'] + '/*.[cS]') + \
+        Glob('arch/' + e['ARCH'] + '/' + e['SUBARCH'] +'/*.[cS]') + \
+        Glob('glue/' + e['ARCH'] + '/*.[cS]') + \
+        Glob('platform/' + e['PLATFORM'] + '/*.[cS]')
+
+for item in e['DRIVER'] :
+    path = 'drivers/' + item
+    if not os.path.isdir(path):
+        feature , device = item.split ( '/' )
+        raise ValueError, 'Driver ' + device + ' for ' + feature + ' not available.'
+    sources += Glob(path + '/*.[cS]')
+
+objects = e.Object(sources)
+Depends(objects, e['configFiles'])
+
+startAxf = e.Program('start.axf', objects)
+Depends(startAxf, e['configFiles'])
+
+Return('startAxf')

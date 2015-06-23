@@ -1,0 +1,151 @@
+.TH L4_THREAD_CONTROL 7 2009-11-02 "Codezero" "Codezero Programmer's Manual"
+.SH NAME
+.nf
+.BR "l4_thread_control" " - create, destroy, suspend, resume, recycle and wait on threads."
+
+.SH SYNOPSIS
+.nf
+.B #include <l4lib/arch/syscalls.h>
+.B #include <l4lib/arch/syslib.h>
+
+.BI "int l4_thread_control(unsigned int " "action" ", struct task_ids *" "ids" ")"
+
+
+.SH DESCRIPTION
+.BR l4_thread_control()
+system call manipulates threads in the system. Pagers may create, destroy, recycle, suspend and resume threads via this call. While Codezero Microkernel aims to provide dynamic privilege and resource management in the form of capabilities, this system call inherently assumes a hierarchical parent-child relationship between the caller and the target thread, such that the caller should be the pager of the targeted thread. See the
+.B THREAD RELATIONSHIPS
+subsection below for a detailed explanation of the matter.
+.fi
+
+.IR "ids " "field specifies the thread, address space, and thread group ids of the targeted thread. Below is the declaration for this structure:"
+
+.nf
+.TP
+.BI "struct" " task_ids { "
+.in 15
+.BI "int " "tid" ";   /* Fully qualified thread id */"
+.BI "int " "spid" ";  /* Address space id (local to container) */"
+.BI "int " "tgid" ";  /* Thread group id (local, defined by userspace protocol) */"
+.ti 7
+};
+.ti 7
+.TP
+.fi
+.I tid
+argument may have different meanings for different thread control actions. For an existing thread, this argument specifies the thread on which the action is to be performed. On a thread creation request, this argument would specify the thread whose context is to be copied from for creating the new thread. See
+.I actions
+below for a more detailed explanation.
+
+.TP
+.fi
+.I spid
+field has meaning only on a
+.B THREAD_CREATE
+request, in conjunction with one of
+.B TC_SHARE_SPACE,
+.B TC_NEW_SPACE
+or
+.B TC_COPY_SPACE
+flags
+.TP
+.fi
+.I tgid
+field is provided as an extra id slot for the thread. The pager of the thread may designate a group of threads to be in the same thread group, defining the group by a userspace protocol. This field has no meaning from the kernel's perspective, and may be removed in future releases.
+
+.I action
+field is the main action specifier where one of the following may be supplied as valid actions:
+.TP
+
+.TP
+.B THREAD_CREATE
+Creates a new thread in a new or existing space depending on the provided space flags.
+.RI "A thread create request requires valid " "tid" " and " "spid" " fields in order to specify which thread context and address space to copy from or use."
+Following are the action flags that are associated with a
+.B THREAD_CREATE
+request:
+
+.in 14
+.B TC_SHARE_UTCB
+Sets the new thread's utcb as the creator's utcb. Threads may validly share UTCBs by making sure that they don't initiate IPC at the same time, or ensure synchronized access to UTCB fields.
+
+.B TC_SHARE_GROUP
+Sets the new thread's thread group id as the id specified by
+.I tgid field.
+
+.B TC_SHARE_SPACE
+Places the new thread into the address space specified by
+.IR "spid" ", and copies the thread context from thread specified by " "tid" " field. The thread represented by the " "tid " "argument is said to represent a "
+.BR "parent " " relationship to the newly created thread."
+
+.B TC_COPY_SPACE
+Copies all page tables of the address space specified by
+.I spid
+to the new thread's newly created address space.
+.RI "Also copies the thread context from thread specified by the " "tid " "field, who is said to represent a " "parent" " relationship to the newly created thread. This flag is particularly useful for implementing the"
+.B POSIX fork()
+system call.
+
+.B TC_NEW_SPACE
+Creates the new thread in a brand new address space.
+.TP
+.B THREAD_DESTROY
+Destroys a thread, and its address space if the thread destroyed is the only thread left in that address space.
+.TP
+.B THREAD_SUSPEND
+Suspends execution of a thread. The thread goes into a dormant state.
+.TP
+.B THREAD_RUN
+Runs or resumes execution of a thread.
+.TP
+.B THREAD_RECYCLE
+Clears all existing state of a thread, but does not deallocate the thread, leaving it dormant. The only information retained is the existing thread ids of the original thread. This is particularly useful for implementing the execve() POSIX system call.
+.TP
+.B THREAD_WAIT
+Waits on a thread to exit, with exit status.
+
+On a system setup where a pager is responsible for creating threads in separate address spaces and communicating with them via IPC, the children may send an exit IPC message to their pager. This way, a pager may synchronously receive exit status of a child in the form of IPC, and take action to destroy it as part of handling the IPC. However, on systems where the application is a multi-threaded, single address space application, a thread wait call provides a simple synchronous channel for the parent to wait on its child's exit status, without requiring any extra set up for IPC handling.
+
+.ti 7
+
+.in 7
+.RB "See " "l4_getid" "(7) for more details on resource ids in Codezero."
+
+.SH THREAD RELATIONSHIPS
+Codezero aims to provide fine-grain privilege levels to threads in the system in the form of capabilities. Capabilities enable privileges of threads over each other to become highly configurable, resulting in the hierarchical relationship between them to become blurry. However, even though such a relationship is not enforced by the architecture, often it comes natural that threads are created by other threads. As a result, even though a thread hierarchy is not enforced by the capability design, it is implicitly catered for by a
+.I pagerid
+field inside the kernel, to denote the relationship that a thread has create or destroy rights on another thread. The relationship is only a one-level relationship, and it may be manipulated upon thread creation by
+.B TC_AS_PAGER
+or
+.B TC_SHARE_PAGER
+fields.
+
+
+.SH L4 USERSPACE LIBRARY
+.nf
+N/A
+
+.SH RETURN VALUE
+.IR "l4_thread_control"()
+Returns 0 on success, and negative value on failure. See below for error codes.
+
+.SH ERRORS
+
+.B -EINVAL
+returned when
+.IR "req"
+field has an invalid value.
+
+.B -ENOCAP
+returned when capabilities required don't exist or do not have sufficient privileges.
+
+.B -EFAULT
+returned when
+.I ids
+argument would cause a page fault.
+
+.B -ESRCH
+returned when a given thread id has not been found in the container.
+
+.SH SEE ALSO
+.BR "capability"(7), " l4_exchange_registers" "(7), " "l4_getid" "(7)"

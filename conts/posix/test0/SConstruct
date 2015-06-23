@@ -1,0 +1,112 @@
+#
+# User space application build script
+#
+# Copyright (C) 2007 Bahadir Balban
+#
+import os
+import sys
+import shutil
+from os.path import join
+from glob import glob
+from configure import *
+
+config = configuration_retrieve()
+
+task_name = "test0"
+
+# The root directory of the repository where this file resides:
+project_root = "../.."
+tools_root = join(project_root, "tools")
+prev_image = join(project_root, "tasks/fs0/fs0.axf")
+libs_path = join(project_root, "libs")
+ld_script = "include/linker.lds"
+physical_base_ld_script = "include/physical_base.lds"
+
+# Libc situation:
+# Libposix has uClibc (and therefore posix) headers.
+# NICTA libc implements printf for us for now.
+# Libposix implements posix calls for us, e.g. mmap.
+# In conclusion nicta libc and libposix complement each other
+# they should not clash. In future libposix will be part of uclibc
+# and uclibc will be used.
+
+# libc paths:
+libc_variant = "userspace"
+libc_libpath = join(libs_path, "c/build/%s" % libc_variant)
+libc_incpath = join(libc_libpath, "include")
+libc_crt0 = join(libs_path, "c/build/crt/sys-userspace/arch-arm/crt0.o")
+libc_name = "c-%s" % libc_variant
+
+# libposix paths:
+libposix_libpath = "../libposix"
+libposix_incpath = "../libposix/include/posix"
+
+# libl4 paths:
+libl4_path = "../libl4"
+libl4_incpath = join(libl4_path, "include")
+
+# kernel paths:
+kernel_incpath = join(project_root, "include")
+
+# If crt0 is in its library path, it becomes hard to link with it.
+# For instance the linker script must use an absolute path for it.
+def copy_crt0(source, target, env):
+	os.system("cp " + str(source[0]) + " " + str(target[0]))
+
+def get_physical_base(source, target, env):
+	os.system(join(tools_root, "pyelf/readelf.py --first-free-page " + \
+		  prev_image + " >> " + physical_base_ld_script))
+
+# The kernel build environment
+env = Environment(CC = config.toolchain_userspace + 'gcc',
+		  # We don't use -nostdinc because sometimes we need standard headers,
+		  # such as stdarg.h e.g. for variable args, as in printk().
+		  CCFLAGS = ['-g', '-nostdlib', '-ffreestanding', '-std=gnu99', '-Wall', '-Werror'],
+		  LINKFLAGS = ['-nostdlib', '-T' + ld_script, "-L" + libc_libpath, "-L" + libl4_path, \
+				  '-L' + libposix_libpath],
+		  ASFLAGS = ['-D__ASSEMBLY__'],
+		  PROGSUFFIX = '.axf',			# The suffix to use for final executable
+		  ENV = {'PATH' : os.environ['PATH']},	# Inherit shell path
+		  LIBS = [libc_name, 'gcc', libc_name, 'libl4', 'libposix', libc_name],
+		  CPPFLAGS = "-D__USERSPACE__",
+		  CPPPATH = ['#include', libl4_incpath, libposix_incpath, kernel_incpath])
+
+
+test_exec_ld_script = "include/test_exec_linker.lds"
+# The kernel build environment:
+test_exec_env = Environment(CC = config.toolchain_userspace + 'gcc',
+		  # We don't use -nostdinc because sometimes we need standard headers,
+		  # such as stdarg.h e.g. for variable args, as in printk().
+		  CCFLAGS = ['-O3', '-nostdlib', '-ffreestanding', '-std=gnu99', '-Wall', '-Werror'],
+		  LINKFLAGS = ['-nostdlib', '-T' + test_exec_ld_script, "-L" + libc_libpath, "-L" + libl4_path, \
+				  '-L' + libposix_libpath],
+		  ASFLAGS = ['-D__ASSEMBLY__'],
+		  PROGSUFFIX = '.axf',			# The suffix to use for final executable
+		  ENV = {'PATH' : os.environ['PATH']},	# Inherit shell path
+		  LIBS = [libc_name, 'gcc', libc_name, 'libl4', 'libposix', libc_name],
+		  CPPFLAGS = "-D__USERSPACE__",
+		  CPPPATH = ['#include', libl4_incpath, libposix_incpath, kernel_incpath])
+
+src = [glob("src/*.c"), glob("*.c"), glob("*.S"), glob("src/arch/arm/*.c"), glob("../libcont/*.c")]
+objs = env.Object(src)
+physical_base = env.Command(physical_base_ld_script, prev_image, get_physical_base)
+crt0_copied = env.Command("crt0.o", libc_crt0, copy_crt0)
+
+test_exec_src = [glob("src/test_exec/*.c")]
+test_exec_objs = test_exec_env.Object(test_exec_src)
+test_exec_name = "test_exec"
+test_exec = test_exec_env.Program(test_exec_name, test_exec_objs + [crt0_copied])
+test_exec_env.Alias(test_exec_name, test_exec)
+
+env.Depends(objs, test_exec)
+task = env.Program(task_name, objs + [crt0_copied])
+env.Alias(task_name, task)
+
+# I find this to be a BUG related to SCons. SCons is still good compared to
+# notoriously horrible makefiles, but it could have been better.
+# if test_exec doesn't depend on physical_base, test_exec is compiled but
+# task complains that physical_base is not there. However we already declared
+# its dependency below.
+
+env.Depends(test_exec, physical_base)
+env.Depends(task, physical_base)

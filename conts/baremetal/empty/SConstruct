@@ -1,0 +1,66 @@
+# -*- mode: python; coding: utf-8; -*-
+#
+#  Codezero -- Virtualization microkernel for embedded systems.
+#
+#  Copyright © 2009  B Labs Ltd
+#
+import os, shelve, sys
+from os.path import *
+
+PROJRELROOT = '../..'
+
+sys.path.append(PROJRELROOT)
+
+from config.projpaths import *
+from config.configuration import *
+
+config = configuration_retrieve()
+platform = config.platform
+arch = config.arch
+gcc_arch_flag = config.gcc_arch_flag
+
+LIBL4_RELDIR = 'conts/libl4'
+KERNEL_INCLUDE = join(PROJROOT, 'include')
+LIBL4_DIR = join(PROJROOT, LIBL4_RELDIR)
+LIBL4_INCLUDE = join(LIBL4_DIR, 'include')
+LIBL4_LIBPATH = join(BUILDDIR, LIBL4_RELDIR)
+
+# Locally important paths are here
+LIBC_RELDIR = 'conts/libc'
+LIBC_DIR = join(PROJROOT, LIBC_RELDIR)
+LIBC_LIBPATH = join(BUILDDIR, LIBC_RELDIR)
+LIBC_INCLUDE = [join(LIBC_DIR, 'include'), \
+                join(LIBC_DIR, 'include/arch' + '/' + arch)]
+
+LIBDEV_RELDIR = 'conts/libdev'
+LIBDEV_DIR = join(PROJROOT, LIBDEV_RELDIR)
+LIBDEV_LIBPATH = join(join(BUILDDIR, LIBDEV_RELDIR), 'sys-userspace')
+LIBDEV_INCLUDE = [join(LIBDEV_DIR, 'uart/include')]
+
+LIBMEM_RELDIR = 'conts/libmem'
+LIBMEM_DIR = join(PROJROOT, LIBMEM_RELDIR)
+LIBMEM_LIBPATH = join(BUILDDIR, LIBMEM_RELDIR)
+LIBMEM_INCLUDE = LIBMEM_DIR
+
+env = Environment(CC = config.toolchain_userspace + 'gcc',
+          # We don't use -nostdinc because sometimes we need standard headers,
+          # such as stdarg.h e.g. for variable args, as in printk().
+          CCFLAGS = ['-g', '-nostdlib', '-ffreestanding', '-std=gnu99', '-Wall', \
+                     '-Werror'],
+          LINKFLAGS = ['-nostdlib', '-T' + "include/linker.lds", "-u_start"],
+		  ASFLAGS = ['-D__ASSEMBLY__'], \
+		  PROGSUFFIX = '.elf',			# The suffix to use for final executable\
+		  ENV = {'PATH' : os.environ['PATH']},	# Inherit shell path\
+		  LIBS = ['gcc', 'libl4', 'c-userspace', 'libdev-userspace', 'gcc', \
+                  'libmm', 'libmc', 'libmalloc','c-userspace'],	# libgcc.a - This is required for division routines.
+		  CPPPATH = ["#include", KERNEL_INCLUDE, LIBL4_INCLUDE, LIBDEV_INCLUDE, \
+                     LIBC_INCLUDE, LIBMEM_INCLUDE],
+          LIBPATH = [LIBL4_LIBPATH, LIBDEV_LIBPATH, LIBC_LIBPATH, LIBMEM_LIBPATH],
+		  CPPFLAGS = '-include l4/config.h -include l4/macros.h -include l4/types.h')
+
+src = Glob('*.[cS]')
+src += Glob('src/*.[cS]')
+
+objs = env.Object(src)
+prog = env.Program('main.elf', objs)
+Depends(prog, 'include/linker.lds')

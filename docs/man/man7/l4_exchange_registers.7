@@ -1,0 +1,115 @@
+.TH L4_EXCHANGE_REGISTERS 7 2009-11-02 "Codezero" "Codezero Programmer's Manual"
+.SH NAME
+.nf
+.BR "l4_exchange_registers" "Modifies the context of a suspended thread."
+
+.SH SYNOPSIS
+.nf
+.B #include <l4lib/arch/syscalls.h>
+.B #include <l4lib/arch/syslib.h>
+
+.BI "int l4_exchange_registers(void " "*exregs_struct" ", l4id_t " "tid" ");"
+.SH DESCRIPTION
+.BR "l4_exchange_registers() " " Reads and modifies the context of a suspended thread."
+
+By this call, pagers can read and modify any register or other crucial information about a thread such as the pager id or utcb virtual address. An architecture specific
+.BI "struct " exregs_data
+is passed to the kernel for modifying the targeted thread's context. See below for a detailed description of this structure and the default context structure for the ARM architecture.
+
+.nf
+/* Exchange registers context structure for the ARM architecture */
+.B typedef struct arm_exregs_context {
+.BI "	   u32 " "r0" ";		/* 0x4 */"
+.BI "	   u32 " "r1" ";		/* 0x8 */"
+.BI "	   u32 " "r2" ";		/* 0xC */"
+.BI "	   u32 " "r3" ";		/* 0x10 */"
+.BI "	   u32 " "r4" ";		/* 0x14 */"
+.BI "	   u32 " "r5" ";		/* 0x18 */"
+.BI "	   u32 " "r6" "; 		/* 0x1C */"
+.BI "	   u32 " "r7" ";		/* 0x20 */"
+.BI "	   u32 " "r8" ";		/* 0x24 */"
+.BI "	   u32 " "r9" ";		/* 0x28 */"
+.BI "	   u32 " "r10" ";		/* 0x2C */"
+.BI "	   u32 " "r11" ";		/* 0x30 */"
+.BI "	   u32 " "r12" ";		/* 0x34 */"
+.BI "	   u32 " "sp" ";		/* 0x38 */"
+.BI "	   u32 " "lr" ";		/* 0x3C */"
+.BI "	   u32 " "pc" ";		/* 0x40 */"
+.B } __attribute__((__packed__)) exregs_context_t;
+
+.nf
+/*
+ * Generic structure passed by userspace pagers
+ * for exchanging registers
+ */
+.B struct exregs_data {
+.BI "	   exregs_context_t " "context" ";"
+.BI "	   u32 " "valid_vect" ";"
+.BI "	   u32 " "flags" ";"
+.BI "	   l4id_t " "pagerid" ";"
+.BI "	   unsigned long " "utcb_address" ";"
+.B };
+
+.fi
+.in 7
+Each bit in the
+.I valid_vect
+field determines which register offsets are going to be modified.
+
+.I flags
+field determines whether to set or read the pager values provided, and affects the
+.IR pagerid " and " utcb_address
+fields of the thread:
+.TP
+.B EXREGS_SET_PAGER
+Sets the pagerid value of the targeted thread.
+.TP
+.B EXREGS_SET_UTCB
+Sets the utcb virtual address of the targeted thread.
+.TP
+.B EXREGS_READ
+Enables read-only operation, all set fields are read back from the targeted thread's context instead of modifying it.
+
+
+.in 8
+.SH L4 USERSPACE LIBRARY
+
+.nf
+/*
+ * Exchange register library calls to modify program counter,
+ * stack, pager id, utcb address and any hardware register.
+ */
+.BI "void exregs_set_stack(struct exregs_data " "*s" ", unsigned long " sp);
+.BI "void exregs_set_mr(struct exregs_data " "*s" ", int " "offset" ", unsigned long " "val" ");"
+.BI "void exregs_set_pc(struct exregs_data " "*s" ", unsigned long " "pc" ");"
+.BI "void exregs_set_pager(struct exregs_data " "*s" ", l4id_t " "pagerid" ");"
+.BI "void exregs_set_utcb(struct exregs_data  "*s" ", unsigned long " "virt" ");"
+
+.fi
+Above functions may be used for convenient manipulation of the
+.BI "struct " "exregs_data"
+structure.
+
+.SH RETURN VALUE
+.IR "l4_exchange_registers"()
+Returns 0 on success, and negative value on failure. See below for error codes.
+
+.SH ERRORS
+.TP
+.B -ESRCH
+Target thread was not found in the system.
+
+.TP
+.B -ENOCAP
+Capabilities required don't exist or do not have sufficient privileges.
+
+.TP
+.B -EACTIVE
+Target thread has not suspended yet.
+
+.TP
+.B -EAGAIN
+Target thread is busy holding a mutex.
+
+.SH SEE ALSO
+.BR "l4_thread_control"(7)

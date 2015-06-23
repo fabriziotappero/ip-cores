@@ -1,0 +1,122 @@
+
+Import('config', 'environment', 'previmage', 'contid')
+
+import os, sys
+
+arch = config.arch
+
+sys.path.append('../../../../')
+from config.lib import *
+from tools.pyelf.lmanext import *
+
+src = [Glob('*.c') + Glob('test_exec.S') + Glob('src/*.[Sc]') + Glob('src/arch/arm/*.c')]
+
+container = next((c for c in config.containers if int(c.id) == int(contid)), None)
+
+asm_string = \
+'''
+.align 4
+.section .testexec
+.incbin "%s"
+'''
+
+test_exec_linker_lds_in = \
+'''
+/*
+ * Simple linker script for userspace or svc tasks.
+ *
+ * Copyright (C) 2007 Bahadir Balban
+ */
+
+virtual_base = %s;
+
+/* First page before the env/args */
+
+
+ENTRY(_start)
+
+SECTIONS
+{
+	. = virtual_base;
+	.text : { *(.text.head) *(.text) }
+	.rodata : { *(.rodata) }
+	.rodata1 : { *(.rodata1) }
+	. = ALIGN(4K);
+	.data :	{ *(.data) }
+	.bss : { *(.bss) }
+}
+'''
+
+def generate_incbin_asm(target, source, env):
+    with open(target[0].path, 'w+') as asm_out:
+        asm_out.write(asm_string % source[0].path)
+
+def generate_lma_lds(target, source, env):
+    with open(source[1].path, 'r') as lds_in:
+        with open(target[0].path, 'w+') as lds_out:
+            linker_script = lds_in.read()
+            lds_out.write(linker_script % (conv_hex(container.pager_task_region_start), next_available_lma(source[0].path)))
+
+def generate_test_exec_lds(target, source, env):
+    with open(target[0].path, 'w+') as lds_out:
+        lds_out.write(test_exec_linker_lds_in % conv_hex(container.pager_task_region_start))
+
+lma_lds = Command('include/linker.lds', [previmage, 'include/linker.lds.in'], generate_lma_lds)
+test_exec_lds = Command('include/test_exec_linker.lds', [], generate_test_exec_lds)
+
+env = environment.Clone()
+test_exec_env = environment.Clone()
+
+test_exec_env.Append(LIBS = ['posix', 'c-userspace'])
+test_exec_env.Append(LINKFLAGS = '-T' + test_exec_lds[0].path)
+test_exec_env.Append(CPPFLAGS = ' -D__USERSPACE__ -include l4lib/macros.h ')
+test_exec_env.Replace(PROGSUFFIX = '')
+test_exec_src = Glob('src/test_exec/*.[cS]')
+test_exec_objs = test_exec_env.Object(test_exec_src)
+test_exec = test_exec_env.Program('src/test_exec/test_exec', test_exec_objs)
+test_exec_asm = Command('test_exec.S', test_exec, generate_incbin_asm)
+Depends(test_exec, test_exec_objs)
+Depends(test_exec, test_exec_lds)
+AlwaysBuild(test_exec_lds)
+
+env.Append(LIBS = ['posix', 'c-userspace'])
+env.Append(LINKFLAGS = '-T' + lma_lds[0].path)
+env.Append(CPPFLAGS = ' -D__USERSPACE__ -include l4lib/macros.h ')
+env.Replace(PROGSUFFIX = '')
+objs = env.Object(src + test_exec_asm)
+test0 = env.Program('test0', objs)
+
+elf_wrap_string = \
+'''
+.align 4
+.section .data
+.incbin "%s"
+'''
+
+def elf_wrap_asm(target, source, env):
+    with open(target[0].path, 'w+') as asm_out:
+        asm_out.write(elf_wrap_string % source[0].path)
+
+def elf_wrap_lds(target, source, env):
+    with open(source[1].path, 'r') as lds_in:
+        with open(target[0].path, 'w+') as lds_out:
+            linker_script = lds_in.read()
+            lds_out.write(linker_script % next_available_lma(source[0].path))
+
+# This further wraps the test0 elf image in another elf. Required.
+elf_wrap_env = environment.Clone()
+elf_wrapped_asm = Command('test0_elf_wrapped.S', test0, elf_wrap_asm)
+elf_wrapped_lds = Command('include/elf_wrapper.lds', [previmage, 'include/elf_wrapper.lds.in'], elf_wrap_lds)
+elf_wrap_env.Append(LINKFLAGS = '-T' + elf_wrapped_lds[0].path)
+elf_wrap_objs = elf_wrap_env.Object(elf_wrapped_asm)
+test0_elf_elf = elf_wrap_env.Program('test0_elf.elf', elf_wrap_objs)
+
+# So that everytime test0 is built, elf_wrap_objs
+# gets built (even though elf_wrapped_asm remains the same
+Depends(elf_wrap_objs, test0)
+Depends(test0, lma_lds)
+Depends(test0, test_exec)
+Depends(lma_lds, previmage)
+AlwaysBuild(lma_lds)
+Depends(test0_elf_elf, elf_wrapped_lds)
+Return('test0_elf_elf')

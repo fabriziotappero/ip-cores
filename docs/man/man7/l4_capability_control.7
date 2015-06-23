@@ -1,0 +1,115 @@
+.TH L4_CAPABILITY_CONTROL 7 2009-11-07 "Codezero" "Codezero Programmer's Manual"
+.SH NAME
+.nf
+.BR "l4_capability_control" " - Capability inspection and manipulation"
+
+.SH SYNOPSIS
+.nf
+.B #include <l4lib/arch/syscalls.h>
+.B #include <l4lib/arch/syslib.h>
+
+.BI "int l4_capability_control (unsigned int " "req" ", unsigned int " "flags" ", void *" buf ");
+.SH DESCRIPTION
+.B l4_capability_control()
+enables a thread to read and manipulate the list of capabilities that it possesses. Capabilities may be shared, granted to other threads, or they may be replicated, destroyed, reduced in privileges or split into parts, effectively enabling a dynamically configurable resource management architecture. The thread calling this system call must possess relevant capabilities as any operation done by this call are also subject to capability checking.
+.TP
+.fi
+.I req
+denotes the type of request. See below for a full list.
+
+.TP
+.fi
+.I flags
+denotes additional flags for the given request. See below for a list of flags.
+
+.TP
+.fi
+.I buf
+almost always contains a capability structure that describes the request with regard to given
+.IR "req"
+and
+.IR "flags."
+
+.TP
+.BR CAP_CONTROL_NCAPS
+Get capability count. This is the sum of thread-private capabilities, address space capabilities and container capabilities.
+.TP
+.BR CAP_CONTROL_READ
+Returns an array of
+.BI "struct " "capability"
+structures in
+.I buf.
+The number of capabilities in the array should be first obtained by the
+.B CAP_CONTROL_NCAPS
+request.
+.TP
+.BR CAP_CONTROL_SHARE
+Shares a single capability or list of capabilities with a collection entity such as an address space or a container. If
+.B CAP_SHARE_SINGLE
+is specified in
+.IR "flag",
+a single capability is shared.
+.BR "CAP_SHARE_ALL_CONTAINER " "makes the caller thread share all of its thread-level and address space-level capability lists with its container. The caller must also be the owner of all of the capabilities, in case of the address space.
+.BR "CAP_SHARE_ALL_SPACE " "makes the caller thread share all of its thread-level capabilities with its address space."
+
+The sharing must be made with a thread collection entity that contains the capability owner. For example, a capability possessed by a thread may be shared with the thread's address space, or the thread's container. However it is not possible to share a capability in one container with another container. See
+.B CAP_CONTROL_REPLICATE
+and
+.B CAP_CONTROL_GRANT
+on other methods of transferring a possessed capability to another entity.
+
+.TP
+.BR CAP_CONTROL_GRANT
+Grants a single capability to a target thread. The granted capability must be described in the
+.IR "buf",
+field. Since ownership may only be exercised by threads, the grantee must be a thread whose thread id is provided in the
+.I owner
+field of the capability provided, leaving all other fields intact.
+
+Currently,
+.BR "CAP_GRANT_SINGLE",
+must be provided in the
+.I flag
+field, as no method has been defined for granting a larger entity than a single capability, i.e. a list of capabilities. To achieve this, a
+.B CAP_GRANT_ALL
+flag is planned for a future release.
+If
+.B CAP_GRANT_IMMUTABLE
+is specified in the flags, this means the granted capability should be made immutable on-the-fly. This is required as granting needs grant capabilities on the capability, but a granter may want to remove it as it grants it.
+.TP
+.BR CAP_CONTROL_REPLICATE
+Replicates an existing capability. This is useful for expanding capabilities to managed children. For example, a pager may make a replica of its capability to ipc to all threads in the container, deduce the capability to only cover itself as a thread target, and share this with the container. As a result, all threads in the container may ipc to the pager but nobody else, including each other.
+.TP
+.B CAP_CONTROL_SPLIT
+Capabilities are split by taking the diff of resources possessed between capabilities.
+.I flags
+field may be one of
+.BR " CAP_SPLIT_SIZE",
+.B CAP_SPLIT_ACCESS
+or
+.BR "CAP_SPLIT_RANGE",
+.RI " by which the capability is either split by its " "size", " access" ", or" " start " and " end" " fields, respectively."
+.TP
+.BR CAP_CONTROL_DEDUCE
+Deduction can be by access permissions, start, end, size fields, or the target resource type. Target resource deduction denotes reducing the applicable space of the target, e.g. from a container to a space in that container. For example, an ipc capability that targets a container may be deduced to one that targets only a single address space, or even a single thread.
+.TP
+.BR CAP_CONTROL_DESTROY
+Destroys a capability.
+
+
+.SH RETURN VALUE
+.IR "l4_capability_control"()
+Returns 0 on success, and negative value on failure. See below for error codes.
+
+.SH ERRORS
+.TP
+.B -EINVAL
+when a capability struct is passed in
+.IR "buf"
+but with invalid fields.
+.TP
+.B -ENOCAP
+when capabilities required don't exist or do not have sufficient privileges.
+
+.SH SEE ALSO
+.BR "capability"(7)

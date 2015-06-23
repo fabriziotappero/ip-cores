@@ -1,0 +1,46 @@
+# -*- mode: python; coding: utf-8; -*-
+
+#  Codezero -- a microkernel for embedded systems.
+#
+#  Copyright © 2009  B Labs Ltd
+
+import os.path
+import sys, subprocess, shutil
+from os.path import *
+
+Import('config', 'environment', 'previmage')
+
+e = environment.Clone()
+
+sys.path.append('../../../')
+
+from config.projpaths import *
+from config.configuration import *
+from tools.pyelf.lmanext import *
+
+rootfs_lds_in = \
+'''
+/*
+ * Linker script that embeds an empty root filesystem.
+ * This is to be replaced by a real rootfs image later.
+ */
+SECTIONS
+{
+	. = %s;
+	.bss : { *(.bss) }
+}
+'''
+
+def generate_rootfs_lds(target, source, env):
+    with open(source[1].path, 'r') as lds_in:
+        with open(target[0].path, 'w+') as lds_out:
+            linker_script = lds_in.read()
+            lds_out.write(linker_script % next_available_lma(source[0].path))
+
+rootfs_lds = e.Command('rootfs.lds', [previmage, 'rootfs.lds.in'], generate_rootfs_lds)
+
+e.Append(LINKFLAGS = '-T' + rootfs_lds[0].path)
+rootfs_img = e.Program('rootfs.elf', 'rootfs.c')
+Depends(rootfs_img, rootfs_lds)
+
+Return('rootfs_img')
