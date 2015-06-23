@@ -1,0 +1,19 @@
+
+
+#define GET_STATUS 0x00
+#define CLEAR_FEATURE 0x01
+#define SET_FEATURE 0x03
+#define SET_ADDRESS 0x05
+#define GET_DESCRIPTOR 0x06
+#define SET_DESCRIPTOR 0x07
+#define GET_CONFIG 0x08
+#define SET_CONFIG 0x09
+#define GET_INTERFACE 0x0a
+#define SET_INTERFACE 0x0b
+#define SYNCH_FRAME 0x0c
+
+#define VENDOR_DATA_MSB 0x00
+#define VENDOR_DATA_LSB 0x00
+
+#define MAX_RESP_SIZE 64
+
