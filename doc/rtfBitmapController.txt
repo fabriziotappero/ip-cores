@@ -1,0 +1,66 @@
+
+Description:
+
+This core is a low to medium resolution bitmap display controller. It was engineered for use on the
+Nexsys2 board, a Spartan3e FPGA board, but is readily adaptable to other environments.
+
+
+Features
+
+- small size
+- low to mid resolution bitmap display
+- fixed format display
+- 32 byte burst fetching
+- memory bandwidth consideration
+- line buffer
+- independent video and bus clocks
+
+While small, this controller core has a number of interesting features. It features low resolution
+(low resolution these days) bitmap display. The resolution is 416 x 262 x 8bpp. Memory usage is
+about 128Kb. The controller is of a fixed display format, and hence doesn't need any software
+control. It does have a control signal to allow page flipping between two different address ranges.
+The design of the controller takes into consideration the amount of memory bandwidth available to
+the system, using 32 byte burst fetches to fill a line cache. A trick to achieving a low resolution
+bitmap display, is to use a video line cache instead of a video fifo. 
+
+
+Operation:
+
+The line cache allows the same video data to be retrieved several times for a given video display
+row, without accessing main memory.
+
+Briefly, a fifo works by filling the fifo buffer once it becomes a certain percentage empty. As data
+is retrieved for display from the fifo, new data for future display is fetched and loaded into the
+fifo. A video line cache works slightly differently, by buffering entire video display lines in
+a line buffer.
+
+The video line cache is periodically filled at a rate that keeps up with the video
+display. While one video row is being displayed, a to-be-displayed video row is being fetched from
+memory and stored in the line cache. The advantage of a line cache over a fifo is that the same
+video data may be redisplayed without refetching the data. This allows data for the display to be
+fetched across the duration of several scan lines, when a lower resolution mode is in use.
+
+A video fifo is driven by the fifo status, if the status indicates that the fifo is
+becoming empty, more data is fetched. The line cache is driven directly by video timing instead.
+Rather than monitoring empty/full status, it simply automatically fetches data at periodic
+intervals.
+
+The disadvantage of a video line cache is that it requires a larger memory reousrce than a video
+fifo would require. Often a fifo only needs to be a few dozen bytes in size. The line cache needs to
+buffer at least two entire lines, which can result in it being several kilobytes in size, depending
+on the video mode. Timing control for a line cache is more complex than a fifo.
+
+The controller fetches data in 32 byte bursts at periodic intervals. One might think that it would
+be a lot simpler and more efficient to just fetch an entire line in a long burst. However this would
+have the drawback of consuming memory bandwidth for an extended duration of time. The 32 byte
+burst fetches are geared towards allowing other devices in the system to access the same memory. So
+that the peformance of the entire system isn't adverse. The controller relies on the memory system
+to support burst mode fetchs. In this case page-mode of the PSRAM is used.
+
+The controller uses two independent clocks, one each for bus timing and video timing. Except for
+the video request flip-flop, all cross clock domain data is handled using a block ram resource. The
+block ram itself allows a different clock to be used on each port. Data is written to the block
+ram under control of the bus clock, and read from the block ram on the second port using the
+video timing clock. A clock domain crossing synchronizer is used to allow the video request signal
+to cross the clock domain.
+
