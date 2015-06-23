@@ -1,0 +1,76 @@
+/*
+ * User defines for synthesizing RTC IP core
+ *
+ */
+TOPLEVEL = TOP
+include select_tech.inc
+PCI_CLK = CLK
+WB_CLK  = CLK_I
+RST     = RST_I
+PCI_CLK_PERIOD = 15     /* 66 MHz */
+WB_CLK_PERIOD  = 5     /* 200 MHz */
+MAX_AREA = 0            /* Push hard */
+DO_UNGROUP = yes         /* yes, no */
+DO_VERIFY = no         /* yes, no */
+CHECK     = no         /* yes, no */
+ 
+/* Set some basic variables related to environment */
+include set_env.inc
+STAGE = final
+ 
+/* Load libraries */
+include tech_ + TECH + .inc
+ 
+/* Load HDL source files */
+/*include read_design.inc         > LOG_PATH + read_design_ + TOPLEVEL + .log*/
+include analyze_design.inc        > LOG_PATH + analyze_design_ + TOPLEVEL + .log
+include elaborate_design.inc      > LOG_PATH + elaborate_design_ + TOPLEVEL + .log
+ 
+/* Set design top */
+current_design TOPLEVEL
+ 
+/* Link all blocks and uniquify them */
+link
+uniquify
+
+if (CHECK == "yes"){
+check_design                    > LOG_PATH + check_design_ + TOPLEVEL + .log
+}
+ 
+create_clock WB_CLK -period WB_CLK_PERIOD
+create_clock PCI_CLK -period PCI_CLK_PERIOD
+
+/* Apply PCI constraints */
+include cons_pci_ports.inc
+include cons_wb_ports.inc
+
+/* Apply technology constraints */
+if (TECH == "vs_umc18") {
+        include cons_vs_umc18.inc
+} else if (TECH == "art_umc18") {
+        include cons_art_umc18.inc
+} else {
+        echo "Error: Unsupported technology"
+        exit
+}
+
+/* Lets do basic synthesis */
+if (DO_UNGROUP == "yes") {
+        ungroup -all -flatten
+}
+compile -boundary_optimization -map_effort low
+ 
+/* Dump gate-level from incremental synthesis */
+include save_design.inc
+ 
+/* Generate reports for incremental synthesis */
+include reports.inc
+ 
+/* Verify design */
+if (DO_VERIFY == "yes") {
+        compile -no_map -verify         > LOG_PATH + verify_ + TOPLEVEL + .log
+}
+ 
+/* Finish */
+sh date
+exit

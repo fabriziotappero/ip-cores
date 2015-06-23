@@ -1,0 +1,173 @@
+#!/bin/csh -f
+
+set iter = 1;
+set failed = 0;
+set all_tests = 0;
+# List all test cases
+set simpletests=(buserr-nocache immu-nocache dmmu-nocache basic-nocache mul-nocache-O2 syscall-nocache cbasic-nocache-O2 ints1-nocache ints2-nocache \
+		buserr-icdc immu-icdc dmmu-icdc basic-icdc mul-icdc-O2 syscall-icdc cbasic-icdc-O2 ints1-icdc ints2-icdc)
+set complextests=(buserr-ic immu-ic dmmu-ic basic-ic mul-ic-O2 syscall-ic cbasic-ic-O2 ints1-ic ints2-ic \
+		buserr-dc immu-dc dmmu-dc basic-dc mul-dc-O2 syscall-dc cbasic-dc-O2 ints1-dc ints2-dc \
+		mul-nocache-O0 cbasic-nocache-O0 \
+		mul-icdc-O0 cbasic-icdc-O0 \
+		mul-ic-O0 cbasic-ic-O0 \
+		mul-dc-O0 cbasic-dc-O0)
+set simpletimes=(10 10 10 40 40 40 40 40 60 \
+		 10 10 10 40 40 40 40 40 40)
+set complextimes=(10 10 10 40 40 40 40 40 40 \
+		 10 10 10 40 40 40 40 40 100 \
+		 40 40 \
+		 40 40 \
+		 40 40 \
+		 40 40)
+set iterations=( \
+		"OR1200_REGISTERED_OUTPUTS+FLASH_GENERIC" \
+		"OR1200_REGISTERED_OUTPUTS+FLASH_GENERIC+FLASH_GENERIC_REGISTERED+OR1200_REGISTERED_INPUTS" \
+		"OR1200_REGISTERED_OUTPUTS+OR1200_REGISTERED_INPUTS" \
+		"OR1200_REGISTERED_OUTPUTS+OR1200_REGISTERED_INPUTS+OR1200_CLMODE_1TO2" \
+		"OR1200_REGISTERED_OUTPUTS+OR1200_CLMODE_1TO2" \
+		"OR1200_REGISTERED_OUTPUTS+FLASH_GENERIC+FLASH_GENERIC_REGISTERED+OR1200_CLMODE_1TO2" \
+		"OR1200_REGISTERED_OUTPUTS" \
+		"" \
+		"OR1200_REGISTERED_OUTPUTS+OR1200_REGISTERED_INPUTS+FLASH_GENERIC_REGISTERED" \
+		"")
+
+# Process arguments
+if ($1 == "simple") then
+	set tests=(${simpletests})
+	set maxtimes=(${simpletimes})
+else
+	set tests=(${simpletests} ${complextests})
+	set maxtimes=(${simpletimes} ${complextimes})
+endif
+if ($1 == "single") then
+	set tests=(${simpletests} ${complextests})
+	set maxtimes=(${simpletimes} ${complextimes})
+	set tests=${tests[$2]}
+	set maxtimes=${maxtimes[$2]}
+endif
+if ($1 == "clean") then
+	rm -rf ../log/*
+	rm -rf ../out/wave/*
+	exit 0;
+else if ($1 == "sim") then
+	goto sim;
+endif
+
+# List all selected tests
+set i = 0;
+foreach test ($tests)
+	@ i += 1;
+	echo -n " Test ${i}: ${test}, $maxtimes[$i] ms\t"
+	if ((${i} % 2) == 0) then
+		echo ""
+	endif
+end
+
+echo ""
+
+set i = 1;
+while ($iterations[$i] != "")
+	echo " Iteration ${i}: ${iterations[$i]}\t"
+	@ i += 1;
+end
+
+# Prepare all .args files
+iteration:
+echo ""
+echo "<<<"
+echo "<<< Iteration ${iter}: ${iterations[$iter]}"
+echo "<<<"
+if (${iterations[$iter]} != "") then
+	ncprep +define+${iterations[$iter]} -f ../bin/nc.scr > ncprep.out
+else
+	ncprep -f ../bin/nc.scr > ncprep.out
+endif
+if (`tail -1 ncprep.out | grep Failed` != "") then
+  echo ""
+  cat ncprep.out
+  exit
+endif
+
+# Run NC-Verilog compiler
+echo ""
+echo "\t@@@"
+echo "\t@@@ Compiling sources"
+echo "\t@@@"
+ncvlog -NOCOPYRIGHT -f ncvlog.args > ncvlog.out
+if ($status != 0) then
+  echo "\t@@@ FAILED"
+  echo ""
+  cat ncvlog.out
+  exit
+else
+  echo "\t@@@ Passed"
+endif
+
+# Run the NC-Verilog elaborator (build the design hierarchy)
+echo ""
+echo "\t@@@"
+echo "\t@@@ Building design hierarchy (elaboration)"
+echo "\t@@@"
+ncelab -NOTIMINGCHECKS -NOCOPYRIGHT -f ncelab.args > ncelab.out
+if ($status != 0) then
+  echo "\t@@@ FAILED"
+  echo ""
+  cat ncelab.out
+  exit
+else
+  echo "\t@@@ Passed"
+endif
+
+# Run the NC-Verilog simulator (simulate the design)
+sim:
+set i = 0;
+foreach test ($tests)
+	@ i += 1;
+	echo ""
+	echo "\t###"
+	echo "\t### Running test ${i}: ${test}, $maxtimes[$i] ms"
+	echo "\t###"
+
+	echo "database -open waves -into ../out/wave/i${iter}-${test} -default" > sim.tcl
+	echo "probe -create -shm xess_top -all -variables -depth all" >> sim.tcl
+	echo "stop -create -time $maxtimes[$i]ms -relative" >> sim.tcl
+	echo "run" >> sim.tcl
+	echo "quit" >> sim.tcl
+
+	cp ../src/${test}.mem ../src/flash.in
+	ncsim -NOCOPYRIGHT -f ncsim.args > ncsim.out
+	if ($status != 0) then
+	  cat ncsim.out
+	  exit
+	else
+	  set magic=`tail -1 nop.log | cut -d'(' -f2 | cut -d')' -f1`
+	  set magictime=`tail -1 nop.log | cut -d'n' -f1`
+	  if ($magic == "deaddead") then
+		echo "\t### Passed (@time $magictime)"
+		@ all_tests += 1;
+	  else
+		echo "\t### FAILED (@time $magictime, magic# 0x$magic)"
+		@ failed += 1;
+		@ all_tests += 1;
+	  endif
+  	  mv flash.log ../log/i${iter}-${test}-flash.log
+	  mv executed.log ../log/i${iter}-${test}-executed.log
+	  mv sram.log ../log/i${iter}-${test}-sram.log
+	  mv sprs.log ../log/i${iter}-${test}-sprs.log
+	  mv nop.log ../log/i${iter}-${test}-nop.log
+	endif
+end
+
+@ iter += 1;
+if ($iterations[$iter] != "") then
+	goto iteration
+else
+	echo ""
+	echo "<<<"
+	echo "<<< End of Regression Iterations"
+	echo "<<<"
+	echo "<<< Failed $failed out of $all_tests"
+	echo "<<<"
+endif
+

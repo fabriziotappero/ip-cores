@@ -1,0 +1,81 @@
+#!/bin/sh
+# $XConsortium: startx.cpp,v 1.4 91/08/22 11:41:29 rws Exp $
+# $XFree86: xc/programs/xinit/startx.cpp,v 3.2 1998/12/20 11:58:22 dawes Exp $
+# 
+# This is just a sample implementation of a slightly less primitive 
+# interface than xinit.  It looks for user .xinitrc and .xserverrc
+# files, then system xinitrc and xserverrc files, else lets xinit choose
+# its default.  The system xinitrc should probably do things like check
+# for .Xresources files and merge them in, startup up a window manager,
+# and pop a clock and serveral xterms.
+#
+# Site administrators are STRONGLY urged to write nicer versions.
+# 
+
+bindir=BINDIR
+
+userclientrc=$HOME/.xinitrc
+userserverrc=$HOME/.xserverrc
+sysclientrc=$HOME/delete/xinitrc
+sysserverrc=/etc/X11/xinit/xserverrc
+clientargs=""
+serverargs=""
+
+if [ -f $userclientrc ]; then
+    clientargs=$userclientrc
+else if [ -f $sysclientrc ]; then
+    clientargs=$sysclientrc
+fi
+fi
+
+if [ -f $userserverrc ]; then
+    serverargs=$userserverrc
+else if [ -f $sysserverrc ]; then
+    serverargs=$sysserverrc
+fi
+fi
+
+display=:1
+#server=/usr/X11R6/bin/XF86_FBDev
+server=/usr/X11R6/bin/XFree86
+#server=/home/simons/X11R6.5.1/bin/XFree86
+whoseargs="client"
+while [ "x$1" != "x" ]; do
+    case "$1" in
+	/''*|\.*)	if [ "$whoseargs" = "client" ]; then
+		    if [ "x$clientargs" = x ]; then
+			clientargs="$1"
+		    else
+			clientargs="$clientargs $1"
+		    fi
+		else
+		    if [ "x$serverargs" = x ]; then
+			serverargs="$1"
+		    else
+			serverargs="$serverargs $1"
+		    fi
+		fi ;;
+	--)	whoseargs="server" ;;
+	*)	if [ "$whoseargs" = "client" ]; then
+		    clientargs="$clientargs $1"
+		else
+    		    case "$1" in
+		        :[0-9]) display="$1"
+		        ;;
+                        *) serverargs="$serverargs $1"
+			;;
+		    esac
+		fi ;;
+    esac
+    shift
+done
+
+# set up default Xauth info for this machine
+mcookie=`mcookie`
+serverargs="$serverargs -xf86config ./XF86Config-fb -auth $HOME/.Xauthority"
+xauth add $display . $mcookie
+xauth add `hostname -f`$display . $mcookie
+xinit $clientargs -- $server $display $serverargs
+
+# various machines need special cleaning up,
+# which should be done here

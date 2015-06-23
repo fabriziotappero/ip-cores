@@ -1,0 +1,703 @@
+##############################################
+#      BASIC UCF SYNTAX EXAMPLES V2.1.6      #
+##############################################
+#
+# The "#" symbol is a comment character.   To use this sample file, find the
+# specification necessary, remove the comment character (#) from the beginning
+# of the line, and modify the line (if necessary) to fit your design.
+#
+#              TIMING SPECIFICATIONS
+#
+# Timing specifications can be applied to the entire device (global) or to
+# specific groups in your design (called "time groups'). The time groups are
+# declared in two basic ways.
+#
+# Method 1: Based on a net name, where 'my_net' is a net that touches all the
+#           logic to be grouped in to 'logic_grp'. Example:
+#NET my_net TNM_NET = logic_grp ;
+#
+# Method 2: Group using the key word 'TIMEGRP' and declare using the names of
+#           logic in your design. Example:
+#TIMEGRP group_name = FFS ("U1/*");
+#           creates a group called 'group_name' for all flip-flops within
+#           the hierarchical block called U1. Wildcards are valid.
+#
+# Grouping is very important because it lets you tell the software which parts
+# of a design run at which speeds.  For the majority of the designs with only
+# one clock, use simple global constraints.
+#
+# The type of grouping constraint you use can vary depending on the synthesis
+# tools you are using.  Foundation Express does better with Method 2.
+#
+#
+############################################################
+# Internal to the device clock speed specifications - Tsys #
+############################################################
+#
+# data      _________      /^^^^^\       _________   out
+# ----------| D   Q |-----{ LOGIC } -----| D   Q |------
+#           |       |      \vvvvv/       |       |
+#        ---|> CLK  |                 ---|> CLK  |
+# clock  |  ---------                 |  ---------
+# ------------------------------------
+#
+# ---------------
+# Single Clock
+# ---------------
+#
+# ----------------
+# PERIOD TIME-SPEC
+# ----------------
+# The PERIOD spec. covers all timing paths that start or end at a
+# register, latch, or synchronous RAM which are clocked by the reference
+# net (excluding pad destinations).  Also covered is the setup
+# requirement of the synchronous element relative to other elements
+# (ex. flip flops, pads, etc...).
+# NOTE:  The default unit for time is nanoseconds.
+#
+#NET clock PERIOD = 50ns ;
+#
+#       -OR-
+#
+# ------------------
+# FROM:TO TIME-SPECs
+# ------------------
+# FROM:TO style timespecs can be used to constrain paths between time
+# groups.  NOTE:  Keywords:  RAMS, FFS, PADS, and LATCHES are predefined
+# time groups used to specify all elements of each type in a design.
+#TIMEGRP RFFS = RISING FFS ("*");  // creates a rising group called RFFS
+#TIMEGRP FFFS = FALLING FFS ("*");  // creates a falling group called FFFS
+#TIMESPEC TSF2F  = FROM : FFS   : TO : FFS   : 50 ns; // Flip-flips with the same edge
+#TIMESPEC TSR2F  = FROM : RFFS  : TO : FFFS  : 25 ns; // rising edge to falling edge
+#TIMESPEC TSF2R  = FROM : FFFS  : TO : RFFS  : 25 ns; // falling edge to rising edge
+#
+# ---------------
+# Multiple Clocks
+# ---------------
+# Requires a combination of the 'Period' and 'FROM:TO' type time specifications
+#NET clock1 TNM_NET = clk1_grp ;
+#NET clock2 TNM_NET = clk2_grp ;
+#
+#TIMESPEC TS_clk1 = PERIOD : clk1_grp : 50 ;
+#TIMESPEC TS_clk2 = PERIOD : clk2_grp : 30 ;
+#TIMESPEC TS_ck1_2_ck2 = FROM : clk1_grp : TO : clk2_grp : 50 ;
+#TIMESPEC TS_ck2_2_ck1 = FROM : clk2_grp : TO : clk1_grp : 30 ;
+#
+#
+############################################################
+# CLOCK TO OUT specifications - Tco                        #
+############################################################
+#
+# from      _________      /^^^^^\       --------\
+# ----------| D   Q |-----{ LOGIC } -----| Pad    >
+# PLD       |       |      \vvvvv/       --------/
+#        ---|> CLK  |
+# clock  |  ---------
+# --------
+#
+# ----------------
+# OFFSET TIME-SPEC
+# ----------------
+# To automatically include clock buffer/routing delay in your
+# clock-to-out timing specifications, use OFFSET constraints .
+# For an output where the maximum clock-to-out (Tco) is 25 ns:
+#
+#NET out_net_name OFFSET = OUT 25 AFTER clock_net_name ;
+#
+#      -OR-
+#
+# ------------------
+# FROM:TO TIME-SPECs
+# ------------------
+#TIMESPEC TSF2P  = FROM : FFS   : TO : PADS  : 25 ns;
+# Note that FROM: FFS : TO: PADS constraints start the delay analysis
+# at the flip flop itself, and not the clock input pin.  The recommended
+# method to create a clock-to-out constraint is to use an OFFSET constraint.
+#
+#
+############################################################
+# Pad to Flip-Flop speed specifications - Tsu              #
+############################################################
+#
+# ------\         /^^^^^\       _________   into PLD
+# |pad   >-------{ LOGIC } -----| D   Q |------
+# ------/         \vvvvv/       |       |
+#                            ---|> CLK  |
+# clock                      |  ---------
+# ----------------------------
+#
+# ----------------
+# OFFSET TIME-SPEC
+# ----------------
+# To automatically account for clock delay in your input setup timing
+# specifications, use OFFSET constraints.
+# For an input where the maximum setup time is 25 ns:
+#NET in_net_name OFFSET = IN 25 BEFORE clock_net_name ;
+#
+#      -OR-
+#
+# ------------------
+# FROM:TO TIME-SPECs
+# ------------------
+#TIMESPEC TSP2F  = FROM : PADS  : TO : FFS   : 25 ns;
+# Note that FROM: PADS : TO: FFS constraints do not take into account any
+# delay for the clock path.  The recommended method to create an input
+# setup time constraint is to use an OFFSET constraint.
+#
+#
+############################################################
+# Pad to Pad speed specifications - Tpd                    #
+############################################################
+#
+# ------\         /^^^^^\       -------\
+# |pad   >-------{ LOGIC } -----| pad   >
+# ------/         \vvvvv/       -------/
+#
+# ------------------
+# FROM:TO TIME-SPECs
+# ------------------
+#TIMESPEC TSP2P  = FROM : PADS  : TO : PADS  : 125 ns;
+#
+#
+############################################################
+# Other timing specifications                              #
+############################################################
+#
+# -------------
+# TIMING IGNORE
+# -------------
+# If you can ignore timing of paths, use Timing Ignore (TIG). NOTE: The
+# "*" character is a wild card, which can be used for bus names.  A "?"
+# character can be used to wild-card one character.
+# Ignore timing of net reset_n:
+#NET : reset_n : TIG ;
+#
+# Ignore data_reg(7:0) net in instance mux_mem:
+#NET : mux_mem/data_reg* : TIG ;
+#
+# Ignore data_reg(7:0) net in instance mux_mem as related to a TIMESPEC
+# named TS01 only:
+#NET : mux_mem/data_reg* : TIG = TS01 ;
+#
+# Ignore data1_sig and data2_sig nets:
+#NET : data?_sig : TIG ;
+#
+# ---------------
+# PATH EXCEPTIONS
+# ---------------
+# If your design has outputs that can be slower than others, you can
+# create specific timespecs similar to this example for output nets
+# named out_data(7:0) and irq_n:
+#TIMEGRP slow_outs = PADS(out_data* : irq_n) ;
+#TIMEGRP fast_outs = PADS : EXCEPT : slow_outs ;
+#TIMESPEC TS08 = FROM : FFS : TO : fast_outs : 22 ;
+#TIMESPEC TS09 = FROM : FFS : TO : slow_outs : 75 ;
+#
+# If you have multi-cycle FF to FF paths, you can create a time group
+# using either the TIMEGRP or TNM statements.
+#
+# WARNING:  Many VHDL/Verilog synthesizers do not predictably name flip
+# flop Q output nets.  Most synthesizers do assign predictable instance
+# names to flip flops, however.
+#
+# TIMEGRP example:
+#TIMEGRP slowffs = FFS(inst_path/ff_q_output_net1* :
+#inst_path/ff_q_output_net2*);
+#
+# TNM attached to instance example:
+#INST inst_path/ff_instance_name1_reg* TNM = slowffs ;
+#INST inst_path/ff_instance_name2_reg* TNM = slowffs ;
+#
+# If a FF clock-enable is used on all flip flops of a multi-cycle path,
+# you can attach TNM to the clock enable net.  NOTE:  TNM attached to a
+# net "forward traces" to any FF, LATCH, RAM, or PAD attached to the
+# net.
+#NET ff_clock_enable_net TNM = slowffs ;
+#
+# Example of using "slowffs" timegroup, in a FROM:TO timespec, with
+# either of the three timegroup methods shown above:
+#TIMESPEC TS10 = FROM : slowffs : TO : FFS : 100 ;
+#
+# Constrain the skew or delay associate with a net.
+#NET any_net_name MAXSKEW = 7 ;
+#NET any_net_name MAXDELAY = 20 ns;
+#
+#
+# Constraint priority in your .ucf file is as follows:
+#
+#    highest 1.  Timing Ignore (TIG)
+#            2.  FROM : THRU : TO specs
+#            3.  FROM : TO specs
+#    lowest  4.  PERIOD specs
+#
+# See the on-line "Library Reference Guide" document for
+# additional timespec features and more information.
+#
+#
+############################################################
+#                                                          #
+#         LOCATION and ATTRIBUTE SPECIFICATIONS            #
+#                                                          #
+############################################################
+# Pin and CLB location locking constraints                 #
+############################################################
+#
+# -----------------------
+# Assign an IO pin number
+# -----------------------
+#INST io_buf_instance_name  LOC = P110 ;
+#NET io_net_name  LOC = P111 ;
+#
+# -----------------------
+# Assign a signal to a range of I/O pins
+# -----------------------
+#NET "signal_name" LOC=P32, P33, P34;
+#
+# -----------------------
+# Place a logic element(called a BEL) in a specific CLB location.
+# BEL = FF, LUT, RAM, etc...
+# -----------------------
+#INST instance_path/BEL_inst_name  LOC = CLB_R17C36 ;
+#
+# -----------------------
+# Place CLB in rectangular area from CLB R1C1 to CLB R5C7
+# -----------------------
+#INST /U1/U2/reg<0> LOC=clb_r1c1:clb_r5c7;
+#
+# -----------------------
+# Place hierarchical logic block in rectangular area from CLB R1C1 to CLB R5C7
+# -----------------------
+#INST /U1* LOC=clb_r1c1:clb_r5c7;
+#
+# -----------------------
+# Prohibit IO pin P26 or CLBR5C3 from being used:
+# -----------------------
+#CONFIG PROHIBIT = P26 ;
+#CONFIG PROHIBIT = CLB_R5C3 ;
+# Config Prohibit is very important for forcing the software to not use critical
+# configuration pins like INIT or DOUT on the FPGA.  The Mode pins and JTAG
+# Pins require a special pad so they will not be available to this constraint
+#
+# -----------------------
+# Assign an OBUF to be FAST or SLOW:
+# -----------------------
+#INST obuf_instance_name FAST ;
+#INST obuf_instance_name SLOW ;
+#
+# -----------------------
+# FPGAs only:  IOB input Flip-flop delay specification
+# -----------------------
+# Declare an IOB input FF delay (default = MAXDELAY).
+# NOTE:  MEDDELAY/NODELAY can be attached to a CLB FF that is pushed
+# into an IOB by the "map -pr i" option.
+#INST input_ff_instance_name MEDDELAY ;
+#INST input_ff_instance_name NODELAY ;
+#
+# -----------------------
+# Assign Global Clock Buffers Lower Left Right Side
+# -----------------------
+# INST gbuf1 LOC=SSW
+#
+# #
+
+################################################################################
+# Define Device, Package, And Speed Grade
+################################################################################
+#
+CONFIG PART = XC2S200-FG456-5 ;
+#
+################################################################################
+# Prohibited Pins List
+################################################################################
+#
+CONFIG PROHIBIT = "A20" ;       #IO_WRITE
+CONFIG PROHIBIT = "C19" ;       #IO_CS
+CONFIG PROHIBIT = "C21" ;       #IO_DOUT_BUSY
+CONFIG PROHIBIT = "D20" ;       #IO_DIN_D0
+CONFIG PROHIBIT = "H22" ;       #IO_D1
+CONFIG PROHIBIT = "H20" ;       #IO_D2
+CONFIG PROHIBIT = "K20" ;       #IO_D3
+#CONFIG PROHIBIT = "N22" ;      #IO_D4
+CONFIG PROHIBIT = "R21" ;       #IO_D5
+CONFIG PROHIBIT = "T22" ;       #IO_D6
+CONFIG PROHIBIT = "Y21" ;       #IO_D7
+CONFIG PROHIBIT = "V19" ;       #IO_INIT
+
+NET "CLK" IOSTANDARD = PCI33_5 ;
+NET "CLK"       TNM_NET = "CLK";
+NET "CRT_CLK"   TNM_NET = "CRT_CLK";
+
+TIMESPEC "TS_CLK"       = PERIOD "CLK" 30 ns HIGH 50 %;
+TIMESPEC "TS_CRT_CLK"   = PERIOD "CRT_CLK" 44 ns HIGH 50 %;
+TIMESPEC "TS_CLK_2_CRT_CLK" = FROM : "CLK"     : TO : "CRT_CLK" : 15 ;
+TIMESPEC "TS_CRT_CLK_2_CLK" = FROM : "CRT_CLK" : TO : "CLK"     : 15 ;
+
+INST "AD0.PAD" TNM = "PCI_AD";
+INST "AD1.PAD" TNM = "PCI_AD";
+INST "AD2.PAD" TNM = "PCI_AD";
+INST "AD3.PAD" TNM = "PCI_AD";
+INST "AD4.PAD" TNM = "PCI_AD";
+INST "AD5.PAD" TNM = "PCI_AD";
+INST "AD6.PAD" TNM = "PCI_AD";
+INST "AD7.PAD" TNM = "PCI_AD";
+INST "AD8.PAD" TNM = "PCI_AD";
+INST "AD9.PAD" TNM = "PCI_AD";
+INST "AD10.PAD" TNM = "PCI_AD";
+INST "AD11.PAD" TNM = "PCI_AD";
+INST "AD12.PAD" TNM = "PCI_AD";
+INST "AD13.PAD" TNM = "PCI_AD";
+INST "AD14.PAD" TNM = "PCI_AD";
+INST "AD15.PAD" TNM = "PCI_AD";
+INST "AD16.PAD" TNM = "PCI_AD";
+INST "AD17.PAD" TNM = "PCI_AD";
+INST "AD18.PAD" TNM = "PCI_AD";
+INST "AD19.PAD" TNM = "PCI_AD";
+INST "AD20.PAD" TNM = "PCI_AD";
+INST "AD21.PAD" TNM = "PCI_AD";
+INST "AD22.PAD" TNM = "PCI_AD";
+INST "AD23.PAD" TNM = "PCI_AD";
+INST "AD24.PAD" TNM = "PCI_AD";
+INST "AD25.PAD" TNM = "PCI_AD";
+INST "AD26.PAD" TNM = "PCI_AD";
+INST "AD27.PAD" TNM = "PCI_AD";
+INST "AD28.PAD" TNM = "PCI_AD";
+INST "AD29.PAD" TNM = "PCI_AD";
+INST "AD30.PAD" TNM = "PCI_AD";
+INST "AD31.PAD" TNM = "PCI_AD";
+TIMEGRP "PCI_AD" OFFSET = IN 7 ns BEFORE "CLK";
+TIMEGRP "PCI_AD" OFFSET = OUT 11 ns AFTER "CLK";
+NET "AD0" IOSTANDARD = PCI33_5;
+NET "AD1" IOSTANDARD = PCI33_5;
+NET "AD2" IOSTANDARD = PCI33_5;
+NET "AD3" IOSTANDARD = PCI33_5;
+NET "AD4" IOSTANDARD = PCI33_5;
+NET "AD5" IOSTANDARD = PCI33_5;
+NET "AD6" IOSTANDARD = PCI33_5;
+NET "AD7" IOSTANDARD = PCI33_5;
+NET "AD8" IOSTANDARD = PCI33_5;
+NET "AD9" IOSTANDARD = PCI33_5;
+NET "AD10" IOSTANDARD = PCI33_5;
+NET "AD11" IOSTANDARD = PCI33_5;
+NET "AD12" IOSTANDARD = PCI33_5;
+NET "AD13" IOSTANDARD = PCI33_5;
+NET "AD14" IOSTANDARD = PCI33_5;
+NET "AD15" IOSTANDARD = PCI33_5;
+NET "AD16" IOSTANDARD = PCI33_5;
+NET "AD17" IOSTANDARD = PCI33_5;
+NET "AD18" IOSTANDARD = PCI33_5;
+NET "AD19" IOSTANDARD = PCI33_5;
+NET "AD20" IOSTANDARD = PCI33_5;
+NET "AD21" IOSTANDARD = PCI33_5;
+NET "AD22" IOSTANDARD = PCI33_5;
+NET "AD23" IOSTANDARD = PCI33_5;
+NET "AD24" IOSTANDARD = PCI33_5;
+NET "AD25" IOSTANDARD = PCI33_5;
+NET "AD26" IOSTANDARD = PCI33_5;
+NET "AD27" IOSTANDARD = PCI33_5;
+NET "AD28" IOSTANDARD = PCI33_5;
+NET "AD29" IOSTANDARD = PCI33_5;
+NET "AD30" IOSTANDARD = PCI33_5;
+NET "AD31" IOSTANDARD = PCI33_5;
+INST "CBE0.PAD" TNM = "PCI_CBE";
+INST "CBE1.PAD" TNM = "PCI_CBE";
+INST "CBE2.PAD" TNM = "PCI_CBE";
+INST "CBE3.PAD" TNM = "PCI_CBE";
+
+TIMEGRP "PCI_CBE" OFFSET = IN 7 ns BEFORE "CLK";
+TIMEGRP "PCI_CBE" OFFSET = OUT 11 ns AFTER "CLK";
+
+NET "CBE0" IOSTANDARD = PCI33_5;
+NET "CBE1" IOSTANDARD = PCI33_5;
+NET "CBE2" IOSTANDARD = PCI33_5;
+NET "CBE3" IOSTANDARD = PCI33_5;
+
+#INST "DEVSEL.PAD" TNM = "PCI_CTRL" ;
+
+NET "DEVSEL" OFFSET = IN 7 ns BEFORE "CLK";
+
+NET "DEVSEL" OFFSET = OUT 11 ns AFTER "CLK";
+
+NET "DEVSEL" IOSTANDARD = PCI33_5;
+
+NET "FRAME" OFFSET = IN 7 ns BEFORE "CLK";
+
+NET "FRAME" OFFSET = OUT 11 ns AFTER "CLK";
+
+NET "FRAME" IOSTANDARD = PCI33_5;
+
+#INST "FRAME.PAD" TNM = "PCI_CTRL" ;
+
+NET "GNT" OFFSET = IN 10 ns BEFORE "CLK";
+
+NET "GNT" IOSTANDARD = PCI33_5;
+NET "RST" IOSTANDARD = PCI33_5;
+NET "INTA" IOSTANDARD = PCI33_5;
+
+#INST "GNT.PAD" TNM = "PCI_GNT" ;
+
+NET "IRDY" OFFSET = IN 7 ns BEFORE "CLK";
+NET "IRDY" OFFSET = OUT 11 ns AFTER "CLK";
+
+NET "IRDY" IOSTANDARD = PCI33_5;
+
+#INST "IRDY.PAD" TNM="PCI_CTRL" ;
+
+NET "PAR" OFFSET = IN 7 ns BEFORE "CLK";
+NET "PAR" OFFSET = OUT 11 ns AFTER "CLK";
+
+NET "PAR" IOSTANDARD = PCI33_5;
+
+#INST "PAR.PAD" TNM = "PCI_CTRL" ;
+
+NET "PERR" OFFSET = IN 7 ns BEFORE "CLK";
+
+NET "PERR" OFFSET = OUT 11 ns AFTER "CLK";
+
+NET "PERR" IOSTANDARD = PCI33_5;
+
+#INST "PERR.PAD" TNM = "PCI_CTRL" ;
+
+NET "REQ" OFFSET = OUT 12 ns AFTER "CLK";
+
+NET "REQ" IOSTANDARD = PCI33_5;
+
+#INST "REQ.PAD" TNM = "PCI_REQ" ;
+
+NET "SERR" OFFSET = OUT 11 ns AFTER "CLK";
+
+NET "SERR" IOSTANDARD = PCI33_5;
+
+#INST "SERR.PAD" TNM = "PCI_CTRL" ;
+
+NET "STOP" OFFSET = IN 7 ns BEFORE "CLK";
+NET "STOP" OFFSET = OUT 11 ns AFTER "CLK";
+
+NET "STOP" IOSTANDARD = PCI33_5;
+
+#INST "STOP.PAD" TNM = "PCI_CTRL" ;
+
+NET "TRDY" OFFSET = IN 7 ns BEFORE "CLK";
+NET "TRDY" OFFSET = OUT 10 ns AFTER "CLK";
+
+NET "TRDY" IOSTANDARD = PCI33_5;
+
+#INST "TRDY.PAD" TNM = "PCI_CTRL" ;
+
+NET "IDSEL" OFFSET = IN 7ns BEFORE "CLK" ;
+NET "IDSEL" IOSTANDARD = PCI33_5 ;
+
+##################################################################################
+# Pin locations
+##################################################################################
+NET  "CLK"                             LOC = "C11"  ;
+NET  "INTA"                            LOC = "M3"   ;
+NET  "RST"                             LOC = "E2"   ;
+NET  "GNT"                             LOC = "L5"   ;
+NET  "REQ"                             LOC = "K2"   ;
+NET  "AD31"                            LOC = "E1"   ;
+NET  "AD30"                            LOC = "G4"   ;
+NET  "AD29"                            LOC = "G3"   ;
+NET  "AD28"                            LOC = "H5"   ;
+NET  "AD27"                            LOC = "F2"   ;
+NET  "AD26"                            LOC = "F1"   ;
+NET  "AD25"                            LOC = "H4"   ;
+NET  "AD24"                            LOC = "G1"   ;
+NET  "CBE3"                            LOC = "N2"   ;
+NET  "IDSEL"                           LOC = "L6"   ;
+NET  "AD23"                            LOC = "H3"   ;
+NET  "AD22"                            LOC = "H2"   ;
+NET  "AD21"                            LOC = "J4"   ;
+NET  "AD20"                            LOC = "H1"   ;
+NET  "AD19"                            LOC = "J5"   ;
+NET  "AD18"                            LOC = "J2"   ;
+NET  "AD17"                            LOC = "J3"   ;
+NET  "AD16"                            LOC = "J1"   ;
+NET  "CBE2"                            LOC = "N3"   ;
+NET  "FRAME"                           LOC = "M6"   ;
+NET  "IRDY"                            LOC = "L3"   ;
+#
+NET  "TRDY"                            LOC = "M1"   ;
+NET  "DEVSEL"                          LOC = "L1"   ;
+NET  "STOP"                            LOC = "L4"   ;
+NET  "PERR"                            LOC = "N5"   ;
+NET  "SERR"                            LOC = "M4"   ;
+NET  "PAR"                             LOC = "P2"   ;
+NET  "CBE1"                            LOC = "N4"   ;
+NET  "AD15"                            LOC = "K5"   ;
+NET  "AD14"                            LOC = "K1"   ;
+NET  "AD13"                            LOC = "K3"   ;
+NET  "AD12"                            LOC = "K4"   ;
+NET  "AD11"                            LOC = "P4"   ;
+NET  "AD10"                            LOC = "R1"   ;
+NET  "AD9"                             LOC = "P5"   ;
+NET  "AD8"                             LOC = "P3"   ;
+NET  "CBE0"                            LOC = "P1"   ;
+NET  "AD7"                             LOC = "R2"   ;
+NET  "AD6"                             LOC = "T1"   ;
+NET  "AD5"                             LOC = "R4"   ;
+NET  "AD4"                             LOC = "T2"   ;
+NET  "AD3"                             LOC = "U1"   ;
+NET  "AD2"                             LOC = "R5"   ;
+NET  "AD1"                             LOC = "V1"   ;
+NET  "AD0"                             LOC = "T5"   ;
+
+# Dime Pinout: http://ece-www.colorado.edu/~ecen5633/dime.html
+# Opencore VGA Dime connection http://www.opencores.org/projects/pci/test_board
+#
+#NET  "HSYNC"				LOC = "W17" ;
+#NET  "VSYNC"				LOC = "W18" ;
+#NET  "RGB<0>"				LOC = "" ;
+#NET  "RGB<1>"				LOC = "" ;
+#NET  "RGB<2>"				LOC = "" ;
+#NET  "RGB<3>"				LOC = "" ;
+#
+NET  "CRT_CLK"                          LOC = "W12" ;
+NET  "HSYNC"				LOC = "W17" ;
+NET  "VSYNC"				LOC = "W18" ;
+NET  "RGB4"				LOC = "AA19" ;
+NET  "RGB5"				LOC = "V12" ;
+NET  "RGB6"				LOC = "Y15" ;
+NET  "RGB7"				LOC = "Y12" ;
+NET  "RGB8"				LOC = "Y16" ;
+NET  "RGB9"				LOC = "V13" ;
+NET  "RGB10"				LOC = "Y17" ;
+NET  "RGB11"				LOC = "Y13" ;
+NET  "RGB12"				LOC = "Y18" ;
+NET  "RGB13"				LOC = "W13" ;
+NET  "RGB14"				LOC = "Y14" ;
+NET  "RGB15"				LOC = "V14" ;
+#NET  "LED"				LOC = "" ;
+#
+
+##################################################################################
+# IOB force
+##################################################################################
+#INST "bridge/pci_io_mux/ad_iob0/dat_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob1/dat_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob2/dat_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob3/dat_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob4/dat_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob5/dat_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob6/dat_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob7/dat_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob8/dat_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob9/dat_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob10/dat_out_reg"                          IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob11/dat_out_reg"                          IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob12/dat_out_reg"                          IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob13/dat_out_reg"                          IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob14/dat_out_reg"                          IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob15/dat_out_reg"                          IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob16/dat_out_reg"                          IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob17/dat_out_reg"                          IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob18/dat_out_reg"                          IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob19/dat_out_reg"                          IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob20/dat_out_reg"                          IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob21/dat_out_reg"                          IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob22/dat_out_reg"                          IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob23/dat_out_reg"                          IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob24/dat_out_reg"                          IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob25/dat_out_reg"                          IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob26/dat_out_reg"                          IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob27/dat_out_reg"                          IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob28/dat_out_reg"                          IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob29/dat_out_reg"                          IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob30/dat_out_reg"                          IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob31/dat_out_reg"                          IOB = TRUE ;
+
+####################################################################################
+# Force output enable IOBs
+####################################################################################
+#INST "bridge/pci_io_mux/ad_iob0/en_out_reg"                            IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob1/en_out_reg"                            IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob2/en_out_reg"                            IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob3/en_out_reg"                            IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob4/en_out_reg"                            IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob5/en_out_reg"                            IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob6/en_out_reg"                            IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob7/en_out_reg"                            IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob8/en_out_reg"                            IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob9/en_out_reg"                            IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob10/en_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob11/en_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob12/en_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob13/en_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob14/en_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob15/en_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob16/en_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob17/en_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob18/en_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob19/en_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob20/en_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob21/en_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob22/en_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob23/en_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob24/en_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob25/en_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob26/en_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob27/en_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob28/en_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob29/en_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob30/en_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/ad_iob31/en_out_reg"                           IOB = TRUE ;
+
+####################################################################################
+# CBE IOBs
+####################################################################################
+#INST "bridge/pci_io_mux/cbe_iob0/dat_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/cbe_iob1/dat_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/cbe_iob2/dat_out_reg"                           IOB = TRUE ;
+#INST "bridge/pci_io_mux/cbe_iob3/dat_out_reg"                           IOB = TRUE ;
+#
+#INST "bridge/pci_io_mux/cbe_iob0/en_out_reg"                            IOB = TRUE ;
+#INST "bridge/pci_io_mux/cbe_iob1/en_out_reg"                            IOB = TRUE ;
+#INST "bridge/pci_io_mux/cbe_iob2/en_out_reg"                            IOB = TRUE ;
+#INST "bridge/pci_io_mux/cbe_iob3/en_out_reg"                            IOB = TRUE ;
+
+####################################################################################
+# Control signals IOBs
+####################################################################################
+#INST "bridge/pci_io_mux/frame_iob/dat_out_reg"                        IOB = TRUE ;
+#INST "bridge/pci_io_mux/frame_iob/en_out_reg"                         IOB = TRUE ;
+#INST "bridge/pci_io_mux/irdy_iob/dat_out_reg"                         IOB = TRUE ;
+#INST "bridge/pci_io_mux/irdy_iob/en_out_reg"                          IOB = TRUE ;
+#
+#INST "bridge/pci_io_mux/trdy_iob/dat_out_reg"                         IOB = TRUE ;
+#INST "bridge/pci_io_mux/trdy_iob/en_out_reg"                          IOB = TRUE ;
+#
+#INST "bridge/pci_io_mux/devsel_iob/dat_out_reg"                       IOB = TRUE ;
+#INST "bridge/pci_io_mux/devsel_iob/en_out_reg"                        IOB = TRUE ;
+#
+#INST "bridge/pci_io_mux/stop_iob/dat_out_reg"                         IOB = TRUE ;
+#INST "bridge/pci_io_mux/stop_iob/en_out_reg"                          IOB = TRUE ;
+#
+#INST "bridge/pci_io_mux/par_iob/dat_out_reg"                          IOB = TRUE ;
+#INST "bridge/pci_io_mux/par_iob/en_out_reg"                           IOB = TRUE ;
+#
+#INST "bridge/pci_io_mux/perr_iob/dat_out_reg"                         IOB = TRUE ;
+#INST "bridge/pci_io_mux/perr_iob/en_out_reg"                          IOB = TRUE ;
+#
+#INST "bridge/pci_io_mux/serr_iob/dat_out_reg"                         IOB = TRUE ;
+#INST "bridge/pci_io_mux/serr_iob/en_out_reg"                          IOB = TRUE ;
+#
+#INST "bridge/pci_io_mux/req_iob/dat_out_reg"                          IOB = TRUE ;
+#INST "bridge/pci_io_mux/req_iob/en_out_reg"                           IOB = TRUE ;
+
+#INST "bridge/wishbone_slave_unit/pci_initiator_if" TNM=FFS:PCI_MIF_FFS ;
+#INST "bridge/wishbone_slave_unit/pci_initiator_sm" TNM=FFS:PCI_MSM_FFS ;
+#INST "bridge/pci_io_mux/frame_iob/dat_out_reg" TNM=FFS:PCI_O_FFS ;
+#INST "bridge/parity_checker" TNM=FFS:PCI_PAR_FFS ;
+#INST "bridge/input_register" TNM=FFS:PCI_I_FFS ;
+
+#TIMEGRP "ALL_PCI_FFS" = "PCI_O_FFS" ;
+
+#TIMESPEC TS_PCI_AD_SETUP   = FROM : "PCI_AD"   : TO : "ALL_PCI_FFS" :  7.000 ;
+#TIMESPEC TS_PCI_CBE_SETUP  = FROM : "PCI_CBE"  : TO : "ALL_PCI_FFS" :  7.000 ;
+#TIMESPEC TS_PCI_CTRL_SETUP = FROM : "PCI_CTRL" : TO : "ALL_PCI_FFS" :  7.000 ;
+
+#TIMESPEC TS_PCI_REQ_TIME_OUT    = FROM : "ALL_PCI_FFS" : TO : "PCI_REQ" :  12.000 ;
+#TIMESPEC TS_PCI_GNT_SETUP       = FROM : "PCI_GNT"     : TO : "ALL_PCI_FFS" :  10.000 ;
+
+#TIMESPEC TS_PCI_AD_HOLD   = FROM : "ALL_PCI_FFS"   : TO : "PCI_AD" :  11.000 ;
+#TIMESPEC TS_PCI_CBE_HOLD  = FROM : "ALL_PCI_FFS"  : TO : "PCI_CBE" :  11.000 ;
+#TIMESPEC TS_PCI_CTRL_HOLD = FROM : "ALL_PCI_FFS" : TO : "PCI_CTRL" :  11.000 ;
