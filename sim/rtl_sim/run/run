@@ -1,0 +1,145 @@
+#!/bin/csh -f
+#
+# testa all programs with oc8051 microcontroler
+#
+
+rm cds.lib hdl.var RUN_NC
+rm nc*
+rm -r INCA_libs
+
+set failedi = 0;
+set failedx = 0;
+set all_testsi = 0;
+set all_testsx = 0;
+
+set internal_tests=(testall lcall r_bank test_xram xrom_test div16u \
+            interrupt_test timer_test counter_test timer2_test serial_test \
+            negcnt gcd int2bin cast divmul fib sort sqroot xram \
+	    )
+
+set external_tests=(testall lcall r_bank test_xram xrom_test div16u \
+	    interrupt_test serial_test \
+            negcnt gcd int2bin cast divmul fib sort sqroot xram \
+	    )
+
+	    
+# Prepare all .args files
+iteration:
+echo ""
+echo ""
+echo " preparing files"
+echo ""
+
+ncprep -f make > ../out/ncprep.out
+
+if (`tail -1 ../out/ncprep.out | grep Failed` != "") then
+  echo ""
+  cat ../out/ncprep.out
+  exit
+endif
+
+# Run NC-Verilog compiler
+echo ""
+echo "\t@@@"
+echo "\t@@@ Compiling sources"
+echo "\t@@@"
+
+ncvlog -NOCOPYRIGHT -f ncvlog.args > ../out/ncvlog.out
+if ($status != 0) then
+  echo "\t@@@ FAILED"
+  echo ""
+  cat ../out/ncvlog.out
+  exit
+else
+  echo "\t@@@ Passed"
+endif
+
+# Run the NC-Verilog elaborator (build the design hierarchy)
+echo ""
+echo "\t@@@"
+echo "\t@@@ Building design hierarchy (elaboration)"
+echo "\t@@@"
+ncelab -NOTIMINGCHECKS -NOCOPYRIGHT -f ncelab.args > ../out/ncelab.out
+if ($status != 0) then
+  echo "\t@@@ FAILED"
+  echo ""
+  cat ../out/ncelab.out
+  exit
+else
+  echo "\t@@@ Passed"
+endif
+
+# Run the NC-Verilog simulator (simulate the design)
+
+echo ""
+echo "\t@@@"
+echo "\t@@@ Tesing programs from internal rom"
+echo "\t@@@"
+
+cp ../oc8051_eai.in ../oc8051_ea.in
+set i = 0;
+foreach internal_test ($internal_tests)
+	@ i += 1;
+	echo ""
+	echo "\t###"
+	echo "\t### Running test ${i}: ${internal_test}"
+	echo "\t###"
+
+	cp ../../../bench/in/${internal_test}.in ../../../bench/in/oc8051_rom.in
+	ncsim -NOCOPYRIGHT -f ncsim.args > ../out/ncsim.out
+	if ($status != 0) then
+	  cat ../out/ncsim.out
+	  exit
+	else if (`tail -5 ../out/ncsim.out | grep Passed` == "") then
+          echo "\t### FAILED"
+          @ failedi += 1;
+          @ all_testsi += 1;
+        else
+          echo "\t### Passed"
+          @ all_testsi += 1;
+	endif
+  mv ../out/ncsim.out ../out/${internal_test}.out
+
+
+end
+
+echo ""
+echo "\t@@@"
+echo "\t@@@ tesing programs from external rom"
+echo "\t@@@"
+
+cp ../oc8051_eax.in ../oc8051_ea.in
+set i = 0;
+foreach external_test ($external_tests)
+	@ i += 1;
+	echo ""
+	echo "\t###"
+	echo "\t### Running test ${i}: ${external_test}"
+	echo "\t###"
+
+        cp ../../../bench/in/${external_test}.in ../../../bench/in/oc8051_xrom.in
+        cp ../oc8051_eax.in ../oc8051_ea.in
+	ncsim -NOCOPYRIGHT -f ncsim.args > ../out/ncsim.out
+	if ($status != 0) then
+	  cat ../out/ncsim.out
+	  exit
+	else if (`tail -5 ../out/ncsim.out | grep Passed` == "") then
+          echo "\t### FAILED"
+          @ failedx += 1;
+          @ all_testsx += 1;
+        else
+          echo "\t### Passed"
+          @ all_testsx += 1;
+	endif
+  mv ../out/ncsim.out ../out/x_${external_test}.out
+
+end
+
+	echo ""
+	echo "\t###"
+	echo "\t### Failed $failedi of $all_testsi internal tests"
+	echo "\t###"
+	echo "\t### Failed $failedx of $all_testsx external tests"
+	echo "\t###"
+
+
