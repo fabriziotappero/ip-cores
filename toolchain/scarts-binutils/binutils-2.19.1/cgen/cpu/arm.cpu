@@ -1,0 +1,424 @@
+; ARM CPU description.  -*- Scheme -*-
+; Copyright (C) 2000, 2009 Red Hat, Inc.
+; This file is part of CGEN.
+; See file COPYING.CGEN for details.
+
+(define-rtl-version 0 8)
+
+(include "simplify.inc")
+
+(define-arch
+  (name arm)
+  (comment "Advanced RISC Machines (ARM)")
+  (insn-lsb0? #t)
+  (machs arm7tdmi)
+  (isas arm thumb)
+)
+
+; ??? There should be an official rtx to do this.  Until then.
+(define-pmacro (invalid-insn)
+  (c-call BI "invalid_insn" pc) ; FIXME: Not VOID to workaround codegen bug.
+)
+
+(define-isa
+  (name arm)
+  (comment "ARM instruction set (32 bit insns)")
+  (base-insn-bitsize 32)
+  ; FIXME: wip. `f-cond' is currently defined in arm7.cpu.
+  (condition f-cond
+	     ; `cond-code' is the extracted value of `f-cond'
+	     ; FIXME: wip
+;	     (case BI cond-code
+;		   ((COND_EQ) (reg h-zbit))
+;		   ((COND_NE) (not (reg h-zbit)))
+;		   ((COND_CS) (reg h-cbit))
+;		   ((COND_CC) (not (reg h-cbit)))
+;		   ((COND_MI) (reg h-nbit))
+;		   ((COND_PL) (not (reg h-zbit)))
+;		   ((COND_VS) (reg h-vbit))
+;		   ((COND_VC) (not (reg h-vbit)))
+;		   ((COND_HI) (and (reg h-cbit) (not (reg h-zbit))))
+;		   ((COND_LS) (not (or (reg h-cbit) (reg h-zbit))))
+;		   ((COND_GE) (eq (reg h-zbit) (reg h-vbit)))
+;		   ((COND_LT) (ne (reg h-nbit) (reg h-vbit)))
+;		   ((COND_GT) (and (not (reg h-zbit))
+;				   (eq (reg h-nbit) (reg h-vbit))))
+;		   ((COND_LE) (or (reg h-zbit)
+;				  (ne (reg h-nbit) (reg h-vbit))))
+;		   ((COND_AL) 1)
+;		   (else (sequence BI () (invalid-insn) 1))))
+	     (c-call BI "eval_cond" cond-code pc))
+  (decode-assist (27 26 25 24 23 22 21))
+  ; We can lengthen pbb's by breaking insns that set h-gr into those that set
+  ; h-gr[15] (the pc), and those that don't.
+  ; Other analysis of the isa will benefit from this, so this is recorded here
+  ; rather than in a simulator specific file.
+;;   (decode-splits
+;;   ; split insns with field f-rd into f-rd == 15, f-rd != 15
+;;   ; ??? To be made more general in time.
+;;   (f-rd ; split on values of this field
+;;    ()   ; no extra constraints
+;;    ((no-pc-dest (.iota 15)) (pc-dest 15)) ; list of splits
+;;    )
+;;   )
+  (setup-semantics (set-quiet (reg h-gr 15) (add pc (attr (current-insn) R15-OFFSET))))
+)
+
+(define-isa
+  (name thumb)
+  (comment "ARM Thumb instruction set (16 bit insns)")
+  (base-insn-bitsize 16)
+  (decode-assist (15 14 13 12 11 10 9 8))
+  (setup-semantics (set-quiet (reg h-gr 15) (add pc 4)))
+)
+
+(define-cpu
+  (name arm7f)
+  (comment "ARM7")
+  (endian either)
+  (word-bitsize 32)
+)
+
+(define-mach
+  (name arm7tdmi)
+  (comment "ARM 7TDMI core")
+  (cpu arm7f)
+  (isas arm thumb)
+)
+
+(define-model
+  (name arm710)
+  (comment "ARM 710 microprocessor")
+  (mach arm7tdmi)
+  (unit u-exec "Execution Unit" ()
+	1 1 ; issue done
+	() () () ())
+)
+
+; IDOC attribute for instruction documentation.
+; FIXME: Categorization is a bit tricky when alu ops can set the pc.
+
+(define-attr
+  (for insn)
+  (type enum)
+  (name IDOC)
+  (comment "insn kind for documentation")
+  (attrs META)
+  (values
+   (MEM - () "Memory")
+   (ALU - () "ALU")
+   (FPU - () "FPU")
+   (BR - () "Branch")
+   (PRIV - () "Priviledged")
+   (MISC - () "Miscellaneous")
+  )
+)
+
+; Hardware.
+
+; The program counter is actually reg 15.
+; But ... [there's always a "But ..." :-(] when referenced in instructions
+; the value is either 8 or 12 beyond the address of the instruction in
+; ARM mode and 4 beyond in Thumb mode.
+; To handle this the program counter is treated as a separate register
+; and r15 is set to the appropriate offset before executing each instruction.
+; This seems like the simplest and most efficient way to handle this.
+
+(define-hardware
+  (name h-pc)
+  (comment "ARM program counter (h-gr reg 15)")
+  (attrs PC (ISA arm,thumb))
+  (type pc)
+  ; In ARM mode the bottom two bits read as zero.
+  ; In Thumb mode the bottom bit reads as zero.
+  ; This can be handled during gets, sets, or both.
+  ; Handling this in sets seems best ('tis handled in only one place and the
+  ; stored value is always correct - assuming all out-of-band sets are ok).
+  ; ??? Might be possible to optimize out the test of tbit.  Later.
+  (set (newval)
+       (if (reg h-tbit)
+	   (set (raw-reg SI h-pc) (and newval -2))
+	   (set (raw-reg SI h-pc) (and newval -4))))
+)
+
+(define-keyword
+  (name gr-names)
+  (enum-prefix H-GR-)
+  (values (pc 15) ; put this first so it is prefered over r15
+	  (r0 0) (r1 1) (r2 2) (r3 3) (r4 4) (r5 5) (r6 6) (r7 7) 
+	  (r8 8) (r9 9) (r10 10) (r11 11) (r12 12) (r13 13) (r14 14) (r15 15)
+	  (sp 13) (lr 14))
+)
+
+(define-hardware 
+  (name h-gr)
+  (comment "General purpose registers")
+  (attrs (ISA arm,thumb) CACHE-ADDR)
+  (type register SI (16))
+  (indices extern-keyword gr-names)
+)
+
+; Banked versions of h-gr.
+; h-gr is always "active".  When a mode switch happens, the copies in h-gr
+; are copied to their holding buffers, and new values are switched in.
+; ??? The non-user-mode versions of these registers have special names which
+; are just(?) aliases for the normal names.
+
+(define-hardware
+  (name h-gr-usr)
+  (comment "user/system mode r8-r14 holding buffer")
+  (attrs (ISA arm,thumb))
+  (type register SI (7))
+)
+(define-hardware
+  (name h-gr-fiq)
+  (comment "fiq mode r8-r14 regs")
+  (attrs (ISA arm,thumb))
+  (type register SI (7))
+)
+(define-hardware
+  (name h-gr-svc)
+  (comment "supervisor mode r13-r14 regs")
+  (attrs (ISA arm,thumb))
+  (type register SI (2))
+)
+(define-hardware
+  (name h-gr-abt)
+  (comment "abort mode r13-r14 regs")
+  (attrs (ISA arm,thumb))
+  (type register SI (2))
+)
+(define-hardware
+  (name h-gr-irq)
+  (comment "irq mode r13-r14 regs")
+  (attrs (ISA arm,thumb))
+  (type register SI (2))
+)
+(define-hardware
+  (name h-gr-und)
+  (comment "undefined mode r13-r14 regs")
+  (attrs (ISA arm,thumb))
+  (type register SI (2))
+)
+
+; The condition code bits.
+
+(dsh h-cbit "carry bit"    ((ISA arm,thumb)) (register BI))
+(dsh h-nbit "negative bit" ((ISA arm,thumb)) (register BI))
+(dsh h-vbit "overflow bit" ((ISA arm,thumb)) (register BI))
+(dsh h-zbit "zerobit"      ((ISA arm,thumb)) (register BI))
+
+(dnop cbit "carry bit"     ((ISA arm,thumb)) h-cbit f-nil)
+(dnop nbit "negative bit"  ((ISA arm,thumb)) h-nbit f-nil)
+(dnop vbit "overflow bit"  ((ISA arm,thumb)) h-vbit f-nil)
+(dnop zbit "zero bit"      ((ISA arm,thumb)) h-zbit f-nil)
+
+; The CPSR (current program status register).
+
+(dsh h-ibit  "irq disable bit" ((ISA arm,thumb)) (register BI))
+(dsh h-fbit  "fiq disable bit" ((ISA arm,thumb)) (register BI))
+
+(define-hardware
+  (name h-tbit)
+  (comment "thumb bit")
+  (attrs (ISA arm,thumb))
+  (type register BI)
+  (set (newval)
+       (sequence ()
+		 (c-call VOID "arm_tbit_set" newval)))
+)
+
+(define-keyword
+  (name arm-mode)
+  (comment "arm cpu states")
+  (values (User #x10)
+	  (FIQ  #x11)
+	  (IRQ  #x12)
+	  (Supervisor #x13)
+	  (Abort #x17)
+	  (Undefined #x1b)
+	  (System #x1f)
+	  )
+)
+
+(define-hardware
+  (name h-mbits)
+  (comment "m4,m3,m2,m1,m0")
+  (attrs (ISA arm,thumb))
+  (type register (UINT 5))
+  (set (newval)
+       (sequence ()
+		 ; processor goes into an undefined state if bad value,
+		 ; so do something similar
+		 (case VOID newval
+			((ARM-MODE-User ARM-MODE-FIQ ARM-MODE-IRQ
+			  ARM-MODE-Supervisor ARM-MODE-Abort
+			  ARM-MODE-Undefined ARM-MODE-System)
+			 (nop))
+			(else (error VOID "bad value for M4-M0")))
+		 (c-call VOID "arm_mbits_set" newval)))
+)
+
+(define-hardware
+  (name h-cpsr)
+  (comment "Current Program Status Register")
+  (attrs VIRTUAL (ISA arm,thumb))
+  (type register SI) ; One CPSR register.
+  (get ()
+       ; ??? 'twould be nice if one `or' would do
+       (or SI (sll (zext SI (reg BI h-nbit)) (const 31))
+	    (or SI (sll (zext SI (reg BI h-zbit)) (const 30))
+		 (or SI (sll (zext SI (reg BI h-cbit)) (const 29))
+		      (or SI (sll (zext SI (reg BI h-vbit)) (const 28))
+			   (or SI (sll (zext SI (reg BI h-ibit)) (const 7))
+				(or SI (sll (zext SI (reg BI h-fbit)) (const 6))
+				     (or SI (sll (zext SI (reg BI h-tbit)) (const 5))
+					  (reg UINT h-mbits)))))))))
+  (set (newval)
+       (sequence ()
+		 ; FIXME: Processor enters undefined state if software changes
+		 ; tbit, so we should do something similar.
+		 (set (reg h-nbit) (ne (and newval #x80000000) 0))
+		 (set (reg h-zbit) (ne (and newval #x40000000) 0))
+		 (set (reg h-cbit) (ne (and newval #x20000000) 0))
+		 (set (reg h-vbit) (ne (and newval #x10000000) 0))
+		 ; FIXME: user mode is not permitted to change ibit/fbit!
+		 (set (reg h-ibit) (ne (and newval #x00000080) 0))
+		 (set (reg h-fbit) (ne (and newval #x00000040) 0))
+		 (set (reg h-tbit) (ne (and newval #x00000020) 0))
+		 (set (reg h-mbits) (and newval #x1f))))
+)
+
+(define-hardware
+  (name h-spsr-fiq)
+  (comment "Saved Process Status Register during FIQ")
+  (attrs (ISA arm,thumb))
+  (type register SI)
+)
+(define-hardware
+  (name h-spsr-svc)
+  (comment "Saved Process Status Register during SVC")
+  (attrs (ISA arm,thumb))
+  (type register SI)
+)
+(define-hardware
+  (name h-spsr-abt)
+  (comment "Saved Process Status Register during Abort")
+  (attrs (ISA arm,thumb))
+  (type register SI)
+)
+(define-hardware
+  (name h-spsr-irq)
+  (comment "Saved Process Status Register during IRQ")
+  (attrs (ISA arm,thumb))
+  (type register SI)
+)
+(define-hardware
+  (name h-spsr-und)
+  (comment "Saved Process Status Register during Undefined")
+  (attrs (ISA arm,thumb))
+  (type register SI)
+)
+
+; Virtual version of spsr to access real one based on current mode.
+
+(define-hardware
+  (name h-spsr)
+  (comment "virtual spsr")
+  (attrs VIRTUAL (ISA arm,thumb))
+  (type register SI)
+  (get ()
+       (case SI (reg h-mbits)
+	      ((ARM-MODE-User)       (error SI "can't read spsr in user mode"))
+	      ((ARM-MODE-FIQ)        (reg h-spsr-fiq))
+	      ((ARM-MODE-IRQ)        (reg h-spsr-irq))
+	      ((ARM-MODE-Supervisor) (reg h-spsr-svc))
+	      ((ARM-MODE-Abort)      (reg h-spsr-abt))
+	      ((ARM-MODE-Undefined)  (reg h-spsr-und))
+	      ((ARM-MODE-System)     (error SI "can't read spsr in system mode"))
+	      (else (error SI "can't read spsr, invalid mode"))))
+  (set (newval)
+       (case VOID (reg h-mbits)
+	      ((ARM-MODE-User)       (error VOID "can't set spsr in user mode"))
+	      ((ARM-MODE-FIQ)        (set (reg h-spsr-fiq) newval))
+	      ((ARM-MODE-IRQ)        (set (reg h-spsr-irq) newval))
+	      ((ARM-MODE-Supervisor) (set (reg h-spsr-svc) newval))
+	      ((ARM-MODE-Abort)      (set (reg h-spsr-abt) newval))
+	      ((ARM-MODE-Undefined)  (set (reg h-spsr-und) newval))
+	      ((ARM-MODE-System)     (error VOID "can't set spsr in system mode"))
+	      (else (error VOID "can't set spsr, invalid mode"))))
+)
+
+; Explicitly define the shift types so they can be used in semantics
+; (enums are created for them).
+
+(define-keyword
+  (name shift-type)
+  (comment "operand 2 shift type")
+  (values (lsl 0) (asl 0) (lsr 1) (asr 2) (ror 3))
+)
+
+(define-hardware
+  (name h-operand2-shifttype)
+  (comment "operand2 shift type")
+  (type immediate (UINT 2))
+  (values extern-keyword shift-type)
+)
+
+; Utility macros for setting the condition codes.
+
+(define-pmacro (set-zn-flags result)
+  (sequence ()
+	    (set zbit (zflag WI result))
+	    (set nbit (nflag WI result)))
+)
+
+; Logical operation flag handling:
+; cbit is set to the carry out of a shift operation if present
+; nbit is set to the sign bit
+; vbit is not affected
+; zflag is set to indicate whether the result was zero or not
+
+(define-pmacro (set-logical-cc result carry-out)
+  (sequence ()
+	    (set-zn-flags result)
+	    (set cbit carry-out))
+)
+
+(define-pmacro (set-add-flags arg1 arg2 carry)
+  (sequence ((SI result))
+	    (set result (addc arg1 arg2 carry))
+	    (set-zn-flags result)
+	    (set cbit (add-cflag arg1 arg2 carry))
+	    (set vbit (add-oflag arg1 arg2 carry)))
+)
+
+(define-pmacro (set-sub-flags arg1 arg2 borrow)
+  (sequence ((SI result))
+	    (set result (subc arg1 arg2 (not borrow)))
+	    (set-zn-flags result)
+	    (set cbit (not (sub-cflag arg1 arg2 (not borrow))))
+	    (set vbit (sub-oflag arg1 arg2 (not borrow))))
+)
+
+; Utility macros for testing the condition codes.
+
+(define-pmacro (test-ne)  (not zbit))
+(define-pmacro (test-eq)  zbit)
+(define-pmacro (test-gt)  (not (or zbit (xor nbit vbit))))
+(define-pmacro (test-le)  (or zbit (xor nbit vbit)))
+(define-pmacro (test-ge)  (not (xor nbit vbit)))
+(define-pmacro (test-lt)  (xor nbit vbit))
+(define-pmacro (test-hi)  (and cbit (not zbit)))
+(define-pmacro (test-ls)  (or (not cbit) zbit))
+(define-pmacro (test-cc)  (not cbit))
+(define-pmacro (test-cs)  cbit)
+(define-pmacro (test-pl)  (not nbit))
+(define-pmacro (test-mi)  nbit)
+(define-pmacro (test-vc)  (not vbit))
+(define-pmacro (test-vs)  vbit)
+
+(if (keep-isa? (arm))
+    (include "arm7.cpu"))
+(if (keep-isa? (thumb))
+    (include "thumb.cpu"))

@@ -1,0 +1,919 @@
+; Intel IA32 CPU description.  -*- Scheme -*-
+; Copyright (C) 2000, 2009 Red Hat, Inc.
+; This file is part of CGEN.
+; See file COPYING.CGEN for details.
+;
+; References:
+;
+; Intel486 Processor Family, Programmer's Reference Manual, Intel
+
+(define-rtl-version 0 8)
+
+(include "simplify.inc")
+
+; define-arch must appear first
+
+(define-arch
+  (name ia32) ; name of cpu family
+  (comment "Intel IA32 (x86)")
+  (default-alignment unaligned)
+  (insn-lsb0? #t)
+  (machs i386 i486 pentium pentium-ii pentium-iii) ; ??? wip
+  (isas ia32) ; ??? separate 8086 isa?
+)
+
+; Attributes.
+
+; Instruction set parameters.
+
+(define-isa
+  (name ia32)
+
+  (default-insn-bitsize 8)
+
+  ; Number of bytes of insn we can initially fetch.
+  (base-insn-bitsize 8)
+
+  ; Used in computing bit numbers.
+  (default-insn-word-bitsize 32)
+
+  ; Initial bitnumbers to decode insns by.
+  (decode-assist (0 1 2 3 4 5 6 7))
+)
+
+; Cpu family definitions.
+
+(define-cpu
+  ; cpu names must be distinct from the architecture name and machine names.
+  ; The "b" suffix stands for "base" and is the convention.
+  ; The "f" suffix stands for "family" and is the convention.
+  (name ia32bf)
+  (comment "Intel x86 base family")
+  (endian little)
+  (word-bitsize 32)
+)
+
+(define-mach
+  (name pentium-ii)
+  (comment "Pentium II")
+  (cpu ia32bf)
+)
+
+; Model descriptions.
+
+; The meaning of this value is wip but at the moment it's intended to describe
+; the implementation (i.e. what -mtune=foo does in sparc gcc).
+; ??? This is intended to be redesigned later.
+
+(define-model
+  (name pentium-ii)
+  (comment "Pentium II model")
+  (mach pentium-ii)
+  (unit u-exec "Execution Unit" ()
+	1 1 ; issue done
+	() ; state
+	() ; inputs
+	() ; outputs
+	() ; profile action (default)
+	)
+)
+
+; Instruction fields.
+
+; There currently doesn't exist shorthand macros for CISC ISA's,
+; so define our own.
+; DIF: define-ia32-field
+; DNIF: define-normal-ia32-field
+
+(define-pmacro (dif x-name x-comment x-attrs x-word-offset x-word-length x-start x-length x-mode x-encode x-decode)
+  (define-ifield
+    (name x-name)
+    (comment x-comment)
+    (.splice attrs (.unsplice x-attrs))
+    (word-offset x-word-offset)
+    (word-length x-word-length)
+    (start x-start)
+    (length x-length)
+    (mode x-mode)
+    (encode x-encode)
+    (decode x-decode)
+    )
+)
+
+(define-pmacro (dnif x-name x-comment x-attrs x-word-offset x-word-length x-start x-length)
+  (dif x-name x-comment x-attrs x-word-offset x-word-length x-start x-length
+       UINT #f #f)
+)
+
+(dnif f-opcode "first insn byte" () 0 8 7 8)
+
+; The mod-r/m byte.
+(dnif f-mod "mod field of mod-r/m byte" () 8 8 7 2)
+(dnif f-reg/opcode "reg/opcode field of mod-r/m byte" () 8 8 5 3)
+(dnif f-r/m "r/m field of mod-r/m byte" () 8 8 2 3)
+(dsmf f-mod-r/m "entire mod-r/m byte" () (f-mod f-reg/opcode f-r/m))
+
+(dnif f-simm8  "signed 8 bit immediate"  () 8 8 7 8)
+(dnif f-simm16 "signed 16 bit immediate" () 8 16 15 16)
+(dnif f-simm32 "signed 32 bit immediate" () 8 32 31 32)
+
+(dnif f-disp8  "signed 8 bit displacement"  () 8 8 7 8)
+(dnif f-disp16 "signed 16 bit displacement" () 8 16 15 16)
+(dnif f-disp32 "signed 32 bit displacement" () 8 32 31 32)
+
+(dnif f-rel8  "signed 8 bit pc-relative displacement"  (PCREL-ADDR) 8 8 7 8)
+(dnif f-rel16 "signed 16 bit pc-relative displacement" (PCREL-ADDR) 8 16 15 16)
+(dnif f-rel32 "signed 32 bit pc-relative displacement" (PCREL-ADDR) 8 32 31 32)
+
+; The sib byte.
+(dnif f-sib-ss "sib scale size" () 16 8 7 2)
+(dnif f-sib-base "sib base reg" () 16 8 5 3)
+(dnif f-sib-index "sib index reg" () 16 8 2 3)
+(dsmf f-sib "entire sib byte" () (f-sib-ss f-sib-base f-sib-index))
+
+; Enums.
+
+(define-pmacro (build-hex2 num) (.hex num 2))
+
+; insn-opcode
+; "00" ... "FF"
+(define-normal-insn-enum insn-opcode "insn opcode enums" () OP_ f-opcode
+  (.map .upcase (.map build-hex2 (.iota 256)))
+)
+
+; Hardware pieces.
+; These entries list the elements of the raw hardware.
+; They're also used to provide tables and other elements of the assembly
+; language.
+;
+; ??? Sets of SP have extra-special semantics.
+
+(dnh h-pc "program counter" (PC PROFILE) (pc) () () ())
+
+(define-keyword
+  (name gr8-names)
+  (enum-prefix H-GR8-)
+  (name-prefix "%")
+  (values (al 0) (cl 1) (dl 2) (bl 3) (ah 4) (ch 5) (dh 6) (bh 7))
+)
+
+(define-hardware
+  (name h-gr8)
+  (comment "8 bit general registers")
+  (attrs VIRTUAL PROFILE)
+  (type register QI (8))
+  (indices extern-keyword gr8-names)
+  (get (index)
+       (if (lt index 4)
+	   (reg QI h-gr index)
+	   (bitfield (reg h-gr (sub index 4)) 15 8)))
+  (set (index newval)
+       (if (lt index 4)
+	   (set (bitfield (reg h-gr index) 7 8) newval)
+	   (set (bitfield (reg h-gr (sub index 4)) 15 8) newval)))
+)
+
+(define-keyword
+  (name gr16-names)
+  (enum-prefix H-GR16-)
+  (name-prefix "%")
+  (values (ax 0) (cx 1) (dx 2) (bx 3) (sp 4) (bp 5) (si 6) (di 7))
+)
+
+(define-hardware
+  (name h-gr16)
+  (comment "16 bit general registers")
+  (attrs VIRTUAL PROFILE)
+  (type register HI (8))
+  (indices extern-keyword gr16-names)
+  (get (index) (reg HI h-gr index))
+  (set (index newval) (set (bitfield (reg h-gr index) 15 16) newval))
+)
+
+(define-keyword
+  (name gr-names)
+  (enum-prefix H-GR-)
+  (name-prefix "%")
+  (values (eax 0) (ecx 1) (edx 2) (ebx 3) (esp 4) (ebp 5) (esi 6) (edi 7))
+)
+
+(define-hardware
+  (name h-gr)
+  (comment "general registers")
+  (attrs PROFILE CACHE-ADDR)
+  (type register SI (8))
+  (indices extern-keyword gr-names)
+)
+
+(dsh h-cf "carry flag"    () (register BI))
+(dsh h-sf "sign flag"     () (register BI))
+(dsh h-of "overflow flag" () (register BI))
+(dsh h-zf "zero flag"     () (register BI))
+
+; Instruction Operands.
+
+; M32R specific operand attributes:
+; - none yet
+
+; Some registers are refered to explicitly.
+; ??? Might eventually be worth defining them all, but for now we just
+; define the ones we need.
+; ??? Another way to do this is to use pmacros.
+
+(dnop al  "%al register"  () h-gr8 0)
+(dnop ax  "%ax register"  () h-gr16 0)
+(dnop eax "%eax register" () h-gr 0)
+
+; Registers specified in the Reg/Opcode field of the r/m byte.
+
+(dnop reg8  "8 bit register"  () h-gr8  f-reg/opcode)
+(dnop reg16 "16 bit register" () h-gr16 f-reg/opcode)
+(dnop reg32 "32 bit register" () h-gr f-reg/opcode)
+
+; Various numeric operands.
+
+(dnop simm8  "8 bit signed immediate"  () h-sint f-simm8)
+(dnop simm16 "16 bit signed immediate" () h-sint f-simm16)
+(dnop simm32 "32 bit signed immediate" () h-sint f-simm32)
+
+(dnop disp8  "8 bit displacement"  () h-sint f-disp8)
+(dnop disp16 "16 bit displacement" () h-sint f-disp16)
+(dnop disp32 "32 bit displacement" () h-sint f-disp32)
+
+(dnop rel8  "8 bit displacement"  () h-iaddr f-rel8)
+(dnop rel16 "16 bit displacement" () h-iaddr f-rel16)
+(dnop rel32 "32 bit displacement" () h-iaddr f-rel32)
+
+; The condition code registers.
+
+(dnop cf "carry flag"    () h-cf f-nil)
+(dnop sf "sign flag"     () h-sf f-nil)
+(dnop of "overflow flag" () h-of f-nil)
+(dnop zf "zero flag"     () h-zf f-nil)
+
+; ModRM support.
+
+(dnop r/m-reg8  "8 bit register in r/m field"  () h-gr8  f-r/m)
+(dnop r/m-reg16 "16 bit register in r/m field" () h-gr16 f-r/m)
+(dnop r/m-reg32 "32 bit register in r/m field" () h-gr f-r/m)
+
+(define-operand
+  (name mod-r/m-base-reg)
+  (comment "base register for mod-r/m addressing")
+  (mode SI)
+  (type h-gr)
+  (index f-r/m)
+)
+
+(define-operand
+  (name sib-base)
+  (comment "base register for sib addressing")
+  (mode SI)
+  (type h-gr)
+  (index f-sib-base)
+)
+
+(define-operand
+  (name sib-index)
+  (comment "index register for sib addressing")
+  (mode SI)
+  (type h-gr)
+  (index f-sib-index)
+)
+
+; The mod-r/m and sib ifields.
+; These are composed of several ifields and specify a set of choices
+; (addressing modes) to choose from.
+
+(define-pmacro (diff x-name x-comment x-attrs x-start x-length x-follows x-mode)
+  "Define an ia32 ifield that follows another ifield."
+  (define-ifield
+    (name x-name)
+    (comment x-comment)
+    (.splice attrs (.unsplice x-attrs))
+    (start x-start)
+    (length x-length)
+    (follows x-follows)
+    (mode x-mode)
+    )
+)
+
+; These must be defined before they're used and it makes sense to define
+; the operand with the ifield (rather than follow the usual convention of
+; defining all ifields first - not that that convention is necessarily the
+; best).
+
+(dnif f-disp8-@16 "signed 8 bit displacement at offset 16" () 16 8 7 8)
+(dnop disp8-@16   "signed 8 bit displacement at offset 16" () h-sint f-disp8-@16)
+
+(dnif f-disp32-@16 "signed 32 bit displacement at offset 16" () 16 32 31 32)
+(dnop disp32-@16   "signed 32 bit displacement at offset 16" () h-sint f-disp32-@16)
+
+(dnif f-disp32-@24 "signed 32 bit displacement at offset 24" () 24 32 31 32)
+(dnop disp32-@24   "signed 32 bit displacement at offset 24" () h-sint f-disp32-@24)
+
+; The sib operand, used by the mod-r/m operand.
+
+(dndo base+index*1 
+      SI
+      (sib-base sib-index)
+      "${sib-base}+${sib-index}"
+      f-sib
+      (+ (f-sib-ss 0) sib-base sib-index)
+      (andif (orif (ne f-mod 0)
+		   (ne f-sib-base 5))
+	     (ne f-sib-index 4))
+      (add sib-base sib-index)
+      () ; no setter
+)
+
+(dndo base-1
+      SI
+      (sib-base)
+      "${sib-base}"
+      f-sib
+      (+ (f-sib-ss 0) sib-base (f-sib-index 4))
+      (orif (ne f-mod 0)
+	    (ne f-sib-base 5))
+      sib-base
+      () ; no setter
+)
+
+(dndo index*1+disp32
+      SI
+      (sib-index disp32)
+      "${disp32-@24}(${sib-index})"
+      f-sib
+      (+ (f-sib-ss 0) (f-sib-base 5) sib-index disp32-@24)
+      (andif (eq f-mod 0)
+	     (ne f-sib-index 4))
+      (add sib-index disp32-@24)
+      () ; no setter
+)
+
+(dndo disp32-1
+      SI
+      (disp32)
+      "${disp32-@24}"
+      f-sib
+      (+ (f-sib-ss 0) (f-sib-base 5) (f-sib-index 4) disp32-@24)
+      (eq f-mod 0)
+      disp32-@24
+      () ; no setter
+)
+
+(dndo base+index*2
+      SI
+      (sib-base sib-index)
+      "${sib-base}+${sib-index}*2"
+      f-sib
+      (+ (f-sib-ss 1) sib-base sib-index)
+      (andif (orif (ne f-mod 0)
+		   (ne f-sib-base 5))
+	     (ne f-sib-index 4))
+      (add sib-base (mul sib-index 2))
+      () ; no setter
+)
+
+(dndo base-2
+      SI
+      (sib-base)
+      "${sib-base}"
+      f-sib
+      (+ (f-sib-ss 1) sib-base (f-sib-index 4))
+      ()
+      sib-base
+      () ; no setter
+)
+
+(dndo index*2+disp32
+      SI
+      (sib-index disp32)
+      "${disp32-@24}(${sib-index})"
+      f-sib
+      (+ (f-sib-ss 1) (f-sib-base 5) sib-index disp32-@24)
+      (andif (eq f-mod 0)
+	     (ne f-sib-index 4))
+      (add (mul sib-index 2) disp32-@24)
+      () ; no setter
+)
+
+(dndo disp32-2
+      SI
+      (disp32)
+      "${disp32-@24}"
+      f-sib
+      (+ (f-sib-ss 1) (f-sib-base 5) (f-sib-index 4) disp32-@24)
+      (eq f-mod 0)
+      disp32-@24
+      () ; no setter
+)
+
+(dndo base+index*4
+      SI
+      (sib-base sib-index)
+      "${sib-base}+${sib-index}*4"
+      f-sib
+      (+ (f-sib-ss 2) sib-base sib-index)
+      (andif (orif (ne f-mod 0)
+		   (ne f-sib-base 5))
+	     (ne f-sib-index 4))
+      (add sib-base (mul sib-index 4))
+      () ; no setter
+)
+
+(dndo base-4
+      SI
+      (sib-base)
+      "${sib-base}"
+      f-sib
+      (+ (f-sib-ss 2) sib-base (f-sib-index 4))
+      ()
+      sib-base
+      () ; no setter
+)
+
+(dndo index*4+disp32
+      SI
+      (sib-index disp32)
+      "${disp32-@24}(${sib-index})"
+      f-sib
+      (+ (f-sib-ss 2) (f-sib-base 5) sib-index disp32-@24)
+      (andif (eq f-mod 0)
+	     (ne f-sib-index 4))
+      (add (mul sib-index 4) disp32-@24)
+      () ; no setter
+)
+
+(dndo disp32-4
+      SI
+      (disp32)
+      "${disp32-@24}"
+      f-sib
+      (+ (f-sib-ss 2) (f-sib-base 5) (f-sib-index 4) disp32-@24)
+      (eq f-mod 0)
+      disp32-@24
+      () ; no setter
+)
+
+(dndo base+index*8
+      SI
+      (sib-base sib-index)
+      "${sib-base}+${sib-index}*8"
+      f-sib
+      (+ (f-sib-ss 3) sib-base sib-index)
+      (andif (orif (ne f-mod 0)
+		   (ne f-sib-base 5))
+	     (ne f-sib-index 4))
+      (add sib-base (mul sib-index 8))
+      () ; no setter
+)
+
+(dndo base-8
+      SI
+      (sib-base)
+      "${sib-base}"
+      f-sib
+      (+ (f-sib-ss 3) sib-base (f-sib-index 4))
+      ()
+      sib-base
+      () ; no setter
+)
+
+(dndo index*8+disp32
+      SI
+      (sib-index disp32)
+      "${disp32-@24}(${sib-index})"
+      f-sib
+      (+ (f-sib-ss 3) (f-sib-base 5) sib-index disp32-@24)
+      (andif (eq f-mod 0)
+	     (ne f-sib-index 4))
+      (add (mul sib-index 8) disp32-@24)
+      () ; no setter
+)
+
+(dndo disp32-8
+      SI
+      (disp32)
+      "${disp32-@24}"
+      f-sib
+      (+ (f-sib-ss 3) (f-sib-base 5) (f-sib-index 4) disp32-@24)
+      (eq f-mod 0)
+      disp32-@24
+      () ; no setter
+)
+
+; Now define an "anyof" operand that puts it all together.
+
+(define-anyof-operand
+  (name sib)
+  (comment "base + scaled-index + displacement")
+  (mode SI)
+  ; Each choice must have the same base-ifield.
+  (choices base+index*1
+	   base-1
+	   index*1+disp32
+	   disp32-1
+	   base+index*2
+	   base-2
+	   index*2+disp32
+	   disp32-2
+	   base+index*4
+	   base-4
+	   index*4+disp32
+	   disp32-4
+	   base+index*8
+	   base-8
+	   index*8+disp32
+	   disp32-8
+	   )
+)
+
+; Additional ifields/operands used by the mod-r/m byte.
+; It seems cleaner to define the operand with its ifield so they are.
+; Maybe the rest should be organized similarily.
+; Also, the ones that "follow" other ifields must be defined after the latter
+; has been defined.
+
+(diff f-disp8-follows-sib "disp8 ifield after sib ifields"
+      () 7 8 sib INT
+)
+(dnop disp8-follows-sib "disp8 following sib"
+      () h-sint f-disp8-follows-sib
+)
+
+(diff f-disp32-follows-sib "disp32 ifield after sib ifields"
+      () 31 32 sib INT
+)
+(dnop disp32-follows-sib "disp32 following sib"
+      () h-sint f-disp32-follows-sib
+)
+
+; The complete mod-r/m operand, used by instructions.
+; ??? The [] bracketing is for clarity.  Match actual assembler later.
+; blah blah blah intel vs at&t blah blah blah
+
+(define-pmacro (define-mod-r/m-choices x-mode x-r/m-reg)
+  (begin
+    (dndo (.sym @reg- x-mode)
+	  x-mode
+	  (mod-r/m-base-reg)
+	  "[${mod-r/m-base-reg}]"
+	  f-mod-r/m
+	  (+ (f-mod 0) mod-r/m-base-reg)
+	  (andif (ne f-r/m 4) (ne f-r/m 5))
+	  (mem x-mode mod-r/m-base-reg)
+	  ()
+	  )
+    (dndo (.sym @sib- x-mode)
+	  x-mode
+	  (sib)
+	  "[$sib]"
+	  f-mod-r/m
+	  (+ (f-mod 0) (f-r/m 4) sib)
+	  ()
+	  (mem x-mode sib)
+	  ()
+	  )
+    (dndo (.sym @disp32- x-mode)
+	  x-mode
+	  (disp32-@16)
+	  "[${disp32-@16}]"
+	  f-mod-r/m
+	  (+ (f-mod 0) (f-r/m 5) disp32-@16)
+	  ()
+	  (mem x-mode disp32-@16)
+	  ()
+	  )
+    (dndo (.sym @reg+disp8- x-mode)
+	  x-mode
+	  (mod-r/m-base-reg disp8)
+	  "[${disp8-@16}(${mod-r/m-base-reg})]"
+	  f-mod-r/m
+	  (+ (f-mod 1) mod-r/m-base-reg disp8-@16)
+	  (ne f-r/m 4)
+	  (mem x-mode (add mod-r/m-base-reg disp8-@16))
+	  ()
+	  )
+    (dndo (.sym @sib+disp8- x-mode)
+	  x-mode
+	  (sib disp8-follows-sib)
+	  "[${disp8-follows-sib}($sib)]"
+	  f-mod-r/m
+	  (+ (f-mod 1) (f-r/m 4) sib disp8-follows-sib)
+	  ()
+	  (mem x-mode (add sib disp8-follows-sib))
+	  ()
+	  )
+    (dndo (.sym @reg+disp32- x-mode)
+	  x-mode
+	  (mod-r/m-base-reg disp32)
+	  "[${disp32-@16}(${mod-r/m-base-reg})]"
+	  f-mod-r/m
+	  (+ (f-mod 2) mod-r/m-base-reg disp32-@16)
+	  (ne f-r/m 4)
+	  (mem x-mode (add mod-r/m-base-reg disp32-@16))
+	  ()
+	  )
+    (dndo (.sym @sib+disp32- x-mode)
+	  x-mode
+	  (sib disp32-follows-sib)
+	  "[${disp32-follows-sib}($sib)]"
+	  f-mod-r/m
+	  (+ (f-mod 2) (f-r/m 4) sib disp32-follows-sib)
+	  ()
+	  (mem x-mode (add sib disp32-follows-sib))
+	  ()
+	  )
+    (dndo (.sym reg- x-mode)
+	  x-mode
+	  (x-r/m-reg)
+	  (.str "${" x-r/m-reg "}")
+	  f-mod-r/m
+	  (+ (f-mod 3) x-r/m-reg)
+	  ()
+	  x-r/m-reg
+	  ()
+	  )
+    )
+)
+
+(define-pmacro (define-mod-r/m-operand x-name x-comment x-mode x-r/m-reg)
+  (begin
+    (define-mod-r/m-choices x-mode x-r/m-reg)
+    (define-anyof-operand
+      (name x-name)
+      (comment x-comment)
+      (mode x-mode)
+      ; Each choice must have the same base-ifield.
+      (choices (.sym @reg- x-mode)
+	       (.sym @sib- x-mode)
+	       (.sym @disp32- x-mode)
+	       (.sym @reg+disp8- x-mode)
+	       (.sym @sib+disp8- x-mode)
+	       (.sym @reg+disp32- x-mode)
+	       (.sym @sib+disp32- x-mode)
+	       (.sym reg- x-mode)
+	       ))
+    )
+)
+
+(define-mod-r/m-operand mod-r/m-8  "8 bit mod-r/m value"  QI r/m-reg8)
+(define-mod-r/m-operand mod-r/m-16 "16 bit mod-r/m value" HI r/m-reg16)
+(define-mod-r/m-operand mod-r/m-32 "32 bit mod-r/m value" SI r/m-reg32)
+
+; Additional ifields/operands used by instructions.
+; These "follow" the mod-r/m byte so must be defined afterwards.
+
+(diff f-simm8-follows-mod-r/m-8 "simm8 ifield after mod-r/m-8 ifields"
+      () 7 8 mod-r/m-8 INT
+)
+(dnop simm8-follows-mod-r/m-8 "simm8 following mod-r/m-8"
+      () h-sint f-simm8-follows-mod-r/m-8
+)
+
+(diff f-simm16-follows-mod-r/m-16 "simm16 ifield after mod-r/m-16 ifields"
+      () 15 16 mod-r/m-16 INT
+)
+(dnop simm16-follows-mod-r/m-16 "simm16 following mod-r/m-16"
+      () h-sint f-simm16-follows-mod-r/m-16
+)
+
+(diff f-simm32-follows-mod-r/m-32 "simm32 ifield after mod-r/m-32 ifields"
+      () 31 32 mod-r/m-32 INT
+)
+(dnop simm32-follows-mod-r/m-32 "simm32 following mod-r/m-32"
+      () h-sint f-simm32-follows-mod-r/m-32
+)
+
+(diff f-simm8-follows-mod-r/m-16 "simm8 ifield after mod-r/m-16 ifields"
+      () 7 8 mod-r/m-16 INT
+)
+(dnop simm8-follows-mod-r/m-16 "simm8 following mod-r/m-16"
+      () h-sint f-simm8-follows-mod-r/m-16
+)
+
+(diff f-simm8-follows-mod-r/m-32 "simm8 ifield after mod-r/m-32 ifields"
+      () 7 8 mod-r/m-32 INT
+)
+(dnop simm8-follows-mod-r/m-32 "simm8 following mod-r/m-32"
+      () h-sint f-simm8-follows-mod-r/m-32
+)
+
+; Some subroutines, to simplify the semantic specs.
+
+(define-pmacro (define-arith-subr x-name x-mode x-fn x-set-cc-fn)
+  (define-subr
+    (name x-name)
+    (mode VOID)
+    (args ((x-mode dst) (x-mode src1) (x-mode src2)))
+    (code (sequence ((x-mode arg1)
+		     (x-mode arg2)
+		     (x-mode result))
+		    (set arg1 src1)
+		    (set arg2 src2)
+		    (set result (x-fn arg1 arg2))
+		    (set dst result)
+		    (x-set-cc-fn result arg1 arg2)))
+    )
+)
+
+(define-arith-subr add-QI QI add set-add-cc)
+(define-arith-subr add-HI HI add set-add-cc)
+(define-arith-subr add-SI SI add set-add-cc)
+
+; Instruction definitions.
+
+; IA32 specific instruction attributes:
+; - none yet
+
+(dni nop
+     "nop"
+     ()
+     "nop"
+     (+ OP_90)
+     (nop)
+     ()
+)
+
+; Add, subtract.
+;
+; ??? Insn naming puts destination before addend.  Ok?
+
+(dni add-al-simm8
+     "add 8 bit signed immediate to %al"
+     ()
+     "FIXME"
+     (+ OP_04 simm8)
+     (sequence ()
+	       (set al (add al simm8))
+	       ; ??? condition codes
+	       )
+     ()
+)
+
+(dni add-ax-simm16
+     "add 16 bit signed immediate to %ax"
+     ()
+     "FIXME"
+     ; ??? Need something like ifield assertions to distinguish from
+     ; 32 bit case.
+     (+ OP_05 simm16)
+     (sequence ()
+	       (set ax (add ax simm16))
+	       ; ??? condition codes
+	       )
+     ()
+)
+
+(dni add-eax-simm32
+     "add 32 bit signed immediate to %eax"
+     ()
+     "FIXME"
+     (+ OP_05 simm32)
+     (sequence ()
+	       (set eax (add eax simm32))
+	       ; ??? condition codes
+	       )
+     ()
+)
+
+(dni add-r/m8-simm8
+     "add 8 bit immediate"
+     ()
+     "FIXME"
+     (+ OP_80 mod-r/m-8 simm8-follows-mod-r/m-8 (f-reg/opcode 0))
+     (sequence ()
+	       (set mod-r/m-8 (add mod-r/m-8 simm8-follows-mod-r/m-8))
+	       ; ??? condition codes
+	       )
+     ()
+)
+
+(dni add-r/m16-simm16
+     "add 16 bit immediate"
+     ()
+     "FIXME"
+     ; ??? Need something akin to ifield-assertions to distinguish from
+     ; 32 bit version.
+     (+ OP_81 mod-r/m-16 simm16-follows-mod-r/m-16 (f-reg/opcode 0))
+     (sequence ()
+	       (set mod-r/m-16 (add mod-r/m-16 simm16-follows-mod-r/m-16))
+	       ; ??? condition codes
+	       )
+     ()
+)
+
+(dni add-r/m32-simm32
+     "add 32 bit immediate"
+     ()
+     "FIXME"
+     (+ OP_81 mod-r/m-32 simm32-follows-mod-r/m-32 (f-reg/opcode 0))
+     (sequence ()
+	       (set mod-r/m-32 (add mod-r/m-32 simm32-follows-mod-r/m-32))
+	       ; ??? condition codes
+	       )
+     ()
+)
+
+(dni add-r/m16-simm8
+     "add 8 bit signed immediate to 16 bit value"
+     ()
+     "FIXME"
+     ; ??? Need something akin to ifield-assertions to distinguish from
+     ; 32 bit version.
+     (+ OP_83 mod-r/m-16 simm8-follows-mod-r/m-16 (f-reg/opcode 0))
+     (sequence ()
+	       (set mod-r/m-16 (add mod-r/m-16 (ext HI simm8-follows-mod-r/m-16)))
+	       ; ??? condition codes
+	       )
+     ()
+)
+
+(dni add-r/m32-simm8
+     "add 8 bit signed immediate to 32 bit value"
+     ()
+     "FIXME"
+     (+ OP_83 mod-r/m-32 simm8-follows-mod-r/m-32 (f-reg/opcode 0))
+     (sequence ()
+	       (set mod-r/m-32 (add mod-r/m-32 (ext SI simm8-follows-mod-r/m-32)))
+	       ; ??? condition codes
+	       )
+     ()
+)
+
+(dni add-r/m8-reg8
+     "add 8 bit reg to 8 bit r/m"
+     ()
+     "FIXME"
+     (+ OP_00 mod-r/m-8 reg8)
+     (sequence ()
+	       (set mod-r/m-8 (add mod-r/m-8 reg8))
+	       ; ??? condition codes
+	       )
+     ()
+)
+
+(dni add-r/m16-reg16
+     "add 16 bit reg to 16 bit r/m"
+     ()
+     "FIXME"
+     ; ??? Need something akin to ifield-assertions to distinguish from
+     ; 32 bit version.
+     (+ OP_01 mod-r/m-16 reg16)
+     (sequence ()
+	       (set mod-r/m-16 (add mod-r/m-16 reg16))
+	       ; ??? condition codes
+	       )
+     ()
+)
+
+(dni add-r/m32-reg32
+     "add 32 bit reg to 32 bit r/m"
+     ()
+     "FIXME"
+     (+ OP_01 mod-r/m-32 reg32)
+     (sequence ()
+	       (set mod-r/m-32 (add mod-r/m-32 reg32))
+	       ; ??? condition codes
+	       )
+     ()
+)
+
+(dni add-reg8-r/m8
+     "add 8 bit r/m to 8 bit reg"
+     ()
+     "FIXME"
+     (+ OP_02 mod-r/m-8 reg8)
+     (sequence ()
+	       (set reg8 (add reg8 mod-r/m-8))
+	       ; ??? condition codes
+	       )
+     ()
+)
+
+(dni add-reg16-r/m16
+     "add 16 bit r/m to 16 bit reg"
+     ()
+     "FIXME"
+     ; ??? Need something akin to ifield-assertions to distinguish from
+     ; 32 bit version.
+     (+ OP_03 mod-r/m-16 reg16)
+     (sequence ()
+	       (set reg16 (add reg16 mod-r/m-16))
+	       ; ??? condition codes
+	       )
+     ()
+)
+
+(dni add-reg32-r/m32
+     "add 32 bit r/m to 32 bit reg"
+     ()
+     "FIXME"
+     (+ OP_03 mod-r/m-32 reg32)
+     (sequence ()
+	       (set reg32 (add reg32 mod-r/m-32))
+	       ; ??? condition codes
+	       )
+     ()
+)

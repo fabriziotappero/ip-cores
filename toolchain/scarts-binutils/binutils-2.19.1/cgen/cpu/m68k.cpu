@@ -1,0 +1,253 @@
+; Motorola M68000 family CPU description.  -*- Scheme -*-
+; Copyright (C) 2000, 2009 Red Hat, Inc.
+; This file is part of CGEN.
+; See file COPYING.CGEN for details.
+
+(define-rtl-version 0 8)
+
+; NOTE: this file is still strictly WORK-IN-PROGRESS.
+
+(include "simplify.inc")
+
+(define-arch
+  (name m68k)
+  (comment "Motorola M68000 architecture")
+  (insn-lsb0? #t)
+  (machs m68k16)
+  (isas basic)
+)
+
+(define-isa
+  (name basic)
+  (comment "Basic M68K instruction set")
+  (default-insn-word-bitsize 16)
+  (default-insn-bitsize 16)
+  (base-insn-bitsize 16)
+  (decode-assist (15 14 13 12))
+)
+
+(define-cpu
+  (name m68k)
+  (comment "Motorola M68000 family")
+  (endian big)
+  (word-bitsize 32)
+)
+
+(define-mach
+  (name m68k16)
+  (comment "Motorola M68000 (16-bit bus)")
+  (cpu m68k)
+  (isas basic)
+)
+
+(define-model
+  (name mc68000)
+  (comment "Motorola MC68000 microprocessor")
+  (mach m68k16)
+  (unit u-exec "Execution Unit" ()
+	1 1 ; issue done
+	() () () ())
+)
+
+; Hardware elements.
+
+(dnh h-pc "program counter" (PC PROFILE (ISA basic)) (pc) () () ())
+
+(dsh h-ccr "condition code register" () (register HI))
+
+(define-keyword
+  (name dr-names)
+  (enum-prefix H-DR-)
+  (values (d0 0) (d1 1) (d2 2) (d3 3) (d4 4) (d5 5) (d6 6) (d7 7))
+)
+
+(define-keyword
+  (name ar-names)
+  (enum-prefix H-AR-)
+  (values (a0 0) (a1 1) (a2 2) (a3 3) (a4 4) (a5 5) (a6 6) (a7 7)
+	  (sp 7))
+)
+
+(define-hardware 
+  (name h-dr)
+  (comment "data registers")
+  (attrs (ISA basic) CACHE-ADDR)
+  (type register SI (8))
+  (indices extern-keyword dr-names)
+)
+
+(define-hardware
+  (name h-ar)
+  (comment "address registers")
+  (attrs (ISA basic) CACHE-ADDR)
+  (type register SI (8))
+  (indices extern-keyword ar-names)
+)
+
+; FIXME: need three shadowed A7 registers here for:
+;   * User stack pointer (USP)
+;   * Interrupt stack pointer (ISP)
+;   * Master stack pointer (MSP).
+; These can be omitted for now since we intend to only do user mode.
+; c.f. arm.cpu for tips on how to do this.  ARM shadows some registers
+; depending on any of its five operating modes.
+
+
+; Instruction fields.
+
+(define-pmacro (d68f x-name x-comment x-attrs x-word-offset x-word-length
+		     x-start x-length x-mode x-encode x-decode)
+  (define-ifield
+    (name x-name)
+    (comment x-comment)
+    (.splice attrs (.unsplice x-attrs))
+    (word-offset x-word-offset)
+    (word-length x-word-length)
+    (start x-start)
+    (length x-length)
+    (mode x-mode)
+    (encode x-encode)
+    (decode x-decode)
+  )
+)
+
+(define-pmacro (dn68f x-name x-comment x-attrs x-word-offset
+		      x-word-length x-start x-length)
+  (d68f x-name x-comment x-attrs x-word-offset x-word-length x-start
+	x-length UINT #f #f)
+)
+
+(d68f f-simm8  "signed 8 bit immediate"  () 16 16 7  8  INT #f #f)
+(d68f f-simm16 "signed 16 bit immediate" () 16 16 15 16 INT #f #f)
+(d68f f-simm32 "signed 32 bit immediate" () 16 32 31 32 INT #f #f)
+
+(dn68f f-uimm8  "unsigned 8 bit immediate"  () 16 16 7  8)
+(dn68f f-uimm16 "unsigned 16 bit immediate" () 16 16 15 16)
+(dn68f f-iumm32 "unsigned 32 bit immediate" () 16 32 31 32)
+
+(dn68f f-imm8-filler "unused part of 8 bit immediate" () 16 16 15 8)
+
+(dn68f f-15-4  "4 bits at bit 15"  () 0 16 15 4)
+(dn68f f-15-12 "12 bits at bit 15" () 0 16 15 12)
+(dn68f f-15-13 "13 bits at bit 15" () 0 16 15 13)
+(dn68f f-15-16 "16 bits at bit 15" () 0 16 15 16)
+(dn68f f-8-1   "1 bit at bit 8"    () 0 16 8  1)
+
+(dnf f-rx     "register Rx field"              ()   11  3)
+(dnf f-ry     "register Ry field"              ()    2  3)
+(dnf f-opmode "operation mode"                 ()    7  5)
+(dnf f-vector "vector field"                   ()    3  4)
+
+(dnf f-imm8   "immediate constant (8 bits)"    ()    7  8)
+
+; Operands.
+(dnop rx      "register Rx operand"            () h-uint f-rx)
+(dnop reg-@2  "general reg number (at bit 2)"  () h-uint f-rx)
+(dnop reg-@11 "general reg number (at bit 11)" () h-uint f-ry)
+(dnop ry      "register Ry operand"            () h-uint f-ry)
+(dnop vector  "trap vector operand"            () h-uint f-vector)
+(dnop imm8    "immediate constant (8 bits)"    () h-uint f-imm8)
+
+; Instructions.
+
+(dni nop "no operation" ()
+     "nop"
+      (+ (f-15-16 #x4E71))
+      (nop)
+      ()
+)
+
+(dni exg-data "exchange data registers" ()
+     "FIXME"
+     (+ (f-15-4 #xC) rx (f-8-1 1) (f-opmode 8) ry)
+     (sequence ((SI temp))
+	       (set temp (reg h-dr rx))
+	       (set (reg h-dr rx) (reg h-dr ry))
+	       (set (reg h-dr ry) temp))
+     ()
+)
+
+(dni exg-addr "exchange address registers" ()
+     "FIXME"
+     (+ (f-15-4 #xC) rx (f-8-1 1) (f-opmode 9) ry)
+     (sequence ((SI temp))
+	       (set temp (reg h-ar rx))
+	       (set (reg h-ar rx) (reg h-ar ry))
+	       (set (reg h-ar ry) temp))
+     ()
+)
+
+(dni exg-data-addr "exchange data and address register" ()
+     "FIXME"
+     (+ (f-15-4 #xC) rx (f-8-1 1) (f-opmode #x11) ry)
+     (sequence ((SI temp))
+	       (set temp (reg h-dr rx))
+	       (set (reg h-dr rx) (reg h-ar ry))
+	       (set (reg h-ar ry) temp))
+     ()
+)
+
+(dni illegal "illegal instruction" ()
+     "FIXME"
+     (+ (f-15-16 #x4AFC))
+     (nop)
+     ()
+)
+
+(dni moveq "move quick" ()
+     "FIXME"
+     (+ (f-15-4 7) reg-@2 (f-8-1 0) imm8)
+     ; FIXME: set condition codes.
+     (sequence ()
+	       (set (reg h-dr reg-@2) (ext SI imm8)))
+     ()
+)
+
+(dni reset "reset external devices" ()
+     "FIXME"
+     (+ (f-15-16 #x4E70))
+     (nop)
+     ()
+)
+
+(dni rte "return from exception" ()
+     "FIXME"
+     (+ (f-15-16 #x4E73))
+     (nop)
+     ()
+)
+
+(dni rtr "return and restore condition codes" ()
+     "FIXME"
+     (+ (f-15-16 #x4E77))
+     (nop)
+     ()
+)
+
+(dni rts "return from subroutine" ()
+     "RTS"
+     (+ (f-15-16 #x4E75))
+     (nop)
+     ()
+)
+
+(dni trap "trap" ()
+     "FIXME"
+     (+ (f-15-12 #x4E4) vector)
+     (nop)
+     ()
+)
+
+(dni trapv "trap on overflow" ()
+     "FIXME"
+     (+ (f-15-16 #x4E76))
+     (nop)
+     ()
+)
+
+(dni unlk "unlink" ()
+     "FIXME"
+     (+ (f-15-13 #x9CB) reg-@2)
+     (nop)
+     ()
+)

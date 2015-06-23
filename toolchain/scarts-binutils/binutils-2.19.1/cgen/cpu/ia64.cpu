@@ -1,0 +1,2340 @@
+;;; Intel IA-64 CPU description.  -*- Scheme -*-
+;;; Copyright (C) 2000 Red Hat, Inc.
+;;; This file is part of CGEN.
+;;; See file COPYING.CGEN for details.
+
+(include "simplify.inc")
+
+
+;;; Architecture and cpu family definitions.
+
+(define-arch
+  (name ia64)
+  (comment "Intel IA-64 architecture")
+  (insn-lsb0? #t)
+  (machs ia64)
+  (isas ia64)
+)
+
+(define-isa
+  (name ia64)
+
+  ;; Each instruction in the 128-bit bundle is 41 bits wide.
+  (base-insn-bitsize 41)
+
+  ;; Each bundle is 3 insns wide.
+  (liw-insns 3)
+
+  ;; ??? How to specify "lots", as that's what the architecture's
+  ;; stop bits means;
+  (parallel-insns 3)
+
+  ;; Initial bit numbers to decode by.
+  (decode-assist (40 39 38 37))
+)
+
+(define-cpu
+  (name ia64)
+  (comment "Intel IA-64 family")
+  (insn-endian little)
+  (data-endian either)
+  (word-bitsize 64)
+)
+
+(define-mach
+  (name ia64)
+  (comment "Intel IA-64 processors")
+  (cpu ia64)
+)
+
+; ??? Incomplete.  Pipeline and unit info wrong.
+
+(define-model
+  (name ia64_itanium)
+  (comment "Intel Itanium processor")
+  (mach ia64)
+  (pipeline all "" () ((fetch) (decode) (execute) (writeback)))
+  (unit u-exec "Execution Unit" () 1 1
+	() () () ())
+)
+
+;;; Attributes. 
+;;;
+;;; These are used to mark instructions so that we can decode the
+;;; dependancy violation data in Intel's tables.
+
+(define-attr
+  (name FORMAT)
+  (for insn)
+  (type enum)
+  (attrs META)
+  (values UNKNOWN
+
+	  A1 A2 A3 A4 A5 A6 A7 A8 A9 A10
+
+	  I1  I2  I3  I4  I5  I6  I7  I8  I9  I10
+	  I11 I12 I13 I14 I15 I16 I17 I18 I19 I20
+	  I21 I22 I23 I24 I25 I26 I27 I28 I29
+
+	  M1  M2  M3  M4  M5  M6  M7  M8  M9  M10
+	  M11 M12 M13 M14 M15 M16 M17 M18 M19 M20
+	  M21 M22 M23 M24 M25 M26 M27 M28 M29 M30
+	  M31 M32 M33 M34 M35 M36 M37 M38 M39 M40
+	  M41 M42 M43 M44 M45 M46
+
+	  B1 B2 B3 B4 B5 B6 B7 B8 B9
+
+	  F1  F2  F3  F4  F5  F6  F7  F8  F9  F10
+	  F11 F12 F13 F14 F15
+	  )
+  (default UNKNOWN)
+)
+
+;; ??? NONE isn't a valid value, but non-FP insns obviously can't have
+;; a valid value either.
+(define-attr
+  (name FIELD-SF)
+  (for insn)
+  (type enum)
+  (attrs META)
+  (values NONE s0 s1 s2 s3)
+  (default NONE)
+)
+
+(define-attr
+  (name FIELD-LFTYPE)
+  (for insn)
+  (type enum)
+  (attrs META)
+  (values NONE fault)
+  (default NONE)
+)
+
+(define-attr
+  (name FIELD-CTYPE)
+  (for insn)
+  (type enum)
+  (attrs META)
+  (values NONE unc or and or.andcm orcm andcm and.orcm)
+  (default NONE)
+)
+
+;; Field AR3 references a register field.
+;; Field CR3 references a register field.
+;; Field ireg references a register field.
+
+;;; ??? IA-64 specific instruction attributes:
+;;;
+;;; FIRST	Must be at the beginning of an instruction group.
+;;; SLOT2	Must be in slot 2 on a bundle.
+;;; LAST	Must be at the end of an instruction group.
+;;; I_IN_MLI	Insn is allowed in I slot of MLI.
+;;; PRIV	Privileged instruction.
+;;; NO_PRED	Insn cannot be predicated.
+
+
+;;; Instruction fields.
+;;;
+;;; ??? This is confusing (at least to me) -- note that we specify the _top_
+;;; of the field and a length.
+;;;
+;;; ??? There are only two fields used nearly universally.  But the
+;;; instruction formats are very regular in the sense that the same 
+;;; field specifications are re-used many times.  So we just have the 
+;;; raw fields here first.
+
+;; Fields used by most instructions.
+(dnf f-opcode	"major opcode"		() 40 4)
+(dnf f-qp	"qualifying predicate"	()  5 6)
+
+;; Random parts used by the 109 (!) instruction formats.
+(dnf f-36-6	"6 @ 36"		() 36 6)
+(df f-36-1s	"1 @ 36, signed"	() 36 1 INT #f #f)
+(dnf f-36-1	"1 @ 36"		() 36 1)
+(dnf f-35-9	"9 @ 35"		() 35 9)
+(dnf f-35-6	"6 @ 35"		() 35 6)
+(dnf f-35-3	"3 @ 35"		() 35 3)
+(dnf f-35-2	"2 @ 35"		() 35 2)
+(dnf f-35-1	"1 @ 35"		() 35 1)
+(dnf f-34-2	"2 @ 34"		() 34 2)
+(dnf f-33-1	"1 @ 33"		() 33 1)
+(dnf f-32-27	"27 @ 32"		() 32 27)
+(dnf f-32-20	"20 @ 32"		() 32 20)
+(dnf f-32-13	"13 @ 32"		() 32 13)
+(dnf f-32-9	"9 @ 32"		() 32 9)
+(dnf f-32-6	"6 @ 32"		() 32 6)
+(dnf f-32-4	"4 @ 32"		() 32 4)
+(dnf f-32-2	"2 @ 32"		() 32 2)
+(dnf f-32-1	"1 @ 32"		() 32 1)
+(dnf f-31-8	"8 @ 31"		() 31 8)
+(dnf f-31-2	"2 @ 31"		() 31 2)
+(dnf f-30-4	"4 @ 30"		() 30 4)
+(dnf f-30-19	"19 @ 30"		() 30 19)
+(dnf f-29-2	"2 @ 29"		() 29 2)
+(dnf f-28-2	"2 @ 28"		() 28 2)
+(dnf f-27-8	"8 @ 27"		() 27 8)
+(dnf f-27-4	"4 @ 27"		() 27 4)
+(dnf f-27-3	"3 @ 27"		() 27 3)
+(dnf f-27-1	"1 @ 27"		() 27 1)
+(dnf f-26-21	"21 @ 26"		() 26 21)
+(dnf f-26-11	"11 @ 26"		() 26 11)
+(dnf f-26-7	"7 @ 26"		() 26 7)
+(dnf f-26-5	"5 @ 26"		() 26 5)
+(dnf f-26-1	"1 @ 26"		() 26 1)
+(dnf f-25-20	"20 @ 25"		() 25 20)
+(dnf f-25-6	"6 @ 25"		() 25 6)
+(dnf f-24-5	"5 @ 24"		() 24 5)
+(dnf f-23-4	"4 @ 23"		() 23 4)
+(dnf f-23-1	"1 @ 23"		() 23 1)
+(dnf f-22-1	"1 @ 22"		() 22 1)
+(dnf f-21-2	"2 @ 21"		() 21 2)
+(dnf f-21-1	"1 @ 21"		() 21 1)
+(dnf f-20-1	"1 @ 20"		() 20 1)
+(dnf f-19-7	"7 @ 19"		() 19 7)
+(dnf f-19-6	"6 @ 19"		() 19 6)
+(dnf f-19-4	"4 @ 19"		() 19 4)
+(dnf f-19-1	"1 @ 19"		() 19 1)
+(dnf f-18-5	"5 @ 18"		() 18 5)
+(dnf f-15-3	"3 @ 15"		() 15 3)
+(dnf f-15-1	"1 @ 15"		() 15 1)
+(dnf f-14-2	"2 @ 14"		() 14 2)
+(dnf f-13-1	"1 @ 13"		() 13 1)
+(dnf f-12-7	"7 @ 12"		() 12 7)
+(dnf f-12-1	"1 @ 12"		() 12 1)
+(dnf f-11-6	"6 @ 11"		() 11 6)
+(dnf f-11-3	"3 @ 11"		() 11 3)
+(dnf f-8-3	"3 @ 8"			()  8 3)
+
+;; The extra field for movl
+(dnf f-81-41	"41 @ 81"		() 81 41)
+
+;; Virtual fields of the broken up constants.
+(dnmf fv-sint8	"i8 for A3 A8 I27 M30" 
+      () INT
+
+      (f-36-1s f-19-7)
+      (sequence ()			; insert
+		(set (ifield f-36-1s) (srl (ifield fv-sint8) (const 7)))
+		(set (ifield f-19-7) (and (ifield fv-sint8) (const #x7f)))
+		)
+      (sequence ()			; extract
+		(set (ifield fv-sint8)
+		     (or (sll (ifield f-36-1s) (const 7))
+			 (ifield f-19-7)))
+		)
+)
+
+(dnmf fv-sint9a	"i9 for M3 M8 M15"
+      () INT
+      (f-36-1s f-27-1 f-19-7)
+      (sequence ()			; insert
+		(set (ifield f-36-1s) (srl (ifield fv-sint9a) (const 8)))
+		(set (ifield f-27-1)
+		     (and (srl (ifield fv-sint9a) (const 7)) (const 1)))
+		(set (ifield f-19-7) (and (ifield fv-sint9a) (const #x7f)))
+		)
+      (sequence ()			; extract
+		(set (ifield fv-sint9a)
+		     (or (sll (ifield f-36-1s) (const 8))
+			 (or (sll (ifield f-27-1) (const 7))
+			     (ifield f-19-7))))
+		)
+)
+
+(dnmf fv-sint9b	"i9 for M5 M10"
+      () INT
+      (f-36-1s f-27-1 f-12-7)
+      (sequence ()			; insert
+		(set (ifield f-36-1s) (srl (ifield fv-sint9b) (const 8)))
+		(set (ifield f-27-1)
+		     (and (srl (ifield fv-sint9b) (const 7)) (const 1)))
+		(set (ifield f-12-7) (and (ifield fv-sint9b) (const #x7f)))
+		)
+      (sequence ()			; extract
+		(set (ifield fv-sint9b)
+		     (or (sll (ifield f-36-1s) (const 8))
+			 (or (sll (ifield f-27-1) (const 7))
+			     (ifield f-12-7))))
+		)
+)
+
+(dnmf fv-sint14	"i14 for A4"
+      () INT
+      (f-36-1s f-32-6 f-19-7)
+      (sequence ()			; insert
+		(set (ifield f-36-1s) (srl (ifield fv-sint14) (const 13)))
+		(set (ifield f-32-6)
+		     (and (srl (ifield fv-sint14) (const 7)) (const #x3f)))
+		(set (ifield f-19-7) (and (ifield fv-sint14) (const #x7f)))
+		)
+      (sequence ()			; extract
+		(set (ifield fv-sint14)
+		     (or (sll (ifield f-36-1s) (const 13))
+			 (or (sll (ifield f-32-6) (const 7))
+			     (ifield f-19-7))))
+		)
+)
+
+(dnmf fv-sint17	"mask17 for I23"
+      () INT
+      (f-36-1s f-31-8 f-12-7)
+      (sequence ()			; insert
+		(set (ifield f-36-1s) (srl (ifield fv-sint17) (const 16)))
+		(set (ifield f-31-8)
+		     (and (srl (ifield fv-sint17) (const 8)) (const #xff)))
+		(set (ifield f-12-7)
+		     (and (srl (ifield fv-sint17) (const 1)) (const #x7f)))
+		)
+      (sequence ()			; extract
+		(set (ifield fv-sint17)
+		     (or (sll (ifield f-36-1s) (const 16))
+			 (or (sll (ifield f-31-8) (const 8))
+			     (ifield f-12-7))))
+		)
+)
+
+(dnmf fv-sint22	"i22 for A5"
+      () INT
+      (f-36-1s f-35-9 f-26-5 f-19-7)
+      (sequence ()			; insert
+		(set (ifield f-36-1s) (srl (ifield fv-sint22) (const 21)))
+		(set (ifield f-26-5)
+		     (and (srl (ifield fv-sint22) (const 16)) (const #x1f)))
+		(set (ifield f-35-9)
+		     (and (srl (ifield fv-sint22) (const 7)) (const #x1ff)))
+		(set (ifield f-19-7) (and (ifield fv-sint22) (const #x7f)))
+		)
+      (sequence ()			; extract
+		(set (ifield fv-sint22)
+		     (or (or (sll (ifield f-36-1s) (const 21))
+			     (sll (ifield f-26-5) (const 16)))
+			 (or (sll (ifield f-35-9) (const 7))
+			     (ifield f-19-7))))
+		)
+)
+
+(dnmf fv-sint44	"i44 for I24"
+      () INT
+      (f-36-1s f-32-27)
+      (sequence ()			; insert
+		(set (ifield f-36-1s) (srl (ifield fv-sint44) (const 43)))
+		(set (ifield f-19-7)
+		     (and (srl (ifield fv-sint44) (const 16))
+			  (const #x7ffffff)))
+		)
+      (sequence ()			; extract
+		(set (ifield fv-sint44)
+		     (or (sll (ifield f-36-1s) (const 43))
+			 (sll (ifield f-32-27) (const 16))))
+		)
+)
+
+(dnmf fv-sint64 "i64 for I18"
+      () INT
+      (f-81-41 f-36-1s f-35-9 f-26-5 f-21-1 f-19-7)
+      (sequence ()			; insert
+		(set (ifield f-36-1s) (srl (ifield fv-sint64) (const 63)))
+		(set (ifield f-81-41)
+		     (and (srl (ifield fv-sint64) (const 22))
+			  (const #x1fffffffff)))
+		(set (ifield f-21-1)
+		     (and (srl (ifield fv-sint64) (const 21)) (const 1)))
+		(set (ifield f-26-5)
+		     (and (srl (ifield fv-sint64) (const 16)) (const #x1f)))
+		(set (ifield f-35-9)
+		     (and (srl (ifield fv-sint64) (const 7)) (const #x1ff)))
+		(set (ifield f-19-7) (and (ifield fv-sint64) (const #x7f)))
+		)
+      (sequence ()			; extract
+		(set (ifield fv-sint64)
+		     (or (or (or (sll (ifield f-36-1s) (const 63))
+				 (sll (ifield f-81-41) (const 22)))
+			     (or (sll (ifield f-21-1) (const 21))
+				 (sll (ifield f-26-5) (const 16))))
+			 (or (sll (ifield f-35-9) (const 7))
+			     (ifield f-19-7))))
+		)
+)
+
+(dnmf fv-uint21	"u21 for I19 M37 F15"
+      () UINT
+      (f-36-1 f-25-20)
+      (sequence ()			; insert
+		(set (ifield f-36-1) (srl (ifield fv-uint21) (const 20)))
+		(set (ifield f-25-20) (and (ifield fv-uint21) (const #xfffff)))
+		)
+      (sequence ()			; extract
+		(set (ifield fv-uint21)
+		     (or (sll (ifield f-36-1) (const 20))
+			 (ifield f-25-20)))
+		)
+)
+
+(dnmf fv-uint24	"u24 for M44"
+      () UINT
+      (f-36-1 f-32-2 f-26-21)
+      (sequence ()			; insert
+		(set (ifield f-36-1) (srl (ifield fv-uint24) (const 23)))
+		(set (ifield f-32-1)
+		     (and (srl (ifield fv-uint24) (const 21)) (const 3)))
+		(set (ifield f-26-21)
+		     (and (ifield fv-uint24) (const #x1fffff)))
+		)
+      (sequence ()			; extract
+		(set (ifield fv-uint24)
+		     (or (sll (ifield f-36-1) (const 23))
+			 (or (sll (ifield f-32-2) (const 21))
+			     (ifield f-26-21))))
+		)
+)
+
+(dnmf fv-tgt25a "target25 for I20 M20 M21"
+      (PCREL-ADDR) INT
+      (f-36-1s f-32-13 f-12-7)
+      (sequence ()			; insert
+		;; ??? Wherefore right shift.
+		(set (ifield f-36-1s) (srl (ifield fv-tgt25a) (const 20)))
+		(set (ifield f-32-13)
+		     (and (srl (ifield fv-tgt25a) (const 7)) (const #x1fff)))
+		(set (ifield f-12-7) (and (ifield fv-tgt25a) (const #x7f)))
+		)
+      (sequence ()			; extract
+		;; ??? Where will pc be added.
+		;; ??? Wherefore left shift.
+		(set (ifield fv-tgt25a)
+		     (or (sll (ifield f-36-1s) (const 20))
+			 (or (sll (ifield f-32-13) (const 7))
+			     (ifield f-12-7))))
+		)
+)
+
+(dnmf fv-tgt25b "target25 for F14"
+      (PCREL-ADDR) INT
+      (f-36-1s f-25-20)
+      (sequence ()			; insert
+		;; ??? Wherefore right shift.
+		(set (ifield f-36-1s) (srl (ifield fv-tgt25b) (const 20)))
+		(set (ifield f-25-20) (and (ifield fv-tgt25b) (const #xfffff)))
+		)
+      (sequence ()			; extract
+		;; ??? Where will pc be added.
+		;; ??? Wherefore left shift.
+		(set (ifield fv-tgt25b)
+		     (or (sll (ifield f-36-1) (const 20))
+			 (ifield f-25-20)))
+		)
+)
+
+(dnmf fv-tgt25c "target25 for M22 M23 B1 B2 B3 B6"
+      (PCREL-ADDR) INT
+      (f-36-1s f-32-20)
+      (sequence ()			; insert
+		;; ??? Wherefore right shift.
+		(set (ifield f-36-1s) (srl (ifield fv-tgt25c) (const 20)))
+		(set (ifield f-32-20) (and (ifield fv-tgt25c) (const #xfffff)))
+		)
+      (sequence ()			; extract
+		;; ??? Where will pc be added.
+		;; ??? Wherefore left shift.
+		(set (ifield fv-tgt25c)
+		     (or (sll (ifield f-36-1s) (const 20))
+			 (ifield f-32-20)))
+		)
+)
+
+(dnmf fv-tag13a "tag13 for I21"
+      (PCREL-ADDR) INT
+      (f-32-9)
+      (sequence ()			; insert
+		;; ??? Wherefore right shift.
+		(set (ifield f-32-9) (and (ifield fv-tag13a (const #x1ff))))
+		)
+      (sequence ()			; extract
+		;; ??? Where will pc be added.
+		;; ??? Wherefore left shift.
+		(set (ifield fv-tag13a)
+		     (sub (xor (ifield f-32-9) (const #x100)) (const #x100)))
+		)
+)
+
+(dnmf fv-tag13b "tag13 for B6 B7"
+      (PCREL-ADDR) INT
+      (f-34-2 f-12-7)
+      (sequence ()			; insert
+		;; ??? Wherefore right shift.
+		(set (ifield f-34-2)
+		     (and (sll (ifield fv-tag13b) (const 7)) (const 3)))
+		(set (ifield f-12-7) (and (ifield fv-tag13b) (const #x7f)))
+		)
+      (sequence ()			; extract
+		;; ??? Where will pc be added.
+		;; ??? Wherefore left shift.
+		(set (ifield fv-tag13a)
+		     (or (sll (sub (xor (ifield f-34-2) (const 2))
+				   (const 2))
+			      (const 7))
+			 (ifield f-12-7)))
+		)
+)
+
+(dnmf fv-uint9	"u9 for F5"
+      () UINT
+      (f-34-2 f-26-7)
+      (sequence ()			; insert
+		(set (ifield f-26-7) (srl (ifield fv-uint9) (const 2)))
+		(set (ifield f-34-2) (and (ifield fv-uint9) (const 3)))
+		)
+      (sequence ()			; extract
+		(set (ifield fv-uint9)
+		     (or (sll (ifield f-26-7) (const 2))
+			 (ifield f-34-2)))
+		)
+)
+
+;; Fields with funny arithmetic
+
+(df f-count2a "count2 for A2" () 28 2 UINT
+    ((value pc) (sub WI value (const 1)))
+    ((value pc) (add WI value (const 1)))
+)
+    
+(df f-count2b "count2 for A10" () 28 2 UINT
+    ((value pc)
+     (if WI (le value (const 2))
+	  (sub WI value (const 1))
+	  (error "invalid value for field count2b")))
+    ((value pc) (add WI value (const 1)))
+)
+
+(df f-count2c "count2 for I1" () 31 2 UINT
+    ((value pc)
+     (cond WI
+	    ((eq value (const 0)) (const 0))
+	    ((eq value (const 7)) (const 1))
+	    ((eq value (const 15)) (const 2))
+	    ((eq value (const 16)) (const 3))
+	    (else (error "invalid value for field count2c"))))
+    ((value pc)
+     (cond WI
+	    ((eq value (const 0)) (const 0))
+	    ((eq value (const 1)) (const 7))
+	    ((eq value (const 2)) (const 15))
+	    ((eq value (const 3)) (const 16))))
+)
+
+(df f-ccount5 "ccount5 for I8" () 24 5 UINT
+    ((value pc) (sub WI (const 31) value))
+    ((value pc) (sub WI (const 31) value))
+)
+    
+(df f-len4 "len4 for I15" () 30 4 UINT
+    ((value pc) (sub WI value (const 1)))
+    ((value pc) (add WI value (const 1)))
+)
+
+(df f-len6 "len6 for I11 I12 I13 I14" () 32 6 UINT
+    ((value pc) (sub WI value (const 1)))
+    ((value pc) (add WI value (const 1)))
+)
+
+(df f-cpos6a "cpos6 for I12 I13" () 25 6 UINT
+    ((value pc) (sub WI (const 63) value))
+    ((value pc) (sub WI (const 63) value))
+)
+
+(df f-cpos6b "cpos6 for I14" () 19 6 UINT
+    ((value pc) (sub WI (const 63) value))
+    ((value pc) (sub WI (const 63) value))
+)
+
+(df f-cpos6c "cpos6 for I15" () 36 6 UINT
+    ((value pc) (sub WI (const 63) value))
+    ((value pc) (sub WI (const 63) value))
+)
+
+(dnmf fv-inc3 "inc3 for M17" () INT
+      (f-15-1 f-14-2)
+      (sequence ()			; insert
+		(set (ifield f-15-1) (lt (ifield fv-inc3) (const 0)))
+		(set (ifield f-14-2) (abs (ifield fv-inc3)))
+		(set (ifield f-14-2)
+		     (cond ((eq (ifield f-14-2) (const 1)) (const 3))
+			   ((eq (ifield f-14-2) (const 4)) (const 2))
+			   ((eq (ifield f-14-2) (const 8)) (const 1))
+			   ((eq (ifield f-14-2) (const 16)) (const 0))
+			   (else (error "invalid value for field inc3"))))
+		)
+      (sequence ()			; extract
+		(set (ifield fv-inc3)
+		     (mul (add (mul (neg (ifield f-15-1)) (const 2)) (const 1))
+			  (if (eq (ifield f-14-2) (const 3))
+			      (const 1)
+			      (sll (const 1) (sub (const 4)
+						  (ifield f-14-2))))))
+		)
+)
+
+;;; Hardware pieces.
+;;;
+;;; These entries list the elements of the raw hardware.  They're also
+;;; used to provide tables and other elements of the assembly language.
+
+;; The normal h-uint only provides 32 bits of integer.
+(dnh h-int64 "64-bit integer" ()
+     (immediate (INT 64))
+     () () ()
+)
+
+;; ??? Intel calls this if IP, but from experience with the i960
+;; simulator using the name "ip", we know that gdb reacts badly.
+(dnh h-pc "program counter" (PC PROFILE) (pc) () () ())
+
+(define-pmacro (build-decpair num) ((.dec num) num))
+
+(define-hardware
+  (name h-gr)
+  (comment "general registers")
+  (attrs CACHE-ADDR)
+  (type register WI (128))
+  (indices keyword "r"
+    (.map build-decpair (.iota 128)))
+)
+
+;; ??? Skip GR NaTs for now, since we're not simulating.
+
+(define-hardware
+  (name h-fr)
+  (comment "floating-point registers")
+  (type register XF (128))
+  (indices keyword "fr"
+    (.map build-decpair (.iota 128)))
+)
+
+(define-hardware
+  (name h-br)
+  (comment "branch registers")
+  (attrs CACHE-ADDR)
+  (type register WI (8))
+  (indices keyword "br"
+    (.map build-decpair (.iota 8)))
+)
+
+(define-hardware
+  (name h-ar)
+  (comment "application registers")
+  (type register WI (128))
+  (indices keyword "ar"
+    (.map build-decpair (.iota 128)))
+)
+
+(define-hardware
+  (name h-pr)
+  (comment "predicate registers")
+  (type register BI (64))
+  (indices keyword "pr"
+    (.map build-decpair (.iota 64)))
+)
+
+(define-hardware
+  (name h-cr)
+  (comment "control registers")
+  (type register WI (128))
+  (indices keyword "cr"
+    (.map build-decpair (.iota 128)))
+)
+
+;; ??? CFM, PSR, PMD, CPUID
+
+;;; Instruction Operands.
+;;;
+;;; These entries provide a layer between the assembler and the raw
+;;; hardware description, and are used to refer to hardware elements
+;;; in the semantic code.  Usually there's a bit of over-specification,
+;;; but in more complicated instruction sets there isn't.
+
+(dnop qp	"qualifying predicate"		() h-pr f-qp)
+
+(dnop r1	"general register 1"		() h-gr f-12-7)
+(dnop r2	"general register 2"		() h-gr f-19-7)
+(dnop r3	"general register 3"		() h-gr f-26-7)
+(dnop r33	"general register 3 for A5"	() h-gr f-21-2)
+
+(dnop f1	"floating-point register 1"	() h-fr f-12-7)
+(dnop f2	"floating-point register 2"	() h-fr f-19-7)
+(dnop f3	"floating-point register 3"	() h-fr f-26-7)
+
+(dnop p1	"predicate register 1"		() h-pr f-11-6)
+(dnop p2	"predicate register 2"		() h-pr f-32-6)
+
+(dnop b1	"branch register 1"		() h-br f-8-3)
+(dnop b2	"branch register 2"		() h-br f-15-3)
+
+(dnop ar3	"application register 3"	() h-ar f-26-7)
+(dnop cr3	"control register 3"		() h-cr f-26-7)
+
+(dnop imm1	"imm1 for I14"			() h-int64 f-36-1s)
+(dnop imm8	"imm8 for A3 A8 I27 M30"	() h-int64 fv-sint8)
+(dnop imm9a	"imm9 for M3 M8 M15"		() h-int64 fv-sint9a)
+(dnop imm9b	"imm9 for M5 M10"		() h-int64 fv-sint9b)
+(dnop imm14	"imm14 for A4"			() h-int64 fv-sint14)
+(dnop imm17	"mask17 for I23"		() h-int64 fv-sint17)
+(dnop imm21	"imm21 for I19"			() h-int64 fv-uint21)
+(dnop imm22	"imm22 for A5"			() h-int64 fv-sint22)
+(dnop imm44	"imm44 for I24"			() h-int64 fv-sint44)
+(dnop imm64	"imm64 for I18"			() h-int64 fv-sint64)
+
+(dnop count2a	"count2 for A2"			() h-int64 f-count2a)
+(dnop count2b	"count2 for A10"		() h-int64 f-count2b)
+(dnop count2c	"count2 for I1"			() h-int64 f-count2c)
+(dnop count5	"count5 for I6"			() h-int64 f-18-5)
+(dnop count6	"count6 for I10"		() h-int64 f-32-6)
+(dnop ccount5	"ccount5 for I8"		() h-int64 f-ccount5)
+
+(dnop len4	"len4 for I15"			() h-int64 f-len4)
+(dnop len6	"len6 for I11 I12 I13 I14"	() h-int64 f-len6)
+
+(dnop pos6	"pos6 for I11"			() h-int64 f-19-6)
+(dnop cpos6a	"cpos6 for I12 I13"		() h-int64 f-cpos6a)
+(dnop cpos6b	"cpos6 for I14"			() h-int64 f-cpos6b)
+(dnop cpos6c	"cpos6 for I15"			() h-int64 f-cpos6c)
+
+(dnop inc3	"inc3 for M17"			() h-int64 fv-inc3)
+
+(define-operand
+  (name mbtype4)
+  (comment "mbtype4 type for I3")
+  (type h-int64)
+  (index f-23-4)
+  (handlers (parse "mbtype4")
+	    (print "mbtype4"))
+)
+
+(dnop mhtype8	"mhtype8 for I4"		() h-int64 f-27-8)
+
+(dnop tgt25a	"tgt25 for I20 M20 M21"		() h-int64 fv-tgt25a)
+(dnop tgt25b	"tgt25 for F14"			() h-int64 fv-tgt25b)
+(dnop tgt25c	"tgt25 for M22 M23 B1 B2 B3 B6"	() h-int64 fv-tgt25c)
+
+(dnop tag13a	"tag13 for I21"			() h-int64 fv-tag13a)
+
+;; Completers 
+
+(define-operand
+  (name ldhint)
+  (comment "ldhint completer")
+  (type h-int64)
+  (index f-29-2)
+  (handlers (parse "ldhint")
+	    (print "ldhint"))
+)
+
+(define-operand
+  (name sthint)
+  (comment "sthint completer")
+  (type h-int64)
+  (index f-29-2)
+  (handlers (parse "sthint")
+	    (print "sthint"))
+)
+
+(define-operand
+  (name movbr_mwh)
+  (comment "mwh completer for mov_br")
+  (type h-int64)
+  (index f-21-2)
+  (handlers (parse "mwh")
+	    (print "mwh"))
+)
+
+(define-operand
+  (name movbr_ih)
+  (comment "ih completer for mov_br")
+  (type h-int64)
+  (index f-23-1)
+  (handlers (parse "ih")
+	    (print "ih"))
+)
+
+(define-operand
+  (name lfhint)
+  (comment "lfhint for lfetch")
+  (type h-int64)
+  (index f-29-2)
+  (handlers (parse "lfhint")
+	    (print "lfhint"))
+)
+
+(define-operand
+  (name sorsolsof)
+  (comment "combined i,l,o,r for alloc")
+  (type h-int64)
+  (index f-30-19)
+  (handlers (parse "sorsolsof")
+	    (print "sorsolsof"))
+)
+
+;; These are architecturally ignored bits, as opposed to architecturally
+;; reserved bits.  I.e. we should assemble them in with zeros, but we should
+;; ignore them when disassembling.
+
+(dnop ign_36_1	"ignore 1 @ 36"			() h-int64 f-36-1)
+(dnop ign_32_2	"ignore 2 @ 32"			() h-int64 f-32-2)
+(dnop ign_32_1	"ignore 1 @ 32"			() h-int64 f-32-1)
+(dnop ign_29_2	"ignore 2 @ 29"			() h-int64 f-29-2)
+(dnop ign_27_4	"ignore 4 @ 27"			() h-int64 f-27-4)
+(dnop ign_27_3	"ignore 3 @ 27"			() h-int64 f-27-3)
+(dnop ign_27_1	"ignore 1 @ 27"			() h-int64 f-27-1)
+(dnop ign_26_11	"ignore 11 @ 26"		() h-int64 f-26-11)
+(dnop ign_26_7	"ignore 7 @ 26"			() h-int64 f-26-7)
+(dnop ign_26_1	"ignore 1 @ 26"			() h-int64 f-26-1)
+(dnop ign_23_4	"ignore 4 @ 23"			() h-int64 f-23-4)
+(dnop ign_19_7	"ignore 7 @ 19"			() h-int64 f-19-7)
+(dnop ign_19_6	"ignore 6 @ 19"			() h-int64 f-19-6)
+(dnop ign_19_4	"ignore 4 @ 19"			() h-int64 f-19-4)
+(dnop ign_19_1	"ignore 1 @ 19"			() h-int64 f-19-1)
+(dnop ign_13_1	"ignore 1 @ 13"			() h-int64 f-13-1)
+(dnop ign_12_7	"ignore 7 @ 12"			() h-int64 f-12-7)
+
+;; ??? Add more as needed.
+
+;;; "A" Format Instruction definitions.
+
+(define-pmacro (I-A1 mnemonic maybe-p1 op x2a ve x4 x2b)
+  (dni (.sym mnemonic maybe-p1)
+       (.str "Integer ALU, reg-reg, " mnemonic maybe-p1)
+       ((FORMAT A1))
+       (.str mnemonic " $r1=$r2,$r3" maybe-p1)
+       (+ (f-opcode op) (f-35-2 x2a) (f-33-1 ve) (f-32-4 x4) (f-28-2 x2b)
+	  ign_36_1 r3 r2 r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-A1 add ""	8 0 0 0 0)
+(I-A1 add ",1"	8 0 0 0 1)
+(I-A1 sub ""	8 0 0 1 1)
+(I-A1 sub ",1"	8 0 0 1 0)
+(I-A1 addp4 ""	8 0 0 2 0)
+(I-A1 and ""	8 0 0 3 0)
+(I-A1 andcm ""	8 0 0 3 1)
+(I-A1 or ""	8 0 0 3 2)
+(I-A1 xor ""	8 0 0 3 3)
+
+(define-pmacro (I-A2 mnemonic op x2a ve x4)
+  (dni mnemonic
+       (.str "Shift Left and Add, " mnemonic)
+       ((FORMAT A2))
+       (.str mnemonic " $r1=$r2,$count2a,$r3")
+       (+ (f-opcode op) (f-35-2 x2a) (f-33-1 ve) (f-32-4 x4)
+	  ign_36_1 count2a r3 r2 r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-A2 shladd	8 0 0 4)
+(I-A2 shladdp4	8 0 0 6)
+
+(define-pmacro (I-A3 mnemonic op x2a ve x4 x2b)
+  (dni (.sym mnemonic "i")
+       (.str "Integer ALU, imm8-reg, " mnemonic)
+       ((FORMAT A3))
+       (.str mnemonic " $r1=$imm8,$r3")
+       (+ (f-opcode op) (f-35-2 x2a) (f-33-1 ve) (f-32-4 x4) (f-28-2 x2b)
+	  r3 imm8 r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-A3 sub	8 0 0  9 1)
+(I-A3 and	8 0 0 11 0)
+(I-A3 andcm	8 0 0 11 1)
+(I-A3 or	8 0 0 11 2)
+(I-A3 xor	8 0 0 11 3)
+
+(define-pmacro (I-A4 mnemonic op x2a ve)
+  (dni (.str mnemonic "i")
+       (.str "Add imm14, " mnemonic)
+       ((FORMAT A4))
+       (.str mnemonic " $r1=$imm14,$r3")
+       (+ (f-opcode op) (f-35-2 x2a) (f-33-1 ve)
+	  r3 imm14 r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-A4 adds	8 2 0)
+(I-A4 addp4	8 3 0)
+
+(define-pmacro (I-A5 mnemonic op)
+  (dni (.str mnemonic)
+       (.str "Add imm22, " mnemonic)
+       ((FORMAT A5))
+       (.str mnemonic " $r1=$imm22,$r33")
+       (+ (f-opcode op) imm22 r33 r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-A5 addl	9)
+
+(define-pmacro (I-A6 mnemonic ctype-attr op x2 tb ta c)
+  (dni (.sym mnemonic)
+       (.str "Integer Compare, reg-reg, " mnemonic)
+       ((FORMAT A6) (FIELD-CTYPE ctype-attr))
+       (.str mnemonic " $p1,$p2=$r2,$r3")
+       (+ (f-opcode op) (f-36-1 tb) (f-35-2 x2) (f-33-1 ta) (f-12-1 c)
+	  p2 r3 r2 p1 qp)
+       ()
+       ()
+       )
+)
+
+(define-pmacro (I-A6-cmp-cond-ctype cmp cond ctype op x2 ta c)
+  (I-A6 (.sym cmp "." cond
+	      (.eval (if (eq? (string-length ctype) 0) "" "."))
+	      ctype)
+	(.eval (if (eq? (string-length ctype) 0) 'NONE (string->symbol ctype)))
+	op 0 x2 ta c)
+)
+
+(define-pmacro (I-A6-cmp cmp x2)
+  (begin
+    (I-A6-cmp-cond-ctype cmp lt  ""		12 x2 0 0)
+    (I-A6-cmp-cond-ctype cmp ltu ""		13 x2 0 0)
+    (I-A6-cmp-cond-ctype cmp eq  ""		14 x2 0 0)
+
+    (I-A6-cmp-cond-ctype cmp lt  "unc"		12 x2 0 1)
+    (I-A6-cmp-cond-ctype cmp ltu "unc"		13 x2 0 1)
+    (I-A6-cmp-cond-ctype cmp eq  "unc"		14 x2 0 1)
+
+    (I-A6-cmp-cond-ctype cmp eq  "and"		12 x2 1 0)
+    (I-A6-cmp-cond-ctype cmp eq  "or"		13 x2 1 0)
+    (I-A6-cmp-cond-ctype cmp eq  "or.andcm"	14 x2 1 0)
+
+    (I-A6-cmp-cond-ctype cmp ne  "and"		12 x2 1 1)
+    (I-A6-cmp-cond-ctype cmp ne  "or"		13 x2 1 1)
+    (I-A6-cmp-cond-ctype cmp ne  "or.andcm"	14 x2 1 1)
+    )
+)
+
+(I-A6-cmp cmp  0)
+(I-A6-cmp cmp4 1)
+
+(define-pmacro (I-A7 mnemonic ctype-attr op x2 tb ta c)
+  (dni (.sym mnemonic)
+       (.str "Integer Compare, zero-reg, " mnemonic)
+       ((FORMAT A7) (FIELD-CTYPE ctype-attr))
+       (.str mnemonic " $p1,$p2=r0,$r3")
+       (+ (f-opcode op) (f-36-1 tb) (f-35-2 x2) (f-33-1 ta) (f-12-1 c)
+	  p2 r3 (f-19-7 0) p1 qp)
+       ()
+       ()
+       )
+)
+
+(define-pmacro (I-A7-cmp-cond-ctype cmp cond ctype op x2 ta c)
+  (I-A7 (.sym cmp "." cond "." ctype) (.sym ctype) op x2 1 ta c)
+)
+
+(define-pmacro (I-A7-cmp-cond cmp cond x2 ta c)
+  (begin
+    (I-A7-cmp-cond-ctype cmp cond and	12 x2 ta c)
+    (I-A7-cmp-cond-ctype cmp cond or	13 x2 ta c)
+    (I-A7-cmp-cond-ctype cmp cond andcm	14 x2 ta c)
+    )
+)
+
+(define-pmacro (I-A7-cmp cmp x2)
+  (begin
+    (I-A7-cmp-cond cmp gt x2 0 0)
+    (I-A7-cmp-cond cmp le x2 0 1)
+    (I-A7-cmp-cond cmp ge x2 1 0)
+    (I-A7-cmp-cond cmp lt x2 1 1)
+    )
+)
+
+(I-A7-cmp cmp  0)
+(I-A7-cmp cmp4 1)
+
+(define-pmacro (I-A8 mnemonic ctype-attr op x2 ta c)
+  (dni (.sym mnemonic)
+       (.str "Integer Compare, imm8-reg, " mnemonic)
+       ((FORMAT A7) (FIELD-CTYPE ctype-attr))
+       (.str mnemonic " $p1,$p2=$imm8,$r3")
+       (+ (f-opcode op) (f-35-2 x2) (f-33-1 ta) (f-12-1 c)
+	  p2 r3 imm8 p1 qp)
+       ()
+       ()
+       )
+)
+
+(define-pmacro (I-A8-cmp-cond-ctype cmp cond ctype op x2 ta c)
+  (I-A8 (.sym cmp "." cond
+	      (.eval (if (eq? (string-length ctype) 0) "" "."))
+	      ctype)
+	(.eval (if (eq? (string-length ctype) 0) 'NONE (string->symbol ctype)))
+	op x2 ta c)
+)
+
+(define-pmacro (I-A8-cmp cmp x2)
+  (begin
+    (I-A8-cmp-cond-ctype cmp lt  ""		12 x2 0 0)
+    (I-A8-cmp-cond-ctype cmp ltu ""		13 x2 0 0)
+    (I-A8-cmp-cond-ctype cmp eq  ""		14 x2 0 0)
+
+    (I-A8-cmp-cond-ctype cmp lt  "unc"		12 x2 0 1)
+    (I-A8-cmp-cond-ctype cmp ltu "unc"		13 x2 0 1)
+    (I-A8-cmp-cond-ctype cmp eq  "unc"		14 x2 0 1)
+
+    (I-A8-cmp-cond-ctype cmp eq  "and"		12 x2 1 0)
+    (I-A8-cmp-cond-ctype cmp eq  "or"		12 x2 1 0)
+    (I-A8-cmp-cond-ctype cmp eq  "or.andcm"	12 x2 1 0)
+
+    (I-A8-cmp-cond-ctype cmp ne  "and"		12 x2 1 1)
+    (I-A8-cmp-cond-ctype cmp ne  "or"		12 x2 1 1)
+    (I-A8-cmp-cond-ctype cmp ne  "or.andcm"	12 x2 1 1)
+    )
+)
+
+(I-A8-cmp cmp  2)
+(I-A8-cmp cmp4 3)
+
+(define-pmacro (I-A9 mnemonic op x2a za zb x4 x2b)
+  (dni (.str mnemonic)
+       (.str "Multimetia ALU, " mnemonic)
+       ((FORMAT A9))
+       (.str mnemonic " $r1=$r2,$r3")
+       (+ (f-opcode op) (f-36-1 za) (f-35-2 x2a) (f-33-1 zb) (f-32-4 x4)
+	  (f-28-2 x2b) r3 r2 r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-A9 padd1	8 1 0 0 0 0)
+(I-A9 padd2	8 1 0 1 0 0)
+(I-A9 padd4	8 1 1 0 0 0)
+(I-A9 padd1.sss	8 1 0 0 0 1)
+(I-A9 padd2.sss	8 1 0 1 0 1)
+(I-A9 padd1.uuu	8 1 0 0 0 2)
+(I-A9 padd2.uuu	8 1 0 1 0 2)
+(I-A9 padd1.uus	8 1 0 0 0 3)
+(I-A9 padd2.uus	8 1 0 1 0 3)
+
+(I-A9 psub1	8 1 0 0 1 0)
+(I-A9 psub2	8 1 0 1 1 0)
+(I-A9 psub4	8 1 1 0 1 0)
+(I-A9 psub1.sss	8 1 0 0 1 1)
+(I-A9 psub2.sss	8 1 0 1 1 1)
+(I-A9 psub1.uuu	8 1 0 0 1 2)
+(I-A9 psub2.uuu	8 1 0 1 1 2)
+(I-A9 psub1.uus	8 1 0 0 1 3)
+(I-A9 psub2.uus	8 1 0 1 1 3)
+
+(I-A9 pavg1	8 1 0 0 2 2)
+(I-A9 pavg2	8 1 0 1 2 2)
+(I-A9 pavg1.raz	8 1 0 0 2 3)
+(I-A9 pavg2.raz	8 1 0 1 2 3)
+
+(I-A9 pavgsub1	8 1 0 0 3 2)
+(I-A9 pavgsub2	8 1 0 1 3 2)
+
+(I-A9 pcmp1.eq	8 1 0 0 9 0)
+(I-A9 pcmp2.eq	8 1 0 1 9 0)
+(I-A9 pcmp4.eq	8 1 1 0 9 0)
+(I-A9 pcmp1.gt	8 1 0 0 9 1)
+(I-A9 pcmp2.gt	8 1 0 1 9 1)
+(I-A9 pcmp4.gt	8 1 1 0 9 1)
+
+(define-pmacro (I-A10 mnemonic op x2a za zb x4)
+  (dni mnemonic
+       (.str "Multimedia Shift and Add, " mnemonic)
+       ((FORMAT A10))
+       (.str mnemonic " $r1=$r2,$count2b,$r3")
+       (+ (f-opcode op) (f-36-1 za) (f-35-2 x2a) (f-33-1 zb) (f-32-4 x4)
+	  count2b r3 r2 r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-A10 pshladd2 8 1 0 1 4)
+(I-A10 pshradd2 8 1 0 1 6)
+
+;;; "I" Format Instruction definitions.
+
+(define-pmacro (I-I1 mnemonic op za zb ve x2a x2b)
+  (dni mnemonic
+       (.str "Multimedia Multiply and Shift, " mnemonic)
+       ((FORMAT I1))
+       (.str mnemonic " $r1=$r2,$r3,$count2c")
+       (+ (f-opcode op) (f-36-1 za) (f-35-2 x2a) (f-33-1 zb) (f-32-1 ve)
+	  (f-29-2 x2b) count2c ign_27_1 r3 r2 r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-I1 pmpyshr2   7 0 1 0 0 3)
+(I-I1 pmpyshr2.u 7 0 1 0 0 1)
+
+(define-pmacro (I-I2 mnemonic op za zb ve x2a x2b x2c)
+  (dni mnemonic
+       (.str "Multimedia Multiply/Mix/Pack/Unpack, " mnemonic)
+       ((FORMAT I2))
+       (.str mnemonic " $r1=$r2,$r3")
+       (+ (f-opcode op) (f-36-1 za) (f-35-2 x2a) (f-33-1 zb) (f-32-1 ve)
+	  (f-31-2 x2c) (f-29-2 x2b) ign_27_1 r3 r2 r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-I2 pmpy2.r	7 0 1 0 2 1 3)
+(I-I2 pmpy2.l	7 0 1 0 2 3 3)
+
+(I-I2 mix1.r	7 0 0 0 2 0 2)
+(I-I2 mix2.r	7 0 1 0 2 0 2)
+(I-I2 mix4.r	7 1 0 0 2 0 2)
+(I-I2 mix1.l	7 0 0 0 2 2 2)
+(I-I2 mix2.l	7 0 1 0 2 2 2)
+(I-I2 mix4.l	7 1 0 0 2 2 2)
+
+(I-I2 pack2.uss	7 0 1 0 2 0 0)
+(I-I2 pack2.sss	7 0 1 0 2 2 0)
+(I-I2 pack4.sss	7 1 0 0 2 2 0)
+
+(I-I2 unpack1.h	7 0 0 0 2 0 1)
+(I-I2 unpack2.h	7 0 1 0 2 0 1)
+(I-I2 unpack4.h	7 1 0 0 2 0 1)
+(I-I2 unpack1.l	7 0 0 0 2 2 1)
+(I-I2 unpack2.l	7 0 1 0 2 2 1)
+(I-I2 unpack4.l	7 1 0 0 2 2 1)
+
+(I-I2 pmin1.u	7 0 0 0 2 1 0)
+(I-I2 pmax1.u	7 0 0 0 2 1 1)
+(I-I2 pmin2	7 0 1 0 2 3 0)
+(I-I2 pmax2	7 0 1 0 2 3 1)
+
+(I-I2 psad1	7 0 0 0 2 3 2)
+
+(define-pmacro (I-I3 mnemonic op za zb ve x2a x2b x2c)
+  (dni mnemonic
+       (.str "Multimedia Mux1, " mnemonic)
+       ((FORMAT I3))
+       (.str mnemonic " $r1=$r2,$mbtype4")
+       (+ (f-opcode op) (f-36-1 za) (f-35-2 x2a) (f-33-1 zb) (f-32-1 ve)
+	  (f-31-2 x2c) (f-29-2 x2b) ign_27_4 mbtype4 r2 r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-I3 mux1	7 0 0 0 3 2 2)
+
+(define-pmacro (I-I4 mnemonic op za zb ve x2a x2b x2c)
+  (dni mnemonic
+       (.str "Multimedia Mux2, " mnemonic)
+       ((FORMAT I4))
+       (.str mnemonic " $r1=$r2,$mhtype8")
+       (+ (f-opcode op) (f-36-1 za) (f-35-2 x2a) (f-33-1 zb) (f-32-1 ve)
+	  (f-31-2 x2c) (f-29-2 x2b) mhtype8 r2 r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-I4 mux2	7 0 1 0 3 2 2)
+
+(define-pmacro (I-I5 mnemonic op za zb ve x2a x2b x2c)
+  (dni mnemonic
+       (.str "Shift Right, variable, " mnemonic)
+       ((FORMAT I5))
+       (.str mnemonic " $r1=$r3,$r2")
+       (+ (f-opcode op) (f-36-1 za) (f-35-2 x2a) (f-33-1 zb) (f-32-1 ve)
+	  (f-31-2 x2c) (f-29-2 x2b) ign_27_1 r3 r2 r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-I5 pshr2	7 0 1 0 0 2 0)
+(I-I5 pshr4	7 1 0 0 0 2 0)
+(I-I5 shr	7 1 1 0 0 2 0)
+
+(I-I5 pshr2.u	7 0 1 0 0 0 0)
+(I-I5 pshr4.u	7 1 0 0 0 0 0)
+(I-I5 shr.u	7 1 1 0 0 0 0)
+
+(define-pmacro (I-I6 mnemonic op za zb ve x2a x2b x2c)
+  (dni (.sym mnemonic "i")
+       (.str "Shift Right, fixed, " mnemonic)
+       ((FORMAT I6))
+       (.str mnemonic " $r1=$r3,$count5")
+       (+ (f-opcode op) (f-36-1 za) (f-35-2 x2a) (f-33-1 zb) (f-32-1 ve)
+	  (f-31-2 x2c) (f-29-2 x2b) ign_27_1 r3 ign_19_1 count5 ign_13_1
+	  r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-I6 pshr2	7 0 1 0 1 3 0)
+(I-I6 pshr4	7 1 0 0 1 3 0)
+(I-I6 pshr2.u	7 0 1 0 1 1 0)
+(I-I6 pshr4.u	7 1 0 0 1 1 0)
+
+(define-pmacro (I-I7 mnemonic op za zb ve x2a x2b x2c)
+  (dni mnemonic
+       (.str "Shift Left, variable, " mnemonic)
+       ((FORMAT I7))
+       (.str mnemonic " $r1=$r2,$r3")
+       (+ (f-opcode op) (f-36-1 za) (f-35-2 x2a) (f-33-1 zb) (f-32-1 ve)
+	  (f-31-2 x2c) (f-29-2 x2b) ign_27_1 r3 r2 r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-I7 pshl2	7 0 1 0 0 0 1)
+(I-I7 pshl4	7 1 0 0 0 0 1)
+(I-I7 shl	7 1 1 0 0 0 1)
+
+(define-pmacro (I-I8 mnemonic op za zb ve x2a x2b x2c)
+  (dni (.sym mnemonic "i")
+       (.str "Shift Left, fixed, " mnemonic)
+       ((FORMAT I8))
+       (.str mnemonic " $r1=$r2,$ccount5")
+       (+ (f-opcode op) (f-36-1 za) (f-35-2 x2a) (f-33-1 zb) (f-32-1 ve)
+	  (f-31-2 x2c) (f-29-2 x2b) ign_27_3 ccount5  r2 r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-I8 pshl2	7 0 1 0 0 0 1)
+(I-I8 pshl4	7 1 0 0 0 0 1)
+
+(define-pmacro (I-I9 mnemonic op za zb ve x2a x2b x2c)
+  (dni mnemonic
+       (.str "Population Count, " mnemonic)
+       ((FORMAT I9))
+       (.str mnemonic " $r1=$r3")
+       (+ (f-opcode op) (f-36-1 za) (f-35-2 x2a) (f-33-1 zb) (f-32-1 ve)
+	  (f-31-2 x2c) (f-29-2 x2b) ign_27_1 r3 (f-19-7 0) r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-I9 popcnt	7 0 1 0 1 1 2)
+
+(define-pmacro (I-I10 mnemonic op x2 x)
+  (dni mnemonic
+       (.str "Shift Right Pair, " mnemonic)
+       ((FORMAT I10))
+       (.str mnemonic " $r1=$r2,$r3,$count6")
+       (+ (f-opcode op) ign_36_1 (f-35-2 x2) (f-33-1 x) count6 r3 r2 r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-I10 shrp	5 3 0)
+
+(define-pmacro (I-I11 mnemonic op x2 x y)
+  (dni mnemonic
+       (.str "Extract, " mnemonic)
+       ((FORMAT I11))
+       (.str mnemonic " $r1=$r3,$pos6,$len6")
+       (+ (f-opcode op) ign_36_1 (f-35-2 x2) (f-33-1 x) (f-13-1 y)
+	  r3 pos6 len6 r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-I11 extr.u	5 1 0 0)
+(I-I11 extr	5 1 0 1)
+
+(define-pmacro (I-I12 mnemonic op x2 x y)
+  (dni mnemonic
+       (.str "Zero and Deposit, " mnemonic)
+       ((FORMAT I12))
+       (.str mnemonic " $r1=$r2,$cpos6a,$len6")
+       (+ (f-opcode op) ign_36_1 (f-35-2 x2) (f-33-1 x) (f-26-1 y)
+	  r2 cpos6a len6 r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-I12 dep.z	5 1 1 0)
+
+(define-pmacro (I-I13 mnemonic op x2 x y)
+  (dni (.sym mnemonic "i")
+       (.str "Zero and Deposit Immediate, " mnemonic)
+       ((FORMAT I13))
+       (.str mnemonic " $r1=$imm8,$cpos6a,$len6")
+       (+ (f-opcode op) (f-35-2 x2) (f-33-1 x) (f-26-1 y)
+	  imm8 cpos6a len6 r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-I13 dep.z	5 1 1 0)
+
+(define-pmacro (I-I14 mnemonic op x2 x)
+  (dni (.sym mnemonic "i")
+       (.str "Deposit Immediate, " mnemonic)
+       ((FORMAT I14))
+       (.str mnemonic " $r1=$imm1,$r3,$cpos6b,$len6")
+       (+ (f-opcode op) (f-35-2 x2) (f-33-1 x) ign_13_1
+	  imm1 r3 cpos6b len6 r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-I14 dep	5 3 1)
+
+(define-pmacro (I-I15 mnemonic op)
+  (dni mnemonic
+       (.str "Deposit, " mnemonic)
+       ((FORMAT I15))
+       (.str mnemonic " $r1=$r2,$r3,$cpos6c,$len4")
+       (+ (f-opcode op) cpos6c len4 r2 r3 r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-I15 dep	4)
+
+(define-pmacro (I-I16 mnemonic ctype-attr op x2 ta tb y c)
+  (dni mnemonic
+       (.str "Test Bit, " mnemonic)
+       ((FORMAT I16) (FIELD-CTYPE ctype-attr))
+       (.str mnemonic " $p1,$p2=$r3,$pos6")
+       (+ (f-opcode op) (f-36-1 tb) (f-35-2 x2) (f-33-1 ta) (f-13-1 y)
+	  (f-12-1 c) p2 r3 pos6 p1 qp)
+       ()
+       ()
+       )
+)
+
+(define-pmacro (I-I16-ctype mnemonic ctype op x2 ta tb y c)
+  (I-I16 (.sym mnemonic
+	       (.eval (if (eq? (string-length ctype) 0) "" "."))
+	       ctype)
+	 (.eval (if (eq? (string-length ctype) 0) 'NONE
+		    (string->symbol ctype)))
+	 op x2 ta tb y c)
+)
+
+(I-I16-ctype tbit.z  ""		5 0 0 0 0 0)
+(I-I16-ctype tbit.z  "unc"	5 0 0 0 0 1)
+(I-I16-ctype tbit.z  "and"	5 0 0 1 0 0)
+(I-I16-ctype tbit.nz "and"	5 0 0 1 0 1)
+(I-I16-ctype tbit.z  "or"	5 0 1 0 0 0)
+(I-I16-ctype tbit.nz "or"	5 0 1 0 0 1)
+(I-I16-ctype tbit.z  "or.andcm"	5 0 1 1 0 0)
+(I-I16-ctype tbit.nz "or.andcm"	5 0 1 1 0 1)
+
+(define-pmacro (I-I17 mnemonic ctype-attr op x2 ta tb y c)
+  (dni mnemonic
+       (.str "Test Bit, " mnemonic)
+       ((FORMAT I17) (FIELD-CTYPE ctype-attr))
+       (.str mnemonic " $p1,$p2=$r3")
+       (+ (f-opcode op) (f-36-1 tb) (f-35-2 x2) (f-33-1 ta) (f-13-1 y)
+	  (f-12-1 c) p2 r3 ign_19_6 p1 qp)
+       ()
+       ()
+       )
+)
+
+(define-pmacro (I-I17-ctype mnemonic ctype op x2 ta tb y c)
+  (I-I17 (.sym mnemonic
+	       (.eval (if (eq? (string-length ctype) 0) "" "."))
+	       ctype)
+	 (.eval (if (eq? (string-length ctype) 0) 'NONE
+		    (string->symbol ctype)))
+	 op x2 ta tb y c)
+)
+
+(I-I17-ctype tnat.z  ""		5 0 0 0 0 0)
+(I-I17-ctype tnat.z  "unc"	5 0 0 0 0 1)
+(I-I17-ctype tnat.z  "and"	5 0 0 1 0 0)
+(I-I17-ctype tnat.nz "and"	5 0 0 1 0 1)
+(I-I17-ctype tnat.z  "or"	5 0 1 0 0 0)
+(I-I17-ctype tnat.nz "or"	5 0 1 0 0 1)
+(I-I17-ctype tnat.z  "or.andcm"	5 0 1 1 0 0)
+(I-I17-ctype tnat.nz "or.andcm"	5 0 1 1 0 1)
+
+(define-pmacro (I-I18 mnemonic op vc)
+  (dni mnemonic
+       (.str "Move Long Immediate, " mnemonic)
+       ((FORMAT I18))
+       (.str mnemonic " $r1=$imm64")
+       (+ (f-opcode op) (f-20-1 vc) r1 imm64 qp)
+       ()
+       ()
+       )
+)
+
+(I-I18 movl	6 0)
+
+(define-pmacro (I-I19 mnemonic op x3 x6)
+  (dni mnemonic
+       (.str "Break/Nop, " mnemonic)
+       ((FORMAT I19))
+       (.str mnemonic " $imm21")
+       (+ (f-opcode op) (f-35-3 x3) (f-32-6 x6) ign_26_1 imm21 qp)
+       ()
+       ()
+       )
+)
+
+(I-I19 break.i	0 0 0)
+(I-I19 nop.i	0 0 1)
+
+(define-pmacro (I-I20 mnemonic op x3)
+  (dni mnemonic
+       (.str "Integer Speculation Check, " mnemonic)
+       ((FORMAT I20))
+       (.str mnemonic " $r2,$tgt25a")
+       (+ (f-opcode op) (f-35-3 x3) tgt25a r2 qp)
+       ()
+       ()
+       )
+)
+
+(I-I20 chk.s.i	0 1)
+
+(define-pmacro (I-I21 mnemonic op x3 x)
+  (dni (.sym mnemonic _tbr)
+       (.str "Move to BR, " mnemonic)
+       ((FORMAT I21))
+       (.str mnemonic
+	     "$movbr_mwh$movbr_ih $b1=$r2,$tag13a")
+       (+ (f-opcode op) (f-35-3 x3) movbr_ih (f-22-1 x) movbr_mwh
+	  (f-12-1 x) (f-11-3 x3) ign_36_1 b1 r2 tag13a qp)
+       ()
+       ()
+       )
+)
+
+(I-I21 mov	0 7 0)
+(I-I21 mov.ret	0 7 1)
+
+(define-pmacro (I-I22 mnemonic op x3 x6)
+  (dni (.sym mnemonic _fbr)
+       (.str "Move from BR, " mnemonic)
+       ((FORMAT I22))
+       (.str mnemonic " $r1=$b2")
+       (+ (f-opcode op) (f-35-3 x3) (f-32-6 x6) ign_36_1 ign_26_11
+	  r1 b2 qp)
+       ()
+       ()
+       )
+)
+
+(I-I22 mov	0 0 #x31)
+
+(define-pmacro (I-I23 mnemonic op x3)
+  (dni (.sym mnemonic _tpr)
+       (.str "Move to PR, reg, " mnemonic)
+       ((FORMAT I23))
+       (.str mnemonic " pr=$r2,$imm17")
+       (+ (f-opcode op) (f-35-3 x3) ign_32_1 ign_23_4 r2 imm17 qp)
+       ()
+       ()
+       )
+)
+
+(I-I23 mov	0 3)
+
+(define-pmacro (I-I24 mnemonic op x3)
+  (dni (.sym mnemonic _tpri)
+       (.str "Move to PR, imm, " mnemonic)
+       ((FORMAT I24))
+       (.str mnemonic " pr.rot=$imm44")
+       (+ (f-opcode op) (f-35-3 x3) imm44 qp)
+       ()
+       ()
+       )
+)
+
+(I-I24 mov	0 2)
+
+(define-pmacro (I-I25 mnemonic src op x3 x6)
+  (dni (.sym mnemonic _f src)
+       (.str "Move from Pred/IP, " mnemonic)
+       ((FORMAT I25))
+       (.str mnemonic " $r1=" src)
+       (+ (f-opcode op) (f-35-3 x3) (f-32-6 x6) ign_26_7 ign_19_7 r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-I25 mov ip	0 0 #x30)
+(I-I25 mov pr	0 0 #x33)
+
+(define-pmacro (I-I26 mnemonic op x3 x6)
+  (dni (.sym mnemonic _tar)
+       (.str "Move to AR, reg, " mnemonic)
+       ((FORMAT I26))
+       (.str mnemonic " $ar3=$r2")
+       (+ (f-opcode op) (f-35-3 x3) (f-32-6 x6) ign_36_1 ign_12_7 ar3 r2 qp)
+       ()
+       ()
+       )
+)
+
+(I-I26 mov.i	0 0 #x2A)
+
+(define-pmacro (I-I27 mnemonic op x3 x6)
+  (dni (.sym mnemonic _tari)
+       (.str "Move to AR, imm, " mnemonic)
+       ((FORMAT I27))
+       (.str mnemonic " $ar3=$imm8")
+       (+ (f-opcode op) (f-35-3 x3) (f-32-6 x6) ign_12_7 ar3 imm8 qp)
+       ()
+       ()
+       )
+)
+
+(I-I27 mov.i	0 0 #x0A)
+
+(define-pmacro (I-I28 mnemonic op x3 x6)
+  (dni (.sym mnemonic _far)
+       (.str "Move from AR, " mnemonic)
+       ((FORMAT I28))
+       (.str mnemonic " $r1=$ar3")
+       (+ (f-opcode op) (f-35-3 x3) (f-32-6 x6) ign_36_1 ign_19_7 ar3 r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-I28 mov.i	0 0 #x32)
+
+(define-pmacro (I-I29 mnemonic op x3 x6)
+  (dni mnemonic
+       (.str "Sign/Zero Extend/Compute Zero Index, " mnemonic)
+       ((FORMAT I29))
+       (.str mnemonic " $r1=$r3")
+       (+ (f-opcode op) (f-35-3 x3) (f-32-6 x6) ign_36_1 ign_19_7 r3 r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-I29 zxt1	0 0 #x10)
+(I-I29 zxt2	0 0 #x11)
+(I-I29 zxt4	0 0 #x12)
+
+(I-I29 sxt1	0 0 #x14)
+(I-I29 sxt2	0 0 #x15)
+(I-I29 sxt4	0 0 #x16)
+
+(I-I29 czx1.l	0 0 #x18)
+(I-I29 czx2.l	0 0 #x19)
+(I-I29 czx1.r	0 0 #x1C)
+(I-I29 czx2.r	0 0 #x1D)
+
+;;; "M" Format Instruction definitions.
+
+(define-pmacro (apply-ildspec macro mnemonic x6-2)
+  (begin
+    (.apply macro (.splice mnemonic		x6-2))
+    (.apply macro (.splice (.sym mnemonic .s)	(.eval (+ x6-2 #x04))))
+    (.apply macro (.splice (.sym mnemonic .a)	(.eval (+ x6-2 #x08))))
+    (.apply macro (.splice (.sym mnemonic .sa)	(.eval (+ x6-2 #x0C))))
+    (.apply macro (.splice (.sym mnemonic .bias) (.eval (+ x6-2 #x10))))
+    (.apply macro (.splice (.sym mnemonic .acq)  (.eval (+ x6-2 #x14))))
+    (.apply macro (.splice (.sym mnemonic .c.clr) (.eval (+ x6-2 #x20))))
+    (.apply macro (.splice (.sym mnemonic .c.nc)  (.eval (+ x6-2 #x24))))
+    (.apply macro (.splice (.sym mnemonic .c.clr.acq)  (.eval (+ x6-2 #x28))))
+    )
+)
+
+(define-pmacro (I-M1 mnemonic op m x x6)
+  (dni mnemonic
+       (.str "Integer Load, " mnemonic)
+       ((FORMAT M1))
+       (.str mnemonic "$ldhint $r1=[$r3]")
+       (+ (f-opcode op) (f-36-1 m) (f-35-6 x6) ldhint (f-27-1 x)
+	  r3 r1 ign_19_7 qp)
+       ()
+       ()
+       )
+)
+
+(apply-ildspec
+ (.pmacro (mnemonic x6)
+	  (I-M1 mnemonic 4 0 0 x6))
+ ld1 0)
+
+(apply-ildspec
+ (.pmacro (mnemonic x6)
+	  (I-M1 mnemonic 4 0 0 x6))
+ ld2 1)
+
+(apply-ildspec
+ (.pmacro (mnemonic x6)
+	  (I-M1 mnemonic 4 0 0 x6))
+ ld4 2)
+
+(apply-ildspec
+ (.pmacro (mnemonic x6)
+	  (I-M1 mnemonic 4 0 0 x6))
+ ld8 3)
+
+(I-M1 ld8.fill 4 0 0 #x1B)
+
+(define-pmacro (I-M2 mnemonic op m x x6)
+  (dni (.sym mnemonic .ir)
+       (.str "Integer Load, incr reg, " mnemonic)
+       ((FORMAT M2))
+       (.str mnemonic "$ldhint $r1=[$r3],$r2")
+       (+ (f-opcode op) (f-36-1 m) (f-35-6 x6) ldhint (f-27-1 x)
+	  r3 r2 r1 qp)
+       ()
+       ()
+       )
+)
+
+(apply-ildspec
+ (.pmacro (mnemonic x6)
+	  (I-M2 mnemonic 4 1 0 x6))
+ ld1 0)
+
+(apply-ildspec
+ (.pmacro (mnemonic x6)
+	  (I-M2 mnemonic 4 1 0 x6))
+ ld2 1)
+
+(apply-ildspec
+ (.pmacro (mnemonic x6)
+	  (I-M2 mnemonic 4 1 0 x6))
+ ld4 2)
+
+(apply-ildspec
+ (.pmacro (mnemonic x6)
+	  (I-M2 mnemonic 4 1 0 x6))
+ ld8 3)
+
+(I-M2 ld8.fill 4 1 0 #x1B)
+
+(define-pmacro (I-M3 mnemonic op x6)
+  (dni (.sym mnemonic .ii)
+       (.str "Integer Load, incr imm, " mnemonic)
+       ((FORMAT M3))
+       (.str mnemonic "$ldhint $r1=[$r3],$imm9a")
+       (+ (f-opcode op) (f-35-6 x6) ldhint r3 imm9a r1 qp)
+       ()
+       ()
+       )
+)
+
+(apply-ildspec
+ (.pmacro (mnemonic x6)
+	  (I-M3 mnemonic 5 x6))
+ ld1 0)
+
+(apply-ildspec
+ (.pmacro (mnemonic x6)
+	  (I-M3 mnemonic 5 x6))
+ ld2 1)
+
+(apply-ildspec
+ (.pmacro (mnemonic x6)
+	  (I-M3 mnemonic 5 x6))
+ ld4 2)
+
+(apply-ildspec
+ (.pmacro (mnemonic x6)
+	  (I-M3 mnemonic 5 x6))
+ ld8 3)
+
+(I-M3 ld8.fill 5 #x1B)
+
+(define-pmacro (apply-istspec macro mnemonic x6-2)
+  (begin
+    (.apply macro (.splice mnemonic		x6-2))
+    (.apply macro (.splice (.sym mnemonic .rel)	(.eval (+ x6-2 #x04))))
+    )
+)
+
+(define-pmacro (I-M4 mnemonic op m x x6)
+  (dni mnemonic
+       (.str "Integer Store, " mnemonic)
+       ((FORMAT M4))
+       (.str mnemonic "$sthint [$r3]=$r2")
+       (+ (f-opcode op) (f-36-1 m) (f-35-6 x6) (f-27-1 x)
+	  sthint r3 r2 ign_12_7 qp)
+       ()
+       ()
+       )
+)
+
+(apply-istspec
+ (.pmacro (mnemonic x6)
+	  (I-M4 mnemonic 4 0 0 x6))
+ st1 #x30)
+
+(apply-istspec
+ (.pmacro (mnemonic x6)
+	  (I-M4 mnemonic 4 0 0 x6))
+ st2 #x31)
+
+(apply-istspec
+ (.pmacro (mnemonic x6)
+	  (I-M4 mnemonic 4 0 0 x6))
+ st4 #x32)
+
+(apply-istspec
+ (.pmacro (mnemonic x6)
+	  (I-M4 mnemonic 4 0 0 x6))
+ st8 #x33)
+
+(I-M4 st8.spill 4 0 0 #x3B)
+
+(define-pmacro (I-M5 mnemonic op x6)
+  (dni (.sym mnemonic .ii)
+       (.str "Integer Store, incr imm, " mnemonic)
+       ((FORMAT M5))
+       (.str mnemonic "$sthint [$r3]=$r2,$imm9b")
+       (+ (f-opcode op) (f-35-6 x6) sthint r3 imm9b r2 qp)
+       ()
+       ()
+       )
+)
+
+(apply-istspec
+ (.pmacro (mnemonic x6)
+	  (I-M5 mnemonic 5 x6))
+ st1 #x30)
+
+(apply-istspec
+ (.pmacro (mnemonic x6)
+	  (I-M5 mnemonic 5 x6))
+ st2 #x31)
+
+(apply-istspec
+ (.pmacro (mnemonic x6)
+	  (I-M5 mnemonic 5 x6))
+ st4 #x32)
+
+(apply-istspec
+ (.pmacro (mnemonic x6)
+	  (I-M5 mnemonic 5 x6))
+ st8 #x33)
+
+(I-M5 st8.spill 5 #x3B)
+
+(define-pmacro (apply-fldspec macro mnemonic x6-2)
+  (begin
+    (.apply macro (.splice mnemonic		  x6-2))
+    (.apply macro (.splice (.sym mnemonic .s)     (.eval (+ x6-2 #x04))))
+    (.apply macro (.splice (.sym mnemonic .a)     (.eval (+ x6-2 #x08))))
+    (.apply macro (.splice (.sym mnemonic .sa)    (.eval (+ x6-2 #x0C))))
+    (.apply macro (.splice (.sym mnemonic .c.clr) (.eval (+ x6-2 #x20))))
+    (.apply macro (.splice (.sym mnemonic .c.nc)  (.eval (+ x6-2 #x24))))
+    )
+)
+
+(define-pmacro (I-M6 mnemonic op m x x6)
+  (dni mnemonic
+       (.str "Floating-point Load, " mnemonic)
+       ((FORMAT M6))
+       (.str mnemonic "$ldhint $f1=[$r3]")
+       (+ (f-opcode op) (f-36-1 m) (f-35-6 x6) ldhint (f-27-1 x)
+	  r3 f1 ign_19_7 qp)
+       ()
+       ()
+       )
+)
+
+(apply-fldspec
+ (.pmacro (mnemonic x6)
+	  (I-M6 mnemonic 6 0 0 x6))
+ ldfs 2)
+
+(apply-fldspec
+ (.pmacro (mnemonic x6)
+	  (I-M6 mnemonic 6 0 0 x6))
+ ldfd 3)
+
+(apply-fldspec
+ (.pmacro (mnemonic x6)
+	  (I-M6 mnemonic 6 0 0 x6))
+ ldf8 1)
+
+(apply-fldspec
+ (.pmacro (mnemonic x6)
+	  (I-M6 mnemonic 6 0 0 x6))
+ ldfe 0)
+
+(I-M6 ldf.fill	6 0 0 #x1B)
+
+(define-pmacro (I-M7 mnemonic op m x x6)
+  (dni (.sym mnemonic .ir)
+       (.str "Floating-point Load, incr reg, " mnemonic)
+       ((FORMAT M7))
+       (.str mnemonic "$ldhint $f1=[$r3],$r2")
+       (+ (f-opcode op) (f-36-1 m) (f-35-6 x6) ldhint (f-27-1 x)
+	  r3 r2 f1 qp)
+       ()
+       ()
+       )
+)
+
+(apply-fldspec
+ (.pmacro (mnemonic x6)
+	  (I-M7 mnemonic 6 1 0 x6))
+ ldfs 2)
+
+(apply-fldspec
+ (.pmacro (mnemonic x6)
+	  (I-M7 mnemonic 6 1 0 x6))
+ ldfd 3)
+
+(apply-fldspec
+ (.pmacro (mnemonic x6)
+	  (I-M7 mnemonic 6 1 0 x6))
+ ldf8 1)
+
+(apply-fldspec
+ (.pmacro (mnemonic x6)
+	  (I-M7 mnemonic 6 1 0 x6))
+ ldfe 0)
+
+(I-M7 ldf.fill	6 1 0 #x1B)
+
+(define-pmacro (I-M8 mnemonic op x6)
+  (dni (.sym mnemonic .ii)
+       (.str "Floating-point Load, incr imm, " mnemonic)
+       ((FORMAT M8))
+       (.str mnemonic "$ldhint $f1=[$r3],$imm9a")
+       (+ (f-opcode op) (f-35-6 x6) ldhint r3 imm9a f1 qp)
+       ()
+       ()
+       )
+)
+
+(apply-fldspec
+ (.pmacro (mnemonic x6)
+	  (I-M8 mnemonic 7 x6))
+ ldfs 2)
+
+(apply-fldspec
+ (.pmacro (mnemonic x6)
+	  (I-M8 mnemonic 7 x6))
+ ldfd 3)
+
+(apply-fldspec
+ (.pmacro (mnemonic x6)
+	  (I-M8 mnemonic 7 x6))
+ ldf8 1)
+
+(apply-fldspec
+ (.pmacro (mnemonic x6)
+	  (I-M8 mnemonic 7 x6))
+ ldfe 0)
+
+(I-M8 ldf.fill	7 #x1B)
+
+(define-pmacro (I-M9 mnemonic op m x x6)
+  (dni mnemonic
+       (.str "Floating-point Store, " mnemonic)
+       ((FORMAT M9))
+       (.str mnemonic "$sthint [$r3]=$f2")
+       (+ (f-opcode op) (f-36-1 m) (f-35-6 x6) (f-27-1 x)
+	  sthint r3 f2 ign_12_7 qp)
+       ()
+       ()
+       )
+)
+
+(I-M9 stfs		6 0 0 #x32)
+(I-M9 stfd		6 0 0 #x33)
+(I-M9 stf8		6 0 0 #x31)
+(I-M9 stfe		6 0 0 #x30)
+(I-M9 stf.spill		6 0 0 #x3B)
+
+(define-pmacro (I-M10 mnemonic op x6)
+  (dni (.sym mnemonic .ii)
+       (.str "Floating-point Store, incr imm, " mnemonic)
+       ((FORMAT M10))
+       (.str mnemonic "$sthint [$r3]=$f2,$imm9b")
+       (+ (f-opcode op) (f-35-6 x6) sthint r3 imm9b f2 qp)
+       ()
+       ()
+       )
+)
+
+(I-M10 stfs		7 #x32)
+(I-M10 stfd		7 #x33)
+(I-M10 stf8		7 #x31)
+(I-M10 stfe		7 #x30)
+(I-M10 stf.spill	7 #x3B)
+
+(define-pmacro (I-M11 mnemonic op m x x6)
+  (dni mnemonic
+       (.str "Floating-point Load Pair, " mnemonic)
+       ((FORMAT M11))
+       (.str mnemonic "$ldhint $f1,$f2=[$r3]")
+       (+ (f-opcode op) (f-36-1 m) (f-35-6 x6) ldhint (f-27-1 x)
+	  r3 f1 f2 qp)
+       ()
+       ()
+       )
+)
+
+(apply-fldspec
+ (.pmacro (mnemonic x6)
+	  (I-M11 mnemonic 6 0 1 x6))
+ ldfps 2)
+
+(apply-fldspec
+ (.pmacro (mnemonic x6)
+	  (I-M11 mnemonic 6 0 1 x6))
+ ldfpd 3)
+
+(apply-fldspec
+ (.pmacro (mnemonic x6)
+	  (I-M11 mnemonic 6 0 1 x6))
+ ldfp8 1)
+
+(define-pmacro (I-M12 mnemonic n op m x x6)
+  (dni mnemonic
+       (.str "Floating-point Load Pair, incr imm, " mnemonic)
+       ((FORMAT M12))
+       (.str mnemonic "$ldhint $f1,$f2=[$r3]," n)
+       (+ (f-opcode op) (f-36-1 m) (f-35-6 x6) ldhint (f-27-1 x)
+	  r3 f1 f2 qp)
+       ()
+       ()
+       )
+)
+
+(apply-fldspec
+ (.pmacro (mnemonic x6)
+	  (I-M12 mnemonic 8 6 1 1 x6))
+ ldfps 2)
+
+(apply-fldspec
+ (.pmacro (mnemonic x6)
+	  (I-M12 mnemonic 16 6 1 1 x6))
+ ldfpd 3)
+
+(apply-fldspec
+ (.pmacro (mnemonic x6)
+	  (I-M12 mnemonic 16 6 1 1 x6))
+ ldfp8 1)
+
+(define-pmacro (apply-lftype macro mnemonic)
+  (begin
+    (.apply macro (.splice mnemonic			NONE	#x2C))
+    (.apply macro (.splice (.sym mnemonic .excl)	NONE	#x2D))
+    (.apply macro (.splice (.sym mnemonic .fault)	fault	#x2E))
+    (.apply macro (.splice (.sym mnemonic .fault.excl)	fault	#x2F))
+    )
+)
+
+(define-pmacro (I-M13 mnemonic fault-attr op m x x6)
+  (dni (.sym mnemonic)
+       (.str "Line Prefetch, " mnemonic)
+       ((FORMAT M13) (FIELD-LFTYPE fault-attr))
+       (.str mnemonic "$lfhint [$r3]")
+       (+ (f-opcode op) (f-36-1 m) (f-35-6 x6) lfhint (f-27-1 x)
+	  r3 ign_19_7 ign_12_7 qp)
+       ()
+       ()
+       )
+)
+
+(apply-lftype
+ (.pmacro (mnemonic fault-attr x6)
+	  (I-M13 mnemonic fault-attr 6 0 0 x6))
+ lfetch)
+
+(define-pmacro (I-M14 mnemonic fault-attr op m x x6)
+  (dni (.sym mnemonic .ir)
+       (.str "Line Prefetch, incr reg" mnemonic)
+       ((FORMAT M14) (FIELD-LFTYPE fault-attr))
+       (.str mnemonic "$lfhint [$r3],$r2")
+       (+ (f-opcode op) (f-36-1 m) (f-35-6 x6) lfhint (f-27-1 x)
+	  r3 r2 ign_12_7 qp)
+       ()
+       ()
+       )
+)
+
+(apply-lftype
+ (.pmacro (mnemonic fault-attr x6)
+	  (I-M14 mnemonic fault-attr 6 0 0 x6))
+ lfetch)
+
+(define-pmacro (I-M15 mnemonic fault-attr op x6)
+  (dni (.sym mnemonic .ii)
+       (.str "Line Prefetch, incr imm" mnemonic)
+       ((FORMAT M15) (FIELD-LFTYPE fault-attr))
+       (.str mnemonic "$lfhint [$r3],$imm9a")
+       (+ (f-opcode op) (f-35-6 x6) lfhint r3 imm9a ign_12_7 qp)
+       ()
+       ()
+       )
+)
+
+(apply-lftype
+ (.pmacro (mnemonic fault-attr x6)
+	  (I-M15 mnemonic fault-attr 7 x6))
+ lfetch)
+
+(define-pmacro (I-M16 mnemonic extra op m x x6)
+  (dni mnemonic
+       (.str "Exchange/Compare and Exchange, " mnemonic)
+       ((FORMAT M16))
+       (.str mnemonic "$ldhint $r1=[$r3],$r2" extra)
+       (+ (f-opcode op) (f-36-1 m) (f-35-6 x6) (f-27-1 x)
+	  ldhint r3 r2 r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-M16 cmpxchg1.acq ",ar.ccv"	4 0 1 #x00)
+(I-M16 cmpxchg2.acq ",ar.ccv"	4 0 1 #x01)
+(I-M16 cmpxchg4.acq ",ar.ccv"	4 0 1 #x02)
+(I-M16 cmpxchg8.acq ",ar.ccv"	4 0 1 #x03)
+
+(I-M16 cmpxchg1.rel ",ar.ccv"	4 0 1 #x04)
+(I-M16 cmpxchg2.rel ",ar.ccv"	4 0 1 #x05)
+(I-M16 cmpxchg4.rel ",ar.ccv"	4 0 1 #x06)
+(I-M16 cmpxchg8.rel ",ar.ccv"	4 0 1 #x07)
+
+(I-M16 xchg1.rel ""		4 0 1 #x08)
+(I-M16 xchg2.rel ""		4 0 1 #x09)
+(I-M16 xchg4.rel ""		4 0 1 #x0A)
+(I-M16 xchg8.rel ""		4 0 1 #x0B)
+
+(define-pmacro (I-M17 mnemonic op m x x6)
+  (dni mnemonic
+       (.str "Fetch and Add, " mnemonic)
+       ((FORMAT M17))
+       (.str mnemonic "$ldhint $r1=[$r3],$inc3")
+       (+ (f-opcode op) (f-36-1 m) (f-35-6 x6) (f-27-1 x)
+	  ldhint r3 ign_19_4 inc3 r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-M17 fetchadd4.acq		4 0 1 #x12)
+(I-M17 fetchadd8.acq		4 0 1 #x13)
+(I-M17 fetchadd4.rel		4 0 1 #x16)
+(I-M17 fetchadd8.rel		4 0 1 #x17)
+
+(define-pmacro (I-M18 mnemonic op m x x6)
+  (dni mnemonic
+       (.str "Set FR, " mnemonic)
+       ((FORMAT M18))
+       (.str mnemonic " $f1=$r2")
+       (+ (f-opcode op) (f-36-1 m) (f-35-6 x6) (f-27-1 x)
+	  ign_26_7 ign_29_2 r2 f1 qp)
+       ()
+       ()
+       )
+)
+
+(I-M18 setf.sig			6 0 1 #x1C)
+(I-M18 setf.exp			6 0 1 #x1D)
+(I-M18 setf.s			6 0 1 #x1E)
+(I-M18 setf.d			6 0 1 #x1F)
+
+(define-pmacro (I-M19 mnemonic op m x x6)
+  (dni mnemonic
+       (.str "Get FR, " mnemonic)
+       ((FORMAT M19))
+       (.str mnemonic " $r1=$f2")
+       (+ (f-opcode op) (f-36-1 m) (f-35-6 x6) (f-27-1 x)
+	  ign_26_7 ign_29_2 f2 r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-M19 getf.sig			4 0 1 #x1C)
+(I-M19 getf.exp			4 0 1 #x1D)
+(I-M19 getf.s			4 0 1 #x1E)
+(I-M19 getf.d			4 0 1 #x1F)
+
+(define-pmacro (I-M20 mnemonic op x3)
+  (dni mnemonic
+       (.str "Integer Speculation Check, " mnemonic)
+       ((FORMAT M20))
+       (.str mnemonic " $r2,$tgt25a")
+       (+ (f-opcode op) (f-35-3 x3) r2 tgt25a qp)
+       ()
+       ()
+       )
+)
+
+(I-M20 chk.s.m			1 1)
+
+(define-pmacro (I-M21 mnemonic op x3)
+  (dni (.sym mnemonic .f)
+       (.str "Floating-point Speculation Check, " mnemonic)
+       ((FORMAT M21))
+       (.str mnemonic " $f2,$tgt25a")
+       (+ (f-opcode op) (f-35-3 x3) f2 tgt25a qp)
+       ()
+       ()
+       )
+)
+
+(I-M21 chk.s			1 3)
+
+(define-pmacro (I-M22 mnemonic op x3)
+  (dni mnemonic
+       (.str "Integer Advanced Load Check, " mnemonic)
+       ((FORMAT M22))
+       (.str mnemonic " $r1,$tgt25c")
+       (+ (f-opcode op) (f-35-3 x3) tgt25c r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-M22 chk.a.nc			0 4)
+(I-M22 chk.a.clr		0 5)
+
+(define-pmacro (I-M23 mnemonic op x3)
+  (dni (.sym mnemonic .f)
+       (.str "Floating-point Advanced Load Check, " mnemonic)
+       ((FORMAT M23))
+       (.str mnemonic " $f1,$tgt25c")
+       (+ (f-opcode op) (f-35-3 x3) tgt25c f1 qp)
+       ()
+       ()
+       )
+)
+
+(I-M22 chk.a.nc			0 6)
+(I-M22 chk.a.clr		0 7)
+
+(define-pmacro (I-M24 mnemonic op x3 x4 x2)
+  (dni mnemonic
+       (.str "Sync/Fence/Serialize/ALAT Control, " mnemonic)
+       ((FORMAT M24))
+       (.str mnemonic)
+       (+ (f-opcode op) (f-35-3 x3) (f-32-2 x2) (f-30-4 x4)
+	  ign_36_1 ign_26_7 ign_19_7 ign_12_7 qp)
+       ()
+       ()
+       )
+)
+
+(I-M24 invala			0 0 0 1)
+(I-M24 fwb			0 0 0 2)
+(I-M24 mf			0 0 2 2)
+(I-M24 mf.a			0 0 3 2)
+(I-M24 srlz.d			0 0 0 3)
+(I-M24 srlz.i			0 0 1 3)
+(I-M24 sync.i			0 0 3 3)
+
+(define-pmacro (I-M25 mnemonic op x3 x4 x2)
+  (dni mnemonic
+       (.str "RSE Control, " mnemonic)
+       ((FORMAT M25))
+       (.str mnemonic)
+       (+ (f-opcode op) (f-35-3 x3) (f-32-2 x2) (f-30-4 x4)
+	  ign_36_1 ign_26_7 ign_19_7 ign_12_7 (f-qp 0))
+       ()
+       ()
+       )
+)
+
+(I-M25 flushrs			0 0 #xC 0)
+(I-M25 loadrs			0 0 #xA 0)
+
+(define-pmacro (I-M26 mnemonic op x3 x4 x2)
+  (dni mnemonic
+       (.str "Integer ALAT Entry Invalidate, " mnemonic)
+       ((FORMAT M26))
+       (.str mnemonic " $r1")
+       (+ (f-opcode op) (f-35-3 x3) (f-32-2 x2) (f-30-4 x4)
+	  ign_36_1 ign_26_7 ign_19_7 r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-M26 invala.e			0 0 2 1)
+
+(define-pmacro (I-M27 mnemonic op x3 x4 x2)
+  (dni (.sym mnemonic .f)
+       (.str "Floating-point ALAT Entry Invalidate, " mnemonic)
+       ((FORMAT M27))
+       (.str mnemonic " $f1")
+       (+ (f-opcode op) (f-35-3 x3) (f-32-2 x2) (f-30-4 x4)
+	  ign_36_1 ign_26_7 ign_19_7 f1 qp)
+       ()
+       ()
+       )
+)
+
+(I-M27 invala.e			0 0 3 1)
+
+(define-pmacro (I-M28 mnemonic op x3 x6)
+  (dni mnemonic
+       (.str "Flush Cache/Purge Translation Cache Entry, " mnemonic)
+       ((FORMAT M28))
+       (.str mnemonic " $r3")
+       (+ (f-opcode op) (f-35-3 x3) (f-32-6 x6)
+	  ign_36_1 r3 ign_19_7 ign_12_7 qp)
+       ()
+       ()
+       )
+)
+
+(I-M28 fc			1 0 #x30)
+(I-M28 ptc.e			1 0 #x34)
+
+(define-pmacro (I-M29 mnemonic op x3 x6)
+  (dni (.sym mnemonic _tar)
+       (.str "Move to AR, reg, " mnemonic)
+       ((FORMAT M29))
+       (.str mnemonic " $ar3=$r2")
+       (+ (f-opcode op) (f-35-3 x3) (f-32-6 x6)
+	  ign_36_1 ar3 r2 ign_12_7 qp)
+       ()
+       ()
+       )
+)
+
+(I-M29 mov.m	1 0 #x2A)
+
+(define-pmacro (I-M30 mnemonic op x3 x4 x2)
+  (dni (.sym mnemonic _tari)
+       (.str "Move to AR, imm," mnemonic)
+       ((FORMAT M30))
+       (.str mnemonic " $ar3=$imm8")
+       (+ (f-opcode op) (f-35-3 x3) (f-32-2 x2) (f-30-4 x4)
+	  ar3 imm8 ign_12_7 qp)
+       ()
+       ()
+       )
+)
+
+(I-M30 mov.m	0 0 8 2)
+
+(define-pmacro (I-M31 mnemonic op x3 x6)
+  (dni (.sym mnemonic _far)
+       (.str "Move from AR, " mnemonic)
+       ((FORMAT M31))
+       (.str mnemonic " $r1=$ar3")
+       (+ (f-opcode op) (f-35-3 x3) (f-32-6 x6) ign_36_1 ign_19_7 ar3 r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-M31 mov.m	1 0 #x22)
+
+(define-pmacro (I-M32 mnemonic op x3 x6)
+  (dni (.sym mnemonic _tcr)
+       (.str "Move to CR, " mnemonic)
+       ((FORMAT M32))
+       (.str mnemonic " $cr3=$r2")
+       (+ (f-opcode op) (f-35-3 x3) (f-32-6 x6)
+	  ign_36_1 cr3 r2 ign_12_7 qp)
+       ()
+       ()
+       )
+)
+
+(I-M32 mov	1 0 #x2C)
+
+(define-pmacro (I-M33 mnemonic op x3 x6)
+  (dni (.sym mnemonic _fcr)
+       (.str "Move from CR, " mnemonic)
+       ((FORMAT M33))
+       (.str mnemonic " $r1=$cr3")
+       (+ (f-opcode op) (f-35-3 x3) (f-32-6 x6)
+	  ign_36_1 cr3 ign_19_7 r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-M33 mov	1 0 #x24)
+
+(define-pmacro (I-M34 mnemonic op x3)
+  (dni mnemonic
+       (.str "Allocate Register Stack Frame, " mnemonic)
+       ((FORMAT M34))
+       (.str mnemonic " $r1=ar.pfs,$sorsolsof")
+       (+ (f-opcode op) (f-35-3 x3) ign_36_1 ign_32_2
+	  sorsolsof r1 (f-qp 0))
+       ()
+       ()
+       )
+)
+
+(I-M34 alloc	1 6)
+
+(define-pmacro (I-M35 mnemonic which op x3 x6)
+  (dni (.sym mnemonic _t which)
+       (.str "Move to PSR, " mnemonic)
+       ((FORMAT M35))
+       (.str mnemonic " " which "=$r2")
+       (+ (f-opcode op) (f-35-3 x3) (f-32-6 x6) ign_36_1
+	  r2 ign_26_7 ign_12_7 qp)
+       ()
+       ()
+       )
+)
+
+(I-M35 mov psr.l	1 0 #x2D)
+(I-M35 mov psr.um	1 0 #x29)
+
+(define-pmacro (I-M36 mnemonic which op x3 x6)
+  (dni (.sym mnemonic _f which)
+       (.str "Move from PSR, " mnemonic)
+       ((FORMAT M35))
+       (.str mnemonic " $r1=" which)
+       (+ (f-opcode op) (f-35-3 x3) (f-32-6 x6) ign_36_1
+	  ign_26_7 ign_19_7 r1 qp)
+       ()
+       ()
+       )
+)
+
+(I-M36 mov psr		1 0 #x25)
+(I-M36 mov psr.um	1 0 #x21)
+
+(define-pmacro (I-M37 mnemonic op x3 x4 x2)
+  (dni mnemonic
+       (.str "Break/Nop, " mnemonic)
+       ((FORMAT M37))
+       (.str mnemonic " $imm21")
+       (+ (f-opcode op) (f-35-3 x3) (f-32-2 x2) (f-30-4 x4) ign_26_1 imm21 qp)
+       ()
+       ()
+       )
+)
+
+(I-M37 break.m		0 0 0 0)
+(I-M37 nop.m		0 0 1 0)
+

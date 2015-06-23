@@ -1,0 +1,131 @@
+# Copyright (c) 1997, 2000 Cygnus Support
+#
+# The authors hereby grant permission to use, copy, modify, distribute,
+# and license this software and its documentation for any purpose, provided
+# that existing copyright notices are retained in all copies and that this
+# notice is included verbatim in any distributions. No written agreement,
+# license, or royalty fee is required for any of the authorized uses.
+# Modifications to this software may be copyrighted by their authors
+# and need not follow the licensing terms described here, provided that
+# the new terms are clearly indicated on the first page of each file where
+# they apply.
+
+DESTDIR	=
+VPATH	= @srcdir@
+srcdir	= @srcdir@
+objdir	= .
+srcroot	= $(srcdir)/../..
+objroot	= $(objdir)/../..
+
+prefix		= @prefix@
+exec_prefix	= @exec_prefix@
+
+host_alias		= @host_alias@
+target_alias		= @target_alias@
+program_transform_name	= @program_transform_name@
+
+bindir		= @bindir@
+libdir		= @libdir@
+tooldir		= $(exec_prefix)/$(target_alias)
+
+# Multilib support variables.
+# TOP is used instead of MULTI{BUILD,SRC}TOP.
+MULTIDIRS	=
+MULTISUBDIR	=
+MULTIDO		= true
+MULTICLEAN	= true
+
+INSTALL		= @INSTALL@
+INSTALL_PROGRAM	= @INSTALL_PROGRAM@
+INSTALL_DATA	= @INSTALL_DATA@
+
+SHELL =	/bin/sh
+
+CC	= @CC@
+AS	= @AS@
+AR	= @AR@
+LD	= @LD@
+RANLIB	= @RANLIB@
+
+OBJDUMP	= `if [ -f ${objroot}/../binutils/objdump ] ; \
+	then echo ${objroot}/../binutils/objdump ; \
+	else t='$(program_transform_name)'; echo objdump | sed -e $$t ; fi`
+OBJCOPY	= `if [ -f ${objroot}/../binutils/objcopy ] ; \
+	then echo ${objroot}/../binutils/objcopy ; \
+	else t='$(program_transform_name)'; echo objcopy | sed -e $$t ; fi`
+
+OBJS	= close.o _exit.o environ.o execve.o fork.o fstat.o getpid.o \
+	  isatty.o kill.o link.o lseek.o open.o read.o sbrk.o stat.o \
+	  times.o unlink.o wait.o write.o
+
+OBJS 	+= UART.o
+
+
+BSP_LDFLAGS	= -L${srcdir}
+BSP_BSP		= libnosys.a
+BSP_CRT0	= crt0.o
+BSP_INCLUDES	= UART.h UART_cfg.h interrupts.h modules.h
+BSP_OBJS	= ${OBJS}
+BSP_SCRIPTS	= 
+BSP_INSTALL	= install-bsp
+
+
+ALL_INSTALL_FILES = \
+	${BSP_BSP} ${BSP_CRT0}
+
+# Host specific makefile fragment comes in here.
+@host_makefile_frag@
+
+# Need to augment the definition from host_makefile_frag above.
+INCLUDES += -I$(srcdir)
+
+all: ${ALL_INSTALL_FILES}
+
+#
+# Here's where we build the board support packages for each target.
+#
+${BSP_BSP}: ${BSP_OBJS}
+	${AR} ${ARFLAGS} ${BSP_BSP} ${BSP_OBJS}
+	${RANLIB} ${BSP_BSP}
+
+.c.S:
+	${CC} ${CFLAGS_FOR_TARGET} $(INCLUDES) -c $<
+
+crt0.o: crt0.S
+	$(CC) $(CFLAGS_FOR_TARGET) $(INCLUDES) -c $< -o $@
+
+clean mostlyclean:
+	rm -f a.out core *.i *~ *.o *-test *.srec *.dis *.map *.x $(BSP_BSP)
+
+distclean maintainer-clean realclean: clean
+	rm -f Makefile config.status *~
+
+.PHONY: clean-info doc info install install-bsp install-info
+install: ${BSP_INSTALL}
+
+clean-info:
+doc:
+info:
+
+install-bsp:
+	set -e;
+	@for bsp in ${BSP_BSP}; do \
+	    $(INSTALL_DATA) $${bsp} $(DESTDIR)$(tooldir)/lib${MULTISUBDIR}/$${bsp}; \
+	done
+	@for crt0 in ${BSP_CRT0}; do \
+	    $(INSTALL_DATA) $${crt0} $(DESTDIR)$(tooldir)/lib${MULTISUBDIR}/$${crt0}; \
+	done
+	@for include in ${BSP_INCLUDES}; do \
+	    $(INSTALL_DATA) ${srcdir}/$${include} $(DESTDIR)$(tooldir)/include${MULTISUBDIR}/machine/$${include}; \
+	done
+	@for script in ${BSP_SCRIPTS}; do \
+	    $(INSTALL_DATA) ${srcdir}/$${script} $(DESTDIR)$(tooldir)/lib${MULTISUBDIR}/ldscripts/$${script}; \
+	done
+
+install-info:
+
+Makefile: Makefile.in config.status @host_makefile_frag_path@
+	$(SHELL) config.status
+
+config.status: configure
+	$(SHELL) config.status --recheck

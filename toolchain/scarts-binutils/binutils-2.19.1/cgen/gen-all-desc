@@ -1,0 +1,82 @@
+#! /bin/sh
+# Utility script to generate basic description files for all ports.
+# The main purpose of this script is to have a script that will
+# exercise loading of all the ports.
+
+# Run this script in the src/cgen directory.
+
+# Exit on any error.
+set -e
+
+# For debugging.
+set -x
+
+# List of top-level .cpu files of all ports.
+# ??? Some are missing: ia32, ia64
+# Need to add them after some research.
+# NOTE: Some of these ports are incomplete.
+
+archs="
+cpu/fr30.cpu
+cpu/arm.cpu
+../cpu/cris.cpu
+../cpu/frv.cpu
+cpu/i960.cpu
+cpu/ip2k.cpu
+../cpu/iq2000.cpu
+../cpu/lm32.cpu
+../cpu/m32c.cpu
+../cpu/m32r.cpu
+cpu/m68k.cpu
+cpu/mep.cpu
+../cpu/mt.cpu
+cpu/openrisc.cpu
+cpu/powerpc.cpu
+../cpu/sh.cpu
+cpu/sparc.cpu
+../cpu/xc16x.cpu
+cpu/xstormy16.cpu
+"
+
+if [ ! -f opcodes.scm ]
+then
+    echo "Not in the src/cgen directory." >& 2
+    exit 1
+fi
+
+export builddir=tmp-desc
+
+rm -rf $builddir
+mkdir $builddir
+
+export cgendir=`pwd`
+
+(
+  set -e
+  set -x
+  cd $builddir
+  $cgendir/configure --prefix /tmp/junk --target m32r-elf
+
+  for a in $archs
+  do
+    archfile=../$a
+    arch=$(basename $archfile .cpu)
+
+    # FIXME: Seems like this shouldn't be needed.  Could be wrong though.
+    ISAS="all"
+    MACHS="all"
+    case $arch in
+    arm) ISAS="arm" ;;
+    sh) ISAS="media" ;;
+    sparc) MACHS="sparc-v9" ;; # FIXME: ugh, would rather select on isa
+    esac
+
+    if make desc ARCH=$arch ARCHFILE=$archfile ISAS="$ISAS" MACHS="$MACHS" \
+        CGENFLAGS='-b -v'
+    then
+        echo "File generation for $arch succeeded."
+    else
+        echo "ERROR: File generation for $arch failed."
+    fi
+  done
+)

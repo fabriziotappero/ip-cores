@@ -1,0 +1,104 @@
+Things libgcj hackers should know
+---------------------------------
+
+If you want to hack on the libgcj files you need to be aware of the
+following things. There are probably lots of other things that should be
+explained in this HACKING file. Please add them if you discover them :)
+
+--
+
+libgcj uses GNU Classpath as an upstream provider.  Snapshots of
+Classpath are imported into the libgcj source tree.  Some classes are
+overridden by local versions; these files still appear in the libgcj
+tree.
+
+To import a new release:
+
+- Check out a classpath snapshot
+  I use 'cvs export' for this.  Make a tag to ensure future hackers
+  know exactly what revision was checked out; tags are of the form
+  'libgcj-import-DATE'.
+- Use auto* to create configure, Makefile.in, etc
+  You have to make sure to use the gcc libtool.m4 and gcc lt* scripts
+  cd .../classpath
+  cp ../../lt* .
+  cp ../../config.sub ../../config.guess .
+  aclocal -I m4 -I ../..
+  autoconf
+  autoheader
+  automake
+  rm -rf autom4te.cache
+- Test everything first.  The simplest way to do this is by overlaying
+  the checked out classpath on your gcc tree and then doing a build.
+- Use 'cvs import' to import.  The vendor tag is 'CLASSPATH'.  For the
+  release tag, if this is a released classpath version, use something
+  like 'classpath-import-VERSION'; otherwise something like
+  'classpath-import-DATE'.
+  Be sure to use -ko and -I\!
+- Remove any files that were deleted in Classpath
+- Run 'scripts/makemake.tcl > sources.am' in the source tree
+- Run automake for libgcj
+
+Over time we plan to remove as many of the remaining divergences as
+possible.
+
+File additions and deletions require running scripts/makemake.tcl
+before running automake.
+
+--
+
+In general you should not make any changes in the classpath/
+directory.  Changes here should come via imports from upstream.
+However, there are two (known) exceptions to this rule:
+
+* In an emergency, such as a bootstrap breakage, it is ok to commit a
+  patch provided that the problem is resolved (by fixing a compiler
+  bug or fixing the Classpath bug upstream) somehow and the resolution
+  is later checked in (erasing the local diff).
+
+* On a release branch to fix a bug, where a full-scale import of
+  Classpath is not advisable.
+
+--
+
+You can develop in a GCC tree using a CVS checkout of Classpath, most
+of the time.  (The exceptions are when an incompatible change has been
+made in Classpath and some core part of libgcj has not yet been
+updated.)
+
+The way to set this up is very similar to importing a new version of
+Classpath into the libgcj tree.  In your working tree:
+
+* cd gcc/libjava; rm -rf classpath
+* cvs co classpath
+* cd classpath
+  Now run the auto tools as specified in the import process; then
+  cd ..
+* Run 'scripts/makemake.tcl > sources.am' in the source tree
+* Run automake for libgcj
+
+Now you should be ready to go.
+
+If you are working in a tree like this, you must remember to run
+makemake.tcl and automake whenever you update your embedded classpath
+tree.
+
+--
+
+If you add a class to java.lang, java.io, or java.util
+(including sub-packages, like java.lang.ref).
+
+* Edit gcj/javaprims.h
+
+* Go to the `namespace java' line, and delete that entire block (the   
+  entire contents of the namespace)
+
+* Then insert the output of `perl scripts/classes.pl' into the file
+  at that point.  This must be run from the build tree, in
+  <build>/classpath/lib; it uses the .class file name to determine
+  what to print.
+
+If you're generating a patch there is a program you can get to do an
+offline `cvs add' (it will fake an `add' if you don't have write
+permission yet).  Then you can use `cvs diff -N' to generate the
+patch.  See http://www.red-bean.com/cvsutils/

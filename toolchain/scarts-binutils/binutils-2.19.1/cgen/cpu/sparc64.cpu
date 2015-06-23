@@ -1,0 +1,422 @@
+; SPARC64 CPU description.  -*- Scheme -*-
+; This file contains elements specific to sparc64.
+; Copyright (C) 2000 Red Hat, Inc.
+; This file is part of CGEN.
+; See file COPYING.CGEN for details.
+
+; Notes:
+; - sparc64 support wip
+; - fp support todo
+; - source file layout wip
+; - cpu family layout wip
+
+; ??? For the nonce there is one cpu family to cover all 64 bit sparcs.
+; It's not clear this will work, but following the goal of incremental
+; complication ....
+
+(define-cpu
+  (name sparc64)
+  (comment "SPARC 64 bit architecture")
+  (endian big) ; ??? big insn, either data
+  (word-bitsize 64)
+  ; Generated files have a "64" suffix.
+  (file-transform "64")
+)
+
+(define-mach
+  (name sparc-v9)
+  (comment "sparc v9")
+  ;(attrs S64-P)
+  (cpu sparc64)
+  (bfd-name "sparc_v9")
+)
+
+(define-mach
+  (name sparc-v9a)
+  (comment "sparc v9a (sparc-v9 + vis)")
+  ;(attrs S64-P)
+  (cpu sparc64)
+  (bfd-name "sparc_v9a")
+)
+
+; sparc64 models
+
+(define-model
+  (name sparc64-def)
+  (comment "sparc64 default")
+  (attrs)
+  (mach sparc-v9)
+  ; wip (Meaning, yes I know this is inaccurate, duh ...
+  ; When I have time I'll finish this up right.
+  ; Support for some of this isn't even implemented yet and support for the
+  ; rest will be rewritten.)
+  (pipeline p-foo "" () ((fetch) (decode) (execute) (memory) (writeback)))
+  (unit u-exec "Execution Unit" ()
+	1 1 ; issue done
+	() () () ())
+)
+
+; sparc64 instruction fields
+
+(dnf f-fmt2-cc1     "cc"           ((MACH64)) 21 1)
+(dnf f-fmt2-cc0     "cc"           ((MACH64)) 20 1)
+(dnf f-p            "p"            ((MACH64)) 19 1)
+(dnf f-fmt2-rcond   "fmt2 rcond"   ((MACH64)) 27 3)
+(df  f-disp19       "disp19"       (PCREL-ADDR (MACH64)) 13 19 INT #f #f)
+(dnf f-fmt3-rcond   "fmt3 rcond"   ((MACH64)) 19 3)
+(dnf f-shcnt64      "shcnt64"      ((MACH64)) 5 6)
+(dnf f-fmt4-cond    "cond"         ((MACH64)) 14 4)
+(dnf f-fmt4-ccx-hi  "ccx hi"       ((MACH64)) 13 1)
+(dnf f-fmt4-ccx-lo  "ccx lo"       ((MACH64)) 19 2)
+(dnf f-fmt4-rcond   "fmt4 rcond"   ((MACH64)) 19 3)
+(dnf f-fmt4-cc2     "fmt4 cc2"     ((MACH64)) 18 1)
+(dnf f-fmt4-cc1-0   "fmt4 cc1,cc0" ((MACH64)) 12 2)
+(dnf f-fmt4-res10-6 "reserved bits in movcc insns" (RESERVED (MACH64)) 10 6)
+
+; The disp16 field requires a bit of special handling as it is split in two.
+(df  f-disp16-hi    "disp16 hi"    ((MACH64)) 10 2 INT #f #f)
+(dnf f-disp16-lo    "disp16 lo"    ((MACH64)) 18 14)
+(dnmf f-disp16      "disp16"       (PCREL-ADDR (MACH64)) INT
+      (f-disp16-hi f-disp16-lo)
+      (sequence () ; insert
+		(set (ifield f-disp16-hi) (srl (ifield f-disp16) (const 14)))
+		(set (ifield f-disp16-lo) (and (ifield f-disp16) (const #x3fff)))
+		)
+      (sequence () ; extract
+		; ??? where will pc be added?
+		(set (ifield f-disp16) (or (sll (ifield f-disp16-hi) (const 14))
+					   (ifield f-disp16-low)))
+		)
+)
+
+(dnf f-res-18-19    "reserved bits in done/retry" (RESERVED (MACH64)) 18 19)
+
+; sparc64 enums of opcodes, special insn values, etc.
+
+(define-normal-insn-enum insn-rcond "rcond op values" () RCOND_ f-fmt2-rcond
+  (
+   (BRZ 1)
+   (BRLEZ 2)
+   (BRLZ 3)
+   (BRNZ 5)
+   (BRGZ 6)
+   (BRGEZ 7)
+   )
+)
+
+; sparc64 hardware pieces.
+
+(dsh h-ver "version" ((MACH64)) (register UDI))
+
+(dsh h-pstate "processor state" ((MACH64)) (register UDI))
+
+(dsh h-tba "trap base address" ((MACH64)) (register UDI))
+
+; FIXME: These are a stack of values.
+(dsh h-tt "trap type" ((MACH64)) (register UDI))
+(dsh h-tpc "trap pc" ((MACH64)) (register UDI))
+(dsh h-tnpc "trap npc" ((MACH64)) (register UDI))
+(dsh h-tstate "trap state" ((MACH64)) (register UDI))
+
+(dsh h-tl "trap level" ((MACH64)) (register UQI))
+
+(dsh h-asi "address space identifier" ((MACH64)) (register UQI))
+
+(dsh h-tick "tick counter" ((MACH64)) (register UDI))
+
+(dsh h-cansave "savable window registers" ((MACH64)) (register UDI))
+(dsh h-canrestore "restorable window registers" ((MACH64)) (register UDI))
+(dsh h-otherwin "other window registers" ((MACH64)) (register UDI))
+(dsh h-cleanwin "clean window registers" ((MACH64)) (register UDI))
+
+(dsh h-wstate "window state" ((MACH64)) (register UDI))
+
+(define-hardware
+  (name h-ixcc)
+  (comment "condition code selector")
+  (attrs (MACH64))
+  (type immediate (UINT 1))
+  (values keyword "%" (("icc" 0) ("xcc" 1)))
+)
+
+(define-hardware
+  (name h-p)
+  (comment "prediction bit")
+  (attrs (MACH64))
+  (type immediate (UINT 1))
+  (values keyword "" (("" 0) (",pf" 0) (",pt" 1)))
+)
+
+; sparc64 operands
+
+(dnop ixcc "%icc,%xcc arg to bpcc insns" ((MACH64)) h-ixcc f-fmt2-cc1)
+
+(dnop p "prediction bit" ((MACH64)) h-p f-p)
+
+(dnop disp16 "16 bit displacement" ((MACH64)) h-iaddr f-disp16)
+(dnop disp19 "19 bit displacement" ((MACH64)) h-iaddr f-disp19)
+
+; sparc64 branches
+
+(dnf f-bpr-res28-1 "reserved bit 28 in bpr insn" (RESERVED (MACH64)) 28 1)
+
+(define-pmacro (bpr-cbranch name comment rcond-op comp-op)
+  (dni name (.str comment ", v9 page 136")
+       ((MACH64))
+       (.str name "$a$p $rs1,$disp16")
+       (+ OP_0 a (f-bpr-res28-1 0) (.sym RCOND_ rcond-op)
+	  OP2_BPR p rs1 disp16)
+       (delay (const 1)
+	      (if (comp-op rs1 (const 0))
+		  (set pc disp16)
+		  (annul a)))
+       ())
+)
+(bpr-cbranch beqz "beqz" BRZ eq)
+(bpr-cbranch bgez "bgez" BRGEZ ge)
+(bpr-cbranch bgtz "bgtz" BRGZ gt)
+(bpr-cbranch blez "blez" BRLEZ le)
+(bpr-cbranch bltz "bltz" BRLZ lt)
+(bpr-cbranch bnez "bnez" BRNZ ne)
+
+(define-pmacro (bpcc-branch bname comment cond test br-sem)
+  (dni (.sym bpcc- bname)
+       (.str "branch with prediction %icc " comment ", v9 page 146")
+       ((MACH64))
+       (.str bname "$a$p %icc,$disp19")
+       (+ OP_0 a cond OP2_BPCC (f-fmt2-cc1 0) (f-fmt2-cc0 0) p disp19)
+       (br-sem test icc)
+       ())
+  (dni (.sym bpcc- bname)
+       (.str "branch with prediction %xcc " comment ", v9 page 146")
+       ((MACH64))
+       (.str bname "$a$p %xcc,$disp19")
+       (+ OP_0 a cond OP2_BPCC (f-fmt2-cc1 1) (f-fmt2-cc0 0) p disp19)
+       (br-sem test xcc)
+       ())
+)
+; test-*,uncond-br-sem,cond-br-sem are defined in sparc.cpu.
+(bpcc-branch ba   "always" CC_A   test-always uncond-br-sem)
+(bpcc-branch bn   "never"  CC_N   test-never uncond-br-sem)
+(bpcc-branch bne  "ne"     CC_NE  test-ne cond-br-sem)
+(bpcc-branch be   "eq"     CC_E   test-eq cond-br-sem)
+(bpcc-branch bg   "gt"     CC_G   test-gt cond-br-sem)
+(bpcc-branch ble  "le"     CC_LE  test-le cond-br-sem)
+(bpcc-branch bge  "ge"     CC_GE  test-ge cond-br-sem)
+(bpcc-branch bl   "lt"     CC_L   test-lt cond-br-sem)
+(bpcc-branch bgu  "gtu"    CC_GU  test-gtu cond-br-sem)
+(bpcc-branch bleu "leu"    CC_LEU test-leu cond-br-sem)
+(bpcc-branch bcc  "geu"    CC_CC  test-geu cond-br-sem)
+(bpcc-branch bcs  "ltu"    CC_CS  test-ltu cond-br-sem)
+(bpcc-branch bpos "pos"    CC_POS test-pos cond-br-sem)
+(bpcc-branch bneg "neg"    CC_NEG test-neg cond-br-sem)
+(bpcc-branch bvc  "vc"     CC_VC  test-vc cond-br-sem)
+(bpcc-branch bvs  "vs"     CC_VS  test-vs cond-br-sem)
+
+; Misc.
+
+(dni done "done, v9 page 155" ((MACH64))
+     "done"
+     (+ OP_2 (f-fcn 0) OP3_DONE_RETRY (f-res-18-19 0))
+     (c-call "@cpu@_done" pc)
+     ()
+)
+(dni retry "retry, v9 page 155" ((MACH64))
+     "done"
+     (+ OP_2 (f-fcn 1) OP3_DONE_RETRY (f-res-18-19 0))
+     (c-call "@cpu@_retry" pc)
+     ()
+)
+
+(dni flush "flush instruction memory rs1+rs2, v9 page 165" ((MACH64))
+     "flush"
+     (+ OP_2 (f-rd 0) OP3_FLUSH rs1 (f-i 0) (f-res-asi 0) rs2)
+     (c-call "@cpu@_flush" pc (add rs1 rs2))
+     ()
+)
+(dni flush-imm "flush instruction memory rs1+simm13, v9 page 165" ((MACH64))
+     "flush"
+     (+ OP_2 (f-rd 0) OP3_FLUSH rs1 (f-i 1) simm13)
+     (c-call "@cpu@_flush" pc (add rs1 simm13))
+     ()
+)
+
+(dni flushw "flush register windows, v9 page 167" ((MACH64))
+     "flushw"
+     (+ OP_2 (f-rd 0) OP3_FLUSHW (f-rs1 0) (f-i 0) (f-simm13 0))
+     (c-call "@cpu@_flushw" pc)
+     ()
+)
+
+; On sparc64 unimp is called illtrap.
+
+(dnmi illtrap "illegal instruction trap, v9 page 168" ((MACH64))
+      "illtrap $imm22"
+      (emit unimp imm22)
+)
+
+; Impdep insns
+
+(dnf f-impdep5  "5 bit field in impdep insns"  ((MACH64)) 29 5)
+(dnf f-impdep19 "19 bit field in impdep insns" ((MACH64)) 18 19)
+
+(dnop impdep5   "5 bit arg in impdep insns"    ((MACH64)) h-uint f-impdep5)
+(dnop impdep19  "19 bit arg in impdep insns"   ((MACH64)) h-uint f-impdep19)
+
+(dni impdep1 "implementation dependent instruction 1, v9 page 169"
+     ((MACH64))
+     "impdep1 $impdep5,$impdep19"
+     (+ OP_2 impdep5 OP3_IMPDEP1 impdep19)
+     (c-call "@cpu@_impdep1" pc impdep5 impdep19)
+     ()
+)
+(dni impdep2 "implementation dependent instruction 1, v9 page 169"
+     ((MACH64))
+     "impdep2 $impdep5,$impdep19"
+     (+ OP_2 impdep5 OP3_IMPDEP2 impdep19)
+     (c-call "@cpu@_impdep2" pc impdep5 impdep19)
+     ()
+)
+
+; Memory barrier insn
+
+(dnf f-membar-res12-6 "reserved bits 12-7 in membar insn"
+     (RESERVED (MACH64)) 12 6)
+(dnf f-cmask          "cmask field in membar insn"       ((MACH64)) 6 3)
+(dnf f-mmask          "mmask field in membar insn"       ((MACH64)) 3 4)
+(dnf f-membarmask     "cmask+mmask field in membar insn" ((MACH64)) 6 7)
+
+(define-hardware
+  (name h-membarmask)
+  (comment "membar mask")
+  (attrs (MACH64))
+  (type immediate (UINT 7))
+  (values keyword "" (
+		      ("#StoreStore" #x8)
+		      ("#LoadStore" #x4)
+		      ("#StoreLoad" #x2)
+		      ("#LoadLoad" #x1)
+		      ("#Sync" #x40)
+		      ("#MemIssue" #x20)
+		      ("#Lookaside" #x10)
+		      ))
+)
+
+(define-operand
+  (name membarmask)
+  (comment "cmask+mmask arg in membar insn")
+  (attrs (MACH64))
+  (type h-membarmask)
+  (index f-membarmask)
+  (handlers (parse "membar_mask")
+	    (print "membar_mask"))
+)
+
+(dni membar "memory barrier, v9 page 183"
+     ((MACH64))
+     "member $membarmask" ; ${membar-mask}
+     (+ OP_2 (f-rd 0) OP3_MEMBAR (f-rs1 15) (f-i 1) (f-membar-res12-6 0)
+	membarmask)
+     (c-call "@cpu@_membar" pc membarmask)
+     ()
+)
+
+; Conditional move insns
+
+(df f-simm11 "11 bit signed immediate field" ((MACH64)) 10 11 INT #f #f)
+
+(dnop simm11 "11 bit signed immediate arg to condition move insns"
+      ((MACH64)) h-sint f-simm11)
+
+(define-pmacro (cond-move-1 name comment mnemonic cc-prefix cc-name cc-opcode
+			    src-name src-opcode cond test)
+  (dni name
+       (.str "move %" cc-name " " comment ", v9 page 191")
+       ((MACH64))
+       (.str mnemonic " " cc-prefix cc-name ",$" src-name ",$rd")
+       (.splice + OP_2 rd OP3_MOVCC cond
+		(.unsplice cc-opcode) (.unsplice src-opcode))
+       (if (test cc-name)
+	   (set rd src-name))
+       ())
+)
+
+(define-pmacro (cond-move name comment cond test)
+  (begin
+    (cond-move-1 (.sym name -icc) comment
+		 name "%" icc ((f-fmt4-cc2 1) (f-fmt4-cc1-0 0))
+		 rs2 ((f-i 0) (f-fmt4-res10-6 0) rs2)
+		 cond test)
+    (cond-move-1 (.sym name -imm-icc) comment
+		 name "%" icc ((f-fmt4-cc2 1) (f-fmt4-cc1-0 0))
+		 simm11 ((f-i 1) simm11)
+		 cond test)
+    (cond-move-1 (.sym name -xcc) comment
+		 name "%" xcc ((f-fmt4-cc2 1) (f-fmt4-cc1-0 2))
+		 rs2 ((f-i 0) (f-fmt4-res10-6 0) rs2)
+		 cond test)
+    (cond-move-1 (.sym name -imm-xcc) comment
+		 name "%" xcc ((f-fmt4-cc2 1) (f-fmt4-cc1-0 2))
+		 simm11 ((f-i 1) simm11)
+		 cond test)
+    )
+)
+; test-* are defined in sparc.cpu.
+(cond-move mova   "always" CC_A   test-always)
+(cond-move movn   "never"  CC_N   test-never)
+(cond-move movne  "ne"     CC_NE  test-ne)
+(cond-move move   "eq"     CC_E   test-eq)
+(cond-move movg   "gt"     CC_G   test-gt)
+(cond-move movle  "le"     CC_LE  test-le)
+(cond-move movge  "ge"     CC_GE  test-ge)
+(cond-move movl   "lt"     CC_L   test-lt)
+(cond-move movgu  "gtu"    CC_GU  test-gtu)
+(cond-move movleu "leu"    CC_LEU test-leu)
+(cond-move movcc  "geu"    CC_CC  test-geu)
+(cond-move movcs  "ltu"    CC_CS  test-ltu)
+(cond-move movpos "pos"    CC_POS test-pos)
+(cond-move movneg "neg"    CC_NEG test-neg)
+(cond-move movvc  "vc"     CC_VC  test-vc)
+(cond-move movvs  "vs"     CC_VS  test-vs)
+
+; Arithmetic binary ops
+
+(define-pmacro (v8-addx-rename old new)
+  (begin
+    (dnmi new
+	  (.str old " in v8 is " new " in v9, v9 page 135") ()
+	  (.str new " $rs1,$rs2,$rd")
+	  (emit old rs1 rs2 rd))
+    (dnmi (.sym new -imm)
+	  (.str old " in v8 is " new " in v9, v9 page 135") ()
+	  (.str new " $rs1,$simm13,$rd")
+	  (emit old rs1 simm13 rd))
+    )
+)
+(v8-addx-rename addx addc)
+(v8-addx-rename addxcc addccc)
+
+; Binary boolean ops
+
+(define-pmacro (s64-set-bool-flags x)
+  (sequence ()
+	    (set icc-z (zflag (trunc SI x)))
+	    (set icc-n (nflag (trunc SI x)))
+	    (set icc-c (const 0))
+	    (set icc-v (const 0))
+	    (set xcc-z (zflag x))
+	    (set xcc-n (nflag x))
+	    (set xcc-c (const 0))
+	    (set xcc-v (const 0))
+	    )
+)
+
+; Multiply/Divide
+
+; FIXME: flags handling incomplete
+; FIXME: div-binop is in sparccom.cpu which is included later.
+;(div-binop s64-sdiv "sdiv" MACH64 SDIV div ext: (s64-set-bool-flags rd))
+;(div-binop s64-udiv "udiv" MACH64 UDIV div zext: (s64-set-bool-flags rd))
+
+; TODO
+; - casa, casxa

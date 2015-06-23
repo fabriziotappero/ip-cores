@@ -1,0 +1,322 @@
+# pmacro testcase #1 -*- shell-script -*-
+
+test=pmacros-1
+
+source ./test-utils.sh
+
+cpu_file=${test}.test.cpu
+rm -f ${cpu_file}
+
+cat > ${cpu_file} <<EOF
+(include "${srcdir}/../cpu/simplify.inc")
+(include "${srcdir}/testsuite.cpu")
+
+(define-pmacro sym-const name1)
+(define-pmacro str-const "string1")
+(define-pmacro int-const 1)
+
+(define-pmacro list-const
+  (
+   (name1 "string1" 1)
+   (name2 "string2" 2)
+   (name3 "string3" 3)
+   )
+)
+(.print list-const "\n")
+
+(test-name ".ref, .car")
+(.if (.not (.equals (.ref (.car list-const) 2) 1))
+     (.print "FAIL (.not (.equals (.ref (.car list-const) 2) 1))\n"))
+
+(test-name ".for-each, nested .pmacros")
+(print-match "adgbehcfi")
+(print-thunk (.pmacro ()
+               (.begin
+                 (.for-each (.pmacro (x y z)
+		              (.print x y z))
+                            (a b c) (d e f) (g h i)))))
+(test-name "nested .pmacros with bindings")
+(print-match "(+ 4 3)")
+(print-thunk (.pmacro ()
+               (.dump ((.pmacro (arg1 arg2)
+                         ((.pmacro (bar) (+ arg2 bar)) arg1))
+                       3 4))))
+
+(test-name ".dump")
+(print-match "(name1 \"string1\" 1)(name2 \"string2\" 2)(name3 \"string3\" 3)\n")
+(.print "EXPR: ")
+(.for-each (.pmacro (a) (.dump a)) list-const)
+(newline)
+
+(test-name ".sym")
+(print-match "abc\n")
+(print-expr (.sym a "b" c))
+
+(test-name ".str")
+(print-match "\"def\"\n")
+(print-expr (.str d "e" f))
+
+(test-name ".hex")
+(print-match "\"2a\"")
+(print-expr (.hex 42))
+
+(test-name ".upcase")
+(print-match "\"UPPER\"")
+(print-expr (.upcase "upper"))
+(print-match "UPPER")
+(print-expr (.upcase upper))
+
+(test-name ".downcase")
+(print-match "\"downer\"")
+(print-expr (.downcase "DOWNER"))
+(print-match "downer")
+(print-expr (.downcase DOWNER))
+
+(test-name ".substring")
+(print-match "\"zz\"")
+(print-expr (.substring "xyzzy" 2 4))
+(print-match "zz")
+(print-expr (.substring xyzzy 2 4))
+
+(test-name ".splice")
+(print-match "(now is the time)")
+(print-expr (.splice now (.unsplice (is the time))))
+
+(test-name ".iota")
+(print-match "(0 1 2 3)")
+(print-expr (.iota 4))
+(print-match "(1 2 3 4)")
+(print-expr (.iota 4 1))
+(print-match "(2 4 6 8)")
+(print-expr (.iota 4 2 2))
+
+(test-name ".map")
+(print-match "(\"a\" \"b\" \"c\")")
+(print-expr (.map .hex (10 11 12)))
+(print-match "(\"a\" \"b\" \"c\")")
+(print-expr (.map (.pmacro (x) (.hex x)) (10 11 12)))
+
+(test-name ".apply")
+(print-match "ABC")
+(print-expr (.apply .upcase (abc)))
+
+(test-name ".pmacro?")
+(print-match "#t")
+(print-expr (.pmacro? .pmacro?))
+(print-match "#t")
+(print-expr (.pmacro? test-name))
+(print-match "#t")
+(print-expr (.pmacro? (.pmacro (a) (add a 1))))
+(print-match "#f")
+(print-expr (.pmacro? 42))
+
+(test-name ".eval")
+(print-match "(explicitly-undefined 42)")
+(define-pmacro (eval-test1 a) (explicitly-undefined a))
+(print-expr (.eval (.splice eval-test1 (.unsplice (42)))))
+
+(test-name ".let")
+(print-match "xyzzy")
+(print-expr (.let ((x xyzzy)) x))
+;; FIXME: This is the currently defined behaviour, but it's somewhat
+;; unintuitive.
+;; pmacro expansion re-evaluates the result if it's also a pmacro,
+;; so x -> y -> x and y -> x -> y.
+(print-match "(x y)")
+(print-expr (.let ((x y) (y x)) (.list x y)))
+
+(test-name ".let*")
+(print-match "(1 2)")
+(print-expr (.let* ((x 1) (y (.add x 1))) (.list x y)))
+
+(test-name ".if")
+(print-match "then")
+(print-expr (.if #t then else))
+(print-match "else")
+(print-expr (.if #f then else))
+
+(test-name ".case")
+(print-match "123")
+(print-expr (.case seba ((seba beach) 123) (else 456)))
+(print-match "123")
+(print-expr (.case beach ((seba beach) 123) (else 456)))
+(print-match "456")
+(print-expr (.case 0 ((seba beach) 123) (else 456)))
+
+(test-name ".cond")
+(print-match "yep")
+(print-expr (.cond ((.eq 1 1) yep) (else nope)))
+(print-match "nope")
+(print-expr (.cond ((.eq 1 2) yep) (else nope)))
+
+(test-name ".begin")
+(print-match "xyz")
+(print-thunk (.pmacro () (.begin (.print "x") (.print "y") (.print "z"))))
+
+(test-name ".list, .ref")
+(print-match "grief")
+(print-expr (.ref (.list good grief) 1))
+
+(test-name ".length")
+(print-match "6")
+(print-expr (.length snoopy))
+(print-match "9")
+(print-expr (.length "woodstock"))
+(print-match "4")
+(print-expr (.length (good grief charlie brown)))
+
+(test-name ".replicate")
+(print-match "(no no no no)")
+(print-expr (.replicate 4 no))
+
+(test-name ".find")
+(print-match "(0 1)")
+(print-expr (.find (.pmacro (n) (.lt n 2)) (.iota 4)))
+
+(test-name ".equals")
+(print-match "#t")
+(print-expr (.equals (yo yo) (yo yo)))
+(print-match "#f")
+(print-expr (.equals (yo yo) (yo x)))
+
+(test-name ".andif")
+(print-match "andif")
+(print-expr (.andif 1 #t andif))
+(print-match "#f")
+(print-expr (.andif 1 #f andif))
+(print-match "#t")
+(print-expr (.andif))
+
+(test-name ".orif")
+(print-match "orif")
+(print-expr (.orif #f orif))
+(print-match "#f")
+(print-expr (.orif #f #f))
+(print-match "#f")
+(print-expr (.orif))
+
+(test-name ".not")
+(print-match "yep")
+(print-expr (.if (.not #f) yep nope))
+(print-match "nope")
+(print-expr (.if (.not #t) yep nope))
+
+(test-name ".eq")
+(print-match "eq")
+(print-expr (.if (.eq foo foo) eq ne))
+(print-match "eq2")
+(print-expr (.if (.eq 1 1) eq2 ne2))
+
+(test-name ".ne")
+(print-match "ne")
+(print-expr (.if (.ne foo bar) ne eq))
+(print-match "ne2")
+(print-expr (.if (.ne 1 2) ne2 eq2))
+
+(test-name ".lt")
+(print-match "lt")
+(print-expr (.if (.lt 1 2) lt nope))
+
+(test-name ".gt")
+(print-match "gt")
+(print-expr (.if (.gt 1 0) gt nope))
+
+(test-name ".le")
+(print-match "le1")
+(print-expr (.if (.le 1 1) le1 nope))
+(print-match "le2")
+(print-expr (.if (.le 1 2) le2 nope))
+
+(test-name ".ge")
+(print-match "ge1")
+(print-expr (.if (.ge 1 1) ge1 nope))
+(print-match "ge2")
+(print-expr (.if (.ge 1 0) ge2 nope))
+
+(test-name ".add")
+(print-match "3")
+(print-expr (.add 1 2))
+
+(test-name ".sub")
+(print-match "-1")
+(print-expr (.sub 1 2))
+
+(test-name ".mul")
+(print-match "6")
+(print-expr (.mul 2 3))
+
+(test-name ".div")
+(print-match "4")
+(print-expr (.div 8 2))
+
+(test-name ".rem")
+(print-match "0")
+(print-expr (.rem 8 2))
+
+(test-name ".sll")
+(print-match "8")
+(print-expr (.sll 1 3))
+(print-match "4")
+(print-expr (.sll 4 0))
+
+(test-name ".srl")
+(print-match "1")
+(print-expr (.srl 8 3))
+(print-match "4")
+(print-expr (.srl 4 0))
+
+(test-name ".sra")
+(print-match "-1")
+(print-expr (.sra -1 0))
+(print-match "-1")
+(print-expr (.sra -1 1))
+(print-match "-2")
+(print-expr (.sra -3 1))
+
+(test-name ".and")
+(print-match "8")
+(print-expr (.and 15 8))
+
+(test-name ".or")
+(print-match "15")
+(print-expr (.or 15 8))
+
+(test-name ".xor")
+(print-match "7")
+(print-expr (.xor 15 8))
+
+(test-name ".inv")
+(print-match "-6")
+(print-expr (.inv 5))
+
+(test-name ".car")
+(print-match "car")
+(print-expr (.car (car cdr)))
+
+(test-name ".cdr")
+(print-match "(cdr)")
+(print-expr (.cdr (car cdr)))
+
+(test-name ".caar")
+(print-match "caar")
+(print-expr (.caar ((caar cdar) cadr cddr)))
+
+(test-name ".cadr")
+(print-match "cadr")
+(print-expr (.cadr ((caar cdar) cadr cddr)))
+
+(test-name ".cdar")
+(print-match "(cdar)")
+(print-expr (.cdar ((caar cdar) cadr cddr)))
+
+(test-name ".cddr")
+(print-match "(cddr)")
+(print-expr (.cddr ((caar cdar) cadr cddr)))
+
+EOF
+
+run_cgen ${cpu_file}
+
+post_process
+
+finish

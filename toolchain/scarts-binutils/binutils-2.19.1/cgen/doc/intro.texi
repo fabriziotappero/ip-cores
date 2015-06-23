@@ -1,0 +1,714 @@
+@c Copyright (C) 2000, 2009 Red Hat, Inc.
+@c This file is part of the CGEN manual.
+@c For copying conditions, see the file cgen.texi.
+
+@node Introduction
+@comment  node-name,  next,  previous,  up
+@chapter Introduction to CGEN
+
+@menu
+* Overview::
+* CPU description language::
+* Opcodes support::
+* Simulator support::
+* Testing support::
+@end menu
+
+@node Overview
+@section Overview
+
+CGEN is a project to provide a framework and toolkit for writing cpu tools.
+
+@menu
+* Goal::                        What CGEN tries to achieve.
+* Why do it?::
+* Maybe it should not be done?::
+* How ambitious is CGEN?::
+* What is missing that should be there someday?::
+@end menu
+
+@node Goal
+@subsection Goal
+
+The goal of CGEN (pronounced @emph{seejen}, and short for
+"Cpu tools GENerator") is to provide a uniform framework and toolkit
+for writing programs like assemblers, disassemblers, and
+simulators without explicitly closing any doors on future things one
+might wish to do.  In the end, its scope is the things the software developer
+cares about when writing software for the cpu (compilation, assembly,
+linking, simulation, profiling, debugging, ???).
+
+Achieving the goal is centered around having an application independent
+description of a CPU (plus environment, like ABI) that applications can then
+make use of.  In the end that's a lot to ask for from one language.  What
+applications can or should be able to use CGEN is left to evolve over time.
+The description language itself is thus also left to evolve over time!
+
+Achieving the goal also involves having a toolkit, libcgen, that contains
+a compiled form of the cpu description plus a suite of routines for working
+with the data.
+@footnote{@file{libcgen} currently doesn't exist, but that was the
+original plan.}
+
+CGEN is not a new idea.  Some GNU ports have done something like this --
+for example, the SH port in its early days.  However, the idea never really
+``caught on''.  CGEN was started because I think it should.
+
+Since CGEN is a very ambitious project, there are currently lots of
+things that aren't written down, let alone implemented.  It will take
+some time to flush all the details out, but in and of itself that doesn't
+necessarily mean they can't be flushed out, or that they haven't been
+considered.
+
+@node Why do it?
+@subsection Why do it?
+
+I think it is important that GNU assembler/disassembler/simulator ports
+be done from a common framework.  On some level it's fun doing things
+from scratch, which was and still is to a large extent current
+practice, but this is not the place for that.
+
+@itemize @bullet
+@item the more ports of something one has, the more important it is that they
+be the same.
+
+@item the more complex each of them become, the more important it is
+that they be the same.
+
+@item if they all are the same, a feature added to one is added to all
+of them--within the context of their similarity, of course.
+
+@item with a common framework in place the planning of how to architect
+a port is taken care of, the main part of what's left is simply writing
+the CPU description.
+
+@item the more applications that use the common framework, the fewer
+places the data needs to be typed in and maintained.
+
+@item new applications can take advantage of data and utilities that
+already exist.
+
+@item a common framework provides a better launching point for bigger things.
+@end itemize
+
+@node Maybe it should not be done?
+@subsection Maybe it should not be done?
+
+However, no one has yet succeeded in pushing for such an extensive common
+framework.@footnote{I'm just trying to solicit input here.  Maybe these
+questions will help get that input.}
+
+@itemize @bullet
+@item maybe people think it's not worth it?
+
+@item maybe they just haven't had the inclination to see it through?
+(where ``inclination'' includes everything from the time it would take
+to the dealing with the various parties whose turf you would tread on)
+
+@item maybe in the case of assemblers and simulators they're not complex
+enough to see much benefit?
+
+@item maybe the resulting tight coupling among the various applications
+will cause problems that offset any gains?
+
+@item maybe there's too much variance to try to achieve a common
+framework, so that all attempts are doomed to become overly complex?
+
+@item as a corollary of the previous item, maybe in the end trying to
+combine ISA syntax (the assembly language), with ISA semantics (simulation),
+with architecture implementation (performance), would become overly complex?
+@end itemize
+
+@node How ambitious is CGEN?
+@subsection How ambitious is CGEN?
+
+CGEN is a very ambitious project, as future projects can be:
+
+@menu
+* More complicated simulators::
+* Profiling tools::
+* Program analysis tools::
+* ABI description::
+* Machine generated architecture reference material::
+* Tools like what NJMCT provides::
+* Input to a compiler backend::
+* Hardware/software codesign::
+@end menu
+
+@node More complicated simulators
+@subsubsection More complicated simulators
+
+Current CGEN-based simulators achieve their speed by using GCC's
+"computed goto" facility to implement a threaded interpreter.
+The "main loop" of the cpu engine is contained within one function
+and the administrivia of running the program is reduced to about three
+host instructions per target instruction (one to increment a "virtual pc",
+one to fetch the address of code that implements that next target instruction,
+and one to branch to it).  Target instructions can be simulated with as few as
+seven@footnote{Actually, this can be reduced even more by creating copies of
+an instruction specialized for all the various inputs.} instructions for an
+"add" (load address of src1, load src1, load address of src2, load src2, add,
+load address of result, store result).  So ignoring overhead (which
+is minimal for frequently executed code) that's ten host instructions per
+"typical" target instruction.  Pretty good.@footnote{The actual results
+depend, of course, on the exact mix of target instructions in the application,
+what instructions the host cpu has, and how efficiently the rest of the
+simulator is (e.g. floating point and memory operations can require a hundred
+or more host instructions).}
+
+However, things can still be better.  There is still some implementation
+related overhead that can be removed.  The two instructions to branch
+to the next instruction would be unnecessary if instruction executors
+were concatenated together.  The fetching and storing of target registers
+can be reduced if target registers were kept in host registers across
+instruction boundaries (and the longer one can keep them in host registers
+the better).  A consequence of both of these improvements is the number
+of memory operations is drastically reduced.  There isn't a lot of ILP
+in the simulation of target instructions to hide memory latencies.
+Another consequence of these improvements is the opportunity to perform
+inter-target-instruction scheduling of the host instructions and other
+optimizations.
+
+There are two ways to achieve these improvements.  Both involve converting
+basic blocks (or superblocks) in the target application into the host
+instruction set and compiling that.  The first way involves doing this
+"offline".  The target program is analyzed and each instruction is converted
+into, for example, C code that implements the instruction.  The result is
+compiled and then the new version of the target program is run.
+
+The second way is to do the translation from target instruction set to
+host instruction set while the target program is running.  This is often
+referred to as JIT (Just In Time) simulation (FIXME: proper phrasing here?).
+One way to implement this is to simulate instructions the way existing
+CGEN simulators do, but keep track of how frequently a basic block is
+executed.  If a block gets executed often enough, then compile a translation
+of it to the host instruction set and switch to using that.  This avoids
+the overhead of doing the compilation on code that is rarely executed.
+Note that here is one place where a dual cpu system can be put to good use.
+One cpu handles the simulation and the other handles compilation (translating
+target instructions to host instructions).
+CGEN can@footnote{This hasn't actually been implemented so there is
+some hand waving here.} handle a large part of building the JIT compiler
+because both host and target architectures are recorded in a way that is
+amenable to program manipulation.
+
+A hybrid of these two ways is to translate target basic blocks to
+C code, compile it, and dynamically load the result into the running
+simulation.  Problems with this are that one must invoke an external program
+(though one could dynamically load a special form of C compiler I suppose)
+and there's a lot of overhead parsing and optimizing the C code.  On the
+other hand one gets to take full advantage of the compiler's optimization
+technology.  And if the application takes a long time to simulate, the
+extra cost may be worthwhile.  A dual cpu system is of benefit here too.
+
+@node Profiling tools
+@subsubsection Profiling tools
+
+It is useful to know how well an architecture is being utilized.
+For one, this helps build better architectures.  It also helps determine
+how well a compilation system is using an architecture.
+
+CGEN-based simulators already compute instruction frequency counts.
+It's straightforward to add register frequency counts.
+Monitoring other aspects of the ISA is also possible.  The description
+file provides all the necessary data, all that's needed is to write a
+generator for an application that then performs the desired analysis.
+
+Function unit, pipeline, and other architecture implementation related items
+requires a lot more effort but it is doable.  The guideline for this effort
+is again coming up with an application-independent specification of these
+things.
+
+CGEN does not currently support memory or cache profiling.
+Obviously they're important, and support may be added in the future.
+One thing that would be straightforward to add is the building of
+trace data for usage by cache and memory analysis tools.
+The point though is that these tools won't benefit much from CGEN's
+existence.
+
+Another kind of profiling tool is one that takes the program to
+be profiled as input, inserts profiling code into it, and then generates
+a new version of the program which is then run.@footnote{Note that there
+are other uses for such a program modification tool besides profiling.}
+Recorded in CGEN's description files should be all the necessary ISA related
+data to do this.  One thing that's missing is code to handle the file format
+and relocations.@xref{ABI description}.
+
+@node Program analysis tools
+@subsubsection Program analysis tools
+
+Related to profiling tools are static program analysis tools.
+By this I mean taking machine code as input and analyzing it in some way.
+Except for symbolic information (which could come from BFD or elsewhere),
+CGEN provides enough information to analyze machine code, both the
+raw instructions *and* their semantics.  Libcgen should contain
+all the basic tools for doing this.
+@footnote{Today this is libopcodes to some degree.}
+
+@node ABI description
+@subsubsection ABI description
+
+Several tools need knowledge of not only a cpu's ISA but also of the ABI
+in use.  I think(!) it makes sense to apply the same goals that went into
+CGEN's architecture description language to an ABI description language:
+specify the ABI in an application independent way and then have a basic
+toolkit/library that provides ways of using that data.
+It might be useful to also allow the writing of program generators
+for applications that want more than what the toolkit/library provides.
+Perhaps not, but the basic toolkit/library should, again I think,
+be useful.
+
+Part of what an ABI defines is the file format and relocations.
+This is something that BFD is built for.  I think a BFD rewrite
+should happen and should be based, at least in part, on a CGEN-style
+ABI description.  This rewrite would be one user of the ABI description,
+but certainly not the only user.
+One problem with this approach is that BFD requires a lot of file format
+specific C code.  I doubt all of this code is amenable to being described
+in an application independent way.  Careful separation of such things
+will be necessary.  It may even be useful to ignore old file formats
+and limit such a BFD rewrite to ELF (not that ELF is free from such
+warts, of course).
+
+@node Machine generated architecture reference material
+@subsubsection Machine generated architecture reference material
+
+Engineers often need to refer to architecture documentation.
+One problem is that there's often only so many hardcopy manuals
+to go around.  Since the CPU description contains a lot of the information
+engineers need to find it makes sense to convert that information back
+into a readable form.  The manual can then be online available to everyone.
+Furthermore, each architecture will be documented using the same style
+making it easier to move from architecture to architecture.
+
+@node Tools like what NJMCT provides
+@subsubsection Tools like what NJMCT provides
+
+NJMCT is the New Jersey Machine Code Toolkit.
+It focuses exclusively on the encoding and decoding of instructions.
+[FIXME: wip, need to say more].
+
+@node Input to a compiler backend
+@subsubsection Input to a compiler backend
+
+One can define a GCC port to include these four things:
+
+@itemize @bullet
+@item cpu architecture description
+@item cpu implementation description
+@item ABI description
+@item miscellaneous
+@end itemize
+
+The CGEN description provides all of the cpu architecture description
+that the compiler needs.
+However, the current design of the CPU description language is geared
+towards going from machine instructions to semantic content, whereas
+what a compiler wants is to do is go from semantic content to machine
+instructions, so in the end this might not be a reasonable thing to
+pursue.  On the other hand, that problem can be solved in part by
+specifying two sets of semantics for each instruction: one for the 
+compiler side of things, and one for the simulator side of things.
+Frequently they will be the same thing and thus need only be specified once.
+Though specifying them twice, for the two different contexts, is reasonable
+I think.  If the two versions of the semantics are used by multiple applications
+this makes even more sense.
+
+The planned rewrite of model support in CGEN will support whatever the
+compiler needs for the implementation description.
+
+Compilers also need to know the target's ABI, which isn't relevant for
+an architecture description.  On the other hand, more than just the
+compiler needs knowledge of the ABI.  Thus it makes sense to think about
+how many tools there are that need this knowledge and whether one can
+come up with a unifying description of the ABI.  Hence one future
+project is to add the ABI description to CGEN.  This would encompass in
+essence most of what is contained in the System V ABI documentation.
+
+That leaves the "miscellaneous" part.  Essentially this is a catchall
+for whatever else is needed.  This would include things like
+include file directory locations, port-specific language features, ???.
+There's not much need to include this info in CGEN, it's pretty
+esoteric and generally useful to only a few applications.
+
+One can even envision a day when GCC emits object files directly.
+The instruction description contains enough information to build
+the instructions and the ABI support would provide enough
+information on relocations and object file formats.
+
+Debugging information should be treated as an orthogonal concept.
+At present it is outside the scope of CGEN, though clearly the same
+reasoning behind CGEN applies to debugging support as well.
+
+@node Hardware/software codesign
+@subsubsection Hardware/software codesign
+
+This section isn't very well thought out -- not much time has been put
+into it.  The thought is that some interface with VHDL/Verilog could
+be created that would assist hw/sw codesign.
+
+Another related application is to have a feedback mechanism from the
+compilation system that helps improve the architecture description
+(both CGEN and HDL).
+CGEN descriptions for experimental instructions could be added,
+and a new set of compilation tools quickly regenerated.
+Then experiments could be run analyzing the effectiveness of the
+new instructions.
+
+@node What is missing that should be there someday?
+@subsection What's missing that should be there someday?
+
+@itemize @bullet
+@item Support for complex ISA's (i386, m68k).
+
+Early versions had the framework of the support, but it's all bit-rotten.
+
+@item ABI description
+
+As discussed elsewhere, one thing that many tools need knowledge of besides
+the ISA is the ABI.  Clearly ABI's are orthogonal to ISA's and one cpu
+may have multiple ABI's running on it.  Thus the ABI description needs to
+be independent of the architecture description.  It would still be useful
+for the ABI to refer to things in the architecture description.
+
+@item Model description
+
+The current design is enough to get reasonable cycle counts from
+the simulator but it doesn't take into account all the uses one would
+want to make of this data.
+
+@item File organization
+
+I believe a lot of what is in libopcodes should be moved to libcgen.
+Libcgen will contain the bulk of the cpu description in processed form.
+It will also contain a suite of utilities for accessing the data.
+
+ABI support could either live in libcgen or separately in libcgenabi.
+libbfd would be a user of this library.
+
+Instruction semantics should also be recorded in libcgen, probably
+in bytecode form.  Operand usage tables, needed for example by the
+m32r assembler, could be lazily computed at runtime.
+Operand usage tables are also useful to gdb's reverse-execution support.
+
+Applications can either make use of libcgen or given the application
+independence of the description language they can write their own code
+generators to tailor the output as needed.
+
+@end itemize
+
+@node CPU description language
+@section CPU description language
+
+The goal of CGEN is to provide a uniform and extensible framework for
+doing assemblers/disassemblers and simulators, as well as allowing
+further tools to be developed as necessary.
+
+With that in mind I think the place to start is in defining a CPU
+description language that is sufficiently powerful for all the current
+and perceived future needs: an application independent description of
+the CPU.  From the CPU description, tables and code can be generated
+that an application framework can then use (e.g. opcode table for
+assembly/disassembly, decoder/executor for simulation).
+
+By "application independence" I mean the data is recorded in a way that
+doesn't intentionally close any doors on uses of the data.  One example of
+this is using RTL to describe instruction semantics rather than, say, C.
+The assembler can also make use of the instruction semantics.  It doesn't
+make use of the semantics, per se, but what it does use is the input and
+output operand information that is machine generated from the semantics.
+Grokking operand usage from C is possible, but harder.
+@footnote{By this I mean analyzing the C and understanding what it's doing.}
+So by writing the semantics in RTL multiple applications can make use of it.
+One can also generate from the RTL code in languages other than C.
+
+@menu
+* Language requirements::
+* Layout::
+* Language problems::
+@end menu
+
+@node Language requirements
+@subsection Language requirements
+
+The CPU description file needs to provide at least the following:
+
+@itemize @bullet
+@item elements of the CPU's architecture (registers, etc.)
+@item elements of a CPU's implementation (e.g. pipeline)
+@item how the bits of an instruction word map to the instruction's semantics
+@item semantic specification in a way that is amenable to being
+understood and manipulated
+@item performance measurement parameters
+@item support for multiple architecture and implementation variants
+@item assembler syntax of the instruction set
+@item how that syntax maps to the bits of the instruction word, and back
+@item support for generating test files
+@item ???
+@end itemize
+
+In addition to this, elements of the particular ABI in use is also needed.
+These things will obviously need to be defined separately from the cpu
+for obvious reasons.
+
+@itemize @bullet
+@item file format
+@item relocations
+@item function calling conventions
+@item structure layout
+@item ... and all the other usual stuff
+@end itemize
+
+Some architectures require knowledge of the pipeline in order to do
+accurate simulation (because, for example, some registers don't have
+interlocks) so that will be required as well, as opposed to being solely
+for performance measurement.  Pipeline knowledge is also needed in order
+to achieve accurate profiling information.  However, I haven't spent
+much time on this yet.  The current design/implementation is a first
+pass in order to get something reasonable, and will be revisited
+as necessary.
+
+Support for generating test files is not complete.  Currently the GAS
+test suite generator gets by (barely) without them.  The simulator test
+suite generator just generates templates and leaves the programmer to
+fill in the details.  But I think this information should be present,
+meaning that for situations where test vectors can't be derived from the
+existing specs, new specs should be added as part of the description
+language.  This would make writing testcases an integral part of writing
+the .cpu file.  Clearly there is a risk in having machine generated
+testcases - but there are ways to eliminate or control the risk.
+
+The syntax of a suitable description language needs to have these
+properties:
+
+@itemize @bullet
+@item simple
+@item expressive
+@item easily parsed
+@item easy to learn
+@item understandable by program generators
+@item extensible
+@end itemize
+
+It would also help to not start over completely from scratch.  GCC's RTL
+satisfies all these goals, and is used as the basis for the description
+language used by CGEN.
+
+Extensibility is achieved by specifying everything as name/value pairs.
+This allows new elements to be added and even CPU specific elements to
+be added without complicating the language or requiring a new element in
+a @code{define_insn}-like entry to be added to each existing port.
+Macros can be used to eliminate the verbosity of repetitively specifying
+the ``name'' part, so one can have it both ways.  Imagine GCC's
+@file{.md} file elements specified as name/value pairs with macro's
+called @code{define_expand}, @code{define_insn}, etc.  that handle the
+common cases and expand the entry to the full @code{(define_full_expand
+(name addsi3) (template ...) (condition ...) ...)}.
+
+Scheme also uses @code{(foo :keyword1 value1 :keyword2 value2 ...)},
+though that isn't implemented yet (or maybe @code{#:keyword} depending
+upon what is enabled in Guile).
+
+@node Layout
+@subsection Layout
+
+Here is a graphical layout of the hierarchy of elements of a @file{.cpu} file.
+		
+@example
+                           architecture
+                           /          \
+                      cpu-family1   cpu-family2  ...
+                      /         \
+                  machine1    machine2  ...
+                   /   \
+              model1  model2  ...
+@end example
+
+Each of these elements is explained in more detail in @ref{RTL}.  The
+@emph{architecture} is one of @samp{sparc}, @samp{m32r}, etc.  Within
+the @samp{sparc} architecture, the @emph{cpu-family} might be
+@samp{sparc32} or @samp{sparc64}.  Within the @samp{sparc32} CPU family,
+the @emph{machine} might be @samp{sparc-v8}, @samp{sparclite}, etc.
+Within the @samp{sparc-v8} machine classificiation, the @emph{model}
+might be @samp{hypersparc} or @samp{supersparc}.
+
+Instructions form their own hierarchy as each instruction may be supported
+by more than one machine.  Also, some architectures can handle more than
+one instruction set on one chip (e.g. ARM).
+
+@example
+                     isa
+                      |
+                  instruction
+                    /   \	   
+             operand1  operand2  ... 
+                |         |
+         hw1+ifield1   hw2+ifield2  ...
+@end example
+
+Each of these elements is explained in more detail in @ref{RTL}.
+
+@node Language problems
+@subsection Language problems
+
+There are at least two potential problem areas in the language's design.
+
+The first problem is variation in assembly language syntax.  Examples of
+this are Intel vs AT&T i386 syntax, and Motorola vs MIT m68k syntax.
+I think there isn't a sufficient number of important cases to warrant
+handling this efficiently.  One could either ignore the issue for
+situations where divergence is sufficient to dissuade one from handling
+it in the existing design, or one could provide a front end or
+use/extend the existing macro mechanism.
+
+One can certainly argue that description of assembler syntax should be
+separated from the hardware description.  Doing so would prevent
+complications in supporting multiple or even difficult assembler
+syntaxes from complicating the hardware description.  On the other hand,
+there is a lot of duplication, and in the end for the intended uses of
+CGEN I think the benefits of combining assembler support with hardware
+description outweigh the disadvantages.  Note that the assembler
+portions of the description aren't used by the simulator @footnote{The
+simulator currently uses elements of the opcode table since the opcode
+table is a nice central repository for such things.  However, the
+assembler/disassembler isn't part of the simulator, and the
+portions of the opcode table can be generated and recorded elsewhere
+should it prove reasonable to do so.  The CPU description file won't
+change, which is the important thing.}, so if one wanted to implement
+the disassembler/assembler via other means one can.
+
+The second problem area is relocations.  Clearly part of
+processing assembly code is dealing with the relocations involved
+(e.g. GOT table specification).  Relocation support necessarily requires
+BFD and GAS support, both of which need cleanup in this area.  Rewriting
+BFD to provide a better interface so reloc handling in GAS can be
+cleaned up is believed to be something this project can and should take
+advantage of, and that any attempt at adding relocation support should
+be done by first cleaning up GAS/BFD.  That can be left for another day
+though. :-)
+
+One can certainly argue trying to combine an ABI description with a
+hardware description is problematic as there can be more than one ABI.
+However, there often isn't and in the cases where there isn't the
+simplified porting and maintenance is worth it, in the author's opinion.
+Furthermore, the current language doesn't embed ABI elements
+with hardware description elements.  Careful segregation of such things
+might ameliorate any problems.
+
+@node Opcodes support
+@section Opcodes support
+
+Opcodes support comes in the form of machine generated opcode tables as
+well as supporting routines.
+
+@node Simulator support
+@section Simulator support
+
+Simulator support comes in the form of machine generated the decoder/executer
+as well as the structure that records CPU state information (i.e., registers).
+
+@node Testing support
+@section Testing support
+
+@menu
+* Assembler/disassembler testing::
+* Simulator testing::
+@end menu
+
+Inherent in the design is the ability to machine generate test cases both
+for the assembler/disassembler and for the simulator.  Furthermore, it
+is not unreasonable to add to the description file data specifically
+intended to assist or guide the testing process.  What kinds of
+additions that will be needed is unknown at present.
+
+@node Assembler/disassembler testing
+@subsection Assembler/disassembler testing
+
+The description of instructions and their fields contains to some extent
+not only the syntax but the possible values for each field.  For
+example, in the specification of an immediate field, it is known what
+the allowable range of values is.  Thus it is possible to machine
+generate test cases for such instructions.  Obviously one wouldn't want
+to test for each number that a number field can contain, however one can
+generate a representative set of any size.  Likewise with register
+fields, mnemonic fields, etc.  A good starting point would be the edge
+cases, the values at either end of the range of allowable values.
+
+When I first raised the possibility of machine generated test cases the
+first response I got was that this wouldn't be useful because the same
+data was being used to generate both the program and the test cases.  An
+error might be propagated to both and thus nullify the test.  For
+example if an opcode field was supposed to have the value 1 and the
+description file had the value 2, then this error wouldn't be caught.
+However, this assumes test cases are always generated during the testing run!
+And it ignores the profound amount of typing that is saved by machine
+generating test cases!  (I discount the argument that this kind of
+exhaustive testing is unnecessary).
+
+One solution to the above problem is to not generate the test cases
+during the testing run (which was implicit in the proposal, but perhaps
+should have been explicit).  Another solution is to generate the
+test cases during the test run but first verify them by some external
+means before actually using them in any test.  Another solution is
+to have some trust in the generated tests.  Yes, some bugs may be missed,
+but given the quantity of testing that can be done, some bugs may still
+be caught that would otherwise have been missed.  Plus it's all
+machine-driven, minimal human interaction is required.
+
+So how are machine generated test cases verified?  By machine, by hand,
+and by time.  The test cases are checked into CVS and are not regenerated
+without care.  Every time the test cases are regenerated, the diffs are
+examined to ensure the bug triggering the regeneration has been fixed
+and that no new bugs have been introduced.  In all likelihood once a
+port is more or less done, regeneration of test cases would stop anyway,
+and all further changes would be done manually.
+
+``By machine'' means that for example in the case of ports with a native
+assembler one can run the test case through the native assembler and use
+that as a good first pass.
+
+``By hand'' means one can go through each test case and verifying them
+manually.  This is what is done in the case of non-machine generated
+test cases, the only difference is the perceived difference in quantity.
+And in the case of machine generated test cases comments can be added to
+each test to help with the manual verification (e.g. a comment can be
+added that splits the instruction into its fields and shows their names
+and values).
+
+``By time'' means that this process needn't be done instantaneously.
+This is no different than the non-machine generated case again except in
+the perceived difference in quantity of test cases.
+
+Note that no claim is made that manually generated test cases aren't
+useful or needed.  The goal here is to enhance existing forms of testing,
+not replace them.
+
+@node Simulator testing
+@subsection Simulator testing
+
+Machine generation of simulator test cases is possible because the
+semantics of each instruction is written in a way that is understandable
+to the generator.  At the very least, knowledge of what the instructions
+are is present!  Obviously there will be some instructions that can't
+be adequately expressed in RTL and are thus not amenable to having a
+test case being machine generated.  There may even be some RTL'd
+semantics that fall into this category.  It is believed, however, that
+there will still be a large percentage of instructions amenable to
+having test cases machine generated for them.  Such test cases can
+certainly be hand generated, but it is believed that this is a large
+amount of unnecessary typing that typically won't be done due to the
+amount.
+
+An example is the simple arithmetic instructions.  These take zero, one,
+or more arguments and produce a result.  The description file contains
+sufficient data to generate such an instruction, the hard part is in
+providing the environment to set up the required inputs (e.g. loading
+values into registers) and retrieve the output (e.g. retrieve a value
+from a register).
+
+Certainly at the very least all the administrivia for each test case can
+be machine generated (i.e. a template file can be generated for each
+instruction, leaving the programmer to fill in the details).
+
+The strategies mentioned for assembler/disassembler machine-generated
+test cases also apply here.

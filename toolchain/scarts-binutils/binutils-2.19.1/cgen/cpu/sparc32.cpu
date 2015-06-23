@@ -1,0 +1,170 @@
+; SPARC32 CPU description.  -*- Scheme -*-
+; This file contains elements specific to sparc32.
+; Copyright (C) 2000 Red Hat, Inc.
+; This file is part of CGEN.
+; See file COPYING.CGEN for details.
+
+; Notes:
+; - sparc64 support wip
+; - fp support todo
+; - source file layout wip
+; - cpu family layout wip
+
+; ??? For the nonce there is one cpu family to cover all 32 bit sparcs.
+; It's not clear this will work, but following the goal of incremental
+; complication ....
+
+(define-cpu
+  (name sparc32)
+  (comment "SPARC 32 bit architecture")
+  (endian big)
+  (word-bitsize 32)
+  ; Generated files have a "32" suffix.
+  (file-transform "32")
+)
+
+(define-mach
+  (name sparc-v8)
+  (comment "sparc v8")
+  (cpu sparc32)
+  (bfd-name "sparc")
+)
+
+(define-mach
+  (name sparclite)
+  (comment "Fujitsu sparclite")
+  (cpu sparc32)
+  (bfd-name "sparc_sparclite")
+)
+
+; sparc32 models
+
+(define-model
+  (name sparc32-def)
+  (comment "sparc32 default")
+  (attrs)
+  (mach sparc-v8)
+  ; wip
+  (pipeline p-foo "" () ((fetch) (decode) (execute) (memory) (writeback)))
+  (unit u-exec "Execution Unit" ()
+	1 1 ; issue done
+	() () () ())
+)
+
+; sparc32 enums of opcodes, special insn values, etc.
+
+; sparc32 hardware pieces.
+
+; ??? impl,ver are left as part of h-psr (change maybe later)
+(define-hardware
+  (name h-psr)
+  (comment "psr register")
+  (type register USI)
+  (get () (c-call USI "@cpu@_get_h_psr_handler"))
+  (set (newval) (c-call VOID "@cpu@_set_h_psr_handler" newval))
+)
+
+(dsh h-s "supervisor bit" () (register BI))
+(dsh h-ps "previous supervisor bit" () (register BI))
+
+(dsh h-pil "processor interrupt level" () (register UQI))
+
+(dsh h-et "enable traps bit" () (register BI))
+
+(define-hardware
+  (name h-tbr)
+  (comment "trap base register")
+  (type register WI)
+  ;CPU (h_tbr) = (CPU (h_tbr) & 0xff0) | ((newval) & 0xfffff000);
+  (set (newval) (set (raw-reg WI h-tbr)
+		     (or WI (and WI (raw-reg WI h-tbr) (const #xff0))
+			  (and WI newval (const #xfffff000)))))
+)
+
+(define-hardware
+  (name h-cwp)
+  (comment "current window pointer")
+  (type register UQI)
+  (set (newval) (c-call VOID "@cpu@_set_h_cwp_handler" newval))
+)
+
+(define-hardware
+  (name h-wim)
+  (comment "window invalid mask")
+  (type register USI)
+  ; ??? These just put ideas down so I can play with them.  Ignore.
+  ;(get (value index) (and SI value (c-code SI "((1 << NWINDOWS) - 1)")))
+  ;(get (self mode index insn)
+  ;     (c-code USI "(CPU (h_wim) & ((1 << NWINDOWS) - 1))"))
+  ;(set (self mode index insn newval)
+  ;    (s-eval `(set SI ,self (and SI ,newval (const #xff)))))
+  (get () (and (raw-reg USI h-wim)
+	       (sub (sll (const 1) (c-raw-call SI "GET_NWINDOWS")) (const 1))))
+)
+
+(dsh h-ag "alternate global indicator" () (register QI))
+
+; Coprocessor support.
+
+(dsh h-ec "enable coprocessor bit" () (register BI))
+
+; Floating point support.
+; wip.
+; - currently evaluating the various possibilities
+
+(dsh h-ef "enable fpu bit" () (register BI))
+
+(dsh h-fsr "floating point status register" () (register USI))
+
+; sparc32 instruction definitions.
+
+; Special register move operations.
+
+; %y is handled by the asr insns
+
+(dni rd-asr "read asr" ()
+     "rd $rdasr,$rd" ; note: `rdasr' is for ReaD asr, `rd' is for Reg Dest.
+     (+ OP_2 OP3_RDASR rd rdasr (f-i 0) (f-simm13 0))
+     (set rd rdasr)
+     ())
+(dni wr-asr "write asr" ()
+     "wr $rs1,$rs2,$wrasr"
+     (+ OP_2 OP3_WRASR wrasr rs1 rs2 (f-i 0) (f-res-asi 0))
+     (set wrasr (xor rs1 rs2))
+     ())
+(dni wr-asr-imm "write-imm asr" ()
+     "wr $rs1,$simm13,$wrasr"
+     (+ OP_2 OP3_WRASR wrasr rs1 (f-i 1) simm13)
+     (set wrasr (xor rs1 simm13))
+     ())
+
+(define-pmacro (rdwr-op name op3 asm-name reg-name)
+  (begin
+     (dni (.sym rd- name) (.str "read " name) ()
+	  (.str "rd " asm-name ",$rd")
+	  (+ OP_2 (.sym OP3_RD op3) rd (f-rs1 0) (f-i 0) (f-simm13 0))
+	  (set rd (reg WI reg-name))
+	  ())
+     (dni (.sym wr- name) (.str "write " name) ()
+	  (.str "wr $rs1,$rs2," asm-name)
+	  (+ OP_2 (.sym OP3_WR op3) (f-rd 0) rs1 rs2 (f-i 0) (f-res-asi 0))
+	  (set (reg WI reg-name) (xor rs1 rs2))
+	  ())
+     (dni (.sym wr- name -imm) (.str "write-imm " name) ()
+	  (.str "wr $rs1,$simm13," asm-name)
+	  (+ OP_2 (.sym OP3_WR op3) (f-rd 0) rs1 (f-i 1) simm13)
+	  (set (reg WI reg-name) (xor rs1 simm13))
+	  ())
+     )
+)
+
+(rdwr-op psr PSR "%psr" h-psr)
+(rdwr-op wim WIM "%wim" h-wim)
+(rdwr-op tbr TBR "%tbr" h-tbr)
+
+; TODO:
+; - rdy,wry
+; - stbar
+; - flush
+; - ldc, lddc, ldcsr, stc, stdc, stcsr, stdcq
+; - cbccc, cpop

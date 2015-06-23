@@ -1,0 +1,186 @@
+@c Copyright (C) 2000, 2009 Red Hat, Inc.
+@c This file is part of the CGEN manual.
+@c For copying conditions, see the file cgen.texi.
+
+@node Opcodes
+@chapter Opcodes support
+@cindex Opcodes support
+
+Opcodes support comes in the form of machine generated opcode tables as
+well as supporting routines.
+
+@menu
+* Generated files::                 List of generated files
+* The .opc file::                   Target specific C code
+* Special assembler parsing needs:: Support for unusual syntax
+@end menu
+
+@node Generated files
+@section Generated files
+
+The basic interface is defined by
+@file{include/opcode/cgen.h} which is included by the machine generated
+@file{<arch>-desc.h}.  @file{opcode/cgen.h} can stand on its own for the
+target independent stuff, but to get target specific parts of the
+interface use @file{<arch>-desc.h}.
+
+The generated files are:
+
+@table @file
+@item <arch>-desc.h
+Defines macros, enums, and types used to describe the chip.
+@item <arch>-desc.c
+Tables of various things describing the chip.
+This does not include assembler syntax nor semantic information.
+@item <arch>-ibld.c
+Routines for constructing and deconstructing instructions.
+@item <arch>-opc.h
+Declarations necessary for assembly/disassembly that aren't used
+elsewhere and thus left out of @file{<arch>-desc.h}.
+@item <arch>-opc.c
+Assembler syntax tables.
+@item <arch>-asm.c
+Assembler support routines.
+@item <arch>-dis.c
+Disassembler support routines.
+@item <arch>-opinst.c
+Operand instance tables.
+These describe which hardware elements are read and which are written
+for each instruction.  This file isn't generated for all architectures,
+only ones that can make use of the data.  For example the M32R uses them
+to emit warnings if the output of one parallel instruction is the input
+of another, and to control creating parallel instructions during optimizing
+assembly.
+@end table
+
+@node The .opc file
+@section The .opc file
+
+Files with suffix @file{.opc} (e.g. @file{m32r.opc}) contain target
+specific C code that accompanies the cpu description file.
+The @file{.opc} file is split into 4 sections:
+
+@itemize @minus
+@item opc.h
+
+This section contains additions to the generated @file{$target-opc.h} file.
+
+Typically defined here are these macros:
+
+@itemize @bullet
+@item #define CGEN_DIS_HASH_SIZE N
+
+Specifies the size of the hash table to use during disassembly.
+A hash table is built of the selected mach's instructions in order to
+speed up disassembly.
+@item #define CGEN_DIS_HASH(buffer, value)
+
+Given BUFFER, a pointer to the instruction being disassembled and
+VALUE, the value of the instruction as a host integer, return an
+index into the hash chain for the instruction.  The result must be
+in the range 0 to CGEN_DIS_HASH_SIZE-1.
+
+VALUE is only usable if all instructions fit in a portable integer (32 bits).
+
+N.B. The result must depend on opcode portions of the instruction only.
+Normally one wants to use between 6 and 8 bits of opcode info for the hash
+table.  However, some instruction sets don't use the same set of bits
+for all insns.  Certainly they'll have at least one opcode bit in common
+with all insns, but beyond that it can vary.  Here's a possible definition
+for sparc.
+
+@example
+#undef CGEN_DIS_HASH_SIZE
+#define CGEN_DIS_HASH_SIZE 256
+#undef CGEN_DIS_HASH
+extern const unsigned int sparc_cgen_opcode_bits[];
+#define CGEN_DIS_HASH(buffer, insn) \
+((((insn) >> 24) & 0xc0) \
+ | (((insn) & sparc_cgen_opcode_bits[((insn) >> 30) & 3]) >> 19))
+@end example
+
+@code{sparc_cgen_opcode_bits} would be defined in the @samp{asm.c} section as
+
+@example
+/* It is important that we only look at insn code bits
+   as that is how the opcode table is hashed.
+   OPCODE_BITS is a table of valid bits for each of the
+   main types (0,1,2,3).  */
+const unsigned int sparc_cgen_opcode_bits[4] = @{
+  0x01c00000, 0x0, 0x01f80000, 0x01f80000
+@};
+@end example
+@end itemize
+
+@item opc.c
+
+@item asm.c
+
+This section contains additions to the generated @file{$target-asm.c} file.
+Typically defined here are functions used by operands with a @code{parse}
+define-operand handler spec.
+
+@item dis.c
+
+This section contains additions to the generated @file{$target-dis.c} file.
+
+Typically defined here these macros:
+
+@itemize @bullet
+@item #define CGEN_PRINT_NORMAL(cd, info, value, attrs, pc, length)
+@item #define CGEN_PRINT_ADDRESS(cd, info, value, attrs, pc, length)
+@item #define CGEN_PRINT_INSN function_name
+@c FIXME: should be CGEN_PRINT_INSN(cd, pc, info)
+@item #define CGEN_BFD_ARCH bfd_arch_<name>
+@item #define CGEN_COMPUTE_ISA(info)
+@end itemize
+
+@end itemize
+
+@node Special assembler parsing needs
+@section Special assembler parsing needs
+
+Often parsing of assembly instructions requires more than what
+a program-generated assembler can handle.  For example one version
+of an instruction may only accept certain registers, rather than
+the entire set.
+
+Here's an example taken from the @samp{m32r} architecture.
+
+32 bit addresses are built up with a two instruction sequence: one to
+load the high 16 bits of a register, and another to @code{or}-in the
+lower 16 bits.
+
+@example
+seth r0,high(some_symbol)
+or3  r0,r0,low(some_symbol)
+@end example
+
+When assembling, special code must be called to recognize the
+@code{high} and @code{low} pseudo-ops and generate the appropriate
+relocations.  This is indicated by specifying a "parse handler" for
+the operand in question.  Here is the @code{define-operand}
+for the lower 16 bit operand.
+
+@example
+(define-operand
+  (name ulo16)
+  (comment "16 bit unsigned immediate, for low()")
+  (attrs)
+  (type h-ulo16)
+  (index f-uimm16)
+  (handlers (parse "ulo16"))
+)
+@end example
+
+The generated parser will call a function named @code{parse_ulo16}
+for the immediate operand of the @code{or3} instruction.
+The name of the function is constructed by prepended "parse_" to the
+argument of the @code{parse} spec.
+
+@example
+errmsg = parse_ulo16 (cd, strp, M32R_OPERAND_ULO16, &fields->f_uimm16);
+@end example
+
+But where does one put the @code{parse_ulo16} function?
+Answer: in the @samp{asm.c} section of @file{m32r.opc}.

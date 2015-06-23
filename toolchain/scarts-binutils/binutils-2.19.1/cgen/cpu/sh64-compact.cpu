@@ -1,0 +1,2560 @@
+; SuperH SHcompact instruction set description.  -*- Scheme -*-
+; Copyright (C) 2000, 2006 Red Hat, Inc.
+; This file is part of CGEN.
+; See file COPYING.CGEN for details.
+
+; dshcf -- define-normal-sh-compact-field
+
+(define-pmacro (dshcf xname xcomment xattrs xstart xlength)
+  (dnf xname xcomment (.splice (ISA compact) (.unsplice xattrs)) xstart xlength))
+
+; dshcop -- define-normal-sh-compact-operand
+
+(define-pmacro (dshcop xname xcomment xattrs xhardware xfield)
+  (dnop xname xcomment (.splice (ISA compact) (.unsplice xattrs)) xhardware xfield))
+
+
+; SHcompact-specific attributes.
+
+(define-attr
+  (for insn)
+  (type boolean)
+  (name ILLSLOT)
+  (comment "instruction may not appear in a delay slot")
+)
+
+(define-attr
+  (for insn)
+  (type boolean)
+  (name FP-INSN)
+  (comment "floating point instruction")
+)
+
+(define-attr
+  (for insn)
+  (type boolean)
+  (name 32-BIT-INSN)
+  (comment "32 bit insn")
+)
+
+; Attributes to describe categories of insns
+(define-attr
+  (for insn)
+  (type enum)
+  (name SH4-GROUP)
+  (comment "sh4 insn groups")
+  ; The order of declaration is significant. Table lookup is
+  ; performed using these as indices.
+  (values NONE MT EX BR LS FE CO MAX)
+)
+
+(define-attr
+  (for insn)
+  (type enum)
+  (name SH4A-GROUP)
+  (comment "sh4a insn groups")
+  ; The order of declaration is significant. Table lookup is
+  ; performed using these as indices.
+  (values NONE MT EX BR LS FE CO MAX)
+)
+
+(define-keyword
+  (name frc-names)
+  (attrs (ISA compact))
+  (enum-prefix H-FRC-)
+  (values (fr0   0) (fr1   1) (fr2   2) (fr3   3) (fr4   4) (fr5   5)
+	  (fr6   6) (fr7   7) (fr8   8) (fr9   9) (fr10 10) (fr11 11)
+	  (fr12 12) (fr13 13) (fr14 14) (fr15 15))
+)
+
+(define-keyword
+  (name drc-names)
+  (attrs (ISA compact))
+  (enum-prefix H-DRC-)
+  (values (dr0 0) (dr2 2) (dr4 4) (dr6 6) (dr8 8) (dr10 10) (dr12 12) (dr14 14))
+)
+
+(define-keyword
+  (name xf-names)
+  (attrs (ISA compact))
+  (enum-prefix H-XF-)
+  (values (xf0   0) (xf1   1) (xf2   2) (xf3   3) (xf4   4) (xf5   5)
+	  (xf6   6) (xf7   7) (xf8   8) (xf9   9) (xf10 10) (xf11 11)
+	  (xf12 12) (xf13 13) (xf14 14) (xf15 15))
+)
+
+; Hardware specific to the SHcompact mode.
+
+(define-pmacro (front) (mul 16 frbit))
+(define-pmacro (back) (mul 16 (not frbit)))
+
+(define-hardware
+  (name h-frc)
+  (comment "Single precision floating point registers")
+  (attrs VIRTUAL PROFILE (ISA compact))
+  (indices extern-keyword frc-names)
+  (type register SF (16))
+  (get (index) (reg h-fr (add (front) index)))
+  (set (index newval) (set (reg h-fr (add (front) index)) newval))
+)
+
+(define-hardware
+  (name h-drc)
+  (comment "Double precision floating point registers")
+  (attrs VIRTUAL PROFILE (ISA compact))
+  (indices extern-keyword drc-names)
+  (type register DF (8))
+  (get (index) (reg h-dr (add (front) index)))
+  (set (index newval) (set (reg h-dr (add (front) index)) newval))
+)
+
+(define-hardware
+  (name h-xf)
+  (comment "Extended single precision floating point registers")
+  (attrs VIRTUAL (ISA compact))
+  (indices extern-keyword xf-names)
+  (type register SF (16))
+  (get (index) (reg h-fr (add (back) index)))
+  (set (index newval) (set (reg h-fr (add (back) index)) newval))
+)
+
+(define-hardware
+  (name h-xd)
+  (comment "Extended double precision floating point registers")
+  (attrs VIRTUAL (ISA compact))
+  (indices extern-keyword frc-names)
+  (type register DF (8))
+  (get (index) (reg h-dr (add (back) index)))
+  (set (index newval) (set (reg h-dr (add (back) index)) newval))
+)
+
+(define-hardware
+  (name h-fvc)
+  (comment "Single precision floating point vectors")
+  (attrs VIRTUAL (ISA compact))
+  (indices keyword "" ((fv0 0) (fv4 4) (fv8 8) (fv12 12)))
+  (type register SF (4))
+  (get (index) (reg h-fr (add (front) index)))
+  (set (index newval) (set (reg h-fr (add (front) index)) newval))
+)
+
+; not needed? Using h-fpscr directly
+;(define-hardware
+;  (name h-fpccr)
+;  (comment "SHcompact floating point status/control register")
+;  (attrs VIRTUAL (ISA compact))
+;  (type register SI)
+;  (get () (or (or (or (raw-reg h-fpscr) (sll SI prbit 19)) (sll SI szbit 20)) (sll SI frbit 21)))
+;  (set (newvalue) (sequence ()
+;			    (set (reg h-fpscr) newvalue)
+;			    (set prbit (and (srl newvalue 19) 1))
+;			    (set szbit (and (srl newvalue 20) 1))
+;			    (set frbit (and (srl newvalue 21) 1))))
+;)
+
+(define-hardware
+  (name h-gbr)
+  (comment "Global base register")
+  (attrs VIRTUAL (ISA compact))
+  (type register SI)
+  (get () (subword SI (raw-reg h-gr 16) 1))
+  (set (newval) (set (raw-reg h-gr 16) (ext DI newval)))
+)
+
+(define-hardware
+  (name h-vbr)
+  (comment "Vector base register")
+  (attrs VIRTUAL (ISA compact))
+  (type register SI)
+  (get () (subword SI (raw-reg h-gr 20) 1))
+  (set (newval) (set (raw-reg h-gr 20) (ext DI newval)))
+)
+
+(define-hardware
+  (name h-pr)
+  (comment "Procedure link register")
+  (attrs VIRTUAL (ISA compact))
+  (type register SI)
+  (get () (subword SI (raw-reg h-gr 18) 1))
+  (set (newval) (set (raw-reg h-gr 18) (ext DI newval)))
+)
+
+(define-hardware
+  (name h-macl)
+  (comment "Multiple-accumulate low register")
+  (attrs VIRTUAL (ISA compact))
+  (type register SI)
+  (get () (subword SI (raw-reg h-gr 17) 1))
+  (set (newval) (set (raw-reg h-gr 17) (-join-si (subword SI (raw-reg h-gr 17) 0) newval)))
+)
+
+(define-hardware
+  (name h-mach)
+  (comment "Multiply-accumulate high register")
+  (attrs VIRTUAL (ISA compact))
+  (type register SI)
+  (get () (subword SI (raw-reg h-gr 17) 0))
+  (set (newval) (set (raw-reg h-gr 17) (-join-si newval (subword SI (raw-reg h-gr 17) 1))))
+)
+  
+(define-hardware
+  (name h-tbit)
+  (comment "Condition code flag")
+  (attrs VIRTUAL (ISA compact))
+  (type register BI)
+  (get () (and BI (raw-reg h-gr 19) 1))
+  (set (newval) (set (raw-reg h-gr 19) (or (and (raw-reg h-gr 19) (inv DI 1)) (zext DI newval))))
+)
+
+
+(dshcf f-op4     "Opcode (4 bits)"         ()   0   4)
+(dshcf f-op8     "Opcode (8 bits)"         ()   0   8)
+(dshcf f-op16    "Opcode (16 bits)"        ()   0  16)
+
+(dshcf f-sub4    "Sub opcode (4 bits)"     ()  12   4)
+(dshcf f-sub8    "Sub opcode (8 bits)"     ()   8   8)
+(dshcf f-sub10   "Sub opcode (10 bits)"    ()   6  10)
+
+(dshcf f-rn      "Register selector n"     ()   4   4)
+(dshcf f-rm      "Register selector m"     ()   8   4)
+
+(dshcf f-7-1     "One bit at bit 8"        ()   7   1)
+(dshcf f-11-1    "One bit at bit 11"       ()  11   1)
+(dshcf f-16-4    "4 bits at bit 16"        ()  16   4)
+
+(df  f-disp8  "Displacement (8 bits)"  ((ISA compact) PCREL-ADDR) 8 8 INT
+     ((value pc) (sra SI value 1))
+     ((value pc) (add SI (sll SI value 1) (add pc 4))))
+
+(df  f-disp12 "Displacement (12 bits)" ((ISA compact) PCREL-ADDR) 4 12 INT
+     ((value pc) (sra SI value 1))
+     ((value pc) (add SI (sll SI value 1) (add pc 4))))
+
+(dshcf f-imm8    "Immediate (8 bits)"      ()   8   8)
+(dshcf f-imm4    "Immediate (4 bits)"      ()  12   4)
+
+(df f-imm4x2     "Immediate (4 bits)"      ((ISA compact)) 12 4 UINT
+    ((value pc) (srl SI value 1))
+    ((value pc) (sll SI value 1)))
+
+(df f-imm4x4     "Immediate (4 bits)"      ((ISA compact)) 12 4 UINT
+    ((value pc) (srl SI value 2))
+    ((value pc) (sll SI value 2)))
+
+(df f-imm8x2     "Immediate (8 bits)"      ((ISA compact)) 8 8 UINT
+    ((value pc) (sra SI value 1))
+    ((value pc) (sll SI value 1)))
+
+(df f-imm8x4     "Immediate (8 bits)"      ((ISA compact)) 8 8 UINT
+    ((value pc) (sra SI value 2))
+    ((value pc) (sll SI value 2)))
+
+(df  f-imm12x4 "Displacement (12 bits)" ((ISA compact)) 20 12 INT
+     ((value pc) (sra SI value 2))
+     ((value pc) (sll SI value 2)))
+
+(df  f-imm12x8 "Displacement (12 bits)" ((ISA compact)) 20 12 INT
+     ((value pc) (sra SI value 3))
+     ((value pc) (sll SI value 3)))
+
+(df f-dn "Double selector n" ((ISA compact))  4 3 UINT
+    ((value pc) (srl SI value 1))
+    ((value pc) (sll SI value 1)))
+
+(df f-dm         "Double selector m"       ((ISA compact)) 8 3 UINT
+    ((value pc) (srl SI value 1))
+    ((value pc) (sll SI value 1)))
+
+(df f-vn         "Vector selector n"       ((ISA compact)) 4 2 UINT
+    ((value pc) (srl SI value 2))
+    ((value pc) (sll SI value 2)))
+
+(df f-vm         "Vector selector m"       ((ISA compact)) 6 2 UINT
+    ((value pc) (srl SI value 2))
+    ((value pc) (sll SI value 2)))
+
+(df f-xn         "Extended selector n"     ((ISA compact)) 4 3 UINT
+    ((value pc) (srl SI value 1))
+    ((value pc) (add SI (sll SI value 1) 1)))
+
+(df f-xm         "Extended selector m"     ((ISA compact)) 8 3 UINT
+    ((value pc) (srl SI value 1))
+    ((value pc) (add SI (sll SI value 1) 1)))
+
+(df f-imm20-hi "imm20 hi" ((ISA compact))  8  4  INT #f #f)
+(df f-imm20-lo "imm20 lo" ((ISA compact)) 16 16 UINT #f #f)
+(define-multi-ifield
+  (name f-imm20)
+  (comment "20 bit immediate")
+  (attrs (ISA compact))
+  (mode INT)
+  (subfields f-imm20-hi f-imm20-lo)
+  (insert (sequence ()
+		    (set (ifield f-imm20-lo) (and (ifield f-imm20) #xffff))
+		    (set (ifield f-imm20-hi) (sra (ifield f-imm20) 16))))
+  (extract (set (ifield f-imm20)
+		(or (sll (ifield f-imm20-hi) 16) (ifield f-imm20-lo))))
+  )
+
+
+; Operands.
+
+(dshcop rm     "Left general purpose register"          ()   h-grc   f-rm)
+(dshcop rn     "Right general purpose register"         ()   h-grc   f-rn)
+(dshcop r0     "Register 0"                             ()   h-grc   0)
+
+(dshcop frn    "Single precision register"              ()   h-frc   f-rn)
+(dshcop frm    "Single precision register"              ()   h-frc   f-rm)
+(dshcop fr0    "Single precision register 0"            ()   h-frc   0)
+
+(dshcop fmovn  "Register for fmov"                      ((SH2e-MACH)) h-fmov f-rn)
+(dshcop fmovm  "Register for fmov"                      ((SH2e-MACH)) h-fmov f-rm)
+
+(dshcop fvn    "Left floating point vector"             ()   h-fvc   f-vn)
+(dshcop fvm    "Right floating point vector"            ()   h-fvc   f-vm)
+
+(dshcop drn    "Left double precision register"         ()   h-drc   f-dn)
+(dshcop drm    "Right double precision register"        ()   h-drc   f-dm)
+
+(dshcop imm4   "Immediate value (4 bits)"		()   h-sint  f-imm4)
+(dshcop imm8   "Immediate value (8 bits)"               ()   h-sint  f-imm8)
+(dshcop uimm8  "Immediate value (8 bits unsigned)"      ()   h-uint  f-imm8)
+(dshcop imm20  "Immediate value (20 bits)"              ()   h-sint  f-imm20)
+
+(dshcop imm4x2 "Immediate value (4 bits, 2x scale)"     ()   h-uint  f-imm4x2)
+(dshcop imm4x4 "Immediate value (4 bits, 4x scale)"     ()   h-uint  f-imm4x4)
+(dshcop imm8x2 "Immediate value (8 bits, 2x scale)"     ()   h-uint  f-imm8x2)
+(dshcop imm8x4 "Immediate value (8 bits, 4x scale)"     ()   h-uint  f-imm8x4)
+
+(dshcop disp8  "Displacement (8 bits)"                  ()   h-iaddr f-disp8)
+(dshcop disp12 "Displacement (12 bits)"                 ()   h-iaddr f-disp12)
+(dshcop imm12x4 "Displacement (12 bits)"                ()   h-sint  f-imm12x4)
+(dshcop imm12x8 "Displacement (12 bits)"                ()   h-sint  f-imm12x8)
+
+(dshcop rm64   "Register m (64 bits)"                   ()   h-gr    f-rm)
+(dshcop rn64   "Register n (64 bits)"                   ()   h-gr    f-rn)
+
+(dshcop gbr    "Global base register"                   ()   h-gbr   f-nil)
+(dshcop vbr    "Vector base register"                   ()   h-vbr   f-nil)
+(dshcop pr     "Procedure link register"                ()   h-pr    f-nil)
+
+(dshcop fpscr  "Floating point status/control register" ()   h-fpscr f-nil)
+
+(dshcop tbit   "Condition code flag"                    ()   h-tbit  f-nil)
+(dshcop sbit   "Multiply-accumulate saturation flag"    ()   h-sbit  f-nil)
+(dshcop mbit   "Divide-step M flag"                     ()   h-mbit  f-nil)
+(dshcop qbit   "Divide-step Q flag"                     ()   h-qbit  f-nil)
+(dshcop fpul   "Floating point ???"			()   h-fr    32)
+
+(dshcop frbit  "Floating point register bank bit"       ()   h-frbit f-nil)
+(dshcop szbit  "Floating point transfer size bit"       ()   h-szbit f-nil)
+(dshcop prbit  "Floating point precision bit"           ()   h-prbit f-nil)
+
+(dshcop macl   "Multiply-accumulate low register"       ()   h-macl  f-nil)
+(dshcop mach   "Multiply-accumulate high register"      ()   h-mach  f-nil)
+
+(define-operand (name fsdm) (comment "bar")
+  (attrs (ISA compact) (SH2e-MACH)) (type h-fsd) (index f-rm) (handlers (parse "fsd")))
+
+(define-operand (name fsdn) (comment "bar")
+  (attrs (ISA compact) (SH2e-MACH)) (type h-fsd) (index f-rn))
+
+
+; Cover macro to dni to indicate these are all SHcompact instructions.
+; dshmi: define-normal-sh-compact-insn
+
+(define-pmacro (dshci xname xcomment xattrs xsyntax xformat xsemantics xtiming)
+  (define-insn
+    (name (.sym xname -compact))
+    (comment xcomment)
+    (.splice attrs (.unsplice xattrs) (ISA compact))
+    (syntax xsyntax)
+    (format xformat)
+    (semantics xsemantics)
+    (.splice timing (.unsplice xtiming))))
+
+(dshci add "Add"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "add $rm, $rn"
+       (+ (f-op4 3) rn rm (f-sub4 12))
+       (set rn (add rn rm))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-gr (in usereg rm))
+		    (unit u-exec))))
+
+(dshci addi "Add immediate"
+       ((SH4-GROUP EX))
+       "add #$imm8, $rn"
+       (+ (f-op4 7) rn imm8)
+       (set rn (add rn (ext SI (and QI imm8 255))))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-exec))))
+
+(dshci addc "Add with carry"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "addc $rm, $rn"
+       (+ (f-op4 3) rn rm (f-sub4 14))
+       (sequence ((BI flag))
+		 (set flag (add-cflag rn rm tbit))
+		 (set rn (addc rn rm tbit))
+		 (set tbit flag))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-gr (in usereg rm))
+		    (unit u-use-tbit)
+		    (unit u-exec)
+		    (unit u-set-sr-bit))))
+
+(dshci addv "Add with overflow"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "addv $rm, $rn"
+       (+ (f-op4 3) rn rm (f-sub4 15))
+       (sequence ((BI t))
+		 (set t (add-oflag rn rm 0))
+		 (set rn (add rn rm))
+		 (set tbit t))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-gr (in usereg rm))
+		    (unit u-use-tbit)
+		    (unit u-exec)
+		    (unit u-set-sr-bit))))
+
+(dshci and "Bitwise AND"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "and $rm64, $rn64"
+       (+ (f-op4 2) rn64 rm64 (f-sub4 9))
+       (set rn64 (and rm64 rn64))
+       (all-models ((unit u-use-gr (in usereg rn64))
+		    (unit u-use-gr (in usereg rm64))
+		    (unit u-exec))))
+
+(dshci andi "Bitwise AND immediate"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "and #$uimm8, r0"
+       (+ (f-op8 #xc9) uimm8)
+       (set r0 (and r0 (zext DI uimm8)))
+       (all-models ((unit u-use-gr (in usereg r0))
+		    (unit u-exec))))
+
+(dshci andb "Bitwise AND memory byte"
+       ((SH4-GROUP CO) (SH4A-GROUP CO))
+       "and.b #$imm8, @(r0, gbr)"
+       (+ (f-op8 #xcd) imm8)
+       (sequence ((DI addr) (UQI data))
+		 (set addr (add r0 gbr))
+		 (set data (and (mem UQI addr) imm8))
+		 (set (mem UQI addr) data))
+       (all-models ((unit u-use-gr (in usereg r0))
+		    (unit u-logic-b)
+		    (unit u-memory-access))))
+
+(dshci bf "Conditional branch"
+       ((SH4-GROUP BR) (SH4A-GROUP BR))
+       "bf $disp8"
+       (+ (f-op8 #x8b) disp8)
+       (if (not tbit)
+	   (set pc disp8))
+       ; non-delayed branch stalls 2 cycles
+       (all-models ((unit u-use-tbit)
+		    (unit u-branch (cycles 3)))))
+
+(dshci bfs "Conditional branch with delay slot"
+       ((SH2-MACH) (SH4-GROUP BR) (SH4A-GROUP BR))
+       "bf/s $disp8"
+       (+ (f-op8 #x8f) disp8)
+       (if (not tbit)
+	   (sequence ()
+		     (set pc (add pc 2)) ; kludge to get it marked as referenced
+		     (save-delayed-pc disp8)
+		     (set-delay 1 pc disp8)))
+       ; delayed branch stalls 1 cycle
+       (all-models ((unit u-use-tbit)
+		    (unit u-branch (cycles 2)))))
+
+(dshci bra "Branch"
+       ((SH4-GROUP BR) (SH4A-GROUP BR))
+       "bra $disp12"
+       (+ (f-op4 10) disp12)
+       (sequence ()
+		 (set pc (add pc 2)) ; kludge to get it marked as referenced
+		 (save-delayed-pc disp12)
+		 (set-delay 1 pc disp12))
+       ; delayed branch stalls 1 cycle
+       (all-models ((unit u-branch (cycles 2)))))
+
+(dshci braf "Branch far"
+       ((SH2-MACH) (SH4-GROUP CO) (SH4A-GROUP BR))
+       "braf $rn"
+       (+ (f-op4 0) rn (f-sub8 35))
+       (sequence ()
+		 (set pc (add pc 2)) ; kludge to get it marked as referenced
+		 (save-delayed-pc (add (ext DI rn) (add pc 4)))
+		 (set-delay 1 pc (add (ext DI rn) (add pc 4))))
+       ; delayed branch stalls 1 cycle
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-jmp (cycles 2)))))
+
+(dshci brk "Breakpoint"
+       ((SH5-MACH))
+       "brk"
+       (+ (f-op16 59))
+       (c-call "sh64_break" pc)
+       ())
+
+(dshci bsr "Branch to subroutine"
+       ((SH4-GROUP BR) (SH4A-GROUP BR))
+       "bsr $disp12"
+       (+ (f-op4 11) disp12)
+       (sequence ()
+		 (set-delay 1 pr (add pc 4))
+		 (set pc (add pc 2)) ; kludge to get it marked as referenced
+		 (save-delayed-pc disp12)
+		 (set-delay 1 pc disp12))
+       ; delayed branch stalls 1 cycle
+       (all-models ((unit u-branch (cycles 2)))))
+
+(dshci bsrf "Branch to far subroutine"
+       ((SH2-MACH) (SH4-GROUP CO) (SH4A-GROUP BR))
+       "bsrf $rn"
+       (+ (f-op4 0) rn (f-sub8 3))
+       (sequence ()
+		 (set-delay 1 pr (add pc 4))
+		 (set pc (add pc 2)) ; kludge to get it marked as referenced
+		 (save-delayed-pc (add (ext DI rn) (add pc 4)))
+		 (set-delay 1 pc (add (ext DI rn) (add pc 4))))
+       ; delayed branch stalls 1 cycle
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-jsr (cycles 2)))))
+       
+(dshci bt "Conditional branch"
+       ((SH4-GROUP BR) (SH4A-GROUP BR))
+       "bt $disp8"
+       (+ (f-op8 #x89) disp8)
+       (if tbit
+	   (set pc disp8))
+       ; non-delayed branch stalls 2 cycles
+       (all-models ((unit u-use-tbit)
+		    (unit u-branch (cycles 3)))))
+
+(dshci bts "Conditional branch with delay slot"
+       ((SH2-MACH) (SH4-GROUP BR) (SH4A-GROUP BR))
+       "bt/s $disp8"
+       (+ (f-op8 #x8d) disp8)
+       (if tbit
+	   (sequence ()
+		     (set pc (add pc 2)) ; kludge to get it marked as referenced
+		     (save-delayed-pc disp8)
+		     (set-delay 1 pc disp8)))
+       ; delayed branch stalls 1 cycle
+       (all-models ((unit u-use-tbit)
+		    (unit u-branch (cycles 2)))))
+
+(dshci clrmac "Clear MACL and MACH"
+       ((SH4-GROUP CO) (SH4A-GROUP EX))
+       "clrmac"
+       (+ (f-op16 40))
+       (sequence ()
+		 (set macl 0)
+		 (set mach 0))
+       (all-models ((unit u-use-multiply-result)
+		    (unit u-exec)
+		    (unit u-set-mac))))
+
+(dshci clrs "Clear S-bit"
+       ((SH3-MACH) (SH4-GROUP CO) (SH4A-GROUP EX))
+       "clrs"
+       (+ (f-op16 72))
+       (set sbit 0)
+       (sh3-models ((unit u-exec)
+		    (unit u-set-sr-bit))))
+;		    (unit u-set-sr))))
+
+(dshci clrt "Clear T-bit"
+       ((SH4-GROUP MT) (SH4A-GROUP EX))
+       "clrt"
+       (+ (f-op16 8))
+       (set tbit 0)
+       (all-models ((unit u-exec)
+		    (unit u-use-tbit)
+		    (unit u-set-sr-bit))))
+;		    (unit u-set-sr))))
+
+(dshci cmpeq "Compare if equal"
+       ((SH4-GROUP MT) (SH4A-GROUP EX))
+       "cmp/eq $rm, $rn"
+       (+ (f-op4 3) rn rm (f-sub4 0))
+       (set tbit (eq rm rn))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-gr (in usereg rm))
+		    (unit u-use-tbit)
+		    (unit u-exec)
+		    (unit u-set-sr-bit))))
+
+(dshci cmpeqi "Compare if equal (immediate)"
+       ((SH4-GROUP MT) (SH4A-GROUP EX))
+       "cmp/eq #$imm8, r0"
+       (+ (f-op8 #x88) imm8)
+       (set tbit (eq r0 (ext SI (and QI imm8 255))))
+       (all-models ((unit u-use-gr (in usereg r0))
+		    (unit u-use-tbit)
+		    (unit u-exec)
+		    (unit u-set-sr-bit))))
+
+(dshci cmpge "Compare if greater than or equal"
+       ((SH4-GROUP MT) (SH4A-GROUP EX))
+       "cmp/ge $rm, $rn"
+       (+ (f-op4 3) rn rm (f-sub4 3))
+       (set tbit (ge rn rm))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-gr (in usereg rm))
+		    (unit u-use-tbit)
+		    (unit u-exec)
+		    (unit u-set-sr-bit))))
+
+(dshci cmpgt "Compare if greater than"
+       ((SH4-GROUP MT) (SH4A-GROUP EX))
+       "cmp/gt $rm, $rn"
+       (+ (f-op4 3) rn rm (f-sub4 7))
+       (set tbit (gt rn rm))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-gr (in usereg rm))
+		    (unit u-use-tbit)
+		    (unit u-exec)
+		    (unit u-set-sr-bit))))
+
+(dshci cmphi "Compare if greater than (unsigned)"
+       ((SH4-GROUP MT) (SH4A-GROUP EX))
+       "cmp/hi $rm, $rn"
+       (+ (f-op4 3) rn rm (f-sub4 6))
+       (set tbit (gtu rn rm))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-gr (in usereg rm))
+		    (unit u-use-tbit)
+		    (unit u-exec)
+		    (unit u-set-sr-bit))))
+
+(dshci cmphs "Compare if greater than or equal (unsigned)"
+       ((SH4-GROUP MT) (SH4A-GROUP EX))
+       "cmp/hs $rm, $rn"
+       (+ (f-op4 3) rn rm (f-sub4 2))
+       (set tbit (geu rn rm))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-gr (in usereg rm))
+		    (unit u-use-tbit)
+		    (unit u-exec)
+		    (unit u-set-sr-bit))))
+
+(dshci cmppl "Compare if greater than zero"
+       ((SH4-GROUP MT) (SH4A-GROUP EX))
+       "cmp/pl $rn"
+       (+ (f-op4 4) rn (f-sub8 21))
+       (set tbit (gt rn 0))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-tbit)
+		    (unit u-exec)
+		    (unit u-set-sr-bit))))
+
+(dshci cmppz "Compare if greater than or equal zero"
+       ((SH4-GROUP MT) (SH4A-GROUP EX))
+       "cmp/pz $rn"
+       (+ (f-op4 4) rn (f-sub8 17))
+       (set tbit (ge rn 0))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-tbit)
+		    (unit u-exec)
+		    (unit u-set-sr-bit))))
+
+(dshci cmpstr "Compare bytes"
+       ((SH4-GROUP MT) (SH4A-GROUP EX))
+       "cmp/str $rm, $rn"
+       (+ (f-op4 2) rn rm (f-sub4 12))
+       (sequence ((BI t) (SI temp))
+		 (set temp (xor rm rn))
+		 (set t (eq (and temp #xff000000) 0))
+		 (set t (or (eq (and temp #xff0000) 0) t))
+		 (set t (or (eq (and temp #xff00) 0) t))
+		 (set t (or (eq (and temp #xff) 0) t))
+		 (set tbit (if BI (gtu t 0) 1 0)))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-gr (in usereg rm))
+		    (unit u-use-tbit)
+		    (unit u-exec)
+		    (unit u-set-sr-bit))))
+
+(dshci div0s "Initialise divide-step state for signed division"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "div0s $rm, $rn"
+       (+ (f-op4 2) rn rm (f-sub4 7))
+       (sequence ()
+		 (set qbit (srl rn 31))
+		 (set mbit (srl rm 31))
+		 (set tbit (if BI (eq (srl rm 31) (srl rn 31)) 0 1)))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-gr (in usereg rm))
+		    (unit u-use-tbit)
+		    (unit u-exec)
+		    (unit u-set-sr-bit))))
+
+(dshci div0u "Initialise divide-step state for unsigned division"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "div0u"
+       (+ (f-op16 25))
+       (sequence ()
+		 (set tbit 0)
+		 (set qbit 0)
+		 (set mbit 0))
+       (all-models ((unit u-use-tbit)
+		    (unit u-exec)
+		    (unit u-set-sr-bit))))
+
+(dshci div1 "Divide step"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "div1 $rm, $rn"
+       (+ (f-op4 3) rn rm (f-sub4 4))
+       (sequence ((BI oldq) (SI tmp0) (UQI tmp1))
+		 (set oldq qbit)
+		 (set qbit (srl rn 31))
+		 (set rn (or (sll rn 1) (zext SI tbit)))
+		 (if (not oldq)
+		     (if (not mbit)
+			 (sequence ()
+				   (set tmp0 rn)
+				   (set rn (sub rn rm))
+				   (set tmp1 (gtu rn tmp0))
+				   (if (not qbit)
+				       (set qbit (if BI tmp1 1 0))
+				       (set qbit (if BI (eq tmp1 0) 1 0))))
+			 (sequence ()
+				   (set tmp0 rn)
+				   (set rn (add rn rm))
+				   (set tmp1 (ltu rn tmp0))
+				   (if (not qbit)
+				       (set qbit (if BI (eq tmp1 0) 1 0))
+				       (set qbit (if BI tmp1 1 0)))))
+		     (if (not mbit)
+			 (sequence ()
+				   (set tmp0 rn)
+				   (set rn (add rm rn))
+				   (set tmp1 (ltu rn tmp0))
+				   (if (not qbit)
+				       (set qbit (if BI tmp1 1 0))
+				       (set qbit (if BI (eq tmp1 0) 1 0))))
+			 (sequence ()
+				   (set tmp0 rn)
+				   (set rn (sub rn rm))
+				   (set tmp1 (gtu rn tmp0))
+				   (if (not qbit)
+				       (set qbit (if BI (eq tmp1 0) 1 0))
+				       (set qbit (if BI tmp1 1 0))))))
+		 (set tbit (if BI (eq qbit mbit) 1 0)))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-gr (in usereg rm))
+		    (unit u-use-tbit)
+		    (unit u-exec)
+		    (unit u-set-sr-bit))))
+
+(dshci divu "Unsigned Divide"
+       ((SH2a-nofpu-MACH))
+       "divu r0, $rn"
+       (+ (f-op4 4) rn (f-sub8 #x84))
+       (set rn (udiv rn r0))
+       (sh2a-nofpu-models ((unit u-use-gr (in usereg rn))
+			   (unit u-use-gr (in usereg r0))
+			   (unit u-exec (cycles 34)))))
+
+(dshci mulr "Multiply to Register"
+       ((SH2a-nofpu-MACH))
+       "mulr r0, $rn"
+       (+ (f-op4 4) rn (f-sub8 #x80))
+       (set rn (mul rn r0))
+       (sh2a-nofpu-models ((unit u-use-gr (in usereg rn))
+			   (unit u-use-gr (in usereg r0))
+			   (unit u-mulr)
+			   (unit u-mulr-gr (out loadreg rn)))))
+
+(dshci dmulsl "Multiply long (signed)"
+       ((SH2-MACH) (SH4-GROUP CO) (SH4A-GROUP EX))
+       "dmuls.l $rm, $rn"
+       (+ (f-op4 3) rn rm (f-sub4 13))
+       (sequence ((DI result))
+		 (set result (mul (ext DI rm) (ext DI rn)))
+		 (set mach (subword SI result 0))
+		 (set macl (subword SI result 1)))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-gr (in usereg rm))
+		    (unit u-dmul))))
+
+(dshci dmulul "Multiply long (unsigned)"
+       ((SH2-MACH) (SH4-GROUP CO) (SH4A-GROUP EX))
+       "dmulu.l $rm, $rn"
+       (+ (f-op4 3) rn rm (f-sub4 5))
+       (sequence ((DI result))
+		 (set result (mul (zext DI rm) (zext DI rn)))
+		 (set mach (subword SI result 0))
+		 (set macl (subword SI result 1)))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-gr (in usereg rm))
+		    (unit u-dmul))))
+
+(dshci dt "Decrement and set"
+       ((SH2-MACH) (SH4-GROUP EX) (SH4A-GROUP EX))
+       "dt $rn"
+       (+ (f-op4 4) rn (f-sub8 16))
+       (sequence ()
+		 (set rn (sub rn 1))
+		 (set tbit (eq rn 0)))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-tbit)
+		    (unit u-exec)
+		    (unit u-set-sr-bit))))
+
+(dshci extsb "Sign extend byte"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "exts.b $rm, $rn"
+       (+ (f-op4 6) rn rm (f-sub4 14))
+       (set rn (ext SI (subword QI rm 3)))
+       (all-models ((unit u-use-gr (in usereg rm))
+		    (unit u-exec)
+		    (unit u-shift))))
+
+(dshci extsw "Sign extend word"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "exts.w $rm, $rn"
+       (+ (f-op4 6) rn rm (f-sub4 15))
+       (set rn (ext SI (subword HI rm 1)))
+       (all-models ((unit u-use-gr (in usereg rm))
+		    (unit u-exec)
+		    (unit u-shift))))
+
+(dshci extub "Zero extend byte"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "extu.b $rm, $rn"
+       (+ (f-op4 6) rn rm (f-sub4 12))
+       (set rn (zext SI (subword QI rm 3)))
+       (all-models ((unit u-use-gr (in usereg rm))
+		    (unit u-exec)
+		    (unit u-shift))))
+
+(dshci extuw "Zero etxend word"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "extu.w $rm, $rn"
+       (+ (f-op4 6) rn rm (f-sub4 13))
+       (set rn (zext SI (subword HI rm 1)))
+       (all-models ((unit u-use-gr (in usereg rm))
+		    (unit u-exec)
+		    (unit u-shift))))
+
+(dshci fabs "Floating point absolute"
+       ((SH2e-MACH) FP-INSN (SH4-GROUP LS) (SH4A-GROUP LS))
+       "fabs $fsdn"
+       (+ (f-op4 15) fsdn (f-sub8 #x5d))
+       (if prbit
+	   (set fsdn (c-call DF "sh64_fabsd" fsdn))
+	   (set fsdn (c-call SF "sh64_fabss" fsdn)))
+       (sh2e-models ((unit u-use-fr (in usereg fsdn))
+		     (unit u-exec)
+		     (unit u-maybe-fpu)
+		     (unit u-set-fr-0 (out loadreg fsdn)))))
+
+(dshci fadd "Floating point add"
+       ((SH2e-MACH) FP-INSN (SH4-GROUP FE) (SH4A-GROUP FE))
+       "fadd $fsdm, $fsdn"
+       (+ (f-op4 15) fsdn fsdm (f-sub4 0))
+       (if prbit
+	   (set fsdn (c-call DF "sh64_faddd" fsdm fsdn))
+	   (set fsdn (c-call SF "sh64_fadds" fsdm fsdn)))
+       (sh2e-models ((unit u-use-fr (in usereg fsdm))
+		     (unit u-use-fr (in usereg fsdn))
+		     (unit u-exec)
+		     (unit u-fpu)
+		     (unit u-set-fr (out loadreg fsdn)))))
+
+(dshci fcmpeq "Floating point compare equal"
+       ((SH2e-MACH) FP-INSN (SH4-GROUP FE) (SH4A-GROUP FE))
+       "fcmp/eq $fsdm, $fsdn"
+       (+ (f-op4 15) fsdn fsdm (f-sub4 4))
+       (if prbit
+	   (set tbit (c-call BI "sh64_fcmpeqd" fsdm fsdn))
+	   (set tbit (c-call BI "sh64_fcmpeqs" fsdm fsdn)))
+       (sh2e-models ((unit u-use-fr (in usereg fsdm))
+		     (unit u-use-fr (in usereg fsdn))
+		     (unit u-exec)
+		     (unit u-fcmp)
+		     (unit u-fpu))))
+       
+(dshci fcmpgt "Floating point compare greater than"
+       ((SH2e-MACH) FP-INSN (SH4-GROUP FE) (SH4A-GROUP FE))
+       "fcmp/gt $fsdm, $fsdn"
+       (+ (f-op4 15) fsdn fsdm (f-sub4 5))
+       (if prbit
+	   (set tbit (c-call BI "sh64_fcmpgtd" fsdn fsdm))
+	   (set tbit (c-call BI "sh64_fcmpgts" fsdn fsdm)))
+       (sh2e-models ((unit u-use-fr (in usereg fsdm))
+		     (unit u-use-fr (in usereg fsdn))
+		     (unit u-exec)
+		     (unit u-fcmp)
+		     (unit u-fpu))))
+
+(dshci fcnvds "Floating point convert (double to single)"
+       ((SH2a-MACH) FP-INSN (SH4-GROUP FE) (SH4A-GROUP FE))
+       "fcnvds $drn, fpul"
+       (+ (f-op4 15) drn (f-7-1 0) (f-sub8 #xbd))
+       (set fpul (c-call SF "sh64_fcnvds" drn))
+       (sh2a-fpu-models ((unit u-use-dr (in usereg drn))
+			 (unit u-exec)
+			 (unit u-fcnv)
+			 (unit u-set-fpul))))
+
+(dshci fcnvsd "Floating point convert (single to double)"
+       ((SH2a-MACH) FP-INSN (SH4-GROUP FE) (SH4A-GROUP FE))
+       "fcnvsd fpul, $drn"
+       (+ (f-op4 15) drn (f-7-1 0) (f-sub8 #xad))
+       (set drn (c-call DF "sh64_fcnvsd" fpul))
+       (sh2a-fpu-models ((unit u-use-fpul)
+			 (unit u-exec)
+			 (unit u-fcnv)
+			 (unit u-set-dr (out loadreg drn)))))
+
+(dshci fdiv "Floating point divide"
+       ((SH2e-MACH) FP-INSN (SH4-GROUP FE) (SH4A-GROUP FE))
+       "fdiv $fsdm, $fsdn"
+       (+ (f-op4 15) fsdn fsdm (f-sub4 3))
+       (if prbit
+	   (set fsdn (c-call DF "sh64_fdivd" fsdn fsdm))
+	   (set fsdn (c-call SF "sh64_fdivs" fsdn fsdm)))
+       (sh2e-models ((unit u-use-fr (in usereg fsdm))
+		     (unit u-use-fr (in usereg fsdn))
+		     (unit u-exec)
+		     (unit u-fdiv (out loadreg fsdn)))))
+
+(dshci fipr "Floating point inner product"
+       ((SH4-MACH) FP-INSN (SH4-GROUP FE) (SH4A-GROUP FE))
+       "fipr $fvm, $fvn"
+       (+ (f-op4 15) fvn fvm (f-sub8 #xed))
+       (c-call VOID "sh64_fipr" (index-of fvm) (index-of fvn))
+       (sh4-models ((unit u-exec)
+		    (unit u-fipr))))
+
+(dshci flds "Floating point load status register"
+       ((SH2e-MACH) FP-INSN (SH4-GROUP LS) (SH4A-GROUP LS))
+       "flds $frn, fpul"
+       (+ (f-op4 15) frn (f-sub8 #x1d))
+       (set fpul frn)
+       (sh2e-models ((unit u-use-fr (in usereg frn))
+		     (unit u-exec)
+		     (unit u-flds-fpul))))
+
+(dshci fldi0 "Floating point load immediate 0.0"
+       ((SH2e-MACH) FP-INSN (SH4-GROUP LS) (SH4A-GROUP LS))
+       "fldi0 $frn"
+       (+ (f-op4 15) frn (f-sub8 #x8d))
+       (set frn (c-call SF "sh64_fldi0"))
+       (sh2e-models ((unit u-exec)
+		     (unit u-maybe-fpu)
+		     (unit u-set-fr-0 (out loadreg frn)))))
+
+(dshci fldi1 "Floating point load immediate 1.0"
+       ((SH2e-MACH) FP-INSN (SH4-GROUP LS) (SH4A-GROUP LS))
+       "fldi1 $frn"
+       (+ (f-op4 15) frn (f-sub8 #x9d))
+       (set frn (c-call SF "sh64_fldi1"))
+       (sh2e-models ((unit u-exec)
+		     (unit u-maybe-fpu)
+		     (unit u-set-fr-0 (out loadreg frn)))))
+
+(dshci float "Floating point integer conversion"
+       ((SH2e-MACH) FP-INSN (SH4-GROUP FE) (SH4A-GROUP FE))
+       "float fpul, $fsdn"
+       (+ (f-op4 15) fsdn (f-sub8 #x2d))
+       (if prbit
+	   (set fsdn (c-call DF "sh64_floatld" fpul))
+	   (set fsdn (c-call SF "sh64_floatls" fpul)))
+       (sh2e-models ((unit u-use-fpul)
+		     (unit u-exec)
+		     (unit u-fpu)
+		     (unit u-set-fr (out loadreg fsdn)))))
+
+(dshci fmac "Floating point multiply and accumulate"
+       ((SH2e-MACH) FP-INSN (SH4-GROUP FE) (SH4A-GROUP FE))
+       "fmac fr0, $frm, $frn"
+       (+ (f-op4 15) frn frm (f-sub4 14))
+       (set frn (c-call SF "sh64_fmacs" fr0 frm frn))
+       (sh2e-models ((unit u-use-fr (in usereg frm))
+		     (unit u-use-fr (in usereg frn))
+		     (unit u-use-fr (in usereg fr0))
+		     (unit u-exec)
+		     (unit u-fpu)
+		     (unit u-set-fr (out loadreg frn)))))
+
+(dshci fmov1 "Floating point move (register to register)"
+       ((SH2e-MACH) FP-INSN (SH4-GROUP LS) (SH4A-GROUP LS))
+       "fmov $fmovm, $fmovn"
+       (+ (f-op4 15) fmovn fmovm (f-sub4 12))
+       (set fmovn fmovm)
+       (sh2e-models ((unit u-use-fr (in usereg fmovm))
+		     (unit u-exec)
+		     (unit u-maybe-fpu)
+		     (unit u-set-fr-0 (out loadreg fmovn)))))
+
+(dshci fmov2 "Floating point load"
+       ((SH2e-MACH) FP-INSN (SH4-GROUP LS) (SH4A-GROUP LS))
+       "fmov @$rm, $fmovn"
+       (+ (f-op4 15) fmovn rm (f-sub4 8))
+       (if (not szbit)
+	   (set fmovn (mem SF rm))
+	   (set fmovn (mem DF rm)))
+       (sh2e-models ((unit u-use-gr (in usereg rm))
+		     (unit u-exec)
+		     (unit u-maybe-fpu)
+		     (unit u-fpu-memory-access)
+		     (unit u-load-fr (out loadreg fmovn)))))
+
+(dshci fmov3 "Floating point load (post-increment)"
+       ((SH2e-MACH) FP-INSN (SH4-GROUP LS) (SH4A-GROUP LS))
+       "fmov @${rm}+, fmovn"
+       (+ (f-op4 15) fmovn rm (f-sub4 9))
+       (if (not szbit)
+	   (sequence ()
+		     (set fmovn (mem SF rm))
+		     (set rm (add rm 4)))
+	   (sequence ()
+		     (set fmovn (mem DF rm))
+		     (set rm (add rm 8))))
+       (sh2e-models ((unit u-use-gr (in usereg rm))
+		     (unit u-exec)
+		     (unit u-maybe-fpu)
+		     (unit u-fpu-memory-access)
+		     (unit u-load-fr (out loadreg fmovn)))))
+
+(dshci fmov4 "Floating point load (register/register indirect)"
+       ((SH2e-MACH) FP-INSN (SH4-GROUP LS) (SH4A-GROUP LS))
+       "fmov @(r0, $rm), $fmovn"
+       (+ (f-op4 15) fmovn rm (f-sub4 6))
+       (if (not szbit)
+	   (set fmovn (mem SF (add r0 rm)))
+	   (set fmovn (mem DF (add r0 rm))))
+       (sh2e-models ((unit u-use-gr (in usereg rm))
+		     (unit u-use-gr (in usereg r0))
+		     (unit u-exec)
+		     (unit u-maybe-fpu)
+		     (unit u-fpu-memory-access)
+		     (unit u-load-fr (out loadreg fmovn)))))
+
+(dshci fmov5 "Floating point store"
+       ((SH2e-MACH) FP-INSN (SH4-GROUP LS) (SH4A-GROUP LS))
+       "fmov $fmovm, @$rn"
+       (+ (f-op4 15) rn fmovm (f-sub4 10))
+       (if (not szbit)
+	   (set (mem SF rn) fmovm)
+	   (set (mem DF rn) fmovm))
+       (sh2e-models ((unit u-use-fr (in usereg fmovm))
+		     (unit u-use-gr (in usereg rn))
+		     (unit u-exec)
+		     (unit u-maybe-fpu)
+		     (unit u-fpu-memory-access))))
+
+(dshci fmov6 "Floating point store (pre-decrement)"
+       ((SH2e-MACH) FP-INSN (SH4-GROUP LS) (SH4A-GROUP LS))
+       "fmov $fmovm, @-$rn"
+       (+ (f-op4 15) rn fmovm (f-sub4 11))
+       (if (not szbit)
+	   (sequence ()
+		     (set rn (sub rn 4))
+		     (set (mem SF rn) fmovm))
+	   (sequence ()
+		     (set rn (sub rn 8))
+		     (set (mem DF rn) fmovm)))
+       (sh2e-models ((unit u-use-fr (in usereg fmovm))
+		     (unit u-use-gr (in usereg rn))
+		     (unit u-exec)
+		     (unit u-maybe-fpu)
+		     (unit u-fpu-memory-access))))
+
+(dshci fmov7 "Floating point store (register/register indirect)"
+       ((SH2e-MACH) FP-INSN (SH4-GROUP LS) (SH4A-GROUP LS))
+       "fmov $fmovm, @(r0, $rn)"
+       (+ (f-op4 15) rn fmovm (f-sub4 7))
+       (if (not szbit)
+	   (set (mem SF (add r0 rn)) fmovm)
+	   (set (mem DF (add r0 rn)) fmovm))
+       (sh2e-models ((unit u-use-fr (in usereg fmovm))
+		     (unit u-use-gr (in usereg rn))
+		     (unit u-use-gr (in usereg r0))
+		     (unit u-exec)
+		     (unit u-maybe-fpu)
+		     (unit u-fpu-memory-access))))
+
+(dshci fmov8 "Load double float from memory (register indirect w/ displacement)"
+       ((SH2a-MACH) 32-BIT-INSN)
+       "fmov.d @($imm12x8, $rm), $drn"
+       (+ (f-op4 3) (f-sub4 1) (f-7-1 0) (f-16-4 7) drn rm imm12x8)
+       (set drn (mem DF (add rm imm12x8)))
+       (sh2a-fpu-models ((unit u-use-gr (in usereg rm))
+			 (unit u-exec)
+			 (unit u-fpu)
+			 (unit u-fpu-memory-access (cycles 1)) ; 1 extra cycle
+			 (unit u-load-dr (out loadreg drn)))))
+
+(dshci fmov9 "Store double float to memory (register indirect w/ displacement)"
+       ((SH2a-MACH) 32-BIT-INSN)
+       "mov.l $drm, @($imm12x8, $rn)"
+       (+ (f-op4 3) (f-sub4 1) (f-11-1 0) (f-16-4 3) rn drm imm12x8)
+       (set (mem DF (add rn imm12x8)) drm)
+       (sh2a-fpu-models ((unit u-use-fr (in usereg drm))
+			 (unit u-exec)
+			 (unit u-fpu)
+			 (unit u-fpu-memory-access (cycles 1))))) ; 1 extra cycle
+
+(dshci fmul "Floating point multiply"
+       ((SH2e-MACH) FP-INSN (SH4-GROUP FE) (SH4A-GROUP FE))
+       "fmul $fsdm, $fsdn"
+       (+ (f-op4 15) fsdn fsdm (f-sub4 2))
+       (if prbit
+	   (set fsdn (c-call DF "sh64_fmuld" fsdm fsdn))
+	   (set fsdn (c-call SF "sh64_fmuls" fsdm fsdn)))
+       (sh2e-models ((unit u-use-fr (in usereg fsdm))
+		     (unit u-use-fr (in usereg fsdn))
+		     (unit u-exec)
+		     (unit u-fpu)
+		     (unit u-set-fr (out loadreg fsdn)))))
+
+(dshci fneg "Floating point negate"
+       ((SH2e-MACH) FP-INSN (SH4-GROUP LS) (SH4A-GROUP LS))
+       "fneg $fsdn"
+       (+ (f-op4 15) fsdn (f-sub8 #x4d))
+       (if prbit
+	   (set fsdn (c-call DF "sh64_fnegd" fsdn))
+	   (set fsdn (c-call SF "sh64_fnegs" fsdn)))
+       (sh2e-models ((unit u-use-fr (in usereg fsdn))
+		     (unit u-exec)
+		     (unit u-maybe-fpu)
+		     (unit u-set-fr-0 (out loadreg fsdn)))))
+
+(dshci frchg "Toggle floating point register banks"
+       (FP-INSN (SH4-GROUP FE) (SH4A-GROUP FE))
+       "frchg"
+       (+ (f-op16 #xfbfd))
+       (set frbit (not frbit))
+       ())
+
+(dshci fschg "Set size of floating point transfers"
+       (FP-INSN (SH4-GROUP FE) (SH4A-GROUP FE))
+       "fschg"
+       (+ (f-op16 #xf3fd))
+       (set szbit (not szbit))
+       ())
+
+(dshci fsqrt "Floating point square root"
+       ((MACH sh2a-fpu,sh3e,sh4,sh4a,sh5) FP-INSN (SH4-GROUP FE) (SH4A-GROUP FE))
+       "fsqrt $fsdn"
+       (+ (f-op4 15) fsdn (f-sub8 #x6d))
+       (if prbit
+	   (set fsdn (c-call DF "sh64_fsqrtd" fsdn))
+	   (set fsdn (c-call SF "sh64_fsqrts" fsdn)))
+       (fsqrt-models ((unit u-use-fr (in usereg fsdn))
+		      (unit u-exec)
+		      (unit u-fsqrt (out loadreg fsdn)))))
+
+(dshci fsts "Floating point store status register"
+       ((SH2e-MACH) FP-INSN (SH4-GROUP LS) (SH4A-GROUP LS))
+      "fsts fpul, $frn"
+       (+ (f-op4 15) frn (f-sub8 13))
+       (set frn fpul)
+       (sh2e-models ((unit u-use-fpul)
+		     (unit u-exec)
+		     (unit u-fpu)
+		     (unit u-set-fr-0 (out loadreg frn)))))
+
+(dshci fsub "Floating point subtract"
+       ((SH2e-MACH) FP-INSN (SH4-GROUP FE) (SH4A-GROUP FE))
+       "fsub $fsdm, $fsdn"
+       (+ (f-op4 15) fsdn fsdm (f-sub4 1))
+       (if prbit
+	   (set fsdn (c-call DF "sh64_fsubd" fsdn fsdm))
+	   (set fsdn (c-call SF "sh64_fsubs" fsdn fsdm)))
+       (sh2e-models ((unit u-use-fr (in usereg fsdm))
+		     (unit u-use-fr (in usereg fsdn))
+		     (unit u-exec)
+		     (unit u-fpu)
+		     (unit u-set-fr (out loadreg fsdn)))))
+
+(dshci ftrc "Floating point truncate"
+       ((SH2e-MACH) FP-INSN (SH4-GROUP FE) (SH4A-GROUP FE))
+       "ftrc $fsdn, fpul"
+       (+ (f-op4 15) fsdn (f-sub8 #x3d))
+       (set fpul (if SF prbit
+		     (c-call SF "sh64_ftrcdl" fsdn)
+		     (c-call SF "sh64_ftrcsl" fsdn)))
+       (sh2e-models ((unit u-use-fr (in usereg fsdn))
+		     (unit u-exec)
+		     (unit u-fpu)
+		     (unit u-set-fpul))))
+
+(dshci ftrv "Floating point transform vector"
+       ((SH4-MACH) FP-INSN (SH4-GROUP FE) (SH4A-GROUP FE))
+       "ftrv xmtrx, $fvn"
+       (+ (f-op4 15) fvn (f-sub10 #x1fd))
+       (c-call VOID "sh64_ftrv" (index-of fvn))
+       (sh4-models ((unit u-exec)
+		    (unit u-ftrv))))
+
+(dshci jmp "Jump"
+       ((SH4-GROUP CO) (SH4A-GROUP BR))
+       "jmp @$rn"
+       (+ (f-op4 4) rn (f-sub8 43))
+       (sequence ()
+		 (set pc (add pc 2)) ; kludge to get it marked as referenced
+		 (save-delayed-pc rn)
+		 (set-delay 1 pc rn)
+		 (cg-profile pc rn))
+       ; delayed branch stalls 1 cycle
+       (all-models ((unit u-jmp (cycles 2)))))
+
+(dshci jsr "Jump to subroutine"
+       ((SH4-GROUP CO) (SH4A-GROUP BR))
+       "jsr @$rn"
+       (+ (f-op4 4) rn (f-sub8 11))
+       (sequence ()
+		 (set-delay 1 pr (add pc 4))
+		 (set pc (add pc 2)) ; kludge to get it marked as referenced
+		 (save-delayed-pc rn)
+		 (set-delay 1 pc rn)
+		 (cg-profile pc rn))
+       ; delayed branch stalls 1 cycle
+       (all-models ((unit u-jsr (cycles 2)))))
+
+(dshci ldc-gbr "Load control register (GBR)"
+       ((SH4-GROUP CO) (SH4A-GROUP LS))
+       "ldc $rn, gbr"
+       (+ (f-op4 4) rn (f-sub8 30))
+       (set gbr rn)
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-ldc-gbr))))
+
+(dshci ldc-vbr "Load control register (VBR)"
+       ((SH4-GROUP CO) (SH4A-GROUP LS))
+       "ldc $rn, vbr"
+       (+ (f-op4 4) rn (f-sub8 46))
+       (set vbr rn)
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-exec))))
+
+(dshci ldc-sr "Load control register (SR)"
+       ((SH4-GROUP CO) (SH4A-GROUP CO))
+       "ldc $rn, sr"
+       (+ (f-op4 4) rn (f-sub8 14))
+       (set (reg h-sr) rn)
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-ldc-sr))))
+
+(dshci ldcl-gbr "Load control register (GBR)"
+       ((SH4-GROUP CO) (SH4A-GROUP LS))
+       "ldc.l @${rn}+, gbr"
+       (+ (f-op4 4) rn (f-sub8 23))
+       (sequence ()
+		 (set gbr (mem SI rn))
+		 (set rn (add rn 4)))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-ldcl)
+		    (unit u-memory-access)
+		    (unit u-load-gbr))))
+
+(dshci ldcl-vbr "Load control register (VBR)"
+       ((SH4-GROUP CO) (SH4A-GROUP LS))
+       "ldc.l @${rn}+, vbr"
+       (+ (f-op4 4) rn (f-sub8 39))
+       (sequence ()
+		 (set vbr (mem SI rn))
+		 (set rn (add rn 4)))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-ldcl-vbr)
+		    (unit u-memory-access)
+		    (unit u-load-vbr))))
+
+(dshci lds-fpscr "Load status register (FPSCR)"
+       ((SH2e-MACH) (SH4-GROUP CO) (SH4A-GROUP LS))
+       "lds $rn, fpscr"
+       (+ (f-op4 4) rn (f-sub8 106))
+       (set fpscr rn)
+       (sh2e-models ((unit u-use-gr (in usereg rn))
+		     (unit u-lds-fpscr))))
+
+(dshci ldsl-fpscr "Load status register (FPSCR)"
+       ((SH2e-MACH) (SH4-GROUP CO) (SH4A-GROUP LS))
+       "lds.l @${rn}+, fpscr"
+       (+ (f-op4 4) rn (f-sub8 102))
+       (sequence ()
+		 (set fpscr (mem SI rn))
+		 (set rn (add rn 4)))
+       (sh2e-models ((unit u-use-gr (in usereg rn))
+		     (unit u-lds-fpscr)
+		     (unit u-fpu-memory-access)
+		     (unit u-ldsl-fpscr))))
+
+(dshci lds-fpul "Load status register (FPUL)"
+       ((SH2e-MACH) (SH4-GROUP LS) (SH4A-GROUP LS))
+       "lds $rn, fpul"
+       (+ (f-op4 4) rn (f-sub8 90))
+       ; Use subword to convert rn's mode.
+       (set fpul (subword SF rn 0))
+       (sh2e-models ((unit u-use-gr (in usereg rn))
+		     (unit u-exec)
+		     (unit u-maybe-fpu)
+		     (unit u-fpu-memory-access)
+		     (unit u-load-fpul))))
+
+(dshci ldsl-fpul "Load status register (FPUL)"
+       ((SH2e-MACH) (SH4-GROUP CO) (SH4A-GROUP LS))
+       "lds.l @${rn}+, fpul"
+       (+ (f-op4 4) rn (f-sub8 86))
+       (sequence ()
+		 (set fpul (mem SF rn))
+		 (set rn (add rn 4)))
+       (sh2e-models ((unit u-use-gr (in usereg rn))
+		     (unit u-exec)
+		     (unit u-maybe-fpu)
+		     (unit u-fpu-memory-access)
+		     (unit u-load-fpul))))
+
+(dshci lds-mach "Load status register (MACH)"
+       ((SH4-GROUP CO) (SH4A-GROUP LS))
+       "lds $rn, mach"
+       (+ (f-op4 4) rn (f-sub8 10))
+       (set mach rn)
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-multiply-result)
+		    (unit u-exec)
+		    (unit u-set-mac))))
+
+(dshci ldsl-mach "Load status register (MACH), post-increment"
+       ((SH4-GROUP CO) (SH4A-GROUP LS))
+       "lds.l @${rn}+, mach"
+       (+ (f-op4 4) rn (f-sub8 6))
+       (sequence ()
+		 (set mach (mem SI rn))
+		 (set rn (add rn 4)))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-multiply-result)
+		    (unit u-exec)
+		    (unit u-memory-access)
+		    (unit u-load-mac))))
+
+(dshci lds-macl "Load status register (MACL)"
+       ((SH4-GROUP CO) (SH4A-GROUP LS))
+       "lds $rn, macl"
+       (+ (f-op4 4) rn (f-sub8 26))
+       (set macl rn)
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-multiply-result)
+		    (unit u-exec)
+		    (unit u-set-mac))))
+
+(dshci ldsl-macl "Load status register (MACL), post-increment"
+       ((SH4-GROUP CO) (SH4A-GROUP LS))
+       "lds.l @${rn}+, macl"
+       (+ (f-op4 4) rn (f-sub8 22))
+       (sequence ()
+		 (set macl (mem SI rn))
+		 (set rn (add rn 4)))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-multiply-result)
+		    (unit u-exec)
+		    (unit u-memory-access)
+		    (unit u-load-mac))))
+
+(dshci lds-pr "Load status register (PR)"
+       ((SH4-GROUP CO) (SH4A-GROUP LS))
+       "lds $rn, pr"
+       (+ (f-op4 4) rn (f-sub8 42))
+       (set pr rn)
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-lds-pr))))
+
+(dshci ldsl-pr "Load status register (PR), post-increment"
+       ((SH4-GROUP CO) (SH4A-GROUP LS))
+       "lds.l @${rn}+, pr"
+       (+ (f-op4 4) rn (f-sub8 38))
+       (sequence ()
+		 (set pr (mem SI rn))
+		 (set rn (add rn 4)))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-lds-pr)
+		    (unit u-memory-access)
+		    (unit u-load-pr))))
+
+(dshci macl "Multiply and accumulate (long)"
+       ((SH2-MACH) (SH4-GROUP CO) (SH4A-GROUP CO))
+       "mac.l @${rm}+, @${rn}+"
+       (+ (f-op4 0) rn rm (f-sub4 15))
+       (sequence ((DI tmpry) (DI mac) (DI result) (SI x) (SI y))
+		 (set x (mem SI rn))
+		 (set rn (add rn 4))
+		 (if (eq (index-of rn) (index-of rm))
+		     (sequence ()
+			       (set rn (add rn 4))
+			       (set rm (add rm 4))))
+		 (set y (mem SI rm))
+		 (set rm (add rm 4))
+		 (set tmpry (mul (zext DI x) (zext DI y)))
+		 (set mac (or DI (sll (zext DI mach) 32) (zext DI macl)))
+		 (set result (add mac tmpry))
+		 (sequence ()
+			   (if sbit
+			       (sequence ((SI min) (SI max))
+					 (set max (srl (inv DI 0) 16))
+					; Preserve bit 48 for sign.
+					 (set min (srl (inv DI 0) 15))
+					 (if (gt result max)
+					     (set result max)
+					     (if (lt result min)
+						 (set result min)))))
+			   (set mach (subword SI result 0))
+			   (set macl (subword SI result 1))))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-gr (in usereg rm))
+		    (unit u-macl))))
+
+(dshci macw "Multiply and accumulate (word)"
+       ((SH4-GROUP CO) (SH4A-GROUP CO))
+       "mac.w @${rm}+, @${rn}+"
+       (+ (f-op4 4) rn rm (f-sub4 15))
+       (sequence ((SI tmpry) (DI mac) (DI result) (HI x) (HI y))
+		 (set x (mem HI rn))
+		 (set rn (add rn 2))
+		 (if (eq (index-of rn) (index-of rm))
+		     (sequence ()
+			       (set rn (add rn 2))
+			       (set rm (add rm 2))))
+		 (set y (mem HI rm))
+		 (set rm (add rm 2))
+		 (set tmpry (mul (zext SI x) (zext SI y)))
+		 (if sbit
+		     (sequence ()
+			       (if (add-oflag tmpry macl 0)
+				   (set mach 1))
+			       (set macl (add tmpry macl)))
+		     (sequence ()
+			       (set mac (or DI (sll (zext DI mach) 32) (zext DI macl)))
+			       (set result (add mac (ext DI tmpry)))
+			       (set mach (subword SI result 0))
+			       (set macl (subword SI result 1)))))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-gr (in usereg rm))
+		    (unit u-macw))))
+
+(dshci mov "Move"
+       ((SH4-GROUP MT) (SH4A-GROUP MT))
+       "mov $rm64, $rn64"
+       (+ (f-op4 6) rn64 rm64 (f-sub4 3))
+       (set rn64 rm64)
+       (all-models ((unit u-use-gr (in usereg rm64))
+		    (unit u-exec))))
+
+(dshci movi "Move immediate"
+       ((SH4-GROUP EX) (SH4A-GROUP MT))
+       "mov #$imm8, $rn"
+       (+ (f-op4 14) rn imm8)
+       (set rn (ext DI (and QI imm8 255)))
+       ())
+
+(dshci movi20 "Move immediate"
+       ((SH2a-nofpu-MACH) 32-BIT-INSN)
+       "movi20 #$imm20, $rn"
+       (+ (f-op4 0) (f-sub4 0) rn imm20)
+       (set rn imm20)
+       (sh2a-nofpu-models ((unit u-exec))))
+
+(dshci movb1 "Store byte to memory (register indirect w/ zero displacement)"
+       ((SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.b $rm, @$rn"
+       (+ (f-op4 2) rn rm (f-sub4 0))
+       (set (mem UQI rn) (subword UQI rm 3))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-gr (in usereg rm))
+		    (unit u-exec)
+		    (unit u-memory-access))))
+
+(dshci movb2 "Store byte to memory (register indirect w/ pre-decrement)"
+       ((SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.b $rm, @-$rn"
+       (+ (f-op4 2) rn rm (f-sub4 4))
+       (sequence ((DI addr))
+		 (set addr (sub rn 1))
+		 (set (mem UQI addr) (subword UQI rm 3))
+		 (set rn addr))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-gr (in usereg rm))
+		    (unit u-exec)
+		    (unit u-memory-access))))
+
+(dshci movb3 "Store byte to memory (register/register indirect)"
+       ((SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.b $rm, @(r0,$rn)"
+       (+ (f-op4 0) rn rm (f-sub4 4))
+       (set (mem UQI (add r0 rn)) (subword UQI rm 3))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-gr (in usereg rm))
+		    (unit u-use-gr (in usereg r0))
+		    (unit u-exec)
+		    (unit u-memory-access))))
+
+(dshci movb4 "Store byte to memory (GBR-relative w/ displacement)"
+       ((SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.b r0, @($imm8, gbr)"
+       (+ (f-op8 #xc0) imm8)
+       (sequence ((DI addr))
+		 (set addr (add gbr imm8))
+		 (set (mem UQI addr) (subword UQI r0 3)))
+       (all-models ((unit u-exec)
+		    (unit u-sx)
+		    (unit u-memory-access))))
+
+(dshci movb5 "Store byte to memory (register indirect w/ displacement)"
+       ((SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.b r0, @($imm4, $rm)"
+       (+ (f-op8 #x80) rm imm4)
+       (sequence ((DI addr))
+		 (set addr (add rm imm4))
+		 (set (mem UQI addr) (subword UQI r0 3)))
+       (all-models ((unit u-use-gr (in usereg r0))
+		    (unit u-use-gr (in usereg rm))
+		    (unit u-exec)
+		    (unit u-memory-access))))
+
+(dshci movb6 "Load byte from memory (register indirect w/ zero displacement)"
+       ((SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.b @$rm, $rn"
+       (+ (f-op4 6) rn rm (f-sub4 0))
+       (set rn (ext SI (mem QI rm)))
+       (all-models ((unit u-use-gr (in usereg rm))
+		    (unit u-exec)
+		    (unit u-memory-access)
+		    (unit u-load-gr (out loadreg rn)))))
+
+(dshci movb7 "Load byte from memory (register indirect w/ post-increment)"
+       ((SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.b @${rm}+, $rn"
+       (+ (f-op4 6) rn rm (f-sub4 4))
+       (sequence ((QI data))
+		 (set data (mem QI rm))
+		 (if (eq (index-of rm) (index-of rn))
+		     (set rm (ext SI data))
+		     (set rm (add rm 1)))
+		 (set rn (ext SI data)))
+       (all-models ((unit u-use-gr (in usereg rm))
+		    (unit u-exec)
+		    (unit u-memory-access)
+		    (unit u-load-gr (out loadreg rn)))))
+
+(dshci movb8 "Load byte from memory (register/register indirect)"
+       ((SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.b @(r0, $rm), $rn"
+       (+ (f-op4 0) rn rm (f-sub4 12))
+       (set rn (ext SI (mem QI (add r0 rm))))
+       (all-models ((unit u-use-gr (in usereg rm))
+		    (unit u-use-gr (in usereg r0))
+		    (unit u-exec)
+		    (unit u-memory-access)
+		    (unit u-load-gr (out loadreg rn)))))
+
+(dshci movb9 "Load byte from memory (GBR-relative with displacement)"
+       ((SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.b @($imm8, gbr), r0"
+       (+ (f-op8 #xc4) imm8)
+       (set r0 (ext SI (mem QI (add gbr imm8))))
+       (all-models ((unit u-exec)
+		    (unit u-memory-access)
+		    (unit u-load-gr (out loadreg r0)))))
+
+(dshci movb10 "Load byte from memory (register indirect w/ displacement)"
+       ((SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.b @($imm4, $rm), r0"
+       (+ (f-op8 #x84) rm imm4)
+       (set r0 (ext SI (mem QI (add rm imm4))))
+       (all-models ((unit u-use-gr (in usereg rm))
+		    (unit u-exec)
+		    (unit u-memory-access)
+		    (unit u-load-gr (out loadreg r0)))))
+
+(dshci movl1 "Store long word to memory (register indirect w/ zero displacement)"
+       ((SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.l $rm, @$rn"
+       (+ (f-op4 2) rn rm (f-sub4 2))
+       (set (mem SI rn) rm)
+       (all-models ((unit u-use-gr (in usereg rm))
+		    (unit u-use-gr (in usereg rn))
+		    (unit u-exec)
+		    (unit u-memory-access))))
+
+(dshci movl2 "Store long word to memory (register indirect w/ pre-decrement)"
+       ((SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.l $rm, @-$rn"
+       (+ (f-op4 2) rn rm (f-sub4 6))
+       (sequence ((SI addr))
+		 (set addr (sub rn 4))
+		 (set (mem SI addr) rm)
+		 (set rn addr))
+       (all-models ((unit u-use-gr (in usereg rm))
+		    (unit u-use-gr (in usereg rn))
+		    (unit u-exec)
+		    (unit u-memory-access))))
+
+(dshci movl3 "Store long word to memory (register/register indirect)"
+       ((SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.l $rm, @(r0, $rn)"
+       (+ (f-op4 0) rn rm (f-sub4 6))
+       (set (mem SI (add r0 rn)) rm)
+       (all-models ((unit u-use-gr (in usereg rm))
+		    (unit u-use-gr (in usereg rn))
+		    (unit u-use-gr (in usereg r0))
+		    (unit u-exec)
+		    (unit u-memory-access))))
+
+(dshci movl4 "Store long word to memory (GBR-relative w/ displacement)"
+       ((SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.l r0, @($imm8x4, gbr)"
+       (+ (f-op8 #xc2) imm8x4)
+       (set (mem SI (add gbr imm8x4)) r0)
+       (all-models ((unit u-use-gr (in usereg r0))
+		    (unit u-exec)
+		    (unit u-sx)
+		    (unit u-memory-access))))
+
+(dshci movl5 "Store long word to memory (register indirect w/ displacement)"
+       ((SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.l $rm, @($imm4x4, $rn)"
+       (+ (f-op4 1) rn rm imm4x4)
+       (set (mem SI (add rn imm4x4)) rm)
+       (all-models ((unit u-use-gr (in usereg rm))
+		    (unit u-use-gr (in usereg rn))
+		    (unit u-exec)
+		    (unit u-memory-access))))
+
+(dshci movl6 "Load long word to memory (register indirect w/ zero displacement)"
+       ((SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.l @$rm, $rn"
+       (+ (f-op4 6) rn rm (f-sub4 2))
+       (set rn (mem SI rm))
+       (all-models ((unit u-use-gr (in usereg rm))
+		    (unit u-exec)
+		    (unit u-memory-access)
+		    (unit u-load-gr (out loadreg rn)))))
+
+(dshci movl7 "Load long word from memory (register indirect w/ post-increment)"
+       ((SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.l @${rm}+, $rn"
+       (+ (f-op4 6) rn rm (f-sub4 6))
+       (sequence ()
+		 (set rn (mem SI rm))
+		 (if (eq (index-of rm) (index-of rn))
+		     (set rm rn)
+		     (set rm (add rm 4))))
+       (all-models ((unit u-use-gr (in usereg rm))
+		    (unit u-exec)
+		    (unit u-memory-access)
+		    (unit u-load-gr (out loadreg rn)))))
+
+(dshci movl8 "Load long word from memory (register/register indirect)"
+       ((SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.l @(r0, $rm), $rn"
+       (+ (f-op4 0) rn rm (f-sub4 14))
+       (set rn (mem SI (add r0 rm)))
+       (all-models ((unit u-use-gr (in usereg rm))
+		    (unit u-use-gr (in usereg r0))
+		    (unit u-exec)
+		    (unit u-memory-access)
+		    (unit u-load-gr (out loadreg rn)))))
+
+(dshci movl9 "Load long word from memory (GBR-relative w/ displacement)"
+       ((SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.l @($imm8x4, gbr), r0"
+       (+ (f-op8 #xc6) imm8x4)
+       (set r0 (mem SI (add gbr imm8x4)))
+       (all-models ((unit u-exec)
+		    (unit u-memory-access)
+		    (unit u-load-gr (out loadreg r0)))))
+
+(dshci movl10 "Load long word from memory (PC-relative w/ displacement)"
+       (ILLSLOT (SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.l @($imm8x4, pc), $rn"
+       (+ (f-op4 13) rn imm8x4)
+       (set rn (mem SI (add imm8x4 (and (add pc 4) (inv 3)))))
+       (all-models ((unit u-exec)
+		    (unit u-memory-access)
+		    (unit u-load-gr (out loadreg rn)))))
+
+(dshci movl11 "Load long word from memory (register indirect w/ displacement)"
+       ((SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.l @($imm4x4, $rm), $rn"
+       (+ (f-op4 5) rn rm imm4x4)
+       (set rn (mem SI (add rm imm4x4)))
+       (all-models ((unit u-use-gr (in usereg rm))
+		    (unit u-exec)
+		    (unit u-memory-access)
+		    (unit u-load-gr (out loadreg rn)))))
+
+(dshci movl12 "Load long word from memory (register indirect w/ displacement)"
+       ((SH2a-nofpu-MACH) 32-BIT-INSN)
+       "mov.l @($imm12x4, $rm), $rn"
+       (+ (f-op4 3) (f-sub4 1) (f-16-4 6) rn rm imm12x4)
+       (set rn (mem SI (add rm imm12x4)))
+       (sh2a-nofpu-models ((unit u-use-gr (in usereg rm))
+			   (unit u-exec)
+			   (unit u-memory-access)
+			   (unit u-load-gr (out loadreg rn)))))
+
+(dshci movl13 "Store long word to memory (register indirect w/ displacement)"
+       ((SH2a-nofpu-MACH) 32-BIT-INSN)
+       "mov.l $rm, @($imm12x4, $rn)"
+       (+ (f-op4 3) (f-sub4 1) (f-16-4 2) rn rm imm12x4)
+       (set (mem SI (add rn imm12x4)) rm)
+       (sh2a-nofpu-models ((unit u-use-gr (in usereg rm))
+			   (unit u-exec)
+			   (unit u-memory-access))))
+
+(dshci movw1 "Store word to memory (register indirect w/ zero displacement)"
+       ((SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.w $rm, @$rn"
+       (+ (f-op4 2) rn rm (f-sub4 1))
+       (set (mem HI rn) (subword HI rm 1))
+       (all-models ((unit u-use-gr (in usereg rm))
+		    (unit u-use-gr (in usereg rn))
+		    (unit u-exec)
+		    (unit u-memory-access))))
+
+(dshci movw2 "Store word to memory (register indirect w/ pre-decrement)"
+       ((SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.w $rm, @-$rn"
+       (+ (f-op4 2) rn rm (f-sub4 5))
+       (sequence ((DI addr))
+		 (set addr (sub rn 2))
+		 (set (mem HI addr) (subword HI rm 1))
+		 (set rn addr))
+       (all-models ((unit u-use-gr (in usereg rm))
+		    (unit u-use-gr (in usereg rn))
+		    (unit u-exec)
+		    (unit u-memory-access))))
+
+(dshci movw3 "Store word to memory (register/register indirect)"
+       ((SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.w $rm, @(r0, $rn)"
+       (+ (f-op4 0) rn rm (f-sub4 5))
+       (set (mem HI (add r0 rn)) (subword HI rm 1))
+       (all-models ((unit u-use-gr (in usereg rm))
+		    (unit u-use-gr (in usereg rn))
+		    (unit u-use-gr (in usereg r0))
+		    (unit u-exec)
+		    (unit u-memory-access))))
+
+(dshci movw4 "Store word to memory (GBR-relative w/ displacement)"
+       ((SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.w r0, @($imm8x2, gbr)"
+       (+ (f-op8 #xc1) imm8x2)
+       (set (mem HI (add gbr imm8x2)) (subword HI r0 1))
+       (all-models ((unit u-use-gr (in usereg r0))
+		    (unit u-exec)
+		    (unit u-sx)
+		    (unit u-memory-access))))
+
+(dshci movw5 "Store word to memory (register indirect w/ displacement)"
+       ((SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.w r0, @($imm4x2, $rm)"
+       (+ (f-op8 #x81) rm imm4x2)
+       (set (mem HI (add rm imm4x2)) (subword HI r0 1))
+       (all-models ((unit u-use-gr (in usereg rm))
+		    (unit u-use-gr (in usereg r0))
+		    (unit u-exec)
+		    (unit u-memory-access))))
+
+(dshci movw6 "Load word from memory (register indirect w/ zero displacement)"
+       ((SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.w @$rm, $rn"
+       (+ (f-op4 6) rn rm (f-sub4 1))
+       (set rn (ext SI (mem HI rm)))
+       (all-models ((unit u-use-gr (in usereg rm))
+		    (unit u-exec)
+		    (unit u-memory-access)
+		    (unit u-load-gr (out loadreg rn)))))
+
+(dshci movw7 "Load word from memory (register indirect w/ post-increment)"
+       ((SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.w @${rm}+, $rn"
+       (+ (f-op4 6) rn rm (f-sub4 5))
+       (sequence ((HI data))
+		 (set data (mem HI rm))
+		 (if (eq (index-of rm) (index-of rn))
+		     (set rm (ext SI data))
+		     (set rm (add rm 2)))
+		 (set rn (ext SI data)))
+       (all-models ((unit u-use-gr (in usereg rm))
+		    (unit u-exec)
+		    (unit u-memory-access)
+		    (unit u-load-gr (out loadreg rn)))))
+
+(dshci movw8 "Load word from memory (register/register indirect)"
+       ((SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.w @(r0, $rm), $rn"
+       (+ (f-op4 0) rn rm (f-sub4 13))
+       (set rn (ext SI (mem HI (add r0 rm))))
+       (all-models ((unit u-use-gr (in usereg rm))
+		    (unit u-use-gr (in usereg r0))
+		    (unit u-exec)
+		    (unit u-memory-access)
+		    (unit u-load-gr (out loadreg rn)))))
+
+(dshci movw9 "Load word from memory (GBR-relative w/ displacement)"
+       ((SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.w @($imm8x2, gbr), r0"
+       (+ (f-op8 #xc5) imm8x2)
+       (set r0 (ext SI (mem HI (add gbr imm8x2))))
+       (all-models ((unit u-exec)
+		    (unit u-memory-access)
+		    (unit u-load-gr (out loadreg r0)))))
+
+(dshci movw10 "Load word from memory (PC-relative w/ displacement)"
+       (ILLSLOT (SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.w @($imm8x2, pc), $rn"
+       (+ (f-op4 9) rn imm8x2)
+       (set rn (ext SI (mem HI (add (add pc 4) imm8x2))))
+       (all-models ((unit u-exec)
+		    (unit u-memory-access)
+		    (unit u-load-gr (out loadreg rn)))))
+
+(dshci movw11 "Load word from memory (register indirect w/ displacement)"
+       ((SH4-GROUP LS) (SH4A-GROUP LS))
+       "mov.w @($imm4x2, $rm), r0"
+       (+ (f-op8 #x85) rm imm4x2)
+       (set r0 (ext SI (mem HI (add rm imm4x2))))
+       (all-models ((unit u-use-gr (in usereg rm))
+		    (unit u-exec)
+		    (unit u-memory-access)
+		    (unit u-load-gr (out loadreg r0)))))
+
+(dshci mova "Move effective address"
+       (ILLSLOT (SH4-GROUP EX) (SH4A-GROUP LS))
+       "mova @($imm8x4, pc), r0"
+       (+ (f-op8 #xc7) imm8x4)
+       (set r0 (add (and (add pc 4) (inv 3)) imm8x4))
+       ())
+
+(dshci movcal "Move with cache block allocation"
+       ((SH4-nofpu-MACH) (SH4-GROUP LS) (SH4A-GROUP LS))
+       "movca.l r0, @$rn"
+       (+ (f-op4 0) rn (f-sub8 #xc3))
+       (set (mem SI rn) r0)
+       (sh4-nofpu-models ((unit u-use-gr (in usereg rn))
+			  (unit u-ocb (cycles 6)))))
+       
+(dshci movcol "Move Conditional"
+       ((SH4a-nofpu-MACH) (SH4A-GROUP CO))
+       "movco.l r0, @$rn"
+       (+ (f-op4 0) rn (f-sub8 #x73))
+       ; Never executes since LDST and movli are not implemented
+       (set rn rn) ; hack to allow profiling
+       (sh4a-nofpu-models ((unit u-use-gr (in usereg rn))
+			   (unit u-exec))))
+
+(dshci movt "Move t-bit"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "movt $rn"
+       (+ (f-op4 0) rn (f-sub8 41))
+       (set rn (zext SI tbit))
+       (all-models ((unit u-use-tbit)
+		    (unit u-exec))))
+
+(dshci movual "Move unaligned"
+       ((SH4a-nofpu-MACH) (SH4A-GROUP LS))
+       "movua.l @$rn, r0"
+       (+ (f-op4 4) rn (f-sub8 #xa9))
+       (set r0 (c-call SI "sh64_movua" pc rn))
+       (sh4a-nofpu-models ((unit u-use-gr (in usereg rn))
+			   (unit u-exec)
+			   (unit u-memory-access (cycles 1))
+			   (unit u-load-gr (out loadreg r0)))))
+
+(dshci movual2 "Move unaligned with post increment"
+       ((SH4a-nofpu-MACH) (SH4A-GROUP LS))
+       "movua.l @$rn+, r0"
+       (+ (f-op4 4) rn (f-sub8 #xe9))
+       (sequence ()
+		 (set r0 (c-call SI "sh64_movua" pc rn))
+		 (set rn (add rn 4)))
+       (sh4a-nofpu-models ((unit u-use-gr (in usereg rn))
+			   (unit u-exec)
+			   (unit u-memory-access (cycles 1))
+			   (unit u-load-gr (out loadreg r0)))))
+
+(dshci mull "Multiply"
+       ((SH2-MACH) (SH4-GROUP CO) (SH4A-GROUP EX))
+       "mul.l $rm, $rn"
+       (+ (f-op4 0) rn rm (f-sub4 7))
+       (set macl (mul rm rn))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-gr (in usereg rm))
+		    (unit u-mull))))
+
+(dshci mulsw "Multiply words (signed)"
+       ((SH4-GROUP CO) (SH4A-GROUP EX))
+       "muls.w $rm, $rn"
+       (+ (f-op4 2) rn rm (f-sub4 15))
+       (set macl (mul (ext SI (subword HI rm 1)) (ext SI (subword HI rn 1))))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-gr (in usereg rm))
+		    (unit u-mulsw)
+		    (unit u-multiply))))
+
+(dshci muluw "Multiply words (unsigned)"
+       ((SH4-GROUP CO) (SH4A-GROUP EX))
+       "mulu.w $rm, $rn"
+       (+ (f-op4 2) rn rm (f-sub4 14))
+       (set macl (mul (zext SI (subword HI rm 1)) (zext SI (subword HI rn 1))))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-gr (in usereg rm))
+		    (unit u-mulsw)
+		    (unit u-multiply))))
+
+(dshci neg "Negate"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "neg $rm, $rn"
+       (+ (f-op4 6) rn rm (f-sub4 11))
+       (set rn (neg rm))
+       (all-models ((unit u-use-gr (in usereg rm))
+		    (unit u-exec))))
+
+(dshci negc "Negate with carry"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "negc $rm, $rn"
+       (+ (f-op4 6) rn rm (f-sub4 10))
+       (sequence ((BI flag))
+		 (set flag (sub-cflag 0 rm tbit))
+		 (set rn (subc 0 rm tbit))
+		 (set tbit flag))
+       (all-models ((unit u-use-gr (in usereg rm))
+		    (unit u-use-tbit)
+		    (unit u-exec)
+		    (unit u-set-sr-bit))))
+
+(dshci nop "No operation"
+       ((SH4-GROUP MT) (SH4A-GROUP MT))
+       "nop"
+       (+ (f-op16 9))
+       (nop)
+       ())
+
+(dshci not "Bitwise NOT"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "not $rm64, $rn64"
+       (+ (f-op4 6) rn64 rm64 (f-sub4 7))
+       (set rn64 (inv rm64))
+       (all-models ((unit u-use-gr (in usereg rm64))
+		    (unit u-exec))))
+
+(dshci ocbi "Invalidate operand cache block"
+       ((SH4-nofpu-MACH) (SH4-GROUP LS) (SH4A-GROUP LS))
+       "ocbi @$rn"
+       (+ (f-op4 0) rn (f-sub8 147))
+       (sequence ()
+		 (set rn rn) ; appease CGEN profiling generation for now
+		 (unimp "ocbi"))
+       (sh4-nofpu-models ((unit u-use-gr (in usereg rn))
+			  (unit u-ocb (cycles 1)))))
+
+(dshci ocbp "Purge operand cache block"
+       ((SH4-nofpu-MACH) (SH4-GROUP LS) (SH4A-GROUP LS))
+       "ocbp @$rn"
+       (+ (f-op4 0) rn (f-sub8 163))
+       (sequence ()
+		 (set rn rn) ; appease CGEN profiling generation for now
+		 (unimp "ocbp"))
+       (sh4-nofpu-models ((unit u-use-gr (in usereg rn))
+			  (unit u-ocb (cycles 4)))))
+
+(dshci ocbwb "Write back operand cache block"
+       ((SH4-nofpu-MACH) (SH4-GROUP LS) (SH4A-GROUP LS))
+       "ocbwb @$rn"
+       (+ (f-op4 0) rn (f-sub8 179))
+       (sequence ()
+		 (set rn rn) ; appease CGEN profiling generation for now
+		 (unimp "ocbwb"))
+       (sh4-nofpu-models ((unit u-use-gr (in usereg rn))
+			  (unit u-ocb (cycles 4)))))
+
+(dshci or "Bitwise OR"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "or $rm64, $rn64"
+       (+ (f-op4 2) rn64 rm64 (f-sub4 11))
+       (set rn64 (or rm64 rn64))
+       (all-models ((unit u-use-gr (in usereg rm64))
+		    (unit u-use-gr (in usereg rn64))
+		    (unit u-exec))))
+
+(dshci ori "Bitwise OR immediate"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "or #$uimm8, r0"
+       (+ (f-op8 #xcb) uimm8)
+       (set r0 (or r0 (zext DI uimm8)))
+       (all-models ((unit u-use-gr (in usereg r0))
+		    (unit u-exec))))
+
+(dshci orb "Bitwise OR immediate"
+       ((SH4-GROUP CO) (SH4A-GROUP CO))
+       "or.b #$imm8, @(r0, gbr)"
+       (+ (f-op8 #xcf) imm8)
+       (sequence ((DI addr) (UQI data))
+		 (set addr (add r0 gbr))
+		 (set data (or (mem UQI addr) imm8))
+		 (set (mem UQI addr) data))
+       (all-models ((unit u-use-gr (in usereg r0))
+		    (unit u-logic-b)
+		    (unit u-memory-access))))
+
+(dshci pref "Prefetch data"
+       ((SH3-MACH) (SH4-GROUP LS) (SH4A-GROUP LS))
+       "pref @$rn"
+       (+ (f-op4 0) rn (f-sub8 131))
+       (c-call VOID "sh64_pref" rn)
+       (sh3-models ((unit u-use-gr (in usereg rn))
+		    (unit u-exec)
+		    (unit u-memory-access))))
+
+(dshci rotcl "Rotate with carry left"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "rotcl $rn"
+       (+ (f-op4 4) rn (f-sub8 36))
+       (sequence ((BI temp))
+		 (set temp (srl rn 31))
+		 (set rn (or (sll rn 1) tbit))
+		 (set tbit (if BI temp 1 0)))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-tbit)
+		    (unit u-exec)
+		    (unit u-shift)
+		    (unit u-set-sr-bit))))
+
+(dshci rotcr "Rotate with carry right"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "rotcr $rn"
+       (+ (f-op4 4) rn (f-sub8 37))
+       (sequence ((BI lsbit) (SI temp))
+		 (set lsbit (if BI (eq (and rn 1) 0) 0 1))
+		 (set temp tbit)
+		 (set rn (or (srl rn 1) (sll temp 31)))
+		 (set tbit (if BI lsbit 1 0)))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-tbit)
+		    (unit u-exec)
+		    (unit u-shift)
+		    (unit u-set-sr-bit))))
+
+(dshci rotl "Rotate left"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "rotl $rn"
+       (+ (f-op4 4) rn (f-sub8 4))
+       (sequence ((BI temp))
+		 (set temp (srl rn 31))
+		 (set rn (or (sll rn 1) temp))
+		 (set tbit (if BI temp 1 0)))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-tbit)
+		    (unit u-exec)
+		    (unit u-shift)
+		    (unit u-set-sr-bit))))
+
+(dshci rotr "Rotate right"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "rotr $rn"
+       (+ (f-op4 4) rn (f-sub8 5))
+       (sequence ((BI lsbit) (SI temp))
+		 (set lsbit (if BI (eq (and rn 1) 0) 0 1))
+		 (set temp lsbit)
+		 (set rn (or (srl rn 1) (sll temp 31)))
+		 (set tbit (if BI lsbit 1 0)))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-tbit)
+		    (unit u-exec)
+		    (unit u-shift)
+		    (unit u-set-sr-bit))))
+
+(dshci rts "Return from subroutine"
+       ((SH4-GROUP CO) (SH4A-GROUP BR))
+       "rts"
+       (+ (f-op16 11))
+       (sequence ()
+		 (set pc (add pc 2)) ; kludge to get it marked as referenced
+		 (save-delayed-pc pr)
+		 (set-delay 1 pc pr)
+		 (notify-ret pr))
+       ; delayed branch stalls 1 cycle
+       (all-models ((unit u-jmp (cycles 2)))))
+
+(dshci sets "Set S-bit"
+       ((SH3-MACH) (SH4-GROUP CO) (SH4A-GROUP EX))
+       "sets"
+       (+ (f-op16 88))
+       (set sbit 1)
+       (sh3-models ((unit u-exec)
+		    (unit u-set-sr-bit))))
+;		    (unit u-set-sr))))
+
+(dshci sett "Set T-bit"
+       ((SH4-GROUP MT) (SH4A-GROUP EX))
+       "sett"
+       (+ (f-op16 24))
+       (set tbit 1)
+       (all-models ((unit u-exec)
+		    (unit u-use-tbit)
+		    (unit u-set-sr-bit))))
+;		    (unit u-set-sr))))
+
+(dshci shad "Shift arithmetic dynamic"
+       ((MACH sh2a-nofpu,sh2a-fpu,sh3,sh3e,sh4-nofpu,sh4,sh4a-nofpu,sh4a,sh4al,sh5) (SH4-GROUP EX) (SH4A-GROUP EX))
+       "shad $rm, $rn"
+       (+ (f-op4 4) rn rm (f-sub4 12))
+       (sequence ((SI shamt))
+		 (set shamt (and rm 31))
+		 (if (ge rm 0)
+		     (set rn (sll rn shamt))
+		     (if (ne shamt 0)
+			 (set rn (sra rn (sub 32 shamt)))
+			 (if (lt rn 0)
+			     (set rn (neg 1))
+			     (set rn 0)))))
+       (shad-models ((unit u-use-gr (in usereg rn))
+		     (unit u-use-gr (in usereg rm))
+		     (unit u-exec)
+		     (unit u-shift))))
+
+(dshci shal "Shift left arithmetic one bit"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "shal $rn"
+       (+ (f-op4 4) rn (f-sub8 32))
+       (sequence ((BI t))
+		 (set t (srl rn 31))
+		 (set rn (sll rn 1))
+		 (set tbit (if BI t 1 0)))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-tbit)
+		    (unit u-exec)
+		    (unit u-shift)
+		    (unit u-set-sr-bit))))
+
+(dshci shar "Shift right arithmetic one bit"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "shar $rn"
+       (+ (f-op4 4) rn (f-sub8 33))
+       (sequence ((BI t))
+		 (set t (and rn 1))
+		 (set rn (sra rn 1))
+		 (set tbit (if BI t 1 0)))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-tbit)
+		    (unit u-exec)
+		    (unit u-shift)
+		    (unit u-set-sr-bit))))
+
+(dshci shld "Shift logical dynamic"
+       ((SH3-MACH) (SH4-GROUP EX) (SH4A-GROUP EX))
+       "shld $rm, $rn"
+       (+ (f-op4 4) rn rm (f-sub4 13))
+       (sequence ((SI shamt))
+		 (set shamt (and rm 31))
+		 (if (ge rm 0)
+		     (set rn (sll rn shamt))
+		     (if (ne shamt 0)
+			 (set rn (srl rn (sub 32 shamt)))
+			 (set rn 0))))
+       (sh3-models ((unit u-use-gr (in usereg rn))
+		    (unit u-exec)
+		    (unit u-shift))))
+
+(dshci shll "Shift left logical one bit"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "shll $rn"
+       (+ (f-op4 4) rn (f-sub8 0))
+       (sequence ((BI t))
+		 (set t (srl rn 31))
+		 (set rn (sll rn 1))
+		 (set tbit (if BI t 1 0)))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-tbit)
+		    (unit u-exec)
+		    (unit u-shift)
+		    (unit u-set-sr-bit))))
+
+(dshci shll2 "Shift left logical two bits"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "shll2 $rn"
+       (+ (f-op4 4) rn (f-sub8 8))
+       (set rn (sll rn 2))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-exec)
+		    (unit u-shift))))
+
+(dshci shll8 "Shift left logical eight bits"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "shll8 $rn"
+       (+ (f-op4 4) rn (f-sub8 24))
+       (set rn (sll rn 8))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-exec)
+		    (unit u-shift))))
+
+(dshci shll16 "Shift left logical sixteen bits"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "shll16 $rn"
+       (+ (f-op4 4) rn (f-sub8 40))
+       (set rn (sll rn 16))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-exec)
+		    (unit u-shift))))
+
+(dshci shlr "Shift right logical one bit"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "shlr $rn"
+       (+ (f-op4 4) rn (f-sub8 1))
+       (sequence ((BI t))
+		 (set t (and rn 1))
+		 (set rn (srl rn 1))
+		 (set tbit (if BI t 1 0)))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-tbit)
+		    (unit u-exec)
+		    (unit u-shift)
+		    (unit u-set-sr-bit))))
+
+(dshci shlr2 "Shift right logical two bits"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "shlr2 $rn"
+       (+ (f-op4 4) rn (f-sub8 9))
+       (set rn (srl rn 2))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-exec)
+		    (unit u-shift))))
+
+(dshci shlr8 "Shift right logical eight bits"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "shlr8 $rn"
+       (+ (f-op4 4) rn (f-sub8 25))
+       (set rn (srl rn 8))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-exec)
+		    (unit u-shift))))
+
+(dshci shlr16 "Shift right logical sixteen bits"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "shlr16 $rn"
+       (+ (f-op4 4) rn (f-sub8 41))
+       (set rn (srl rn 16))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-exec)
+		    (unit u-shift))))
+
+(dshci stc-gbr "Store control register (GBR)"
+       ((SH4-GROUP CO))
+       "stc gbr, $rn"
+       (+ (f-op4 0) rn (f-sub8 18))
+       (set rn gbr)
+       ())
+
+(dshci stc-vbr "Store control register (VBR)"
+       ((SH4-GROUP CO))
+       "stc vbr, $rn"
+       (+ (f-op4 0) rn (f-sub8 34))
+       (set rn vbr)
+       (all-models ((unit u-stc-vbr))))
+
+(dshci stcl-gbr "Store control register (GBR)"
+       ((SH4-GROUP CO))
+       "stc.l gbr, @-$rn"
+       (+ (f-op4 4) rn (f-sub8 19))
+       (sequence ((DI addr))
+		 (set addr (sub rn 4))
+		 (set (mem SI addr) gbr)
+		 (set rn addr))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-ldcl (cycles 2))
+		    (unit u-memory-access))))
+
+(dshci stcl-vbr "Store control register (VBR)"
+       ((SH4-GROUP CO))
+       "stc.l vbr, @-$rn"
+       (+ (f-op4 4) rn (f-sub8 35))
+       (sequence ((DI addr))
+		 (set addr (sub rn 4))
+		 (set (mem SI addr) vbr)
+		 (set rn addr))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-ldcl (cycles 2))
+		    (unit u-memory-access))))
+
+(dshci sts-fpscr "Store status register (FPSCR)"
+       ((SH2e-MACH) (SH4-GROUP CO) (SH4A-GROUP LS))
+       "sts fpscr, $rn"
+       (+ (f-op4 0) rn (f-sub8 106))
+       (set rn fpscr)
+       (sh2e-models ((unit u-use-fpscr)
+		     (unit u-exec)
+		     (unit u-maybe-fpu)
+		     (unit u-fpu-memory-access)
+		     (unit u-fpu-load-gr (out loadreg rn)))))
+
+(dshci stsl-fpscr "Store status register (FPSCR)"
+       ((SH2e-MACH) (SH4-GROUP CO) (SH4A-GROUP LS))
+       "sts.l fpscr, @-$rn"
+       (+ (f-op4 4) rn (f-sub8 98))
+       (sequence ((DI addr))
+		 (set addr (sub rn 4))
+		 (set (mem SI addr) fpscr)
+		 (set rn addr))
+       (sh2e-models ((unit u-use-gr (in usereg rn))
+		     (unit u-use-fpscr)
+		     (unit u-exec)
+		     (unit u-maybe-fpu)
+		     (unit u-fpu-memory-access))))
+
+(dshci sts-fpul "Store status regitser (FPUL)"
+       ((SH2e-MACH) (SH4-GROUP LS) (SH4A-GROUP LS))
+       "sts fpul, $rn"
+       (+ (f-op4 0) rn (f-sub8 90))
+       (set rn (subword SI fpul 0))
+       (sh2e-models ((unit u-use-fpul)
+		     (unit u-exec)
+		     (unit u-maybe-fpu)
+		     (unit u-fpu-memory-access)
+		     (unit u-fpu-load-gr (out loadreg rn)))))
+
+(dshci stsl-fpul "Store status register (FPUL)"
+       ((SH2e-MACH) (SH4-GROUP CO) (SH4A-GROUP LS))
+       "sts.l fpul, @-$rn"
+       (+ (f-op4 4) rn (f-sub8 82))
+       (sequence ((DI addr))
+		 (set addr (sub rn 4))
+		 (set (mem SF addr) fpul)
+		 (set rn addr))
+       (sh2e-models ((unit u-use-fpul)
+		     (unit u-use-gr (in usereg rn))
+		     (unit u-exec)
+		     (unit u-maybe-fpu)
+		     (unit u-fpu-memory-access))))
+
+(dshci sts-mach "Store status register (MACH)"
+       ((SH4-GROUP CO) (SH4A-GROUP LS))
+       "sts mach, $rn"
+       (+ (f-op4 0) rn (f-sub8 10))
+       (set rn mach)
+       (all-models ((unit u-use-multiply-result)
+		    (unit u-write-back)
+		    (unit u-exec)
+		    (unit u-memory-access))))
+
+(dshci stsl-mach "Store status register (MACH)"
+       ((SH4-GROUP CO) (SH4A-GROUP LS))
+       "sts.l mach, @-$rn"
+       (+ (f-op4 4) rn (f-sub8 2))
+       (sequence ((DI addr))
+		 (set addr (sub rn 4))
+		 (set (mem SI addr) mach)
+		 (set rn addr))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-multiply-result)
+		    (unit u-write-back)
+		    (unit u-exec)
+		    (unit u-memory-access))))
+
+(dshci sts-macl "Store status register (MACL)"
+       ((SH4-GROUP CO) (SH4A-GROUP LS))
+       "sts macl, $rn"
+       (+ (f-op4 0) rn (f-sub8 26))
+       (set rn macl)
+       (all-models ((unit u-use-multiply-result)
+		    (unit u-write-back)
+		    (unit u-exec)
+		    (unit u-memory-access))))
+
+(dshci stsl-macl "Store status register (MACL)"
+       ((SH4-GROUP CO) (SH4A-GROUP LS))
+       "sts.l macl, @-$rn"
+       (+ (f-op4 4) rn (f-sub8 18))
+       (sequence ((DI addr))
+		 (set addr (sub rn 4))
+		 (set (mem SI addr) macl)
+		 (set rn addr))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-multiply-result)
+		    (unit u-write-back)
+		    (unit u-exec)
+		    (unit u-memory-access))))
+
+(dshci sts-pr "Store status register (PR)"
+       ((SH4-GROUP CO) (SH4A-GROUP LS))
+       "sts pr, $rn"
+       (+ (f-op4 0) rn (f-sub8 42))
+       (set rn pr)
+       (all-models ((unit u-use-pr)
+		    (unit u-sts-pr))))
+
+(dshci stsl-pr "Store status register (PR)"
+       ((SH4-GROUP CO) (SH4A-GROUP LS))
+       "sts.l pr, @-$rn"
+       (+ (f-op4 4) rn (f-sub8 34))
+       (sequence ((DI addr))
+		 (set addr (sub rn 4))
+		 (set (mem SI addr) pr)
+		 (set rn addr))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-pr)
+		    (unit u-sts-pr)
+		    (unit u-memory-access))))
+
+(dshci sub "Subtract"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "sub $rm, $rn"
+       (+ (f-op4 3) rn rm (f-sub4 8))
+       (set rn (sub rn rm))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-gr (in usereg rm))
+		    (unit u-exec))))
+
+(dshci subc "Subtract and detect carry"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "subc $rm, $rn"
+       (+ (f-op4 3) rn rm (f-sub4 10))
+       (sequence ((BI flag))
+		 (set flag (sub-cflag rn rm tbit))
+		 (set rn (subc rn rm tbit))
+		 (set tbit flag))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-gr (in usereg rm))
+		    (unit u-use-tbit)
+		    (unit u-exec))))
+
+(dshci subv "Subtract and detect overflow"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "subv $rm, $rn"
+       (+ (f-op4 3) rn rm (f-sub4 11))
+       (sequence ((BI t))
+		 (set t (sub-oflag rn rm 0))
+		 (set rn (sub rn rm))
+		 (set tbit (if BI t 1 0)))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-gr (in usereg rm))
+		    (unit u-use-tbit)
+		    (unit u-exec)
+		    (unit u-set-sr-bit))))
+
+(dshci swapb "Swap bytes"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "swap.b $rm, $rn"
+       (+ (f-op4 6) rn rm (f-sub4 8))
+       (sequence ((UHI top-half) (UQI byte1) (UQI byte0))
+		 (set top-half (subword HI rm 0))
+		 (set byte1 (subword QI rm 2))
+		 (set byte0 (subword QI rm 3))
+		 (set rn (or SI (sll SI top-half 16) (or SI (sll SI byte0 8) byte1))))
+       (all-models ((unit u-use-gr (in usereg rm))
+		    (unit u-exec)
+		    (unit u-shift))))
+
+(dshci swapw "Swap words"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "swap.w $rm, $rn"
+       (+ (f-op4 6) rn rm (f-sub4 9))
+       (set rn (or (srl rm 16) (sll rm 16)))
+       (all-models ((unit u-use-gr (in usereg rm))
+		    (unit u-exec)
+		    (unit u-shift))))
+
+(dshci tasb "Test and set byte"
+       ((SH4-GROUP CO) (SH4A-GROUP CO))
+       "tas.b @$rn"
+       (+ (f-op4 4) rn (f-sub8 27))
+       (sequence ((UQI byte))
+		 (set byte (mem UQI rn))
+		 (set tbit (if BI (eq byte 0) 1 0))
+		 (set byte (or byte 128))
+		 (set (mem UQI rn) byte))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-tbit)
+		    (unit u-tas)
+		    (unit u-set-sr-bit)
+		    (unit u-memory-access))))
+
+(dshci trapa "Trap"
+       (ILLSLOT (SH4-GROUP CO) (SH4A-GROUP CO))
+       "trapa #$uimm8"
+       (+ (f-op8 #xc3) uimm8)
+       (c-call "sh64_compact_trapa" uimm8 pc)
+       (all-models ((unit u-trap))))
+
+(dshci tst "Test and set t-bit"
+       ((SH4-GROUP MT) (SH4A-GROUP EX))
+       "tst $rm, $rn"
+       (+ (f-op4 2) rn rm (f-sub4 8))
+       (set tbit (if BI (eq (and rm rn) 0) 1 0))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-gr (in usereg rm))
+		    (unit u-use-tbit)
+		    (unit u-exec)
+		    (unit u-set-sr-bit))))
+
+(dshci tsti "Test and set t-bit immediate" 
+       ((SH4-GROUP MT) (SH4A-GROUP EX))
+       "tst #$uimm8, r0"
+       (+ (f-op8 #xc8) uimm8)
+       (set tbit (if BI (eq (and r0 (zext SI uimm8)) 0) 1 0))
+       (all-models ((unit u-use-gr (in usereg r0))
+		    (unit u-use-tbit)
+		    (unit u-exec)
+		    (unit u-set-sr-bit))))
+
+(dshci tstb "Test and set t-bit immedate with memory byte"
+       ((SH4-GROUP CO) (SH4A-GROUP CO))
+       "tst.b #$imm8, @(r0, gbr)"
+       (+ (f-op8 #xcc) imm8)
+       (sequence ((DI addr))
+		 (set addr (add r0 gbr))
+		 (set tbit (if BI (eq (and (mem UQI addr) imm8) 0) 1 0)))
+       (all-models ((unit u-use-gr (in usereg r0))
+		    (unit u-use-tbit)
+		    (unit u-exec (cycles 3))
+		    (unit u-sx (cycles 3))
+		    (unit u-set-sr-bit)
+		    (unit u-memory-access))))
+
+(dshci xor "Exclusive OR"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "xor $rm64, $rn64"
+       (+ (f-op4 2) rn64 rm64 (f-sub4 10))
+       (set rn64 (xor rn64 rm64))
+       (all-models ((unit u-use-gr (in usereg rn64))
+		    (unit u-use-gr (in usereg rm64))
+		    (unit u-exec))))
+
+(dshci xori "Exclusive OR immediate"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "xor #$uimm8, r0"
+       (+ (f-op8 #xca) uimm8)
+       (set r0 (xor r0 (zext DI uimm8)))
+       (all-models ((unit u-use-gr (in usereg r0))
+		    (unit u-exec))))
+
+(dshci xorb "Exclusive OR immediate with memory byte"
+       ((SH4-GROUP CO) (SH4A-GROUP CO))
+       "xor.b #$imm8, @(r0, gbr)"
+       (+ (f-op8 #xce) imm8)
+       (sequence ((DI addr) (UQI data))
+		 (set addr (add r0 gbr))
+		 (set data (xor (mem UQI addr) imm8))
+		 (set (mem UQI addr) data))
+       (all-models ((unit u-use-gr (in usereg r0))
+		    (unit u-logic-b)
+		    (unit u-memory-access))))
+
+(dshci xtrct "Extract"
+       ((SH4-GROUP EX) (SH4A-GROUP EX))
+       "xtrct $rm, $rn"
+       (+ (f-op4 2) rn rm (f-sub4 13))
+       (set rn (or (sll rm 16) (srl rn 16)))
+       (all-models ((unit u-use-gr (in usereg rn))
+		    (unit u-use-gr (in usereg rm))
+		    (unit u-exec)
+		    (unit u-shift))))

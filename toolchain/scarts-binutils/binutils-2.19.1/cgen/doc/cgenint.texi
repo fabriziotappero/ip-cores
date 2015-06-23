@@ -1,0 +1,303 @@
+\input texinfo       @c -*- Texinfo -*-
+@setfilename cgenint.info
+
+@c This file is work in progress.
+
+@c Automake requires this to have a different name than version.texi
+@c since we already use version.texi in cgen.texi.
+@c But there's no real point to having a version file here.
+@c @include versionint.texi
+
+@copying
+Copyright @copyright{} 2000, 2007, 2009 Red Hat, Inc.
+
+Permission is granted to make and distribute verbatim copies of
+this manual provided the copyright notice and this permission notice
+are preserved on all copies.
+
+Permission is granted to copy and distribute modified versions of this
+manual under the conditions for verbatim copying, provided also that
+the entire resulting derived work is distributed under the terms of a
+permission notice identical to this one.
+
+Permission is granted to copy and distribute translations of this manual
+into another language, under the above conditions for modified versions.
+@end copying
+
+@synindex ky cp
+@c
+@c This file documents the internals of the Cpu tools GENerator, CGEN.
+@c
+@c Copyright (C) 2000 Red Hat, Inc.
+@c
+
+@setchapternewpage odd
+@settitle CGEN
+@titlepage
+@finalout
+@title The Cpu tools GENerator, CGEN.
+@c @subtitle Version @value{VERSION}
+@sp 1
+@subtitle @value{UPDATED}
+@author Ben Elliston
+@author Red Hat, Inc.
+@page
+
+@tex
+{\parskip=0pt \hfill Red Hat, Inc.\par \hfill
+\TeX{}info \texinfoversion\par }
+@end tex
+
+@vskip 0pt plus 1filll
+Copyright @copyright{} 2000 Red Hat, Inc.
+
+Permission is granted to make and distribute verbatim copies of
+this manual provided the copyright notice and this permission notice
+are preserved on all copies.
+
+Permission is granted to copy and distribute modified versions of this
+manual under the conditions for verbatim copying, provided also that
+the entire resulting derived work is distributed under the terms of a
+permission notice identical to this one.
+
+Permission is granted to copy and distribute translations of this manual
+into another language, under the above conditions for modified versions.
+@end titlepage
+
+@node Top
+@top Introduction
+
+@cindex version
+This manual documents the internals of CGEN.
+@c version @value{VERSION}.
+
+@menu
+* Introduction::                Introduction
+* Conventions::                 Coding conventions
+* Applications::                Applications of CGEN
+* Source file overview::        Introduction to each source file
+* Parsing::                     Parsing of .cpu files
+* Debugging applications::	Debugging applications
+* Debugging pmacros::		Debugging pmacros
+* Version numbering::           CGEN version numbering
+* Glossary::                    Glossary
+* Index::                       Index
+@end menu
+
+@node Introduction
+@chapter Introduction
+
+This document details the implementation and internals of CGEN, the
+``Cpu tools GENerator''.  It focuses on theory of operation and concepts
+rather than extensive details of the implementation -- these details
+date too quickly.
+
+@node Conventions
+@chapter Conventions
+
+There are a number of conventions used in the CGEN source code.  If you
+take the time to absorb these now, the code will be much easier to
+understand.
+
+@itemize @bullet
+
+@item Procedures and variables local to a file are named @code{-foo}.
+
+@item Only routines that emit application code begin with @code{gen-}.
+
+@item Symbols beginning with @code{c-} are either variables containing C code
+or procedures that generate C code, similarly for C++ and @code{c++-}.
+
+@item Variables containing C code begin with @code{c-}.
+
+@item Only routines that emit an entire file begin with @code{cgen-}.
+
+@item All @file{.cpu} file elements shall have @code{-foo-parse} and
+@code{-foo-read} procedures.  These procedures all follow the same
+basic style for processing entries.
+
+@item Global variables containing class definitions shall be named
+@code{<class-name>}.
+
+@item Procedures related to a particular class shall be named
+@code{class-name-proc-name}, where @code{class-name} may be abbreviated.
+
+@item Procedures that test whether something is an object of a
+particular class shall be named @code{class-name?}.
+
+@item In keeping with Scheme conventions, predicates shall have a
+@code{?} suffix.
+
+@item In keeping with Scheme conventions, methods and procedures that
+modify an argument or have other side effects shall have a
+@code{!} suffix, usually these procs return @code{*UNSPECIFIED*}.
+
+@item All @code{-foo-parse}, @code{parse-foo} procs shall have @code{context}
+as the first argument. [FIXME: not all such procs have been converted]
+
+@end itemize
+
+@node Applications
+@chapter Applications
+
+Applications of CGEN generate source code for various cpu related tools.
+@footnote{One of the neglected concepts in CGEN is that it is not just
+an assembler/disassembler or simulator generator.  Those have just been
+the ones immediately needed and are straightforward to do.}
+
+When you want to run the CGEN framework, an application-specific source
+file is loaded into the Guile interpreter to get CGEN running.  The main
+job of this source file is to load in any other source files it needs and
+then, ultimately, call the @code{cgen} procedure.
+
+Here's an example of the invocation of @code{cgen} from @file{cgen-sim.scm}.
+
+@example
+    (cgen #:argv argv
+	  #:app-name "sim"
+	  #:arg-spec sim-arguments
+	  #:init sim-init!
+	  #:finish sim-finish!
+	  #:analyze sim-analyze!))
+@end example
+
+This gets the whole framework started by:
+
+@enumerate
+@item processing argv
+@item loading the @file{.cpu} file(s)
+@item analyzing the instruction set
+@item generating the source code for the app
+@end enumerate
+
+@node Source file overview
+@chapter Source file overview
+
+This table is a list of noteworthy files in CGEN.
+
+@table @file
+
+@item *.cpu, *.opc, *.sim
+Files belonging to each CPU description.
+@file{.opc} and @file{.sim} files are automatically
+included if they are defined for the given architecture.
+
+@item doc/*.texi
+Texinfo documentation for CGEN.
+
+@item slib/*.scm
+Third-party libraries written in Scheme.  For example, sort.scm is a
+collection of procedures to sort lists.
+
+@item cgen-gas.scm
+Top-level for GAS testsuite generation.
+
+@item cgen-opc.scm
+Top-level for opcodes generation.
+
+@item cgen-sid.scm
+Top-level for SID simulator generation.
+ 
+@item cgen-sim.scm
+Top-level for older simulator generation.
+
+@item cgen-stest.scm
+Top-level for simulator testsuite generation.
+
+@item cos.scm
+CGEN object system.  Adds object oriented features to the Scheme
+language.  See the top of @file{cos.scm} for the user-visible
+procedures.  Note that this was written before goops.
+Switching to goops is not out of the question, it's just a question
+of prioritization.
+
+@item read.scm
+Read and parse @file{.cpu} files.  @code{maybe-load} is used to load in files
+for required symbols if they are not already present in the environment
+(say, because it was compiled).
+
+This file contains @code{cgen}, is the main entry point called by
+application file generators.
+It just calls @code{-cgen}, but it does so wrapped inside a
+@code{catch-with-backtrace} procedure to make debugging easier.
+
+@item simplify.inc
+Preprocessor macros to simplify CPU description files.  This file is not
+loaded by the Scheme interpreter, but is instead included by each
+@file{.cpu} file.
+
+@end table
+
+@node Version numbering
+@chapter Version numbering
+
+There are two version numbers: the version number of CGEN itself and a
+version number for the description language it accepts.  These are kept
+in the symbols @code{-CGEN-VERSION} and @code{-CGEN-LANG-VERSION} in
+@file{read.scm}.
+
+@node Parsing
+@chapter Parsing
+
+Parsing of @file{.cpu} files is very consistent.
+Each element of the cpu description is handled in the same way.
+
+There are two forms for each cpu description element:
+
+@enumerate
+@item key/value pairs
+@item fixed order arguments
+@end enumerate
+
+The key/value parser is named @code{-<object>-read}.
+For example, see @code{-arch-read} in @file{mach.scm}.
+It sets up default values for all elements of the object, parses the parameters
+that have been provided, and then calls the fixed-order parser.
+
+The fixed order parser is named @code{-<object>-parse}.
+For example, see @code{-arch-parse} in @file{mach.scm}.
+It validates the parameters and then builds the requested object.
+
+@node Debugging applications
+@chapter Debugging applications
+
+The best way to debug your application @emph{at this point} is to
+use the @code{logit} function to get a log of what cgen is doing.
+Or if you need a backtrace at a certain point then insert @code{error}
+function calls at select places to cause the interpreter to output a
+stack backtrace.  This can be useful for answering the
+``How did I get here?'' question.
+
+Guile 1.8 provides better debugging facilities than previous versions.
+These need to be investigated and documented here.
+
+@node Debugging pmacros
+@chapter Debugging pmacros
+
+At the implementation level, pmacros are expanded with the
+@code{pmacro-expand} Scheme procedure.
+For interactive debugging purposes there is @code{pmacro-dump}
+which is easier to use.
+
+When debugging pmacros it is useful to see how they are expanded.
+When expanding them from the a Guile shell, remember that expressions
+needed to be quoted lest Scheme try to evaluate them.
+
+@smallexample
+guile> (define-pmacro '(foo a b) '(+ a b))
+guile> (pmacro-dump '(foo 3 4))
+(+ 3 4)
+@end smallexample
+
+One can also use @code{pmacro-debug} to expand a macro and trace its
+expansion.
+
+@node Index
+@unnumbered Index
+
+@include glossary.texi
+
+@printindex cp
+
+@contents
+@bye

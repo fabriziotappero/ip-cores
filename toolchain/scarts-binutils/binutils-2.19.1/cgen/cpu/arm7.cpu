@@ -1,0 +1,2496 @@
+; ARM7 CPU description.  -*- Scheme -*-
+; Copyright (C) 2000 Red Hat, Inc.
+; Copyright (C) 2002 Jennic, Ltd.
+; This file is part of CGEN.
+; See file COPYING.CGEN for details.
+;
+; This file is included by arm.cpu.
+;
+; ??? The name of this file may be confusing.
+;
+; Every entry in this file belongs to the "arm" isa.
+; Things are simple since that is the default, but it is something to
+; keep in mind.
+
+(define-attr
+  (type integer)
+  (name R15-OFFSET)
+  (comment "offset in pc value at time of use")
+  (default 8)
+)
+
+(dnf f-cond          "Condition code"       () 31  4)
+
+(dnf f-op2           "Opcode (2 bits)"      () 27  2)
+(dnf f-op3           "Opcode (3 bits)"      () 27  3)
+(dnf f-op4           "Opcode (4 bits)"      () 27  4)
+(dnf f-op5           "Opcode (5 bits)"      () 27  5)
+(dnf f-op6           "Opcode (6 bits)"      () 27  6)
+(dnf f-op24          "Opcode (24 bits)"     () 27 24)
+
+(dnf f-op-alu        "Arith/logic opcode"   () 24  4)
+(dnf f-op-mul        "Sub-opcode for MUL"   ()  7  4)
+(dnf f-op-swap1      "Sub-opcode for SWP"   () 21  2)
+(dnf f-op-swap2      "Sub-opcode for SWP"   () 11  8)
+(dnf f-op-mrs1       "Sub-opcode for MRS"   () 21  6)
+(dnf f-op-mrs2       "Sub-opcode for MRS"   () 11 12)
+(dnf f-op-msr1       "Sub-opcode for MSR"   () 21 10)
+(dnf f-op-msr2       "Sub-opcode for MSR"   () 11  8)
+
+(dnf f-rn            "Rn"                   () 19 4)
+(dnf f-rd	     "Rd"		    () 15 4)
+(dnf f-rm            "Rm"                   ()  3 4)
+(dnf f-preindex?     "Pre/post indexing"    () 24 1)
+(dnf f-set-cc?       "Set condition codes?" () 20 1)
+(dnf f-imm?          "Immediate?"           () 25 1)
+(dnf f-byte-qty?     "Byte sized transfer?" () 22 1) 
+
+; Extra fields needed for the Data Processing/PSR Transfer class.
+
+(dnf f-ror-imm8-value   "8 bit value to be rotated"  ()  7 8)
+(dnf f-ror-imm8-rotate  "Rotate amount"              () 11 4)
+
+(dnmf f-ror-imm8 "8 bit rotated immediate" () UINT
+      (f-ror-imm8-value f-ror-imm8-rotate)
+      ; insert
+      (c-call SI "arm_encode_imm12" (ifield f-ror-imm8))
+      ; extract
+      (sequence ()
+		(set (ifield f-ror-imm8)
+		     (ror WI (ifield f-ror-imm8-value)
+			   (mul 2 (ifield f-ror-imm8-rotate))))
+		)
+)
+
+(df  f-imm12         "Immediate (12 bit)"   () 11 12 UINT
+     ((value pc) (c-call SI "arm_encode_imm12" value))
+     ((value pc) 
+      (ror WI (and WI value #xFF)
+	    (mul 2 (srl WI (and WI value #xF00) 8))))
+)
+
+; These two are for a register operand2 (i=0).
+(dnf f-operand2-reg?      "Operand2 reg indicator"      () 4  1)
+(dnf f-operand2-shifttype "Operand2 shift type"         () 6  2)
+
+(dnf f-operand2-shiftimm  "Operand2 shift amount (imm)" () 11 5)
+(dnf f-operand2-shiftreg  "Operand2 shift amount (reg)" () 11 4)
+
+; Extra fields needed for the Transfer instruction classes.
+
+(dnf f-up-down       "Base register direction" () 23 1)
+(dnf f-write-back?   "Write back?"             () 21 1)
+(dnf f-load?         "Load or store?"          () 20 1)
+
+; Extra fields needed for the Single Data Transfer instruction class.
+
+(df f-offset12       "Offset"                  (PCREL-ADDR) 11 12 INT
+    ((value pc) (sra WI (sub WI value 2)))
+    ((value pc) (add WI (sll WI value 2) pc)))
+
+(dnf f-uimm12         "Unsigned immediate (12 bit)" () 11 12)
+
+; Extra fields needed for the Branch and Exchange instruction class.
+
+(dnf f-bx-rn         "Rn for branch/exchg"  ()  3 4)
+
+; Extra fields needed for the Halfword Data Transfer instruction class.
+
+(dnf f-halfword?     "Halfword transfer?"    () 5  1)
+(dnf f-signed?       "Signed transfer?"      () 6  1)
+(dnf f-offset4-hi    "High nybble"           () 11 4)
+(dnf f-offset4-lo    "Low nybble"            ()  3 4)
+
+; Extra fields needed for the PSR Transfer instructions.
+
+(dnf f-psr           "PSR selector"          () 22 1)
+
+; Miscellaneous single bit fields.
+
+(dnf f-bit4          "Bit 4"                ()  4 1)
+(dnf f-bit7          "Bit 7"                ()  7 1)
+(dnf f-bit22         "Bit 22"               () 22 1)
+
+(define-multi-ifield
+  (name f-hdt-offset8)
+  (comment "Immediate offset for halfword and signed data transfers")
+  (attrs)
+  (mode UINT)
+  (subfields f-offset4-hi f-offset4-lo)
+  (insert (sequence ()
+		    (set (ifield f-offset4-hi)
+			 (and (srl (ifield f-hdt-offset8) 4) #xF))
+		    (set (ifield f-offset4-lo)
+			 (and (ifield f-hdt-offset8) #xF))))
+  (extract (set (ifield f-hdt-offset8)
+		(or (sll (ifield f-offset4-hi) 4) 
+		    (ifield f-offset4-lo))))
+)
+
+; Extra fields needed for the Multiply instruction class.
+
+(dnf f-acc?          "Accumulate?"          () 21 1)
+(dnf f-mul-rd        "Rd for multiply"      () 19 4)
+(dnf f-mul-rn        "Rn for multiply"      () 15 4)
+(dnf f-rs            "Rs"                   () 11 4)
+(dnf f-unsigned?     "Unsigned multiply?"   () 22 1)
+
+; Extra fields needed for the Multiply Long instruction class.
+
+(dnf f-rdhi          "Rd (high)"            () 19 4)
+(dnf f-rdlo          "Rd (low)"             () 15 4)
+(dnf f-mull-rn       "Rn for long multiply" () 11 4)
+
+; Extra fields needed for the Branch instruction class.
+
+(dnf f-branch-link?  "Branch and link?"     () 24 1)
+(df  f-offset24      "Branch offset"        (PCREL-ADDR) 23 24 INT
+     ((value pc) (sra WI (sub WI value (add pc 8)) 2))
+     ((value pc) (add WI (sll WI value 2) (add pc 8)))
+)
+
+; Extra fields needed for the Block Data Transfer instruction class.
+
+(dnf f-reg-list      "Register list"        () 15 16)
+(dnf f-load-psr?     "Load PSR?"            () 22  1)
+
+; Extra fields needed for the SWI instruction.
+
+(dnf f-swi-comment   "User-defined operand" () 23 24)
+
+; Extra fields needed for the undefined instruction.
+
+(dnf f-undef-dont1  "Don't care"           (RESERVED) 24 20)
+(dnf f-undef-dont2  "Don't care"           (RESERVED)  3  4)
+
+; Enumerated constants.
+
+(define-normal-insn-enum cond-codes "condition codes" () COND_ f-cond
+  ("EQ" "NE" "CS" "CC" "MI" "PL" "VS" "VC" "HI" "LS" "GE" "LT" "GT" "LE" "AL")
+)
+
+(define-normal-insn-enum al-opcode "Arith/logic opcode enums" () OP_ f-op-alu
+  ("AND" "EOR" "SUB" "RSB" "ADD" "ADC" "SBC" "RSC" "TST" "TEQ" "CMP" "CMN"
+   "ORR" "MOV" "BIC" "MVN")
+)
+
+(define-normal-insn-enum psr-dests "PSR transfer destinations" () PSR_
+  f-psr ("CURRENT" "SAVED")
+)
+
+; Instruction operands.
+
+(dnop cond          "Condition code"                    () h-uint  f-cond)
+(dnop rn            "Rn"                                () h-gr    f-rn)
+(dnop rd	    "Rd"				() h-gr    f-rd)
+(dnop rm            "Rm"                                () h-gr    f-rm)
+(dnop rs            "Rs"                                () h-gr    f-rs)
+(dnop imm?	    "Immediate constant?"               () h-uint  f-imm?)
+(dnop set-cc?       "Set condition codes"               () h-uint  f-set-cc?)
+
+(dnop ror-imm8      "Rotated immediate (8 bits)"        () h-uint  f-ror-imm8)
+(dnop imm12         "Immediate"                         () h-uint  f-imm12)
+(dnop uimm12        "Unsigned immediate (12 bits)"      () h-uint  f-uimm12)
+
+(dnop operand2-shifttype "Operand 2 shift type"         ()
+      h-operand2-shifttype f-operand2-shifttype)
+(dnop operand2-shiftimm  "Operand 2 shift immediate"    ()
+      h-uint f-operand2-shiftimm)
+(dnop operand2-shiftreg  "Operand 2 shift reg"          ()
+      h-gr f-operand2-shiftreg)
+
+(dnop reglist       "Register list"                     () h-uint  f-reg-list)
+(dnop bx-rn         "Source register (BX insn)"         () h-gr    f-bx-rn)
+(dnop mul-rd        "Destination register (MUL insns)"  () h-gr    f-mul-rd)
+(dnop mul-rn        "Source register (MUL insns)"       () h-gr    f-mul-rn)
+(dnop rdhi          "Rd (high) for long multiply"       () h-gr    f-rdhi)
+(dnop rdlo          "Rd (low) for long multiply"        () h-gr    f-rdlo)
+
+(dnop offset12      "Offset (12 bits)"                  () h-addr  f-offset12)
+(dnop offset24      "Branch offset (24 bits)"           () h-iaddr f-offset24)
+(dnop hdt-offset8   "Split offset (8 bits)"             () h-addr  f-hdt-offset8)
+
+(dnop swi-comment   "Argument to swi"                   () h-uint  f-swi-comment)
+
+(dnop undef-dont1   "Don't care"			() h-uint  f-undef-dont1)
+(dnop undef-dont2   "Don't care"                        () h-uint  f-undef-dont2)
+
+; Useful macros.
+
+; Same as dni but leave out timing.
+; dnai - define-normal-arm-insn
+
+(define-pmacro (dnai xname xcomment xattrs xsyntax xformat xsemantics)
+  (define-insn
+    (name xname)
+    (comment xcomment)
+    (.splice attrs (.unsplice xattrs))
+    (syntax xsyntax)
+    (format xformat)
+    (semantics xsemantics)
+    )
+)
+
+; Branch insns.
+
+(dnai b "Branch"
+     ()
+     "b$cond $offset24"
+     (+ cond (f-op3 5) (f-branch-link? 0) offset24)
+     (set pc offset24)
+)
+
+(dnai bl "Branch and link"
+     ()
+     "bl$cond $offset24"
+     (+ cond (f-op3 5) (f-branch-link? 1) offset24)
+     (sequence ()
+	       (set (reg h-gr 14) (and (add pc 4) -4))
+	       (set pc offset24))
+)
+
+(dnai bx "Branch and exchange"
+     ()
+     "bx$cond ${bx-rn}"
+     (+ cond (f-op24 #x12FFF1) bx-rn)
+     (sequence ()
+	       (set pc (and bx-rn #xfffffffe))
+	       (if (and bx-rn 1)
+		   (set (reg h-tbit) 1)))
+)
+
+; Load word/byte insns.
+
+(define-pmacro (do-word/byte-load byte? preindex? writeback? up? offset-expr)
+  (sequence ((SI addr) (SI offset))
+	    (set offset offset-expr)
+	    (if preindex?
+		(if up?
+		    (set addr (add rn offset))
+		    (set addr (sub rn offset)))
+		(set addr rn))
+	    ; If writeback in postindexing case -> do transfer
+	    ; in non-priviledged mode.
+	    ; FIXME: still need to handle non-word-aligned addresses
+	    (if (andif (not preindex?) writeback?)
+		(if byte?
+		    ; FIXME: specify "non-priviledged mode" `selector'
+		    (if (eq f-rd 15)
+		        (set pc (zext SI (mem QI addr)))
+			(set rd (zext SI (mem QI addr))))
+		    ; !byte
+		    (if (eq f-rd 15)
+			(set pc (mem SI addr))
+			(set rd (mem SI addr))))
+		; else
+		(if byte?
+		    (if (eq f-rd 15)
+		        (set pc (zext SI (mem QI addr)))
+			(set rd (zext SI (mem QI addr))))
+		    ; !byte
+		    (if (eq f-rd 15)
+			(set pc (mem SI addr))
+			(set rd (mem SI addr)))))
+	    (if (not preindex?)
+		(if up?
+		    (set addr (add rn offset))
+		    (set addr (sub rn offset))))
+	    (if (orif (not preindex?)
+		      (andif preindex? writeback?))
+		(set rn addr))
+	    )
+)
+
+(define-pmacro (load-word/byte name comment size-char t-char
+			       byte? preindex? writeback? up?)
+  (begin
+    (dnai (.sym name -imm-offset)
+	  (.str comment ", immediate offset")
+	  ()
+	  ; ??? Enhancement to compute offset syntax based on args?
+	  (.str "ldr${cond}" size-char t-char " $rd,???")
+	  (+ cond (f-op2 1)
+	     (f-imm? 0) (f-preindex? preindex?) (f-up-down up?)
+	     (f-byte-qty? byte?) (f-write-back? writeback?)
+	     (f-load? 1) rn rd uimm12)
+	  (do-word/byte-load byte? preindex? writeback? up? uimm12)
+	  )
+    (dnai (.sym name -reg-offset)
+	  (.str comment ", register offset")
+	  ()
+	  (.str "ldr${cond}" size-char t-char " $rd,???")
+	  (+ cond (f-op2 1)
+	     (f-imm? 1) (f-preindex? preindex?) (f-up-down up?)
+	     (f-byte-qty? byte?) (f-write-back? writeback?)
+	     (f-load? 1) rn rd rm
+	     (f-operand2-reg? 0) operand2-shifttype operand2-shiftimm)
+	  (do-word/byte-load byte? preindex? writeback? up?
+			     (c-call SI "compute_operand2_immshift" rm
+				      operand2-shifttype operand2-shiftimm))
+	  )
+    )
+)
+
+(load-word/byte #:name ldr-post-dec
+		#:comment "Load word (postindex, decrement)"
+		#:size-char "" #:t-char ""
+		#:byte? 0 #:preindex? 0 #:writeback? 0 #:up? 0)
+
+(load-word/byte #:name ldr-post-inc
+		#:comment "Load word (postindex, increment)"
+		#:size-char "" #:t-char ""
+		#:byte? 0 #:preindex? 0 #:writeback? 0 #:up? 1)
+
+(load-word/byte #:name ldr-post-dec-nonpriv
+		#:comment "Load word (postindex, decrement, nonpriv)"
+		#:size-char "" #:t-char "t"
+		#:byte? 0 #:preindex? 0 #:writeback? 1 #:up? 0)
+
+(load-word/byte #:name ldr-post-inc-nonpriv
+		#:comment "Load word (postindex, increment, nonpriv)"
+		#:size-char "" #:t-char "t"
+		#:byte? 0 #:preindex? 0 #:writeback? 1 #:up? 1)
+
+(load-word/byte #:name ldr-pre-dec
+		#:comment "Load word (preindex, decrement)"
+		#:size-char "" #:t-char ""
+		#:byte? 0 #:preindex? 1 #:writeback? 0 #:up? 0)
+
+(load-word/byte #:name ldr-pre-inc
+		#:comment "Load word (preindex, increment)"
+		#:size-char "" #:t-char ""
+		#:byte? 0 #:preindex? 1 #:writeback? 0 #:up? 1)
+
+(load-word/byte #:name ldr-pre-dec-wb
+		#:comment "Load word (preindex, decrement, writeback)"
+		#:size-char "" #:t-char ""
+		#:byte? 0 #:preindex? 1 #:writeback? 1 #:up? 0)
+
+(load-word/byte #:name ldr-pre-inc-wb
+		#:comment "Load word (preindex, increment, writeback)"
+		#:size-char "" #:t-char ""
+		#:byte? 0 #:preindex? 1 #:writeback? 1 #:up? 1)
+
+(load-word/byte #:name ldrb-post-dec
+		#:comment "Load byte (postindex, decrement)"
+		#:size-char "b" #:t-char ""
+		#:byte? 1 #:preindex? 0 #:writeback? 0 #:up? 0)
+
+(load-word/byte #:name ldrb-post-inc
+		#:comment "Load byte (postindex, increment)"
+		#:size-char "b" #:t-char ""
+		#:byte? 1 #:preindex? 0 #:writeback? 0 #:up? 1)
+
+(load-word/byte #:name ldrb-post-dec-nonpriv
+		#:comment "Load byte (postindex, decrement, nonpriv)"
+		#:size-char "b" #:t-char "t"
+		#:byte? 1 #:preindex? 0 #:writeback? 1 #:up? 0)
+
+(load-word/byte #:name ldrb-post-inc-nonpriv
+		#:comment "Load byte (postindex, increment, nonpriv)"
+		#:size-char "b" #:t-char "t"
+		#:byte? 1 #:preindex? 0 #:writeback? 1 #:up? 1)
+
+(load-word/byte #:name ldrb-pre-dec
+		#:comment "Load byte (preindex, decrement)"
+		#:size-char "b" #:t-char ""
+		#:byte? 1 #:preindex? 1 #:writeback? 0 #:up? 0)
+
+(load-word/byte #:name ldrb-pre-inc
+		#:comment "Load byte (preindex, increment)"
+		#:size-char "b" #:t-char ""
+		#:byte? 1 #:preindex? 1 #:writeback? 0 #:up? 1)
+
+(load-word/byte #:name ldrb-pre-dec-wb
+		#:comment "Load byte (preindex, decrement, writeback)"
+		#:size-char "b" #:t-char ""
+		#:byte? 1 #:preindex? 1 #:writeback? 1 #:up? 0)
+
+(load-word/byte #:name ldrb-pre-inc-wb
+		#:comment "Load byte (preindex, increment, writeback)"
+		#:size-char "b" #:t-char ""
+		#:byte? 1 #:preindex? 1 #:writeback? 1 #:up? 1)
+
+; Store word/byte insns.
+
+(define-pmacro (do-word/byte-store byte? preindex? writeback? up? offset-expr)
+  (sequence ((SI addr) (SI offset))
+	    (set offset offset-expr)
+	    (if preindex?
+		(if up?
+		    (set addr (add rn offset))
+		    (set addr (sub rn offset)))
+		(set addr rn))
+            ; If writeback in postindexing case -> do transfer
+            ; in non-priviledged mode.
+            ; FIXME: still need to handle non-word-aligned addresses
+            (if (andif (not preindex?) writeback?)
+		(if byte?
+		    ; FIXME: specify "non-priviliged mode" `selector'
+		    (set (mem QI addr) (trunc QI rd))
+		    (set (mem SI addr) rd))
+		(if byte?
+		    (set (mem QI addr) (trunc QI rd))
+		    (set (mem SI addr) rd)))
+	    (if (not preindex?)
+		(if up?
+		    (set addr (add rn offset))
+		    (set addr (sub rn offset))))
+	    (if (orif (not preindex?)
+		      (andif preindex? writeback?))
+		(set rn addr))
+	    )
+)
+
+(define-pmacro (store-word/byte name comment size-char t-char 
+			       byte? preindex? writeback? up?)
+  (begin
+    (dnai (.sym name -imm-offset)
+	  (.str comment ", immediate offset")
+	  ()
+	  (.str "ldr${cond}" size-char t-char " $rd,???")
+	  (+ cond (f-op2 1)
+	     (f-imm? 0) (f-preindex? preindex?) (f-up-down up?)
+	     (f-byte-qty? byte?) (f-write-back? writeback?)
+	     (f-load? 0) rn rd uimm12)
+	  (do-word/byte-store byte? preindex? writeback? up? uimm12)
+	  )
+
+    (dnai (.sym name -reg-offset)
+	  (.str comment ", register offset")
+	  ()
+	  (.str "str${cond}" size-char t-char " $rd,???")
+	  (+ cond (f-op2 1)
+	     (f-imm? 1) (f-preindex? preindex?) (f-up-down up?)
+	     (f-byte-qty? byte?) (f-write-back? writeback?)
+	     (f-load? 0) rn rd rm
+	     (f-operand2-reg? 0) operand2-shifttype operand2-shiftimm)
+	  (do-word/byte-store byte? preindex? writeback? up?
+			     (c-call SI "compute_operand2_immshift" rm
+				      operand2-shifttype operand2-shiftimm))
+	  )
+    )
+)
+
+(store-word/byte #:name str-post-dec
+		 #:comment "Store word (postindex, decrement)"
+		 #:size-char "" #:t-char ""
+		 #:byte? 0 #:preindex? 0 #:writeback? 0 #:up? 0)
+
+(store-word/byte #:name str-post-inc
+		 #:comment "Store word (postindex, increment)"
+		 #:size-char "" #:t-char ""
+		 #:byte? 0 #:preindex? 0 #:writeback? 0 #:up? 1)
+
+(store-word/byte #:name str-post-dec-nonpriv
+		 #:comment "Store word (postindex, decrement, nonpriv)"
+		 #:size-char "" #:t-char "t"
+		 #:byte? 0 #:preindex? 0 #:writeback? 1 #:up? 0)
+
+(store-word/byte #:name str-post-inc-nonpriv
+		 #:comment "Store word (postindex, increment, nonpriv)"
+		 #:size-char "" #:t-char "t"
+		 #:byte? 0 #:preindex? 0 #:writeback? 1 #:up? 1)
+
+(store-word/byte #:name str-pre-dec
+		 #:comment "Store word (preindex, decrement)"
+		 #:size-char "" #:t-char ""
+		 #:byte? 0 #:preindex? 1 #:writeback? 0 #:up? 0)
+
+(store-word/byte #:name str-pre-inc
+		 #:comment "Store word (preindex, increment)"
+		 #:size-char "" #:t-char ""
+		 #:byte? 0 #:preindex? 1 #:writeback? 0 #:up? 1)
+
+(store-word/byte #:name str-pre-dec-wb
+		 #:comment "Store word (preindex, decrement, writeback)"
+		 #:size-char "" #:t-char ""
+		 #:byte? 0 #:preindex? 1 #:writeback? 1 #:up? 0)
+
+(store-word/byte #:name str-pre-inc-wb
+		 #:comment "Store word (preindex, increment, writeback)"
+		 #:size-char "" #:t-char ""
+		 #:byte? 0 #:preindex? 1 #:writeback? 1 #:up? 1)
+
+(store-word/byte #:name strb-post-dec
+		 #:comment "Store byte (postindex, decrement)"
+		 #:size-char "b" #:t-char ""
+		 #:byte? 1 #:preindex? 0 #:writeback? 0 #:up? 0)
+
+(store-word/byte #:name strb-post-inc
+		 #:comment "Store byte (postindex, increment)"
+		 #:size-char "" #:t-char ""
+		 #:byte? 1 #:preindex? 0 #:writeback? 0 #:up? 1)
+
+(store-word/byte #:name strb-post-dec-nonpriv
+		 #:comment "Store byte (postindex, decrement, nonpriv)"
+		 #:size-char "" #:t-char "t"
+		 #:byte? 1 #:preindex? 0 #:writeback? 1 #:up? 0)
+
+(store-word/byte #:name strb-post-inc-nonpriv
+		 #:comment "Store byte (postindex, increment, nonpriv)"
+		 #:size-char "" #:t-char "t"
+		 #:byte? 1 #:preindex? 0 #:writeback? 1 #:up? 1)
+
+(store-word/byte #:name strb-pre-dec
+		 #:comment "Store byte (preindex, decrement)"
+		 #:size-char "" #:t-char ""
+		 #:byte? 1 #:preindex? 1 #:writeback? 0 #:up? 0)
+
+(store-word/byte #:name strb-pre-inc
+		 #:comment "Store byte (preindex, increment)"
+		 #:size-char "" #:t-char ""
+		 #:byte? 1 #:preindex? 1 #:writeback? 0 #:up? 1)
+
+(store-word/byte #:name strb-pre-dec-wb
+		 #:comment "Store byte (preindex, decrement, writeback)"
+		 #:size-char "" #:t-char ""
+		 #:byte? 1 #:preindex? 1 #:writeback? 1 #:up? 0)
+
+(store-word/byte #:name strb-pre-inc-wb
+		 #:comment "Store byte (preindex, increment, writeback)"
+		 #:size-char "" #:t-char ""
+		 #:byte? 1 #:preindex? 1 #:writeback? 1 #:up? 1)
+
+; Halfword and signed load insns.
+
+(define-pmacro (do-halfword-load preindex? up? writeback? signed?
+				 halfword? offset-expr)
+  (sequence ((SI addr) (SI offset))
+	    (set offset offset-expr)
+
+	    ; Handle pre-increment.
+	    (if preindex?
+		(if up?
+		    (set addr (add rn offset))
+		    (set addr (sub rn offset)))
+		(set addr rn))
+
+	    ; Do the transfer; sign extend the result.
+	    (if halfword?
+		(if signed?
+		    (if (eq f-rd 15)
+			(set pc (ext SI (mem HI addr)))
+			(set rd (ext SI (mem HI addr))))
+		    (if (eq f-rd 15)
+			(set pc (zext SI (mem HI addr)))
+			(set rd (zext SI (mem HI addr)))))
+		(if (eq f-rd 15)
+		    (set pc (ext SI (mem QI addr)))
+		    (set rd (ext SI (mem QI addr)))))
+
+	    (if (not preindex?)
+		(if up?
+		    (set addr (add rn offset))
+		    (set addr (sub rn offset))))
+	    
+	    ; Write back the modified base register.
+	    (if (orif (not preindex?)
+		      (andif preindex? writeback?))
+		(set rn addr))
+	    )
+)
+
+(define-pmacro (load-halfword name comment preindex? up? writeback?
+			      signed? halfword?)
+  (begin
+    (dnai (.sym name -imm-offset)
+	  (.str comment ", immediate offset")
+	  ()
+	  (.str "FIXME")
+	  (+ cond (f-op3 0) (f-preindex? preindex?) (f-up-down up?)
+	     (f-bit22 1) (f-write-back? writeback?) (f-load? 1)
+	     rn rd (f-bit7 1) (f-signed? signed?) (f-halfword? halfword?) 
+	     (f-bit4 1) hdt-offset8)
+	  (do-halfword-load preindex? up? writeback? signed? halfword? hdt-offset8)
+	  )
+    (dnai (.sym name -reg-offset)
+	  (.str comment ", register offset")
+	  ()
+	  (.str "FIXME")
+	  (+ cond (f-op3 0) (f-preindex? preindex?) (f-up-down up?)
+	     (f-bit22 0) (f-write-back? writeback?) (f-load? 1)
+	     rn rd (f-offset4-hi 0) (f-bit7 1) (f-signed? signed?)
+	     (f-halfword? halfword?) (f-bit4 1) rm)
+	  (do-halfword-load preindex? up? writeback? signed? halfword? rm)
+	  )
+    )
+)
+
+(define-pmacro (do-halfword-store preindex? up? writeback? offset-expr)
+  (sequence ((SI addr) (SI offset))
+	    (set offset offset-expr)
+
+	    ; Handle pre-increment.
+	    (if preindex?
+		(if up?
+		    (set addr (add rn offset))
+		    (set addr (sub rn offset)))
+		(set addr rn))
+
+	    ; Do the transfer; unsigned halfwords only.
+	    (set (mem HI addr) (trunc HI rd))
+	    
+	    (if (not preindex?)
+		(if up?
+		    (set addr (add rn offset))
+		    (set addr (sub rn offset))))
+
+	    (if (orif (not preindex?)
+		      (andif preindex? writeback?))
+		(set rn addr))
+	    )
+)
+
+(define-pmacro (store-halfword name comment preindex? up? writeback?)
+  (begin
+    (dnai (.sym name -imm-offset)
+	  (.str comment ", immediate offset")
+	  ()
+	  (.str "FIXME")
+	  (+ cond (f-op3 0) (f-preindex? preindex?) (f-up-down up?)
+	     (f-bit22 1) (f-write-back? writeback?) (f-load? 0)
+	     rn rd (f-bit7 1) (f-signed? 0) (f-halfword? 1)
+	     (f-bit4 1) hdt-offset8)
+	  (do-halfword-store preindex? up? writeback? hdt-offset8)
+	  )
+    (dnai (.sym name -reg-offset)
+	  (.str comment ", register offset")
+	  ()
+	  (.str "FIXME")
+	  (+ cond (f-op3 0) (f-preindex? preindex?) (f-up-down up?)
+	     (f-bit22 0) (f-write-back? writeback?) (f-load? 0)
+	     rn rd (f-offset4-hi 0) (f-bit7 1) (f-signed? 0)
+	     (f-halfword? 1) (f-bit4 1) rm)
+	  (do-halfword-store preindex? up? writeback? rm)
+	  )
+    )
+)
+
+(store-halfword #:name strh-pre-dec
+		#:comment "Store halfword (predecrement)"
+		#:preindex? 1 #:up? 0 #:writeback? 0)
+
+(store-halfword #:name strh-pre-inc
+		#:comment "Store halfword (preincrement)"
+		#:preindex? 1 #:up? 1 #:writeback? 0)
+
+(store-halfword #:name strh-pre-dec-wb
+		#:comment "Store halfword (predec, writeback)"
+		#:preindex? 1 #:up? 0 #:writeback? 1)
+
+(store-halfword #:name strh-pre-inc-wb
+		#:comment "Store halfword (preinc, writeback)"
+		#:preindex? 1 #:up? 1 #:writeback? 1)
+
+(store-halfword #:name strh-post-dec
+		#:comment "Store halfword (postdecrement)"
+		#:preindex? 0 #:up? 0 #:writeback? 0)
+
+(store-halfword #:name strh-post-inc
+		#:comment "Store halfword (postindex, increment)"
+		#:preindex? 0 #:up? 1 #:writeback? 0)
+
+
+(load-halfword #:name ldrsb-pre-dec
+	       #:comment "Load signed byte (predecrement)"
+	       #:preindex? 1 #:up? 0 #:writeback? 0
+	       #:signed? 1 #:halfword? 0)
+
+(load-halfword #:name ldrsb-pre-inc
+	       #:comment "Load signed byte (preincrement)"
+	       #:preindex? 1 #:up? 1 #:writeback? 0
+	       #:signed? 1 #:halfword? 0)
+
+(load-halfword #:name ldrsb-pre-dec-wb
+	       #:comment "Load signed byte (predec, writeback)"
+	       #:preindex? 1 #:up? 0 #:writeback? 1
+	       #:signed? 1 #:halfword? 0)
+
+(load-halfword #:name ldrsb-pre-inc-wb
+	       #:comment "Load signed byte (preinc, writeback)"
+	       #:preindex? 1 #:up? 1 #:writeback? 1
+	       #:signed? 1 #:halfword? 0)
+
+(load-halfword #:name ldrsb-post-dec
+	       #:comment "Load signed byte (postdecrement)"
+	       #:preindex? 0 #:up? 0 #:writeback? 0
+	       #:signed? 1 #:halfword? 0)
+
+(load-halfword #:name ldrsb-post-inc
+	       #:comment "Load signed byte (postindex, increment)"
+	       #:preindex? 0 #:up? 1 #:writeback? 0
+	       #:signed? 1 #:halfword? 0)
+
+(load-halfword #:name ldrh-pre-dec
+	       #:comment "Load halfword (predecrement)"
+	       #:preindex? 1 #:up? 0 #:writeback? 0
+	       #:signed? 0 #:halfword? 1)
+
+(load-halfword #:name ldrh-pre-inc
+	       #:comment "Load halfword (preincrement)"
+	       #:preindex? 1 #:up? 1 #:writeback? 0
+	       #:signed? 0 #:halfword? 1)
+
+(load-halfword #:name ldrh-pre-dec-wb
+	       #:comment "Load halfword (predec, writeback)"
+	       #:preindex? 1 #:up? 0 #:writeback? 1
+	       #:signed? 0 #:halfword? 1)
+
+(load-halfword #:name ldrh-pre-inc-wb
+	       #:comment "Load halfword (preinc, writeback)"
+	       #:preindex? 1 #:up? 1 #:writeback? 1
+	       #:signed? 0 #:halfword? 1)
+
+(load-halfword #:name ldrh-post-dec
+	       #:comment "Load halfword (postdecrement)"
+	       #:preindex? 0 #:up? 0 #:writeback? 0
+	       #:signed? 0 #:halfword? 1)
+
+(load-halfword #:name ldrh-post-inc
+	       #:comment "Load halfword (postincrement)"
+	       #:preindex? 0 #:up? 1 #:writeback? 0
+	       #:signed? 0 #:halfword? 1)
+
+(load-halfword #:name ldrsh-pre-dec
+	       #:comment "Load signed halfword (predecrement)"
+	       #:preindex? 1 #:up? 0 #:writeback? 0
+	       #:signed? 1 #:halfword? 1)
+
+(load-halfword #:name ldrsh-pre-inc
+	       #:comment "Load signed halfword (preincrement)"
+	       #:preindex? 1 #:up? 1 #:writeback? 0
+	       #:signed? 1 #:halfword? 1)
+
+(load-halfword #:name ldrsh-pre-dec-wb
+	       #:comment "Load signed halfword (predec, writeback)"
+	       #:preindex? 1 #:up? 0 #:writeback? 1
+	       #:signed? 1 #:halfword? 1)
+
+(load-halfword #:name ldrsh-pre-inc-wb
+	       #:comment "Load signed halfword (preinc, writeback)"
+	       #:preindex? 1 #:up? 1 #:writeback? 1
+	       #:signed? 1 #:halfword? 1)
+
+(load-halfword #:name ldrsh-post-dec
+	       #:comment "Load signed halfword (postdecrement)"
+	       #:preindex? 0 #:up? 0 #:writeback? 0
+	       #:signed? 1 #:halfword? 1)
+
+(load-halfword #:name ldrsh-post-inc
+	       #:comment "Load signed halfword (postincrement)"
+	       #:preindex? 0 #:up? 1 #:writeback? 0
+	       #:signed? 1 #:halfword? 1)
+
+; Multiply instructions.
+
+(define-pmacro (set-mul-cond-maybe result)
+  (if set-cc?
+      (sequence ()
+		; vbit is not affected
+		; cbit is set to a meaningless value, we just ignore it
+		(set zbit (zflag WI result))
+		(set nbit (nflag WI result))))
+)
+
+(define-pmacro (set-muldi-cond-maybe result)
+  (if set-cc?
+      (sequence ()
+		; vbit,cbit are set to meaningless values, we just ignore them
+		(set zbit (zflag DI result))
+		(set nbit (nflag DI result))))
+)
+
+(dnai mul "Multiply"
+     ()
+     "mul$cond${set-cc?} ${mul-rd},$rm,$rs"
+     (+ cond (f-op6 0) (f-acc? 0) set-cc? mul-rd mul-rn rs (f-op-mul 9) rm)
+     (sequence ((WI result))
+	       (set result (mul rm rs))
+	       (set mul-rd result)
+	       (set-mul-cond-maybe result))
+)
+
+(dnai mla "Multiply and accumulate"
+     ()
+     "mla$cond${set-cc?} ${mul-rd},$rm,$rs,${mul-rn}"
+     (+ cond (f-op6 0) (f-acc? 1) set-cc? mul-rd mul-rn rs (f-op-mul 9) rm)
+     (sequence ((WI result))
+	       (set mul-rd (add (mul rm rs) mul-rn))
+	       (set-mul-cond-maybe result))
+)
+
+(dnai umull "Multiply long (unsigned)"
+     ()
+     "umull$cond${set-cc?} $rdlo,$rdhi,$rm,$rs"
+     (+ cond (f-op5 1) (f-unsigned? 0) (f-acc? 0) set-cc? rdhi rdlo rs (f-op-mul 9) rm)
+     (sequence ((DI mul-result) (SI hi) (SI lo))
+	       (set mul-result (mul (zext DI rs) (zext DI rm)))
+	       (set rdhi (subword SI mul-result 0))
+	       (set rdlo (subword SI mul-result 1))
+	       (set-muldi-cond-maybe mul-result))
+)
+
+(dnai umlal "Multiply long and accumulate (unsigned)"
+     ()
+     "umlal$cond${set-cc?} $rdlo,$rdhi,$rm,$rs"
+     (+ cond (f-op5 1) (f-unsigned? 0) (f-acc? 1) set-cc? rdhi rdlo rs (f-op-mul 9) rm)
+     (sequence ((DI mul-result) (SI hi) (SI lo))
+	       (set mul-result (join DI SI rdhi rdlo))
+	       (set mul-result
+		    (add (mul (zext DI rs) (zext DI rm)) mul-result))
+	       (set rdhi (subword SI mul-result 0))
+	       (set rdlo (subword SI mul-result 1))
+	       (set-muldi-cond-maybe mul-result))
+)
+
+(dnai smull "Multiply long (signed)"
+     ()
+     "smull$cond${set-cc?} $rdlo,$rdhi,$rm,$rs"
+     (+ cond (f-op5 1) (f-unsigned? 1) (f-acc? 0) set-cc? rdhi rdlo rs 
+	(f-op-mul 9) rm)
+     (sequence ((DI mul-result) (SI hi) (SI lo))
+	       (set mul-result (mul (ext DI rs) (ext DI rm)))
+	       (set rdhi (subword SI mul-result 0))
+	       (set rdlo (subword SI mul-result 1))
+	       (set-muldi-cond-maybe mul-result))
+)
+
+(dnai smlal "Multiply long and accumulate (signed)"
+     ()
+     "smlal$cond${set-cc?} $rdlo,$rdhi,$rm,$rs"
+     (+ cond (f-op5 1) (f-unsigned? 1) (f-acc? 1) set-cc? rdhi rdlo rs
+	(f-op-mul 9) rm)
+     (sequence ((DI mul-result) (SI hi) (SI lo))
+	       (set mul-result (join DI SI rdhi rdlo))
+	       (set mul-result
+		    (add (mul (ext DI rs) (ext DI rm)) mul-result))
+	       (set rdhi (subword SI mul-result 0))
+	       (set rdlo (subword SI mul-result 1))
+	       (set-muldi-cond-maybe mul-result))
+)
+
+(dnai swp "Swap word"
+     ()
+     "swp$cond $rd,$rm,[$rn]"
+     (+ cond (f-op5 2) (f-byte-qty? 0) (f-op-swap1 #b00) rn rd
+	(f-op-swap2 9) rm)
+     (sequence ((WI temp))
+	       (set temp (mem WI rn)) ; read contents of swap address
+	       (set (mem WI rn) rm)   ; write rm to the swap address
+	       (set rd temp))          ; store old swap contents in rd
+)
+
+(dnai swpb "Swap byte"
+     ()
+     "swpb${cond}b $rd,$rm,[$rn]"
+     (+ cond (f-op5 2) (f-byte-qty? 1) (f-op-swap1 #b00) rn rd
+	(f-op-swap2 #b00001001) rm)
+     (sequence ((WI temp))
+	       (set temp (mem QI rn)) ; read contents of swap address
+	       (set (mem QI rn) rm)   ; write rm to the swap address
+	       (set rd temp))         ; store old swap contents in rd
+)
+
+(dnai swi "Software interrupt"
+     ()
+     "swi$cond ${swi-comment}"
+     (+ cond (f-op4 #xF) swi-comment)
+         ; Take the software trap. Jump to the vector held in
+         ; 0x8. User code retrieves the comment field itself (see the
+         ; SWI instruction description in the ARM 7TDMI data sheet).
+         ; FIXME: more state change than this occurs
+         ;(set pc (mem WI 8)))
+     (set pc (c-call SI "arm_swi" pc swi-comment))
+)
+
+; Data processing [sic] instructions with a register for operand2.
+; The immediate operand2 case is handled separately.
+;
+; FIXME: 'twould be nice to split up each semantic element into
+; shifttype, set-cc/no-set-cc, set-pc,no-set-pc cases.
+; This is something that could be done as an optimization or extension,
+; without having to change this code [which would have general utility].
+;
+; FIXME: assembler syntaxes don't take into account unary vs binary vs
+; no-result.  Later.
+
+; Logical operation semantic code.
+;
+; Flag handling if rd != pc:
+; cbit is set to the carry out of a shift operation if present
+; nbit is set to the sign bit
+; vbit is not affected
+; zflag is set to indicate whether the result was zero or not
+;
+; Flag handling if rd = pc:
+; cpsr is set from spsr
+; N.B. The pc must be set before setting cpsr as the registers that go into
+; computing the new value of pc may change when cpsr is set (new register
+; bank may get installed).
+
+; Logical operation, with a result.
+
+(define-pmacro (logical-op mnemonic comment-text opcode semantic-fn)
+  (begin
+    (dnai
+     (.sym mnemonic -reg/imm-shift)
+     (.str comment-text " immediate shift")
+     ()
+     (.str mnemonic "$cond${set-cc?} $rd,$rn,$rm,${operand2-shifttype} ${operand2-shiftimm}")
+     (+ cond (f-op2 0) (f-imm? 0) opcode set-cc? rn rd rm
+	(f-operand2-reg? 0) operand2-shifttype operand2-shiftimm)
+     (sequence ((SI operand2) (BI carry-out) (SI result))
+	       (set operand2
+		    (c-call SI "compute_operand2_immshift" rm
+			    operand2-shifttype operand2-shiftimm))
+	       (set carry-out
+		    (c-call BI "compute_carry_out_immshift" rm
+			    operand2-shifttype operand2-shiftimm cbit))
+	       (set result (semantic-fn rn operand2))
+	       (if (eq f-rd 15)
+		   (sequence ()
+			     (set pc result)
+			     (if set-cc?
+				 (set (reg h-cpsr) (reg h-spsr))))
+		   (sequence ()
+			     (set rd result)
+			     (if set-cc?
+				 (set-logical-cc result carry-out)))))
+     )
+    (dnai
+     (.sym mnemonic -reg/reg-shift)
+     (.str comment-text " register shift")
+     ((R15-OFFSET 12))
+     (.str mnemonic "$cond${set-cc?} $rd,$rn,$rm,${operand2-shifttype} ${operand2-shiftreg}")
+     (+ cond (f-op2 0) (f-imm? 0) opcode set-cc? rn rd rm
+	(f-operand2-reg? 1) (f-bit7 0)
+	operand2-shifttype operand2-shiftreg)
+     (sequence ((SI operand2) (BI carry-out) (SI result))
+	       (set operand2
+		    (c-call SI "compute_operand2_regshift" rm
+			    operand2-shifttype operand2-shiftreg))
+	       (set carry-out
+		    (c-call BI "compute_carry_out_regshift" rm
+			    operand2-shifttype operand2-shiftreg cbit))
+	       (set result (semantic-fn rn operand2))
+	       (if (eq f-rd 15)
+		   (sequence ()
+			     (set pc result)
+			     (if set-cc?
+				 (set (reg h-cpsr) (reg h-spsr))))
+		   (sequence ()
+			     (set rd result)
+			     (if set-cc?
+				 (set-logical-cc result carry-out)))))
+     )
+    )
+)
+
+; Arithmetic operation semantic code.
+;
+; Flag handling if rd != pc:
+; cbit is set to the carry out of the ALU
+; N.B. For subtraction, the "carry" bit is actually a "borrow" bit.
+; nbit is set to the sign bit
+; vbit is set to indicate if an overflow occured
+; zbit is set to indicate whether the result was zero or not
+;
+; Flag handling if rd = pc:
+; cpsr is set from spsr
+
+; Arithmetic operation, with a result.
+
+(define-pmacro (arith-op mnemonic comment-text opcode semantic-fn set-flags)
+  (begin
+    (dnai
+     (.sym mnemonic -reg/imm-shift)
+     (.str comment-text " immediate shift")
+     ()
+     (.str mnemonic "$cond${set-cc?} $rd,$rn,$rm,${operand2-shifttype} ${operand2-shiftimm}")
+     (+ cond (f-op2 0) (f-imm? 0) opcode set-cc? rn rd rm
+	(f-operand2-reg? 0) operand2-shifttype operand2-shiftimm)
+     (sequence ((SI operand2) (SI result) (SI temp-op1) (SI temp-op2))
+	       (set operand2
+		    (c-call SI "compute_operand2_immshift" rm
+			     operand2-shifttype operand2-shiftimm))
+	       (set temp-op1 rn)
+	       (set temp-op2 operand2)
+	       (set result (semantic-fn rn operand2 cbit))
+	       (if (eq f-rd 15)
+		   (sequence ()
+			     (set pc result)
+			     (if set-cc?
+				 (set (reg h-cpsr) (reg h-spsr))))
+		   (sequence ()
+			     (set rd result)
+			     (if set-cc?
+				 (set-flags temp-op1 temp-op2 cbit)))))
+     )
+    (dnai
+     (.sym mnemonic -reg/reg-shift)
+     (.str comment-text " register shift")
+     ((R15-OFFSET 12))
+     (.str mnemonic "$cond${set-cc?} $rd,$rn,$rm,${operand2-shifttype} ${operand2-shiftreg}")
+     (+ cond (f-op2 0) (f-imm? 0) opcode set-cc? rn rd rm
+	(f-operand2-reg? 1) (f-bit7 0)
+	operand2-shifttype operand2-shiftreg)
+     (sequence ((SI operand2) (SI result) (SI temp-op1) (SI temp-op2))
+	       (set operand2
+		    (c-call SI "compute_operand2_regshift" rm
+			     operand2-shifttype operand2-shiftreg))
+	       (set temp-op1 rn)
+	       (set temp-op2 operand2)
+	       (set result (semantic-fn rn operand2 cbit))
+	       (if (eq f-rd 15)
+		   (sequence ()
+			     (set pc result)
+			     (if set-cc?
+				 (set (reg h-cpsr) (reg h-spsr))))
+		   (sequence ()
+			     (set rd result)
+			     (if set-cc?
+				 (set-flags temp-op1 temp-op2 cbit)))))
+     )
+    )
+)
+
+; Arithmetic operation, with a result and immediate operand.
+
+(define-pmacro (arith-imm-op mnemonic comment-text opcode semantic-fn set-flags)
+  (dnai (.sym mnemonic -imm)
+	(.str comment-text " immediate")
+	()
+	(.str mnemonic "$cond${set-cc?} $rd,$rn,$imm12")
+	(+ cond (f-op2 0) (f-imm? 1) opcode set-cc? rn rd imm12)
+	(sequence ((SI result))
+		  (set result (semantic-fn rn imm12 cbit))
+		  (if (eq f-rd 15)
+		      (sequence ()
+				(if set-cc?
+				    (set (reg h-cpsr) (reg h-spsr)))
+				(set pc result))
+		      (sequence ()
+				(if set-cc?
+				    (set-flags rn imm12 cbit))
+				(set rd result))))
+	)
+)
+
+; Logical data processing insns.
+
+(logical-op and "Bitwise AND" OP_AND and)
+
+(dnai and-imm "Bitwise AND immediate" ()
+      "and$cond${set-cc?} $rd,$rn,$imm12"
+      (+ cond (f-op2 0) (f-imm? 1) OP_AND set-cc? rn rd imm12)
+      (sequence ((SI result))
+		(set result (and rn imm12))
+		(if (eq f-rd 15)
+		    (sequence ()
+			      (set pc result)
+			      (if set-cc?
+				  (set (reg h-cpsr) (reg h-spsr))))
+		    (sequence ()
+			      (set rd result)
+			      (if set-cc?
+				  (set-zn-flags result)))))
+)
+
+(logical-op orr "Bitwise OR" OP_ORR or)
+
+(dnai orr-imm "Bitwise OR immediate" ()
+      "orr$cond${set-cc?} $rd,$rn,$imm12"
+      (+ cond (f-op2 0) (f-imm? 1) OP_ORR set-cc? rn rd imm12)
+      (sequence ((SI result))
+		(set result (or rn imm12))
+		(if (eq f-rd 15)
+		    (sequence ()
+			      (set pc result)
+			      (if set-cc?
+				  (set (reg h-cpsr) (reg h-spsr))))
+		    (sequence ()
+			      (set rd result)
+			      (if set-cc?
+				  (set-zn-flags result)))))
+)
+
+(logical-op eor "Exclusive OR" OP_EOR xor)
+
+(dnai eor-imm "Exclusive OR immediate" ()
+      "eor$cond${set-cc?} $rd,$rn,$imm12"
+      (+ cond (f-op2 0) (f-imm? 1) OP_EOR set-cc? rn rd imm12)
+      (sequence ((SI result))
+		(set result (xor rn imm12))
+		(if (eq f-rd 15)
+		    (sequence ()
+			      (set pc result)
+			      (if set-cc?
+				  (set (reg h-cpsr) (reg h-spsr))))
+		    (sequence ()
+			      (set rd result)
+			      (if set-cc?
+				  (set-zn-flags result)))))
+)
+
+(logical-op mov "Move" OP_MOV (.pmacro (arg1 arg2) arg2))
+
+(dnai mov-imm "Move immediate" ()
+      "mov$cond${set-cc?} $rd,$imm12"
+      ; rn is ignored
+      (+ cond (f-op2 0) (f-imm? 1) OP_MOV set-cc? rn rd imm12)
+      (sequence ((SI result))
+		(set result imm12)
+		(if (eq f-rd 15)
+		    (sequence ()
+			      (set pc result)
+			      (if set-cc?
+				  (set (reg h-cpsr) (reg h-spsr))))
+		    (sequence ()
+			      (set rd result)
+			      (if set-cc?
+				  (set-zn-flags result)))))
+)
+
+(logical-op bic "Bit clear" OP_BIC (.pmacro (arg1 arg2) (and arg1 (inv arg2))))
+
+(dnai bic-imm "Bit clear immediate" ()
+      "bic$cond${set-cc?} $rd,$rn,$imm12"
+      (+ cond (f-op2 0) (f-imm? 1) OP_BIC set-cc? rn rd imm12)
+      (sequence ((SI result))
+		(set result (and rn (inv imm12)))
+		(if (eq f-rd 15)
+		    (sequence ()
+			      (set pc result)
+			      (if set-cc?
+				  (set (reg h-cpsr) (reg h-spsr))))
+		    (sequence ()
+			      (set rd result)
+			      (if set-cc?
+				  (set-zn-flags result)))))
+)
+
+(logical-op mvn "Move negate" OP_MVN (.pmacro (arg1 arg2) (inv arg2)))
+
+(dnai mvn-imm "Move (logical) negate immediate" ()
+      "mvn$cond${set-cc?} $rd,$imm12"
+      ; rn is ignored
+      (+ cond (f-op2 0) (f-imm? 1) OP_MVN set-cc? rn rd imm12)
+      (sequence ((SI result))
+		(set result (inv imm12))
+		(if (eq f-rd 15)
+		    (sequence ()
+			      (set pc result)
+			      (if set-cc?
+				  (set (reg h-cpsr) (reg h-spsr))))
+		    (sequence ()
+			      (set rd result)
+			      (if set-cc?
+				  (set-zn-flags result)))))
+)
+
+; Arithmetic data processing insns.
+
+(arith-op add "Add" OP_ADD
+	  (.pmacro (arg1 arg2 carry) (add arg1 arg2))
+	  (.pmacro (arg1 arg2 carry) (set-add-flags arg1 arg2 0))
+)
+
+(arith-imm-op add "Add" OP_ADD
+	  (.pmacro (arg1 arg2 carry) (add arg1 arg2))
+	  (.pmacro (arg1 arg2 carry) (set-add-flags arg1 arg2 0))
+)
+
+(arith-op adc "Add with carry" OP_ADC
+	  (.pmacro (arg1 arg2 carry) (addc arg1 arg2 carry))
+	  (.pmacro (arg1 arg2 carry) (set-add-flags arg1 arg2 carry))
+)
+
+(arith-imm-op adc "Add with carry" OP_ADC
+	  (.pmacro (arg1 arg2 carry) (addc arg1 arg2 carry))
+	  (.pmacro (arg1 arg2 carry) (set-add-flags arg1 arg2 carry))
+)
+
+(arith-op sub "Subtract" OP_SUB
+	  (.pmacro (arg1 arg2 borrow) (sub arg1 arg2))
+	  (.pmacro (arg1 arg2 borrow) (set-sub-flags arg1 arg2 1))
+)
+
+(arith-imm-op sub "Subtract" OP_SUB
+	  (.pmacro (arg1 arg2 borrow) (sub arg1 arg2))
+	  (.pmacro (arg1 arg2 borrow) (set-sub-flags arg1 arg2 1))
+)
+
+(arith-op sbc "Subtract with carry" OP_SBC
+	  (.pmacro (arg1 arg2 borrow) (subc arg1 arg2 (not borrow)))
+	  (.pmacro (arg1 arg2 borrow) (set-sub-flags arg1 arg2 borrow))
+)
+
+(arith-imm-op sbc "Subtract with carry" OP_SBC
+	  (.pmacro (arg1 arg2 borrow) (subc arg1 arg2 (not borrow)))
+	  (.pmacro (arg1 arg2 borrow) (set-sub-flags arg1 arg2 borrow))
+)
+
+(arith-op rsb "Reverse subtract" OP_RSB
+	  (.pmacro (arg1 arg2 borrow) (sub arg2 arg1))
+	  (.pmacro (arg1 arg2 borrow) (set-sub-flags arg2 arg1 1))
+)
+
+(arith-imm-op rsb "Reverse subtract" OP_RSB
+	  (.pmacro (arg1 arg2 borrow) (sub arg2 arg1))
+	  (.pmacro (arg1 arg2 borrow) (set-sub-flags arg2 arg1 1))
+)
+
+(arith-op rsc "Reverse subtract with carry" OP_RSC
+	  (.pmacro (arg1 arg2 borrow) (subc arg2 arg1 (not borrow)))
+	  (.pmacro (arg1 arg2 borrow) (set-sub-flags arg2 arg1 borrow))
+)
+
+(arith-imm-op rsc "Reverse subtract with carry" OP_RSC
+	  (.pmacro (arg1 arg2 borrow) (subc arg2 arg1 (not borrow)))
+	  (.pmacro (arg1 arg2 borrow) (set-sub-flags arg2 arg1 borrow))
+)
+
+; Comparison instructions.
+;
+; For the following data processing insns, the `S' mnemonic suffix is
+; redundant, but can be specified.  The `S' bit is forced to 1 by the
+; assembler.  rd is not used.  rn is tested only.  
+; `S' bit = 0 -> mrs,msr insns.
+
+(dnai tst-reg/imm-shift
+      "Test immediate shift"
+      ()
+      "tst$cond${set-cc?} $rd,$rn,$rm,${operand2-shifttype} ${operand2-shiftimm}"
+      (+ cond (f-op2 0) (f-imm? 0) OP_TST (f-set-cc? 1) rn rd rm
+	 (f-operand2-reg? 0) operand2-shifttype operand2-shiftimm)
+      (sequence ((SI operand2) (BI carry-out) (SI result))
+		(set operand2
+		     (c-call SI "compute_operand2_immshift" rm
+			     operand2-shifttype operand2-shiftimm))
+		(set carry-out
+		     (c-call BI "compute_carry_out_immshift" rm
+			     operand2-shifttype operand2-shiftimm cbit))
+		(set result (and rn operand2))
+		(if (eq f-rd 15)
+		    (set (reg h-cpsr) (reg h-spsr))
+		    (set-logical-cc result carry-out)))
+)
+
+(dnai tst-reg/reg-shift
+      "Test register shift"
+      ((R15-OFFSET 12))
+      "tst$cond${set-cc?} $rd,$rn,$rm,${operand2-shifttype} ${operand2-shiftreg}"
+      (+ cond (f-op2 0) (f-imm? 0) OP_TST (f-set-cc? 1) rn rd rm
+	 (f-operand2-reg? 1) (f-bit7 0)
+	 operand2-shifttype operand2-shiftreg)
+      (sequence ((SI operand2) (BI carry-out) (SI result))
+		(set operand2
+		     (c-call SI "compute_operand2_regshift" rm
+			     operand2-shifttype operand2-shiftreg))
+		(set carry-out
+		     (c-call BI "compute_carry_out_regshift" rm
+			     operand2-shifttype operand2-shiftreg cbit))
+		(set result (and rn operand2))
+		(if (eq f-rd 15)
+		    (set (reg h-cpsr) (reg h-spsr))
+		    (set-logical-cc result carry-out)))
+)
+
+(dnai tst-imm "Test immediate" ()
+      "tst${cond}${set-cc?} $rn,$imm12"
+      (+ cond (f-op2 0) (f-imm? 1) OP_TST (f-set-cc? 1) rn rd ror-imm8)
+      (sequence ((BI carry-out))
+		(if (eq f-ror-imm8-rotate 0)
+		    (set carry-out cbit)
+		    ; FIXME: nflag BI?
+		    (set carry-out (nflag BI ror-imm8)))
+		(set-logical-cc (and rn ror-imm8) carry-out))
+)
+
+(dnai teq-reg/imm-shift
+      "Test equal immediate shift"
+      ()
+      "teq$cond${set-cc?} $rd,$rn,$rm,${operand2-shifttype} ${operand2-shiftimm}"
+      (+ cond (f-op2 0) (f-imm? 0) OP_TEQ (f-set-cc? 1) rn rd rm
+	 (f-operand2-reg? 0) operand2-shifttype operand2-shiftimm)
+      (sequence ((SI operand2) (BI carry-out) (SI result))
+		(set operand2
+		     (c-call SI "compute_operand2_immshift" rm
+			     operand2-shifttype operand2-shiftimm))
+		(set carry-out
+		     (c-call BI "compute_carry_out_immshift" rm
+			     operand2-shifttype operand2-shiftimm cbit))
+		(set result (xor rn operand2))
+		(if (eq f-rd 15)
+		    (set (reg h-cpsr) (reg h-spsr))
+		    (set-logical-cc result carry-out)))
+)
+
+(dnai teq-reg/reg-shift
+      "Test equal register shift"
+      ((R15-OFFSET 12))
+      "teq$cond${set-cc?} $rd,$rn,$rm,${operand2-shifttype} ${operand2-shiftreg}"
+      (+ cond (f-op2 0) (f-imm? 0) OP_TEQ (f-set-cc? 1) rn rd rm
+	 (f-operand2-reg? 1) (f-bit7 0)
+	 operand2-shifttype operand2-shiftreg)
+      (sequence ((SI operand2) (BI carry-out) (SI result))
+		(set operand2
+		     (c-call SI "compute_operand2_regshift" rm
+			     operand2-shifttype operand2-shiftreg))
+		(set carry-out
+		     (c-call BI "compute_carry_out_regshift" rm
+			     operand2-shifttype operand2-shiftreg cbit))
+		(set result (xor rn operand2))
+		(if (eq f-rd 15)
+		    (set (reg h-cpsr) (reg h-spsr))
+		    (set-logical-cc result carry-out)))
+)
+
+(dnai teq-imm "Test equal immediate" ()
+      "teq${cond}${set-cc?} $rn,$imm12"
+      (+ cond (f-op2 0) (f-imm? 1) OP_TEQ (f-set-cc? 1) rn rd ror-imm8)
+      ; The carry bit is preserved for the immediate form of this
+      ; insn.  ??? Though semantic analysis will believe it's read/written.
+      (sequence ((BI carry-out))
+		(if (eq f-ror-imm8-rotate 0)
+		    (set carry-out cbit)
+		    ; FIXME: nflag BI?
+		    (set carry-out (nflag BI ror-imm8)))
+		(set-logical-cc (xor rn ror-imm8) carry-out))
+)
+
+(dnai cmp-reg/imm-shift
+      "Compare immediate shift "
+      ()
+      "cmp$cond${set-cc?} $rd,$rn,$rm,${operand2-shifttype} ${operand2-shiftimm}"
+      (+ cond (f-op2 0) (f-imm? 0) OP_CMP (f-set-cc? 1) rn rd rm
+	 (f-operand2-reg? 0) operand2-shifttype operand2-shiftimm)
+      (sequence ((SI operand2))
+		(set operand2
+		     (c-call SI "compute_operand2_immshift" rm
+			      operand2-shifttype operand2-shiftimm))
+		(if (eq f-rd 15)
+		    (set (reg h-cpsr) (reg h-spsr))
+		    (set-sub-flags rn operand2 1)))
+)
+
+(dnai cmp-reg/reg-shift
+      "Compare register shift"
+      ((R15-OFFSET 12))
+      "cmp$cond${set-cc?} $rd,$rn,$rm,${operand2-shifttype} ${operand2-shiftreg}"
+      (+ cond (f-op2 0) (f-imm? 0) OP_CMP (f-set-cc? 1) rn rd rm
+	 (f-operand2-reg? 1) (f-bit7 0)
+	 operand2-shifttype operand2-shiftreg)
+      (sequence ((SI operand2))
+		(set operand2
+		     (c-call SI "compute_operand2_regshift" rm
+			      operand2-shifttype operand2-shiftreg))
+		(if (eq f-rd 15)
+		    (set (reg h-cpsr) (reg h-spsr))
+		    (set-sub-flags rn operand2 1)))
+)
+
+(dnai cmp-imm "Compare immediate" ()
+      "cmp${cond}${set-cc?} $rn,$imm12"
+      (+ cond (f-op2 0) (f-imm? 1) OP_CMP (f-set-cc? 1) rn rd imm12)
+      (set-sub-flags rn imm12 1)
+)
+
+(dnai cmn-reg/imm-shift
+      "Compare negative immediate shift "
+      ()
+      "cmn$cond${set-cc?} $rd,$rn,$rm,${operand2-shifttype} ${operand2-shiftimm}"
+      (+ cond (f-op2 0) (f-imm? 0) OP_CMN (f-set-cc? 1) rn rd rm
+	 (f-operand2-reg? 0) operand2-shifttype operand2-shiftimm)
+      (sequence ((SI operand2))
+		(set operand2
+		     (c-call SI "compute_operand2_immshift" rm
+			      operand2-shifttype operand2-shiftimm))
+		(if (eq f-rd 15)
+		    (set (reg h-cpsr) (reg h-spsr))
+		    (set-add-flags rn operand2 0)))
+)
+
+(dnai cmn-reg/reg-shift
+      "Compare negative register shift"
+      ((R15-OFFSET 12))
+      "cmn$cond${set-cc?} $rd,$rn,$rm,${operand2-shifttype} ${operand2-shiftreg}"
+      (+ cond (f-op2 0) (f-imm? 0) OP_CMN (f-set-cc? 1) rn rd rm
+	 (f-operand2-reg? 1) (f-bit7 0)
+	 operand2-shifttype operand2-shiftreg)
+      (sequence ((SI operand2))
+		(set operand2
+		     (c-call SI "compute_operand2_regshift" rm
+			      operand2-shifttype operand2-shiftreg))
+		(if (eq f-rd 15)
+		    (set (reg h-cpsr) (reg h-spsr))
+		    (set-add-flags rn operand2 0)))
+)
+
+(dnai cmn-imm "Compare negative immediate" ()
+      "cmn${cond}${set-cc?} $rn,$imm12"
+      (+ cond (f-op2 0) (f-imm? 1) OP_CMN (f-set-cc? 1) rn rd imm12)
+      ; ??? Is this right?
+      (set-add-flags rn imm12 0)
+)
+
+; Multiple load and store insns.
+
+(define-pmacro (multi-action bit-num semantic-fn)
+  (if (and reglist (sll 1 bit-num))
+      (semantic-fn bit-num))
+)
+
+(define-pmacro (ldmda-action bit-num)
+  (sequence ()
+	    (set (reg WI h-gr bit-num) (mem WI addr))
+	    (set addr (sub addr 4)))
+)
+
+(define-pmacro (ldmda-action-r15 ignored)
+  (sequence ()
+	    (set pc (mem WI addr))
+	    (set addr (sub addr 4)))
+)
+
+(define-pmacro (ldmda-sw-action bit-num)
+  (sequence ()
+	    (if (and reglist (sll 1 15))
+	        (set (reg WI h-gr bit-num) (mem WI addr))
+	        (set (reg WI h-gr-usr (sub bit-num 8)) (mem WI addr)))
+	    (set addr (sub addr 4)))
+)
+
+(define-pmacro (ldmda-sw-action-r15 ignored)
+  (sequence ()
+	    (set pc (mem WI addr))
+	    (set addr (sub addr 4))
+	    (set (reg h-cpsr) (reg h-spsr)))
+)
+
+(dnai ldmda "Load multiple registers (postindex, decrement)"
+     ()
+     "FIXME"
+     (+ cond (f-op3 4) (f-preindex? 0) (f-up-down 0) (f-load-psr? 0)
+	(f-write-back? 0) (f-load? 1) rn reglist)
+     (sequence ((WI addr))
+	       (set addr rn)
+	       (multi-action 15 ldmda-action-r15)
+	       (multi-action 14 ldmda-action)
+	       (multi-action 13 ldmda-action)
+	       (multi-action 12 ldmda-action)
+	       (multi-action 11 ldmda-action)
+	       (multi-action 10 ldmda-action)
+	       (multi-action  9 ldmda-action)
+	       (multi-action  8 ldmda-action)
+	       (multi-action  7 ldmda-action)
+	       (multi-action  6 ldmda-action)
+	       (multi-action  5 ldmda-action)
+	       (multi-action  4 ldmda-action)
+	       (multi-action  3 ldmda-action)
+	       (multi-action  2 ldmda-action)
+	       (multi-action  1 ldmda-action)
+	       (multi-action  0 ldmda-action)
+     )
+)
+
+(dnai ldmda-sw "Load multiple registers (postindex, decrement, switch)"
+     ()
+     "FIXME"
+     (+ cond (f-op3 4) (f-preindex? 0) (f-up-down 0) (f-load-psr? 1)
+	(f-write-back? 0) (f-load? 1) rn reglist)
+     (sequence ((WI addr))
+	       (set addr rn)
+	       (multi-action 15 ldmda-sw-action-r15)
+	       (multi-action 14 ldmda-sw-action)
+	       (multi-action 13 ldmda-sw-action)
+	       (multi-action 12 ldmda-sw-action)
+	       (multi-action 11 ldmda-sw-action)
+	       (multi-action 10 ldmda-sw-action)
+	       (multi-action  9 ldmda-sw-action)
+	       (multi-action  8 ldmda-sw-action)
+	       (multi-action  7 ldmda-action)
+	       (multi-action  6 ldmda-action)
+	       (multi-action  5 ldmda-action)
+	       (multi-action  4 ldmda-action)
+	       (multi-action  3 ldmda-action)
+	       (multi-action  2 ldmda-action)
+	       (multi-action  1 ldmda-action)
+	       (multi-action  0 ldmda-action)
+     )
+)
+
+(dnai ldmda-wb "Load multiple registers (postindex, decrement, writeback)"
+      ()
+      "FIXME"
+      (+ cond (f-op3 4) (f-preindex? 0) (f-up-down 0) (f-load-psr? 0)
+	 (f-write-back? 1) (f-load? 1) rn reglist)
+      (sequence ((WI addr))
+		(set addr rn)
+		(multi-action 15 ldmda-action-r15)
+		(multi-action 14 ldmda-action)
+		(multi-action 13 ldmda-action)
+		(multi-action 12 ldmda-action)
+		(multi-action 11 ldmda-action)
+		(multi-action 10 ldmda-action)
+		(multi-action  9 ldmda-action)
+		(multi-action  8 ldmda-action)
+		(multi-action  7 ldmda-action)
+		(multi-action  6 ldmda-action)
+		(multi-action  5 ldmda-action)
+		(multi-action  4 ldmda-action)
+		(multi-action  3 ldmda-action)
+		(multi-action  2 ldmda-action)
+		(multi-action  1 ldmda-action)
+		(multi-action  0 ldmda-action)
+		(set rn addr))
+)
+
+(dnai ldmda-sw-wb "Load multiple registers (postindex, decrement, switch, writeback)"
+      ()
+      "FIXME"
+      (+ cond (f-op3 4) (f-preindex? 0) (f-up-down 0) (f-load-psr? 1)
+	 (f-write-back? 1) (f-load? 1) rn reglist)
+      (sequence ((WI addr))
+		(set addr rn)
+		(multi-action 15 ldmda-sw-action-r15)
+		(multi-action 14 ldmda-sw-action)
+		(multi-action 13 ldmda-sw-action)
+		(multi-action 12 ldmda-sw-action)
+		(multi-action 11 ldmda-sw-action)
+		(multi-action 10 ldmda-sw-action)
+		(multi-action  9 ldmda-sw-action)
+		(multi-action  8 ldmda-sw-action)
+		(multi-action  7 ldmda-action)
+		(multi-action  6 ldmda-action)
+		(multi-action  5 ldmda-action)
+		(multi-action  4 ldmda-action)
+		(multi-action  3 ldmda-action)
+		(multi-action  2 ldmda-action)
+		(multi-action  1 ldmda-action)
+		(multi-action  0 ldmda-action)
+		(set rn addr))
+)
+
+(define-pmacro (ldmib-action bit-num)
+  (sequence ()
+	    (set addr (add addr 4))
+	    (set (reg WI h-gr bit-num) (mem WI addr)))
+)
+
+(define-pmacro (ldmib-action-r15 ignored)
+  (sequence ()
+	    (set addr (add addr 4))
+	    (set pc (mem WI addr)))
+)
+
+(define-pmacro (ldmib-sw-action bit-num)
+  (sequence ()
+	    (set addr (add addr 4))
+	    (if (and reglist (sll 1 15))
+	        (set (reg WI h-gr bit-num) (mem WI addr))
+	        (set (reg WI h-gr-usr (sub bit-num 8)) (mem WI addr))))
+)
+
+(define-pmacro (ldmib-sw-action-r15 ignored)
+  (sequence ()
+	    (set addr (add addr 4))
+	    (set pc (mem WI addr))
+	    (set (reg h-cpsr) (reg h-spsr)))
+)
+
+(dnai ldmib "Load multiple register (preindex, increment)"
+     ()
+     "FIXME"
+     (+ cond (f-op3 4) (f-preindex? 1) (f-up-down 1) (f-load-psr? 0)
+	(f-write-back? 0) (f-load? 1) rn reglist)
+     (sequence ((WI addr))
+	       (set addr rn)
+	       (multi-action  0 ldmib-action)
+	       (multi-action  1 ldmib-action)
+	       (multi-action  2 ldmib-action)
+	       (multi-action  3 ldmib-action)
+	       (multi-action  4 ldmib-action)
+	       (multi-action  5 ldmib-action)
+	       (multi-action  6 ldmib-action)
+	       (multi-action  7 ldmib-action)
+	       (multi-action  8 ldmib-action)
+	       (multi-action  9 ldmib-action)
+	       (multi-action 10 ldmib-action)
+	       (multi-action 11 ldmib-action)
+	       (multi-action 12 ldmib-action)
+	       (multi-action 13 ldmib-action)
+	       (multi-action 14 ldmib-action)
+	       (multi-action 15 ldmib-action-r15))
+)
+
+(dnai ldmib-sw "Load multiple register (preindex, increment, switch)"
+     ()
+     "FIXME"
+     (+ cond (f-op3 4) (f-preindex? 1) (f-up-down 1) (f-load-psr? 1)
+	(f-write-back? 0) (f-load? 1) rn reglist)
+     (sequence ((WI addr))
+	       (set addr rn)
+	       (multi-action  0 ldmib-action)
+	       (multi-action  1 ldmib-action)
+	       (multi-action  2 ldmib-action)
+	       (multi-action  3 ldmib-action)
+	       (multi-action  4 ldmib-action)
+	       (multi-action  5 ldmib-action)
+	       (multi-action  6 ldmib-action)
+	       (multi-action  7 ldmib-action)
+	       (multi-action  8 ldmib-sw-action)
+	       (multi-action  9 ldmib-sw-action)
+	       (multi-action 10 ldmib-sw-action)
+	       (multi-action 11 ldmib-sw-action)
+	       (multi-action 12 ldmib-sw-action)
+	       (multi-action 13 ldmib-sw-action)
+	       (multi-action 14 ldmib-sw-action)
+	       (multi-action 15 ldmib-sw-action-r15))
+)
+
+(dnai ldmib-wb "Load multiple registers (preindex, increment, writeback)"
+      ()
+      "FIXME"
+      (+ cond (f-op3 4) (f-preindex? 1) (f-up-down 1) (f-load-psr? 0)
+	 (f-write-back? 1) (f-load? 1) rn reglist)
+      (sequence ((WI addr))
+		(set addr rn)
+		(multi-action  0 ldmib-action)
+		(multi-action  1 ldmib-action)
+		(multi-action  2 ldmib-action)
+		(multi-action  3 ldmib-action)
+		(multi-action  4 ldmib-action)
+		(multi-action  5 ldmib-action)
+		(multi-action  6 ldmib-action)
+		(multi-action  7 ldmib-action)
+		(multi-action  8 ldmib-action)
+		(multi-action  9 ldmib-action)
+		(multi-action 10 ldmib-action)
+		(multi-action 11 ldmib-action)
+		(multi-action 12 ldmib-action)
+		(multi-action 13 ldmib-action)
+		(multi-action 14 ldmib-action)
+		(multi-action 15 ldmib-action-r15)
+		(set rn addr))
+)
+
+(dnai ldmib-sw-wb "Load multiple registers (preindex, increment, switch, writeback)"
+      ()
+      "FIXME"
+      (+ cond (f-op3 4) (f-preindex? 1) (f-up-down 1) (f-load-psr? 1)
+	 (f-write-back? 1) (f-load? 1) rn reglist)
+      (sequence ((WI addr))
+		(set addr rn)
+		(multi-action  0 ldmib-action)
+		(multi-action  1 ldmib-action)
+		(multi-action  2 ldmib-action)
+		(multi-action  3 ldmib-action)
+		(multi-action  4 ldmib-action)
+		(multi-action  5 ldmib-action)
+		(multi-action  6 ldmib-action)
+		(multi-action  7 ldmib-action)
+		(multi-action  8 ldmib-sw-action)
+		(multi-action  9 ldmib-sw-action)
+		(multi-action 10 ldmib-sw-action)
+		(multi-action 11 ldmib-sw-action)
+		(multi-action 12 ldmib-sw-action)
+		(multi-action 13 ldmib-sw-action)
+		(multi-action 14 ldmib-sw-action)
+		(multi-action 15 ldmib-sw-action-r15)
+		(set rn addr))
+)
+
+(define-pmacro (ldmia-action bit-num)
+  (sequence ()
+	    (set (reg WI h-gr bit-num) (mem WI addr))
+	    (set addr (add addr 4)))
+)
+
+(define-pmacro (ldmia-action-r15 ignored)
+  (sequence ()
+	    (set pc (mem WI addr))
+	    (set addr (add addr 4)))
+)
+
+(define-pmacro (ldmia-sw-action bit-num)
+  (sequence ()
+	    (if (and reglist (sll 1 15))
+	        (set (reg WI h-gr bit-num) (mem WI addr))
+	        (set (reg WI h-gr-usr (sub bit-num 8)) (mem WI addr)))
+	    (set addr (add addr 4)))
+)
+
+(define-pmacro (ldmia-sw-action-r15 ignored)
+  (sequence ()
+	    (set pc (mem WI addr))
+	    (set addr (add addr 4))
+	    (set (reg h-cpsr) (reg h-spsr)))
+)
+
+(dnai ldmia "Load multiple registers (postindex, increment)"
+     ()
+     "FIXME"
+     (+ cond (f-op3 4) (f-preindex? 0) (f-up-down 1) (f-load-psr? 0)
+	(f-write-back? 0) (f-load? 1) rn reglist)
+     (sequence ((WI addr))
+	       (set addr rn)
+	       (multi-action  0 ldmia-action)
+	       (multi-action  1 ldmia-action)
+	       (multi-action  2 ldmia-action)
+	       (multi-action  3 ldmia-action)
+	       (multi-action  4 ldmia-action)
+	       (multi-action  5 ldmia-action)
+	       (multi-action  6 ldmia-action)
+	       (multi-action  7 ldmia-action)
+	       (multi-action  8 ldmia-action)
+	       (multi-action  9 ldmia-action)
+	       (multi-action 10 ldmia-action)
+	       (multi-action 11 ldmia-action)
+	       (multi-action 12 ldmia-action)
+	       (multi-action 13 ldmia-action)
+	       (multi-action 14 ldmia-action)
+	       (multi-action 15 ldmia-action-r15))
+)
+
+(dnai ldmia-sw "Load multiple registers (postindex, increment, switch)"
+     ()
+     "FIXME"
+     (+ cond (f-op3 4) (f-preindex? 0) (f-up-down 1) (f-load-psr? 1)
+	(f-write-back? 0) (f-load? 1) rn reglist)
+     (sequence ((WI addr))
+	       (set addr rn)
+	       (multi-action  0 ldmia-action)
+	       (multi-action  1 ldmia-action)
+	       (multi-action  2 ldmia-action)
+	       (multi-action  3 ldmia-action)
+	       (multi-action  4 ldmia-action)
+	       (multi-action  5 ldmia-action)
+	       (multi-action  6 ldmia-action)
+	       (multi-action  7 ldmia-action)
+	       (multi-action  8 ldmia-sw-action)
+	       (multi-action  9 ldmia-sw-action)
+	       (multi-action 10 ldmia-sw-action)
+	       (multi-action 11 ldmia-sw-action)
+	       (multi-action 12 ldmia-sw-action)
+	       (multi-action 13 ldmia-sw-action)
+	       (multi-action 14 ldmia-sw-action)
+	       (multi-action 15 ldmia-sw-action-r15))
+)
+
+(dnai ldmia-wb "Load multiple registers (postindex, increment, writeback)"
+     ()
+     "FIXME"
+     (+ cond (f-op3 4) (f-preindex? 0) (f-up-down 1) (f-load-psr? 0)
+	(f-write-back? 1) (f-load? 1) rn reglist)
+     (sequence ((WI addr))
+	       (set addr rn)
+	       (multi-action  0 ldmia-action)
+	       (multi-action  1 ldmia-action)
+	       (multi-action  2 ldmia-action)
+	       (multi-action  3 ldmia-action)
+	       (multi-action  4 ldmia-action)
+	       (multi-action  5 ldmia-action)
+	       (multi-action  6 ldmia-action)
+	       (multi-action  7 ldmia-action)
+	       (multi-action  8 ldmia-action)
+	       (multi-action  9 ldmia-action)
+	       (multi-action 10 ldmia-action)
+	       (multi-action 11 ldmia-action)
+	       (multi-action 12 ldmia-action)
+	       (multi-action 13 ldmia-action)
+	       (multi-action 14 ldmia-action)
+	       (multi-action 15 ldmia-action-r15)
+	       (set rn addr))
+)
+
+(dnai ldmia-sw-wb "Load multiple registers (postindex, increment, switch, writeback)"
+     ()
+     "FIXME"
+     (+ cond (f-op3 4) (f-preindex? 0) (f-up-down 1) (f-load-psr? 1)
+	(f-write-back? 1) (f-load? 1) rn reglist)
+     (sequence ((WI addr))
+	       (set addr rn)
+	       (multi-action  0 ldmia-action)
+	       (multi-action  1 ldmia-action)
+	       (multi-action  2 ldmia-action)
+	       (multi-action  3 ldmia-action)
+	       (multi-action  4 ldmia-action)
+	       (multi-action  5 ldmia-action)
+	       (multi-action  6 ldmia-action)
+	       (multi-action  7 ldmia-action)
+	       (multi-action  8 ldmia-sw-action)
+	       (multi-action  9 ldmia-sw-action)
+	       (multi-action 10 ldmia-sw-action)
+	       (multi-action 11 ldmia-sw-action)
+	       (multi-action 12 ldmia-sw-action)
+	       (multi-action 13 ldmia-sw-action)
+	       (multi-action 14 ldmia-sw-action)
+	       (multi-action 15 ldmia-sw-action-r15)
+	       (set rn addr))
+)
+
+(define-pmacro (ldmdb-action bit-num)
+  (sequence ()
+	    (set addr (sub addr 4))
+	    (set (reg WI h-gr bit-num) (mem WI addr)))
+)
+
+(define-pmacro (ldmdb-action-r15 bit-num)
+  (sequence ()
+	    (set addr (sub addr 4))
+	    (set pc (mem WI addr)))
+)
+
+(define-pmacro (ldmdb-sw-action bit-num)
+  (sequence ()
+	    (set addr (sub addr 4))
+	    (if (and reglist (sll 1 15))
+	        (set (reg WI h-gr bit-num) (mem WI addr))
+	        (set (reg WI h-gr-usr (sub bit-num 8)) (mem WI addr))))
+)
+
+(define-pmacro (ldmdb-sw-action-r15 ignored)
+  (sequence ()
+	    (set addr (sub addr 4))
+	    (set pc (mem WI addr))
+	    (set (reg h-cpsr) (reg h-spsr)))
+)
+
+(dnai ldmdb "Load multiple registers (preindex, decrement)" 
+     ()
+     "ldm$cond .."
+     (+ cond (f-op3 4) (f-preindex? 1) (f-up-down 0) (f-load-psr? 0)
+	(f-write-back? 0) (f-load? 1) rn reglist)
+     (sequence ((WI addr))
+	       (set addr rn)
+	       (multi-action 15 ldmdb-action-r15)
+	       (multi-action 14 ldmdb-action)
+	       (multi-action 13 ldmdb-action)
+	       (multi-action 12 ldmdb-action)
+	       (multi-action 11 ldmdb-action)
+	       (multi-action 10 ldmdb-action)
+	       (multi-action  9 ldmdb-action)
+	       (multi-action  8 ldmdb-action)
+	       (multi-action  7 ldmdb-action)
+	       (multi-action  6 ldmdb-action)
+	       (multi-action  5 ldmdb-action)
+	       (multi-action  4 ldmdb-action)
+	       (multi-action  3 ldmdb-action)
+	       (multi-action  2 ldmdb-action)
+	       (multi-action  1 ldmdb-action)
+	       (multi-action  0 ldmdb-action))
+)
+
+(dnai ldmdb-sw "Load multiple registers (preindex, decrement, switch)" 
+     ()
+     "ldm$cond .."
+     (+ cond (f-op3 4) (f-preindex? 1) (f-up-down 0) (f-load-psr? 1)
+	(f-write-back? 0) (f-load? 1) rn reglist)
+     (sequence ((WI addr))
+	       (set addr rn)
+	       (multi-action 15 ldmdb-sw-action-r15)
+	       (multi-action 14 ldmdb-sw-action)
+	       (multi-action 13 ldmdb-sw-action)
+	       (multi-action 12 ldmdb-sw-action)
+	       (multi-action 11 ldmdb-sw-action)
+	       (multi-action 10 ldmdb-sw-action)
+	       (multi-action  9 ldmdb-sw-action)
+	       (multi-action  8 ldmdb-sw-action)
+	       (multi-action  7 ldmdb-action)
+	       (multi-action  6 ldmdb-action)
+	       (multi-action  5 ldmdb-action)
+	       (multi-action  4 ldmdb-action)
+	       (multi-action  3 ldmdb-action)
+	       (multi-action  2 ldmdb-action)
+	       (multi-action  1 ldmdb-action)
+	       (multi-action  0 ldmdb-action))
+)
+
+(dnai ldmdb-wb "Load multiple registers (preindex, decrement, writeback)"
+      ()
+      "FIXME"
+      (+ cond (f-op3 4) (f-preindex? 1) (f-up-down 0) (f-load-psr? 0)
+	 (f-write-back? 1) (f-load? 1) rn reglist)
+      (sequence ((WI addr))
+		(set addr rn)
+		(multi-action 15 ldmdb-action-r15)
+		(multi-action 14 ldmdb-action)
+		(multi-action 13 ldmdb-action)
+		(multi-action 12 ldmdb-action)
+		(multi-action 11 ldmdb-action)
+		(multi-action 10 ldmdb-action)
+		(multi-action  9 ldmdb-action)
+		(multi-action  8 ldmdb-action)
+		(multi-action  7 ldmdb-action)
+		(multi-action  6 ldmdb-action)
+		(multi-action  5 ldmdb-action)
+		(multi-action  4 ldmdb-action)
+		(multi-action  3 ldmdb-action)
+		(multi-action  2 ldmdb-action)
+		(multi-action  1 ldmdb-action)
+		(multi-action  0 ldmdb-action)
+		(set rn addr))
+)
+
+(dnai ldmdb-sw-wb "Load multiple registers (preindex, decrement, switch, writeback)"
+      ()
+      "FIXME"
+      (+ cond (f-op3 4) (f-preindex? 1) (f-up-down 0) (f-load-psr? 1)
+	 (f-write-back? 1) (f-load? 1) rn reglist)
+      (sequence ((WI addr))
+		(set addr rn)
+		(multi-action 15 ldmdb-sw-action-r15)
+		(multi-action 14 ldmdb-sw-action)
+		(multi-action 13 ldmdb-sw-action)
+		(multi-action 12 ldmdb-sw-action)
+		(multi-action 11 ldmdb-sw-action)
+		(multi-action 10 ldmdb-sw-action)
+		(multi-action  9 ldmdb-sw-action)
+		(multi-action  8 ldmdb-sw-action)
+		(multi-action  7 ldmdb-action)
+		(multi-action  6 ldmdb-action)
+		(multi-action  5 ldmdb-action)
+		(multi-action  4 ldmdb-action)
+		(multi-action  3 ldmdb-action)
+		(multi-action  2 ldmdb-action)
+		(multi-action  1 ldmdb-action)
+		(multi-action  0 ldmdb-action)
+		(set rn addr))
+)
+
+(define-pmacro (stmdb-action bit-num)
+  (sequence ()
+	    (set addr (sub addr 4))
+	    (set (mem WI addr) (reg WI h-gr bit-num)))
+)
+
+(define-pmacro (stmdb-sw-action bit-num)
+  (sequence ()
+	    (set addr (sub addr 4))
+	    (if (and reglist (sll 1 15))
+	        (set (mem WI addr) (reg WI h-gr bit-num))
+	        (set (mem WI addr) (reg WI h-gr-usr (sub bit-num 8)))))
+)
+
+(define-pmacro (stmdb-action-r15 ignore)
+  (sequence ()
+	    (set addr (sub addr 4))
+	    (set (mem WI addr) (add (reg WI h-gr 15) 4)))
+)
+
+(dnai stmdb "Store multiple registers (preindex, decrement)"
+     ()
+     "FIXME"
+     (+ cond (f-op3 4) (f-preindex? 1) (f-up-down 0) (f-load-psr? 0)
+	(f-write-back? 0) (f-load? 0) rn reglist)
+     (sequence ((WI addr))
+	       (set addr rn)
+	       (multi-action 15 stmdb-action-r15)
+	       (multi-action 14 stmdb-action)
+	       (multi-action 13 stmdb-action)
+	       (multi-action 12 stmdb-action)
+	       (multi-action 11 stmdb-action)
+	       (multi-action 10 stmdb-action)
+	       (multi-action  9 stmdb-action)
+	       (multi-action  8 stmdb-action)
+	       (multi-action  7 stmdb-action)
+	       (multi-action  6 stmdb-action)
+	       (multi-action  5 stmdb-action)
+	       (multi-action  4 stmdb-action)
+	       (multi-action  3 stmdb-action)
+	       (multi-action  2 stmdb-action)
+	       (multi-action  1 stmdb-action)
+	       (multi-action  0 stmdb-action))
+)
+
+(dnai stmdb-sw "Store multiple registers (preindex, decrement, switch)"
+     ()
+     "FIXME"
+     (+ cond (f-op3 4) (f-preindex? 1) (f-up-down 0) (f-load-psr? 1)
+	(f-write-back? 0) (f-load? 0) rn reglist)
+     (sequence ((WI addr))
+	       (set addr rn)
+	       (multi-action 15 stmdb-action-r15)
+	       (multi-action 14 stmdb-sw-action)
+	       (multi-action 13 stmdb-sw-action)
+	       (multi-action 12 stmdb-sw-action)
+	       (multi-action 11 stmdb-sw-action)
+	       (multi-action 10 stmdb-sw-action)
+	       (multi-action  9 stmdb-sw-action)
+	       (multi-action  8 stmdb-sw-action)
+	       (multi-action  7 stmdb-action)
+	       (multi-action  6 stmdb-action)
+	       (multi-action  5 stmdb-action)
+	       (multi-action  4 stmdb-action)
+	       (multi-action  3 stmdb-action)
+	       (multi-action  2 stmdb-action)
+	       (multi-action  1 stmdb-action)
+	       (multi-action  0 stmdb-action))
+)
+
+(dnai stmdb-wb "Store multiple registers (preindex, decrement, writeback)"
+      ()
+      "FIXME"
+      (+ cond (f-op3 4) (f-preindex? 1) (f-up-down 0) (f-load-psr? 0)
+	 (f-write-back? 1) (f-load? 0) rn reglist)
+      (sequence ((WI addr))
+		(set addr rn)
+		(multi-action 15 stmdb-action-r15)
+		(multi-action 14 stmdb-action)
+		(multi-action 13 stmdb-action)
+		(multi-action 12 stmdb-action)
+		(multi-action 11 stmdb-action)
+		(multi-action 10 stmdb-action)
+		(multi-action  9 stmdb-action)
+		(multi-action  8 stmdb-action)
+		(multi-action  7 stmdb-action)
+		(multi-action  6 stmdb-action)
+		(multi-action  5 stmdb-action)
+		(multi-action  4 stmdb-action)
+		(multi-action  3 stmdb-action)
+		(multi-action  2 stmdb-action)
+		(multi-action  1 stmdb-action)
+		(multi-action  0 stmdb-action)
+		(set rn addr))
+)
+
+(dnai stmdb-sw-wb "Store multiple registers (preindex, decrement, switch, writeback)"
+      ()
+      "FIXME"
+      (+ cond (f-op3 4) (f-preindex? 1) (f-up-down 0) (f-load-psr? 1)
+	 (f-write-back? 1) (f-load? 0) rn reglist)
+      (sequence ((WI addr))
+		(set addr rn)
+		(multi-action 15 stmdb-action-r15)
+		(multi-action 14 stmdb-sw-action)
+		(multi-action 13 stmdb-sw-action)
+		(multi-action 12 stmdb-sw-action)
+		(multi-action 11 stmdb-sw-action)
+		(multi-action 10 stmdb-sw-action)
+		(multi-action  9 stmdb-sw-action)
+		(multi-action  8 stmdb-sw-action)
+		(multi-action  7 stmdb-action)
+		(multi-action  6 stmdb-action)
+		(multi-action  5 stmdb-action)
+		(multi-action  4 stmdb-action)
+		(multi-action  3 stmdb-action)
+		(multi-action  2 stmdb-action)
+		(multi-action  1 stmdb-action)
+		(multi-action  0 stmdb-action)
+		(set rn addr))
+)
+
+(define-pmacro (stmib-action bit-num)
+  (sequence ()
+	    (set addr (add addr 4))
+	    (set (mem WI addr) (reg WI h-gr bit-num)))
+)
+
+(define-pmacro (stmib-sw-action bit-num)
+  (sequence ()
+	    (set addr (add addr 4))
+	    (if (and reglist (sll 1 15))
+	        (set (mem WI addr) (reg WI h-gr bit-num))
+	        (set (mem WI addr) (reg WI h-gr-usr (sub bit-num 8)))))
+)
+
+(define-pmacro (stmib-action-r15 ignore)
+  (sequence ()
+	    (set addr (add addr 4))
+	    (set (mem WI addr) (add (reg WI h-gr 15) 4)))
+)
+
+(dnai stmib "Store multiple registers (preindex, increment)"
+     ()
+     "FIXME"
+     (+ cond (f-op3 4) (f-preindex? 1) (f-up-down 1) (f-load-psr? 0)
+	(f-write-back? 0) (f-load? 0) rn reglist)
+     (sequence ((WI addr))
+	       (set addr rn)
+	       (multi-action  0 stmib-action)
+	       (multi-action  1 stmib-action)
+	       (multi-action  2 stmib-action)
+	       (multi-action  3 stmib-action)
+	       (multi-action  4 stmib-action)
+	       (multi-action  5 stmib-action)
+	       (multi-action  6 stmib-action)
+	       (multi-action  7 stmib-action)
+	       (multi-action  8 stmib-action)
+	       (multi-action  9 stmib-action)
+	       (multi-action 10 stmib-action)
+	       (multi-action 11 stmib-action)
+	       (multi-action 12 stmib-action)
+	       (multi-action 13 stmib-action)
+	       (multi-action 14 stmib-action)
+	       (multi-action 15 stmib-action-r15))
+)
+
+(dnai stmib-sw "Store multiple registers (preindex, increment, switch)"
+     ()
+     "FIXME"
+     (+ cond (f-op3 4) (f-preindex? 1) (f-up-down 1) (f-load-psr? 1)
+	(f-write-back? 0) (f-load? 0) rn reglist)
+     (sequence ((WI addr))
+	       (set addr rn)
+	       (multi-action  0 stmib-action)
+	       (multi-action  1 stmib-action)
+	       (multi-action  2 stmib-action)
+	       (multi-action  3 stmib-action)
+	       (multi-action  4 stmib-action)
+	       (multi-action  5 stmib-action)
+	       (multi-action  6 stmib-action)
+	       (multi-action  7 stmib-action)
+	       (multi-action  8 stmib-sw-action)
+	       (multi-action  9 stmib-sw-action)
+	       (multi-action 10 stmib-sw-action)
+	       (multi-action 11 stmib-sw-action)
+	       (multi-action 12 stmib-sw-action)
+	       (multi-action 13 stmib-sw-action)
+	       (multi-action 14 stmib-sw-action)
+	       (multi-action 15 stmib-action-r15))
+)
+
+(dnai stmib-wb "Store multiple registers (preindex, increment, writeback)"
+      ()
+      "FIXME"
+      (+ cond (f-op3 4) (f-preindex? 1) (f-up-down 1) (f-load-psr? 0)
+	 (f-write-back? 1) (f-load? 0) rn reglist)
+      (sequence ((WI addr))
+		(set addr rn)
+		(multi-action  0 stmib-action)
+		(multi-action  1 stmib-action)
+		(multi-action  2 stmib-action)
+		(multi-action  3 stmib-action)
+		(multi-action  4 stmib-action)
+		(multi-action  5 stmib-action)
+		(multi-action  6 stmib-action)
+		(multi-action  7 stmib-action)
+		(multi-action  8 stmib-action)
+		(multi-action  9 stmib-action)
+		(multi-action 10 stmib-action)
+		(multi-action 11 stmib-action)
+		(multi-action 12 stmib-action)
+		(multi-action 13 stmib-action)
+		(multi-action 14 stmib-action)
+		(multi-action 15 stmib-action-r15)
+		(set rn addr))
+)
+
+(dnai stmib-sw-wb "Store multiple registers (preindex, increment, switch, writeback)"
+      ()
+      "FIXME"
+      (+ cond (f-op3 4) (f-preindex? 1) (f-up-down 1) (f-load-psr? 1)
+	 (f-write-back? 1) (f-load? 0) rn reglist)
+      (sequence ((WI addr))
+		(set addr rn)
+		(multi-action  0 stmib-action)
+		(multi-action  1 stmib-action)
+		(multi-action  2 stmib-action)
+		(multi-action  3 stmib-action)
+		(multi-action  4 stmib-action)
+		(multi-action  5 stmib-action)
+		(multi-action  6 stmib-action)
+		(multi-action  7 stmib-action)
+		(multi-action  8 stmib-sw-action)
+		(multi-action  9 stmib-sw-action)
+		(multi-action 10 stmib-sw-action)
+		(multi-action 11 stmib-sw-action)
+		(multi-action 12 stmib-sw-action)
+		(multi-action 13 stmib-sw-action)
+		(multi-action 14 stmib-sw-action)
+		(multi-action 15 stmib-action-r15)
+		(set rn addr))
+)
+
+(define-pmacro (stmia-action bit-num)
+  (sequence ()
+	    (set (mem WI addr) (reg WI h-gr bit-num))
+	    (set addr (add addr 4)))
+)
+
+(define-pmacro (stmia-sw-action bit-num)
+  (sequence ()
+	    (if (and reglist (sll 1 15))
+	        (set (mem WI addr) (reg WI h-gr bit-num))
+	        (set (mem WI addr) (reg WI h-gr-usr (sub bit-num 8))))
+	    (set addr (add addr 4)))
+)
+
+(define-pmacro (stmia-action-r15 ignore)
+  (sequence ()
+	    (set (mem WI addr) (add (reg WI h-gr 15) 4))
+	    (set addr (add addr 4)))
+)
+
+(dnai stmia "Store multiple registers (postindex, increment)"
+      ()
+      "FIXME"
+      (+ cond (f-op3 4) (f-preindex? 0) (f-up-down 1) (f-load-psr? 0)
+	 (f-write-back? 0) (f-load? 0) rn reglist)
+      (sequence ((WI addr))
+		(set addr rn)
+		(multi-action  0 stmia-action)
+		(multi-action  1 stmia-action)
+		(multi-action  2 stmia-action)
+		(multi-action  3 stmia-action)
+		(multi-action  4 stmia-action)
+		(multi-action  5 stmia-action)
+		(multi-action  6 stmia-action)
+		(multi-action  7 stmia-action)
+		(multi-action  8 stmia-action)
+		(multi-action  9 stmia-action)
+		(multi-action 10 stmia-action)
+		(multi-action 11 stmia-action)
+		(multi-action 12 stmia-action)
+		(multi-action 13 stmia-action)
+		(multi-action 14 stmia-action)
+		(multi-action 15 stmia-action-r15))
+)
+
+(dnai stmia-sw "Store multiple registers (postindex, increment, switch)"
+      ()
+      "FIXME"
+      (+ cond (f-op3 4) (f-preindex? 0) (f-up-down 1) (f-load-psr? 1)
+	 (f-write-back? 0) (f-load? 0) rn reglist)
+      (sequence ((WI addr))
+		(set addr rn)
+		(multi-action  0 stmia-action)
+		(multi-action  1 stmia-action)
+		(multi-action  2 stmia-action)
+		(multi-action  3 stmia-action)
+		(multi-action  4 stmia-action)
+		(multi-action  5 stmia-action)
+		(multi-action  6 stmia-action)
+		(multi-action  7 stmia-action)
+		(multi-action  8 stmia-sw-action)
+		(multi-action  9 stmia-sw-action)
+		(multi-action 10 stmia-sw-action)
+		(multi-action 11 stmia-sw-action)
+		(multi-action 12 stmia-sw-action)
+		(multi-action 13 stmia-sw-action)
+		(multi-action 14 stmia-sw-action)
+		(multi-action 15 stmia-action-r15))
+)
+
+(dnai stmia-wb "Store multiple registers (postindex, increment, writeback)"
+      ()
+      "FIXME"
+      (+ cond (f-op3 4) (f-preindex? 0) (f-up-down 1) (f-load-psr? 0)
+	 (f-write-back? 1) (f-load? 0) rn reglist)
+      (sequence ((WI addr))
+		(set addr rn)
+		(multi-action  0 stmia-action)
+		(multi-action  1 stmia-action)
+		(multi-action  2 stmia-action)
+		(multi-action  3 stmia-action)
+		(multi-action  4 stmia-action)
+		(multi-action  5 stmia-action)
+		(multi-action  6 stmia-action)
+		(multi-action  7 stmia-action)
+		(multi-action  8 stmia-action)
+		(multi-action  9 stmia-action)
+		(multi-action 10 stmia-action)
+		(multi-action 11 stmia-action)
+		(multi-action 12 stmia-action)
+		(multi-action 13 stmia-action)
+		(multi-action 14 stmia-action)
+		(multi-action 15 stmia-action-r15)
+		(set rn addr))
+)
+
+(dnai stmia-sw-wb "Store multiple registers (postindex, increment, switch, writeback)"
+      ()
+      "FIXME"
+      (+ cond (f-op3 4) (f-preindex? 0) (f-up-down 1) (f-load-psr? 1)
+	 (f-write-back? 1) (f-load? 0) rn reglist)
+      (sequence ((WI addr))
+		(set addr rn)
+		(multi-action  0 stmia-action)
+		(multi-action  1 stmia-action)
+		(multi-action  2 stmia-action)
+		(multi-action  3 stmia-action)
+		(multi-action  4 stmia-action)
+		(multi-action  5 stmia-action)
+		(multi-action  6 stmia-action)
+		(multi-action  7 stmia-action)
+		(multi-action  8 stmia-sw-action)
+		(multi-action  9 stmia-sw-action)
+		(multi-action 10 stmia-sw-action)
+		(multi-action 11 stmia-sw-action)
+		(multi-action 12 stmia-sw-action)
+		(multi-action 13 stmia-sw-action)
+		(multi-action 14 stmia-sw-action)
+		(multi-action 15 stmia-action-r15)
+		(set rn addr))
+)
+
+(define-pmacro (stmda-action-r15 ignore)
+  (sequence ()
+	    (set (mem WI addr) (add (reg WI h-gr 15) 4))
+	    (set addr (sub addr 4)))
+)
+
+(define-pmacro (stmda-sw-action bit-num)
+  (sequence ()
+	    (if (and reglist (sll 1 15))
+	        (set (mem WI addr) (reg WI h-gr bit-num))
+	        (set (mem WI addr) (reg WI h-gr-usr (sub bit-num 8))))
+	    (set addr (sub addr 4)))
+)
+
+(define-pmacro (stmda-action bit-num)
+  (sequence ()
+	    (set (mem WI addr) (reg WI h-gr bit-num))
+	    (set addr (sub addr 4)))
+)
+
+(dnai stmda "Store multiple registers (postindex, decrement)"
+      ()
+      "FIXME"
+      (+ cond (f-op3 4) (f-preindex? 0) (f-up-down 0) (f-load-psr? 0)
+	 (f-write-back? 0) (f-load? 0) rn reglist)
+      (sequence ((WI addr))
+		(set addr rn)
+		(multi-action 15 stmda-action-r15)
+		(multi-action 14 stmda-action)
+		(multi-action 13 stmda-action)
+		(multi-action 12 stmda-action)
+		(multi-action 11 stmda-action)
+		(multi-action 10 stmda-action)
+		(multi-action  9 stmda-action)
+		(multi-action  8 stmda-action)
+		(multi-action  7 stmda-action)
+		(multi-action  6 stmda-action)
+		(multi-action  5 stmda-action)
+		(multi-action  4 stmda-action)
+		(multi-action  3 stmda-action)
+		(multi-action  2 stmda-action)
+		(multi-action  1 stmda-action)
+		(multi-action  0 stmda-action))
+)
+
+(dnai stmda-sw "Store multiple registers (postindex, decrement, switch)"
+      ()
+      "FIXME"
+      (+ cond (f-op3 4) (f-preindex? 0) (f-up-down 0) (f-load-psr? 1)
+	 (f-write-back? 0) (f-load? 0) rn reglist)
+      (sequence ((WI addr))
+		(set addr rn)
+		(multi-action 15 stmda-action-r15)
+		(multi-action 14 stmda-sw-action)
+		(multi-action 13 stmda-sw-action)
+		(multi-action 12 stmda-sw-action)
+		(multi-action 11 stmda-sw-action)
+		(multi-action 10 stmda-sw-action)
+		(multi-action  9 stmda-sw-action)
+		(multi-action  8 stmda-sw-action)
+		(multi-action  7 stmda-action)
+		(multi-action  6 stmda-action)
+		(multi-action  5 stmda-action)
+		(multi-action  4 stmda-action)
+		(multi-action  3 stmda-action)
+		(multi-action  2 stmda-action)
+		(multi-action  1 stmda-action)
+		(multi-action  0 stmda-action))
+)
+
+(dnai stmda-wb "Store multiple registers (postindex, decrement, writeback)"
+      ()
+      "FIXME"
+      (+ cond (f-op3 4) (f-preindex? 0) (f-up-down 0) (f-load-psr? 0)
+	 (f-write-back? 1) (f-load? 0) rn reglist)
+      (sequence ((WI addr))
+		(set addr rn)
+		(multi-action 15 stmda-action-r15)
+		(multi-action 14 stmda-action)
+		(multi-action 13 stmda-action)
+		(multi-action 12 stmda-action)
+		(multi-action 11 stmda-action)
+		(multi-action 10 stmda-action)
+		(multi-action  9 stmda-action)
+		(multi-action  8 stmda-action)
+		(multi-action  7 stmda-action)
+		(multi-action  6 stmda-action)
+		(multi-action  5 stmda-action)
+		(multi-action  4 stmda-action)
+		(multi-action  3 stmda-action)
+		(multi-action  2 stmda-action)
+		(multi-action  1 stmda-action)
+		(multi-action  0 stmda-action)
+		(set rn addr))
+)
+
+(dnai stmda-sw-wb "Store multiple registers (postindex, decrement, switch, writeback)"
+      ()
+      "FIXME"
+      (+ cond (f-op3 4) (f-preindex? 0) (f-up-down 0) (f-load-psr? 1)
+	 (f-write-back? 1) (f-load? 0) rn reglist)
+      (sequence ((WI addr))
+		(set addr rn)
+		(multi-action 15 stmda-action-r15)
+		(multi-action 14 stmda-sw-action)
+		(multi-action 13 stmda-sw-action)
+		(multi-action 12 stmda-sw-action)
+		(multi-action 11 stmda-sw-action)
+		(multi-action 10 stmda-sw-action)
+		(multi-action  9 stmda-sw-action)
+		(multi-action  8 stmda-sw-action)
+		(multi-action  7 stmda-action)
+		(multi-action  6 stmda-action)
+		(multi-action  5 stmda-action)
+		(multi-action  4 stmda-action)
+		(multi-action  3 stmda-action)
+		(multi-action  2 stmda-action)
+		(multi-action  1 stmda-action)
+		(multi-action  0 stmda-action)
+		(set rn addr))
+)
+
+; Coprocessor instructions.
+; Currently not implemented, so omit these, such that we take the
+; undefined instruction trap as specified by the ARM documentation.
+
+(dnai mrs-c "Transfer CPSR contents to a register"
+     ()
+     "mrs$cond $rd,cpsr"
+     (+ cond (f-op5 2) PSR_CURRENT (f-op-mrs1 #xF) rd (f-op-mrs2 0))
+     (set rd (reg h-cpsr))
+)
+
+(dnai mrs-s "Transfer SPSR contents to a register"
+     ()
+     "mrs$cond $rd,spsr"
+     (+ cond (f-op5 2) PSR_SAVED (f-op-mrs1 #xF) rd (f-op-mrs2 0))
+     (set rd (reg h-spsr))
+)
+
+(dnai msr-c "Transfer register contents to CPSR"
+     ()
+     "msr$cond cpsr,$rm"
+     (+ cond (f-op5 2) PSR_CURRENT (f-op-msr1 #x29F) (f-op-msr2 0) rm)
+     (set (reg h-cpsr) rm)
+)
+
+(dnai msr-s "Transfer register contents to SPSR"
+     ()
+     "msr$cond spsr,$rm"
+     (+ cond (f-op5 2) PSR_SAVED (f-op-msr1 #x29F) (f-op-msr2 0) rm)
+     (set (reg h-spsr) rm)
+)
+
+; TODO: msr to flag bits only
+
+; Commented out until ifield assertions added, collides with str/ldr.
+; ??? It's possible to rewrite str,ldr, but assertions are wanted anyway.
+
+;(dnai undefined "Undefined instruction"
+;     ()
+;     "undef"
+;     (+ cond (f-op3 3) undef-dont1 (f-bit4 1) undef-dont2)
+;     ; Generate an undefined exception. 
+;     ; Jump to the vector held in 0x4.
+;     ; FIXME: More state change than this occurs.
+;     (set pc (mem WI #x4))
+;)

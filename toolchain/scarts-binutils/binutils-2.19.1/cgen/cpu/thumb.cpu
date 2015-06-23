@@ -1,0 +1,842 @@
+; ARM/Thumb instructions.  -*- Scheme -*-
+; Copyright (C) 2000 Red Hat, Inc.
+; This file is part of CGEN.
+; See file COPYING.CGEN for details.
+;
+; This file is included by arm.cpu.
+
+; Hardware elements.
+
+(define-hardware 
+  (name h-gr-t)
+  (comment "Thumb's general purpose registers")
+  (attrs (ISA thumb) VIRTUAL) ; ??? CACHE-ADDR should be doable
+  (type register WI (8))
+  (indices keyword ""
+	   ((r0 0) (r1 1) (r2 2) (r3 3) (r4 4) (r5 5) (r6 6) (r7 7)))
+  (get (regno) (reg h-gr regno))
+  (set (regno newval) (set (reg h-gr regno) newval))
+)
+
+(define-hardware
+  (name h-lr-t)
+  (comment "Thumb's access to the LR register")
+  (attrs (ISA thumb) VIRTUAL)
+  (type register WI)
+  (get () (reg h-gr 14))
+  (set (newval) (set (reg h-gr 14) newval))
+)
+
+(define-hardware
+  (name h-sp-t)
+  (comment "Thumb's access to the SP register")
+  (attrs (ISA thumb) VIRTUAL)
+  (type register WI)
+  (get () (reg h-gr 13))
+  (set (newval) (set (reg h-gr 13) newval))
+)
+
+; Instruction fields.
+
+; define-normal-thumb-field
+(define-pmacro (dntf name comment attrs start length)
+  (dnf name comment (.splice (.unsplice attrs) (ISA thumb)) start length)
+)
+
+; Main opcode fields.
+(dntf f-op3 "First 3 bits of opcode"   () 15 3)
+(dntf f-op4 "First 4 bits of opcode"   () 15 4)
+(dntf f-op5 "First 5 bits of opcode"   () 15 5)
+(dntf f-op6 "First 6 bits of opcode"   () 15 6)
+(dntf f-op8 "First 8 bits of opcode"   () 15 8)
+
+; Other opcode like fields with special names.
+(dntf f-h1 "h1 field in hireg insns" () 7 1)
+(dntf f-h2 "h2 field in hireg insns" () 6 1)
+(dntf f-l  "load/store indicator" () 11 1)
+(dntf f-b  "byte/word indicator" () 10 1)
+(dntf f-h  "byte/halfword indicator" () 11 1)
+
+; Misc. remaining opcode fields (constant values but unnamed).
+(dntf f-bit9 "bit 9" () 9 1)
+
+; Data fields.
+(dntf f-offset5  "5 bit unsigned immediate" () 10 5)
+(dntf f-rs       "Rs (source reg)" () 5 3)
+(dntf f-rd       "Rd (dest reg)" () 2 3)
+(dntf f-rn       "Rn (2nd source reg in add/sub insns" () 8 3)
+(dntf f-offset3  "3 bit unsigned immediate in add/sub insns" () 8 3)
+(dntf f-bit10-rd "Rd (dest reg) at bit 10" () 10 3)
+(dntf f-offset8  "8 bit unsigned immediate" () 7 8)
+(dntf f-ro       "Ro (offset register)" () 8 3)
+(dntf f-rb       "Rb (base register)" () 5 3)
+
+; Instruction operands.
+
+; define-normal-thumb-operand
+(define-pmacro (dntop name comment attrs hw indx)
+  (dnop name comment (.splice (.unsplice attrs) (ISA thumb)) hw indx)
+)
+
+(dntop sp "stack pointer" () h-sp-t f-nil)
+(dntop lr "link register" () h-lr-t f-nil)
+
+(dntop rd      "destination register"      () h-gr-t f-rd)
+(dntop rs      "source register"           () h-gr-t f-rs)
+(dntop offset5 "5 bit unsigned immediate"  () h-uint f-offset5)
+(dntop rn      "2nd source register"       () h-gr-t f-rn)
+(dntop offset3 "3 bit unsigned immediate"  () h-uint f-offset3)
+(dntop offset8 "8 bit unsigned immediate"  () h-uint f-offset8)
+
+(dntop bit10-rd "rd in bits 10,9,8"        () h-gr-t f-bit10-rd)
+
+(dntop ro      "offset register"           () h-gr-t f-ro)
+(dntop rb      "base register"             () h-gr-t f-rb)
+
+; Instruction definitions.
+
+; Cover macro to dni to indicate these are all Thumb insns.
+; dnti: define-normal-thumb-insn
+
+(define-pmacro (dnti xname xcomment xattrs xsyntax xformat xsemantics)
+  (define-insn
+    (name xname)
+    (comment xcomment)
+    (.splice attrs (.unsplice xattrs) (ISA thumb))
+    (syntax xsyntax)
+    (format xformat)
+    (semantics xsemantics)
+    )
+)
+
+; Move shifted register insns.
+
+(dntf f-shift-op "Move shifted register opcode" () 12 2)
+
+(dnti lsl "logical shift left"
+      ()
+      "lsl $rd,$rs,#$offset5"
+      (+ (f-op3 0) (f-shift-op 0) offset5 rs rd)
+      (sequence ((BI carry-out))
+		(set carry-out
+		     (c-call BI "compute_carry_out_immshift" rs
+			     SHIFT-TYPE-lsl offset5 cbit))
+		(set rd (sll rs offset5))
+		(set-logical-cc rd carry-out))
+)
+(dnti lsr "logical shift right"
+      ()
+      "lsr $rd,$rs,#$offset5"
+      (+ (f-op3 0) (f-shift-op 1) offset5 rs rd)
+      (sequence ((BI carry-out))
+		(set carry-out
+		     (c-call BI "compute_carry_out_immshift" rs
+			     SHIFT-TYPE-lsr offset5 cbit))
+		(set rd (srl rs offset5))
+		(set-logical-cc rd carry-out))
+)
+(dnti asr "arithmetic shift right"
+      ()
+      "asr $rd,$rs,#$offset5"
+      (+ (f-op3 0) (f-shift-op 2) offset5 rs rd)
+      (sequence ((BI carry-out))
+		(set carry-out
+		     (c-call BI "compute_carry_out_immshift" rs
+			     SHIFT-TYPE-asr offset5 cbit))
+		(set rd (sra rs offset5))
+		(set-logical-cc rd carry-out))
+)
+
+; Add/subtract insns.
+
+(dntf f-i "immediate indicator in add/sub insns" () 10 1)
+
+(dntf f-addsub-op "Add/subtract opcode" () 9 1)
+
+(dnti add "add reg+reg"
+      ()
+      "add $rd,$rs,$rn"
+      (+ (f-op5 3) (f-i 0) (f-addsub-op 0) rn rs rd)
+      (sequence ()
+		(set-add-flags rs rn 0)
+		(set rd (add rs rn)))
+)
+(dnti addi "add reg+imm"
+      ()
+      "add $rd,$rs,#$offset3"
+      (+ (f-op5 3) (f-i 1) (f-addsub-op 0) offset3 rs rd)
+      (sequence ()
+		(set-add-flags rs offset3 0)
+		(set rd (add rs offset3)))
+)
+(dnti sub "sub reg+reg"
+      ()
+      "sub $rd,$rs,$rn"
+      (+ (f-op5 3) (f-i 0) (f-addsub-op 1) rn rs rd)
+      (sequence ()
+		(set-sub-flags rs rn 1)
+		(set rd (sub rs rn)))
+)
+(dnti subi "sub reg+imm"
+      ()
+      "sub $rd,$rs,#$offset3"
+      (+ (f-op5 3) (f-i 1) (f-addsub-op 1) offset3 rs rd)
+      (sequence ()
+		(set-sub-flags rs offset3 1)
+		(set rd (sub rs offset3)))
+)
+
+; Move/compare/add/subtract immediate insns.
+
+(dntf f-mcasi-op "Move/compare/add/subtract immediate opcode" () 12 2)
+
+(dnti mov "move imm->reg"
+      ()
+      "mov ${bit10-rd},#$offset8"
+      (+ (f-op3 1) (f-mcasi-op 0) bit10-rd offset8)
+      (sequence ()
+		(set bit10-rd offset8)
+		(set-zn-flags bit10-rd))
+)
+(dnti cmp "cmp reg,imm"
+      ()
+      "cmp ${bit10-rd},#$offset8"
+      (+ (f-op3 1) (f-mcasi-op 1) bit10-rd offset8)
+      (set-sub-flags bit10-rd offset8 1)
+)
+(dnti addi8 "add 8 bit immediate"
+      ()
+      "add ${bit10-rd},#$offset8"
+      (+ (f-op3 1) (f-mcasi-op 2) bit10-rd offset8)
+      (sequence ()
+		(set-add-flags bit10-rd offset8 0)
+		(set bit10-rd (add bit10-rd offset8)))
+)
+(dnti subi8 "sub 8 bit immediate"
+      ()
+      "sub ${bit10-rd},#$offset8"
+      (+ (f-op3 1) (f-mcasi-op 3) bit10-rd offset8)
+      (sequence ()
+		(set-sub-flags bit10-rd offset8 1)
+		(set bit10-rd (sub bit10-rd offset8)))
+)
+
+; ALU operations.
+
+(dntf f-alu-op "ALU opcode" () 9 4)
+
+(define-pmacro (alu-logical-op mnemonic comment alu-opcode sem-fn)
+  (dnti (.sym alu- mnemonic) comment
+	()
+	(.str mnemonic " $rd,$rs")
+	(+ (f-op6 #x10) (f-alu-op alu-opcode) rs rd)
+	(sequence ()
+		  (set rd (sem-fn rd rs))
+		  (set-zn-flags rd))
+	)
+)
+
+(define-pmacro (alu-arith-op mnemonic comment alu-opcode sem-fn set-flags)
+  (dnti (.sym alu- mnemonic) comment
+	()
+	(.str mnemonic " $rd,$rs")
+	(+ (f-op6 #x10) (f-alu-op alu-opcode) rs rd)
+	(sequence ((SI result))
+		  (set result (sem-fn rd rs cbit))
+		  (set-flags rd rs cbit)
+		  (set rd result))
+	)
+)
+
+(define-pmacro (alu-shift-op mnemonic comment alu-opcode sem-fn shift-type)
+  (dnti (.sym alu- mnemonic) comment
+	()
+	(.str mnemonic " $rd,$rs")
+	(+ (f-op6 #x10) (f-alu-op alu-opcode) rs rd)
+	(sequence ((BI carry-out) (SI result))
+		  (set carry-out
+		       (c-call BI "compute_carry_out_regshift"
+			       rd shift-type rs cbit))
+		  (set result (sem-fn rd rs))
+		  (set rd result)
+		  (set-logical-cc result carry-out))
+	)
+)
+
+(alu-logical-op and "and" 0 and)
+(alu-logical-op eor "xor" 1 xor)
+
+(alu-shift-op lsl "logical shift left" 2 sll SHIFT-TYPE-lsl)
+(alu-shift-op lsr "logical shift right" 3 srl SHIFT-TYPE-lsr)
+(alu-shift-op asr "arithmetic shift right" 4 sra SHIFT-TYPE-asr)
+(alu-shift-op ror "rotate right" 7 ror SHIFT-TYPE-ror)
+
+(alu-arith-op adc "add with carry" 5
+	(.pmacro (rd rs cbit) (addc rd rs cbit))
+	(.pmacro (rd rs cbit) (set-add-flags rd rs cbit)))
+(alu-arith-op sbc "subtract with carry (borrow)" 6
+	(.pmacro (rd rs cbit) (subc rd rs (not cbit)))
+	(.pmacro (rd rs cbit) (set-sub-flags rd rs cbit)))
+
+(dnti alu-tst "test"
+      ()
+      "tst $rd,$rs"
+      (+ (f-op6 #x10) (f-alu-op 8) rs rd)
+      (sequence ((SI x))
+		(set x (and rd rs))
+		(set-zn-flags x))
+)
+
+(alu-arith-op neg "negate" 9
+	      (.pmacro (rd rs cbit) (neg rs))
+	      (.pmacro (rd rs cbit) (set-sub-flags 0 rs 1)))
+
+(dnti alu-cmp "compare"
+      ()
+      "cmp $rd,$rs"
+      (+ (f-op6 #x10) (f-alu-op 10) rs rd)
+      (set-sub-flags rd rs 1)
+)
+(dnti alu-cmn "compare negative"
+      ()
+      "cmn $rd,$rs"
+      (+ (f-op6 #x10) (f-alu-op 11) rs rd)
+      (set-add-flags rd rs 0)
+)
+
+(alu-logical-op orr "or" 12 or)
+
+; use alu-logical-op 'cus it sets the condition codes the way we want
+(alu-logical-op mul "multiply" 13 mul)
+
+(alu-logical-op bic "bit clear" 14 (.pmacro (rd rs) (and rd (inv rs))))
+
+(alu-logical-op mvn "invert" 15 (.pmacro (rd rs) (inv rs)))
+
+; Hi register operations.
+;
+; R15 and PC are treated as two distinct registers.  It is assumed that the
+; execution environment ensures R15 = PC+4.  All reads are taken from R15.
+; All writes are written to PC.
+
+(define-hardware
+  (name h-hiregs)
+  (comment "High registers (R8-R15)")
+  (attrs (ISA thumb) VIRTUAL)
+  (type register WI (8))
+  (indices keyword ""
+	   ((r8 0) (r9 1) (r10 2) (r11 3) (r12 4) (r13 5) (r14 6) (r15 7)))
+  ; ??? Accesses won't be as efficient as possible as +8 calculation will
+  ; get done at exec time (could be defered to extract phase), but that's an
+  ; optimization that can be generally useful in the extract phase.
+  (get (regno) (reg h-gr (add regno (const 8))))
+  (set (regno newval) (set (reg h-gr (add regno (const 8))) newval))
+)
+
+
+(dntf f-hireg-op  "Hi register opcode" () 9 2)
+
+(dntop hs "high source register"      () h-hiregs f-rs)
+(dntop hd "high destination register" () h-hiregs f-rd)
+
+(define-pmacro (hireg-op mnemonic
+			 lo-op-hi-comment
+			 hi-op-lo-comment
+			 hi1-op-hi2-comment
+			 opcode
+			 lo-dest-sem-fn
+			 hi-dest-sem-fn)
+  (begin
+    (dnti (.sym mnemonic -rd-hs)
+	  lo-op-hi-comment
+	  ()
+	  (.str mnemonic " $rd,$hs")
+	  (+ (f-op6 #x11) (f-hireg-op opcode) (f-h1 0) (f-h2 1) hs rd)
+	  (lo-dest-sem-fn rd hs)
+	  )
+    (dnti (.sym mnemonic -hd-rs)
+	  hi-op-lo-comment
+	  ()
+	  (.str mnemonic " $hd,$rs")
+	  (+ (f-op6 #x11) (f-hireg-op opcode) (f-h1 1) (f-h2 0) hd rs)
+	  (hi-dest-sem-fn hd rs)
+	  )
+    (dnti (.sym mnemonic -hd-hs)
+	  hi1-op-hi2-comment
+	  ()
+	  (.str mnemonic " $hd,$hs")
+	  (+ (f-op6 #x11) (f-hireg-op opcode) (f-h1 1) (f-h2 1) hd hs)
+	  (hi-dest-sem-fn hd hs)
+	  )
+    )
+)
+
+(hireg-op add "lo = lo + hi" "hi = hi + lo" "hi = hi + hi2" 0
+	  (.pmacro (src1-dest src2) (set src1-dest (add src1-dest src2)))
+	  (.pmacro (src1-dest src2)
+		   (if (eq (regno src1-dest) 7)
+		       (set pc (add src1-dest src2))
+		       (set src1-dest (add src1-dest src2))))
+)
+
+(hireg-op cmp "compare lo,hi" "compare hi,lo" "compare hi1,hi2" 1
+	  (.pmacro (src1 src2) (set-sub-flags src1 src2 1))
+	  (.pmacro (src1 src2) (set-sub-flags src1 src2 1))
+)
+
+(hireg-op mov "lo = hi" "hi = lo" "hi1 = hi2" 2
+	  (.pmacro (dest src) (set dest src))
+	  (.pmacro (dest src)
+		   (if (eq (regno dest) 7)
+		       (set pc src)
+		       (set dest src)))
+)
+
+(dnti bx-rs "bx on lo reg"
+      ()
+      "bx $rs"
+      (+ (f-op6 #x11) (f-hireg-op 3) (f-h1 0) (f-h2 0) (f-rd 0) rs)
+      (sequence ()
+		(set pc rs)
+		(if (not (and rs 1))
+		    (set (reg h-tbit) 0)))
+)
+(dnti bx-hs "bx on hi reg"
+      ()
+      "bx $hs"
+      (+ (f-op6 #x11) (f-hireg-op 3) (f-h1 0) (f-h2 1) (f-rd 0) hs)
+      (sequence ()
+		(set pc hs)
+		(if (not (and hs 1))
+		    (set (reg h-tbit) 0)))
+)
+
+; PC relative load.
+
+(df f-word8 "10 bit unsigned offset, right shifted by 2"
+    ((ISA thumb))
+    7 8 UINT
+    ((value pc) (srl WI value (const 2)))
+    ((value pc) (sll WI value (const 2)))
+)
+
+(dntop word8 "10 bit unsigned immediate" () h-uint f-word8)
+
+(dnti ldr-pc "pc relative load"
+      ()
+      "ldr ${bit10-rd},[pc,#$word8]"
+      (+ (f-op5 9) bit10-rd word8)
+      (set bit10-rd
+	   (mem WI (add (and (add pc (const 4)) (const WI -4)) word8)))
+)
+
+; Load/store with register offset.
+
+(dnti str "store word"
+      ()
+      "str $rd,[$rb,$ro]"
+      (+ (f-op4 5) (f-l 0) (f-b 0) (f-bit9 0) ro rb rd)
+      (set (mem WI (add rb ro)) rd)
+)
+(dnti strb "store byte"
+      ()
+      "strb $rd,[$rb,$ro]"
+      (+ (f-op4 5) (f-l 0) (f-b 1) (f-bit9 0) ro rb rd)
+      (set (mem QI (add rb ro)) rd)
+)
+(dnti ldr "load word"
+      ()
+      "ldr $rd,[$rb,$ro]"
+      (+ (f-op4 5) (f-l 1) (f-b 0) (f-bit9 0) ro rb rd)
+      (set rd (mem WI (add rb ro)))
+)
+(dnti ldrb "load zero extended byte"
+      ()
+      "ldrb $rd,[$rb,$ro]"
+      (+ (f-op4 5) (f-l 1) (f-b 1) (f-bit9 0) ro rb rd)
+      (set rd (zext SI (mem QI (add rb ro))))
+)
+
+; Load/store sign-extended byte/halfword.
+
+(dntf f-s  "signed/unsigned indicator" () 10 1)
+
+(dnti strh "store halfword"
+      ()
+      "strh $rd,[$rb,$ro]"
+      (+ (f-op4 5) (f-h 0) (f-s 0) (f-bit9 1) ro rb rd)
+      (set (mem HI (add rb ro)) rd)
+)
+(dnti ldrh "load zero extended halfword"
+      ()
+      "ldrh $rd,[$rb,$ro]"
+      (+ (f-op4 5) (f-h 1) (f-s 0) (f-bit9 1) ro rb rd)
+      (set rd (zext SI (mem HI (add rb ro))))
+)
+(dnti ldsb "load sign extended byte"
+      ()
+      "ldsb $rd,[$rb,$ro]"
+      (+ (f-op4 5) (f-h 0) (f-s 1) (f-bit9 1) ro rb rd)
+      (set rd (ext SI (mem QI (add rb ro))))
+)
+(dnti ldsh "load sign extended halfword"
+      ()
+      "ldsh $rd,[$rb,$ro]"
+      (+ (f-op4 5) (f-h 1) (f-s 1) (f-bit9 1) ro rb rd)
+      (set rd (ext SI (mem HI (add rb ro))))
+)
+
+; Load/store with immediate offset.
+
+(dntf f-b-imm "byte/word indicator in load/store with immediate offset insns" () 12 1)
+
+(df f-offset5-7 "offset5 field as 7 bit unsigned immediate"
+    ((ISA thumb))
+    10 5 UINT
+    ((value pc) (srl WI value (const 2)))
+    ((value pc) (sll WI value (const 2)))
+)
+
+(dntop offset5-7 "offset5 as 7 bit unsigned immediate" () h-uint f-offset5-7)
+
+(dnti str-imm "store word with immediate offset"
+      ()
+      "str $rd,[$rb,#${offset5-7}]"
+      (+ (f-op3 3) (f-b-imm 0) (f-l 0) offset5-7 rb rd)
+      (set (mem WI (add rb offset5-7)) rd)
+)
+(dnti ldr-imm "load word with immediate offset"
+      ()
+      "ldr $rd,[$rb,#${offset5-7}]"
+      (+ (f-op3 3) (f-b-imm 0) (f-l 1) offset5-7 rb rd)
+      (set rd (mem WI (add rb offset5-7)))
+)
+(dnti strb-imm "store byte with immediate offset"
+      ()
+      "strb $rd,[$rb,#$offset5]"
+      (+ (f-op3 3) (f-b-imm 1) (f-l 0) offset5 rb rd)
+      (set (mem QI (add rb offset5)) rd)
+)
+(dnti ldrb-imm "load zero extended byte with immediate offset"
+      ()
+      "ldrb $rd,[$rb,#$offset5]"
+      (+ (f-op3 3) (f-b-imm 1) (f-l 1) offset5 rb rd)
+      (set rd (zext SI (mem QI (add rb offset5))))
+)
+
+; Load/store halfword with immediate offset.
+
+(df f-offset5-6 "offset5 field as 6 bit unsigned immediate"
+    ((ISA thumb))
+    10 5 UINT
+    ((value pc) (srl WI value (const 1)))
+    ((value pc) (sll WI value (const 1)))
+)
+
+(dntop offset5-6 "offset5 as 7 bit unsigned immediate" () h-uint f-offset5-6)
+
+(dnti strh-imm "store halfword with immediate offset"
+      ()
+      "strh $rd,[$rb,#${offset5-6}]"
+      (+ (f-op4 8) (f-l 0) offset5-6 rb rd)
+      (set (mem HI (add rb offset5-6)) rd)
+)
+(dnti ldrh-imm "load zero extended halfword with immediate offset"
+      ()
+      "ldrh $rd,[$rb,#${offset5-6}]"
+      (+ (f-op4 8) (f-l 1) offset5-6 rb rd)
+      (set rd (zext WI (mem HI (add rb offset5-6))))
+)
+
+; SP-relative load/store
+
+(dnti str-sprel "store word, sp-relative"
+      ()
+      "str ${bit10-rd},[sp,#$word8]"
+      (+ (f-op4 9) (f-l 0) bit10-rd word8)
+      (set (mem WI (add sp word8)) bit10-rd)
+)
+(dnti ldr-sprel "load word, sp-relative"
+      ()
+      "ldr ${bit10-rd},[sp,#$word8]"
+      (+ (f-op4 9) (f-l 1) bit10-rd word8)
+      (set bit10-rd (mem WI (add sp word8)))
+)
+
+; Load address
+
+(dntf f-sp "sp/pc indicator" () 11 1)
+
+(dnti lda-pc "load address from pc"
+      ()
+      "add ${bit10-rd},pc,$word8"
+      (+ (f-op4 10) (f-sp 0) bit10-rd word8)
+      (set bit10-rd (add (and (add pc (const 4)) (const WI -4)) word8))
+)
+(dnti lda-sp "load address from sp"
+      ()
+      "add ${bit10-rd},sp,$word8"
+      (+ (f-op4 10) (f-sp 1) bit10-rd word8)
+      (set bit10-rd (add sp word8))
+)
+
+; Add offset to stack pointer.
+; FIXME: Handling of sign+magnitude needs revisiting.
+; If expressions are allowed here we can't assume "-" follows "#".
+
+(dntf f-addoff-s "s bit in add offset to sp insns" () 7 1)
+
+(df f-sword7 "7 bit magnitude, accompanies sign bit"
+    ((ISA thumb))
+    6 7 UINT
+    ((value pc) (srl WI value (const 2)))
+    ((value pc) (sll WI value (const 2)))
+)
+
+(dntop sword7 "7 bit magnitude, accompanies sign bit" () h-uint f-sword7)
+
+(dnti add-sp "add offset to sp"
+      ()
+      "add sp,#$sword7"
+      (+ (f-op8 #xb0) (f-addoff-s 0) sword7)
+      (set sp (add sp sword7))
+)
+(dnti sub-sp "subtract offset from sp"
+      ()
+      "add sp,#-$sword7"
+      (+ (f-op8 #xb0) (f-addoff-s 1) sword7)
+      (set sp (sub sp sword7))
+)
+
+; Push/pop registers.
+
+; FIXME: Might be better to use sequence temp as address reg.
+
+(define-pmacro (push-reg regno)
+  (if (and rlist (sll 1 regno))
+      (sequence ()
+		(set sp (sub sp 4))
+		(set (mem WI sp) (reg WI h-gr-t regno))
+		))
+)
+(define-pmacro (pop-reg regno)
+  (if (and rlist (sll 1 regno))
+      (sequence ()
+		(set (reg WI h-gr-t regno) (mem WI sp))
+		(set sp (add sp 4))
+		))
+)
+
+(dntf f-pushpop-op "opcode bits 10,9 in push/pop insns" () 10 2)
+
+(dntf f-r "register indicator in push/pop insns" () 8 1)
+
+(dntf f-rlist "register list" () 7 8)
+
+; ??? Print/parse handler specs missing.  Later.
+(dntop rlist "register list" () h-uint f-rlist)
+(dntop rlist-lr "register list with lr" () h-uint f-rlist)
+(dntop rlist-pc "register list with pc" () h-uint f-rlist)
+
+(dnti push "push registers"
+      ()
+      "push {$rlist}"
+      (+ (f-op4 11) (f-l 0) (f-pushpop-op 2) (f-r 0) rlist)
+      (.splice sequence () (.unsplice (.map push-reg (.iota 8 7 -1))))
+)
+(dnti push-lr "push registers and lr"
+      ()
+      "push {${rlist-lr}}"
+      (+ (f-op4 11) (f-l 0) (f-pushpop-op 2) (f-r 1) rlist)
+      (.splice sequence ()
+	       (set sp (sub sp 4))
+	       (set (mem WI sp) lr)
+	       (.unsplice (.map push-reg (.iota 8 7 -1)))
+	       )
+)
+
+(dnti pop "pop registers"
+      ()
+      "pop {$rlist}"
+      (+ (f-op4 11) (f-l 1) (f-pushpop-op 2) (f-r 0) rlist)
+      (.splice sequence () (.unsplice (.map pop-reg (.iota 8))))
+)
+(dnti pop-pc "pop registers and pc"
+      ()
+      "pop {${rlist-pc}}"
+      (+ (f-op4 11) (f-l 1) (f-pushpop-op 2) (f-r 1) rlist)
+      (.splice sequence ()
+	       (.unsplice (.map pop-reg (.iota 8)))
+	       (set pc (mem WI sp))
+	       (set sp (add sp 4))
+	       )
+)
+
+; Multiple load/store.
+
+; FIXME: Might be better to use sequence temp as address reg.
+
+(dntf f-bit10-rb "Rb at bit 10" () 10 3)
+
+(dntop bit10-rb "base reg at bit 10" () h-gr-t f-bit10-rb)
+
+(define-pmacro (save-reg-inc regno)
+  (if (and rlist (sll 1 regno))
+      (sequence ()
+		(set (mem WI bit10-rb) (reg WI h-gr-t regno))
+		(set bit10-rb (add bit10-rb 4))
+		))
+)
+(define-pmacro (load-reg-inc regno)
+  (if (and rlist (sll 1 regno))
+      (sequence ()
+		(set (reg WI h-gr-t regno) (mem WI bit10-rb))
+		(set bit10-rb (add bit10-rb 4))
+		))
+)
+
+(dnti stmia "store multiple"
+      ()
+      "stmia $rb!,{$rlist}"
+      (+ (f-op4 12) (f-l 0) bit10-rb rlist)
+      (.splice sequence () (.unsplice (.map save-reg-inc (.iota 8))))
+)
+(dnti ldmia "load multiple"
+      ()
+      "ldmia $rb!,{$rlist}"
+      (+ (f-op4 12) (f-l 1) bit10-rb rlist)
+      (.splice sequence () (.unsplice (.map load-reg-inc (.iota 8))))
+)
+
+; Conditional branches.
+
+(dntf f-cond "condition code spec" () 11 4)
+
+; The standard condition code tests.
+
+(define-normal-insn-enum cc-tests
+  "condition code tests"
+  ((ISA thumb)) "" f-cond
+  (
+   (CC_EQ 0)   ; equal
+   (CC_NE 1)   ; not equal
+   (CC_CS 2)   ; carry set (unsigned greater or equal)
+   (CC_CC 3)   ; carry clear (unsigned less than)
+   (CC_MI 4)   ; minus (negative)
+   (CC_PL 5)   ; positive or zero
+   (CC_VS 6)   ; overflow set
+   (CC_VC 7)   ; overflow clear
+   (CC_HI 8)   ; higher (unsigned greater)
+   (CC_LS 9)   ; less or same (unsigned less or equal)
+   (CC_GE 10)  ; greater or equal
+   (CC_LT 11)  ; less
+   (CC_GT 12)  ; greater
+   (CC_LE 13)  ; less or equal
+   )
+)
+
+(df  f-soffset8 "8 bit pc relative branch address"
+     (PCREL-ADDR (ISA thumb))
+     7 8 INT
+     ((value pc) (sra WI (sub WI value (add WI pc (const 4))) (const 1)))
+     ((value pc) (add WI (sll WI value (const 1)) (add WI pc (const 4))))
+)
+
+(dntop soffset8 "8 bit pc relative branch address" () h-iaddr f-soffset8)
+
+(define-pmacro (cbranch bname comment cond test)
+  (dnti bname (.str "branch if " comment)
+	()
+	(.str bname " $soffset8")
+	(+ (f-op4 13) cond soffset8)
+	(if (test)
+	    (set pc soffset8))
+	)
+)
+(cbranch beq  "eq"                    CC_EQ test-eq)
+(cbranch bne  "ne"                    CC_NE test-ne)
+(cbranch bcs  "cs (ltu)"              CC_CS test-cs)
+(cbranch bcc  "cc (geu)"              CC_CC test-cc)
+(cbranch bmi  "mi (negative)"         CC_MI test-mi)
+(cbranch bpl  "pl (positive or zero)" CC_PL test-pl)
+(cbranch bvs  "vs (overflow set)"     CC_VS test-vs)
+(cbranch bvc  "vc (overflow clear)"   CC_VC test-vc)
+(cbranch bhi  "hi (gtu)"              CC_HI test-hi)
+(cbranch bls  "ls (leu)"              CC_LS test-ls)
+(cbranch bge  "ge"                    CC_GE test-ge)
+(cbranch blt  "lt"                    CC_LT test-lt)
+(cbranch bgt  "gt"                    CC_GT test-gt)
+(cbranch ble  "le"                    CC_LE test-le)
+
+; Software interrupt.
+
+(dntf f-value8 "8 bit value for swi" () 7 8)
+
+(dntop value8 "8 bit value for swi" () h-uint f-value8)
+
+(dnti swi "software interrupt"
+      ()
+      "swi $value8"
+      (+ (f-op8 #xdf) value8)
+      ; FIXME: for now
+      (set pc (c-call WI "thumb_swi" pc value8))
+)
+
+; Unconditional branch.
+
+(df f-offset11 "11 bit pc relative branch address"
+    (PCREL-ADDR (ISA thumb))
+    10 11 INT
+    ((value pc) (sra WI (sub value (add pc (const 4))) (const 1)))
+    ((value pc) (add WI (sll value (const 1)) (add pc (const 4))))
+)
+
+(dntop offset11 "11 bit pc relative branch address" () h-iaddr f-offset11)
+
+(dnti b "unconditional branch"
+      ()
+      "b $offset11"
+      (+ (f-op5 #x1c) offset11)
+      (set pc offset11)
+)
+
+; Long branch with link.
+; Two instructions that make up a subroutine call.
+; FIXME: Assembler access is via one insn - macro-insn?
+; Left for later, as is all assembly considerations.
+
+(dntf f-lbwl-h "long branch with link `h' field"   () 11 1)
+
+; This one is signed.
+(define-ifield
+  (name f-lbwl-hi)
+  (comment "long branch with link offset, high part")
+  (attrs (ISA thumb))
+  (mode INT)
+  (start 10)
+  (length 11)
+)
+(dntop lbwl-hi "long branch with link offset, high part" ()
+       h-sint f-lbwl-hi)
+
+; This one is unsigned.
+(dntf f-lbwl-lo "long branch with link offset, low part" () 10 11)
+(dntop lbwl-lo "long branch with link offset, low part" ()
+       h-uint f-lbwl-lo)
+
+(dnti bl-hi "branch link, high offset"
+      ()
+      "bl-hi ${lbwl-hi}"
+      (+ (f-op4 15) (f-lbwl-h 0) lbwl-hi)
+      (set lr (add (add pc 4) (sll lbwl-hi 12)))
+)
+
+(dnti bl-lo "branch link, low offset"
+      ()
+      "bl-lo ${lbwl-lo}"
+      (+ (f-op4 15) (f-lbwl-h 1) lbwl-lo)
+      (sequence ((WI cur-pc))
+		(set cur-pc pc)
+		(set pc (add lr (sll lbwl-lo 1)))
+		(set lr (or (add cur-pc 2) 1)))
+)

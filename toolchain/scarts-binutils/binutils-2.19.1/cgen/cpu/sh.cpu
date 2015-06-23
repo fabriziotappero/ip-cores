@@ -1,0 +1,1355 @@
+; Renesas / SuperH SH architecture description.  -*- Scheme -*-
+; Copyright (C) 2000, 2001, 2006, 2009 Red Hat, Inc.
+; This file is part of CGEN.
+; See file COPYING.CGEN for details.
+
+(define-rtl-version 0 8)
+
+(include "simplify.inc")
+
+; Macros to handle differences in CGEN for SID vs SIM are included
+; here.
+(if (application-is? SID-SIMULATOR)
+    (include "sh-sid.cpu")
+    (include "sh-sim.cpu"))
+
+(define-arch
+  (name sh)
+  (comment "Renesas / SuperH SuperH (SH)")
+  ; Should be #t but cgen can't handle variable length insns with #t
+  (insn-lsb0? #f)
+  (machs sh2 sh2e sh2a-fpu sh2a-nofpu
+	 sh3 sh3e
+	 sh4-nofpu sh4 sh4a-nofpu sh4a sh4al
+	 sh5)
+  (isas compact media)
+)
+
+
+; Instruction sets.
+
+(define-isa
+  (name media)
+  (comment "SHmedia 32-bit instruction set")
+  (base-insn-bitsize 32)
+  ; not really parallel but some operands are shared between
+  ; the ISAs and CGEN wants them all to be marked as parallel.
+  (isa-parallel-insns 2)
+)
+
+(define-isa
+  (name compact)
+  (comment "SHcompact 16/32 bit instruction set")
+  (default-insn-word-bitsize 32)
+  (base-insn-bitsize 32)
+  (isa-parallel-insns 2)
+)
+
+
+; CPU family.
+
+(define-cpu
+  (name sh64)
+  (comment "SH 64-bit family")
+  (endian either)
+  (word-bitsize 32)
+)
+
+
+(define-mach
+  (name sh2)
+  (comment "SH-2 CPU core")
+  (cpu sh64)
+  (isas compact)
+)
+
+(define-mach
+  (name sh2e)
+  (comment "SH-2e CPU core")
+  (cpu sh64)
+  (isas compact)
+)
+
+(define-mach
+  (name sh2a-fpu)
+  (comment "SH-2a CPU core with fpu")
+  (cpu sh64)
+  (isas compact)
+)
+
+(define-mach
+  (name sh2a-nofpu)
+  (comment "SH-2a CPU core with no fpu")
+  (cpu sh64)
+  (isas compact)
+)
+
+(define-mach
+  (name sh3)
+  (comment "SH-3 CPU core")
+  (cpu sh64)
+  (isas compact)
+)
+
+(define-mach
+  (name sh3e)
+  (comment "SH-3e CPU core")
+  (cpu sh64)
+  (isas compact)
+)
+
+(define-mach
+  (name sh4-nofpu)
+  (comment "SH-4 CPU core - no fpu")
+  (cpu sh64)
+  (isas compact)
+)
+
+(define-mach
+  (name sh4)
+  (comment "SH-4 CPU core with fpu")
+  (cpu sh64)
+  (isas compact)
+)
+
+(define-mach
+  (name sh4a-nofpu)
+  (comment "SH-4a CPU core - no fpu")
+  (cpu sh64)
+  (isas compact)
+)
+
+(define-mach
+  (name sh4a)
+  (comment "SH-4a CPU core with fpu")
+  (cpu sh64)
+  (isas compact)
+)
+
+(define-mach
+  (name sh4al)
+  (comment "SH-4al CPU core")
+  (cpu sh64)
+  (isas compact)
+)
+
+(define-mach
+  (name sh5)
+  (comment "SH-5 CPU core")
+  (cpu sh64)
+  (isas compact media)
+)
+
+; Partition insns according to the mach in which they first appear.
+(define-pmacro (SH2-MACH)        (MACH sh2,sh2e,sh2a-fpu,sh2a-nofpu,sh3,sh3e,sh4-nofpu,sh4,sh4a-nofpu,sh4a,sh4al,sh5)) ; sh2  and up
+(define-pmacro (SH2e-MACH)       (MACH sh2e,sh2a-fpu,sh3e,sh4,sh4a,sh5))                                               ; sh2e and up
+(define-pmacro (SH2a-nofpu-MACH) (MACH sh2a-nofpu,sh2a-fpu,sh4,sh4-nofpu,sh5))                                         ; sh2a and up
+(define-pmacro (SH2a-MACH)       (MACH sh2a-fpu,sh4,sh5))                                                                  ; sh2a with fpu and up
+(define-pmacro (SH3-MACH)        (MACH sh3,sh3e,sh4-nofpu,sh4,sh4a-nofpu,sh4a,sh4al,sh5))                              ; sh3  and up
+(define-pmacro (SH3e-MACH)       (MACH sh3e,sh4,sh4a,sh5))                                                             ; sh3e and up
+(define-pmacro (SH4-nofpu-MACH)  (MACH sh4-nofpu,sh4,sh4a-nofpu,sh4a,sh4al,sh5))                                       ; sh4 no fpu and up
+(define-pmacro (SH4-MACH)        (MACH sh4,sh4a,sh5))                                                                  ; sh4 and up
+(define-pmacro (SH4a-nofpu-MACH) (MACH sh4a-nofpu,sh4a,sh4al,sh5))                                                     ; sh4a no fpu and up
+(define-pmacro (SH4a-MACH)       (MACH sh4a,sh5))                                                                      ; sh4a with fpu and up
+(define-pmacro (SH4al-MACH)      (MACH sh4al))                                                                         ; sh4al and up
+(define-pmacro (SH5-MACH)        (MACH sh5))                                                                           ; sh5 compact and up
+
+; Pipeline Models
+
+; Units common to all machines
+(define-pmacro (common-units)
+  (
+   ; Basic execution unit -- 1 cycle
+   (unit u-exec "Execution unit" ()
+	 1 1 ; issue done
+	 () () () ())
+
+   ; SX execution unit -- 1 cycle
+   ; Ignored on most machines
+   (unit u-sx "SX Execution unit" ()
+	 1 1 ; issue done
+	 () () () ())
+
+   ; Branch unit
+   (unit u-branch "Branch Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 () ; inputs
+	 ((pc)) ; outputs
+	 () ; profile action (default)
+	 )
+
+   ; Jmp unit
+   (unit u-jmp "Jmp Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 () ; inputs
+	 ((pc)) ; outputs
+	 () ; profile action (default)
+	 )
+
+   ; JSR unit
+   (unit u-jsr "JSR Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 () ; inputs
+	 ((pc)) ; outputs
+	 () ; profile action (default)
+	 )
+
+   ; Logic.b unit -- 3 cycles
+   (unit u-logic-b "Logic.b unit" ()
+	 0 3 ; issue done
+	 () () () ())
+
+   ; Memory Access unit
+   (unit u-memory-access "Memory Access Unit" ()
+	 0 0 ; issue done
+	 () () () ())
+
+   ; LDS PR unit
+   (unit u-lds-pr "LDS PR Unit" ()
+	 0 1 ; issue done
+	 () () () ())
+
+   ; STS PR unit
+   (unit u-sts-pr "STS PR Unit" ()
+	 0 1 ; issue done
+	 () () () ())
+
+   ; Load PR unit
+   (unit u-load-pr "Load PR Unit" ()
+	 0 0 ; issue done
+	 () () () ())
+
+   ; Use PR unit
+   (unit u-use-pr "Use PR Unit" ()
+	 0 0 ; issue done
+	 () () () ())
+
+   ; Set SR Bit unit
+   (unit u-set-sr-bit "Set SR Bit Unit" ()
+	 0 0 ; issue done
+	 () () () ())
+
+   ; LDC SR unit
+   (unit u-ldc-sr "LDC SR Unit" ()
+	 0 1 ; issue done
+	 () () () ())
+
+   ; LDC GBR unit
+   (unit u-ldc-gbr "LDC GBR Unit" ()
+	 0 1 ; issue done
+	 () () () ())
+
+   ; Use TBIT unit
+   (unit u-use-tbit "Use TBIT Unit" ()
+	 0 0 ; issue done
+	 () () () ())
+
+   ; LDCL unit
+   (unit u-ldcl "LDCL Unit" ()
+	 0 3 ; issue done
+	 () () () ())
+
+   ; LDCL to VBR unit
+   (unit u-ldcl-vbr "LDCL to VBR Unit" ()
+	 0 3 ; issue done
+	 () () () ())
+
+   ; STC from VBR unit
+   (unit u-stc-vbr "STC from VBR Unit" ()
+	 0 1 ; issue done
+	 () () () ())
+
+   ; Load gr unit
+   (unit u-load-gr "Load into GR Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 () ; inputs
+	 ((loadreg INT -1)) ; outputs
+	 () ; profile action (default)
+	 )
+
+   ; Use gr unit -- stalls if GR not ready
+   (unit u-use-gr "Use GR Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 ((usereg INT -1)) ; inputs
+	 () ; outputs
+	 () ; profile action (default)
+	 )
+
+   ; Load GBR unit
+   (unit u-load-gbr "Load GBR Unit" ()
+	 0 0 ; issue done
+	 () () () ())
+
+   ; Load VBR unit
+   (unit u-load-vbr "Load VBR Unit" ()
+	 0 0 ; issue done
+	 () () () ())
+
+   ; Load MAC{H,L} unit
+   (unit u-load-mac "Load MAC Unit" ()
+	 0 0 ; issue done
+	 () () () ())
+
+   ; Set MAC{H,L} Unit
+   (unit u-set-mac "Set MAC Unit" ()
+	 0 0 ; issue done
+	 () () () ())
+
+   ; Multiply unit
+   (unit u-multiply "Multiply unit" ()
+	 1 2 ; issue done
+	 () () () ())
+
+   ; mac.w Multiply unit
+   (unit u-macw "mac.w multiply unit" ()
+	 1 2 ; issue done
+	 () () () ())
+
+   ; mac.l Multiply unit
+   (unit u-macl "mac.l multiply unit" ()
+	 1 2 ; issue done
+	 () () () ())
+
+   ; dmul Multiply unit
+   (unit u-dmul "dmul{s,u},mull multiply unit" ()
+	 1 2 ; issue done
+	 () () () ())
+
+   ; mull Multiply unit
+   (unit u-mull "mull multiply unit" ()
+	 1 2 ; issue done
+	 () () () ())
+
+   ; muls.w Multiply unit
+   (unit u-mulsw "muls.w multiply unit" ()
+	 1 1 ; issue done
+	 () () () ())
+
+   ; tas unit
+   (unit u-tas "tas unit" ()
+	 1 4 ; issue done
+	 () () () ())
+
+   (unit u-shift "Shift Unit" ()
+ 	 0 0 ; issue done
+	 () () () ())
+
+   ; Use multiply result unit -- stalls if multiply unit is busy
+   (unit u-use-multiply-result "Use Multiply Result Unit" ()
+	 0 0 ; issue done
+	 () () () ())
+
+   ; Writeback unit
+   (unit u-write-back "Writeback Unit" ()
+	 0 0 ; issue done
+	 () () () ())
+
+   ; Trap unit
+   (unit u-trap "Trap Unit" ()
+	 0 8 ; issue done
+	 () () () ())
+  )
+)
+
+; Units common to all floating point enabled machines
+(define-pmacro (common-fp-units)
+  (
+   ; Basic fpu unit -- 1 cycle
+   (unit u-fpu "FPU unit" ()
+	 0 0 ; issue done
+	 () () () ())
+
+   ; Maybe uses fpu -- must have same latency as u-fpu
+   (unit u-maybe-fpu "Maybe FPU unit" ()
+	 0 0 ; issue done
+	 () () () ())
+
+   ; Load fr unit
+   (unit u-load-fr "Load into FR Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 () ; inputs
+	 ((loadreg INT -1)) ; outputs
+	 () ; profile action (default)
+	 )
+
+   ; Set fr unit
+   (unit u-set-fr "Set FR Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 () ; inputs
+	 ((loadreg INT -1)) ; outputs
+	 () ; profile action (default)
+	 )
+
+   ; Set fr unit -- no latency on some machines
+   ; Define it with the same latency as u-set-fr
+   (unit u-set-fr-0 "Set FR Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 () ; inputs
+	 ((loadreg INT -1)) ; outputs
+	 () ; profile action (default)
+	 )
+
+   ; Use fr unit -- stalls if FR not ready
+   (unit u-use-fr "Use FR Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 ((usereg INT -1)) ; inputs
+	 () ; outputs
+	 () ; profile action (default)
+	 )
+
+   ; FPU Memory Access unit
+   (unit u-fpu-memory-access "FPU Memory Access Unit" ()
+	 0 0 ; issue done
+	 () () () ())
+
+   ; Set FPUL unit
+   (unit u-set-fpul "Set FPUL Unit" ()
+	 0 0 ; issue done
+	 () () () ())
+
+   ; Load FPUL unit
+   (unit u-load-fpul "Load FPUL Unit" ()
+	 0 0 ; issue done
+	 () () () ())
+
+   ; FLDS FPUL unit
+   (unit u-flds-fpul "FLDS FPUL Unit" ()
+	 0 0 ; issue done
+	 () () () ())
+
+   ; Use FPUL unit
+   (unit u-use-fpul "Use FPUL Unit" ()
+	 0 0 ; issue done
+	 () () () ())
+
+   ; LDS FPSCR unit
+   (unit u-lds-fpscr "LDS FPSCR Unit" ()
+	 0 3 ; issue done
+	 () () () ())
+
+   ; LDS.L FPSCR unit
+   (unit u-ldsl-fpscr "LDS.L FPSCR Unit" ()
+	 0 0 ; issue done
+	 () () () ())
+
+   ; Use FPSCR unit
+   (unit u-use-fpscr "Use FPSCR Unit" ()
+	 0 0 ; issue done
+	 () () () ())
+
+   ; FPU Load gr unit
+   (unit u-fpu-load-gr "FPU Load into GR Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 () ; inputs
+	 ((loadreg INT -1)) ; outputs
+	 () ; profile action (default)
+	 )
+
+   ; FDIV unit
+   (unit u-fdiv "FDIV Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 () ; inputs
+	 ((loadreg INT -1)) ; outputs
+	 () ; profile action (default)
+	 )
+
+   ; FSQRT unit -- not completely common but common enough
+   (unit u-fsqrt "FSQRT Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 () ; inputs
+	 ((loadreg INT -1)) ; outputs
+	 () ; profile action (default)
+	 )
+
+   ; FCMP unit
+   (unit u-fcmp "FCMP Unit" ()
+	 0 0 ; issue done
+	 () () () ())
+
+   ; FCNV unit
+   (unit u-fcnv "FCNV Unit" ()
+	 0 0 ; issue done
+	 () () () ())
+  )
+)
+
+; Units common to sh2a-nofpu and above
+(define-pmacro (sh2a-nofpu-units)
+  (
+   ; mulr Multiply unit
+   (unit u-mulr "mulr multiply unit" ()
+	 1 2 ; issue done
+	 () () () ())
+
+   ; mulr gr unit
+   (unit u-mulr-gr "MULR into GR Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 () ; inputs
+	 ((loadreg INT -1)) ; outputs
+	 () ; profile action (default)
+	 )
+  )
+)
+
+; Units common to sh2a-fpu and above
+(define-pmacro (sh2a-fpu-units)
+  (
+   ; Set dr unit
+   (unit u-set-dr "Set DR Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 () ; inputs
+	 ((loadreg INT -1)) ; outputs
+	 () ; profile action (default)
+	 )
+
+   ; Load dr unit
+   (unit u-load-dr "Load into DR Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 () ; inputs
+	 ((loadreg INT -1)) ; outputs
+	 () ; profile action (default)
+	 )
+
+   ; Use dr unit -- stalls if DR not ready
+   (unit u-use-dr "Use DR Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 ((usereg INT -1)) ; inputs
+	 () ; outputs
+	 () ; profile action (default)
+	 )
+  )
+)
+
+; Units common to sh3 and above
+;(define-pmacro (sh3-common-units)
+;  (
+;   (unit u-set-sr "Set SR Unit" ()
+;	 0 3 ; issue done
+;	 () () () ())
+;  )
+;)
+
+; Units common to sh4-nofpu and above
+(define-pmacro (sh4-nofpu-units)
+  (
+   ; OCB*  unit
+   (unit u-ocb "OCB* unit" ()
+	 0 0 ; issue done
+	 () () () ())
+  )
+)
+
+; Units common to sh4 and above with fp
+(define-pmacro (sh4-common-fp-units)
+  (
+   (unit u-fipr "FIPR Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 ((fvm INT -1) (fvn INT -1)) ; inputs
+	 () ; outputs
+	 () ; profile action (default)
+	 )
+   (unit u-ftrv "FTRV Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 ((fvn INT -1)) ; inputs
+	 () ; outputs
+	 () ; profile action (default)
+	 )
+  )
+)
+
+; Units common to sh5 media and above
+(define-pmacro (sh5-media-units)
+  (
+   ; Load gr unit
+   (unit u-set-gr "Set into GR Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 () ; inputs
+	 ((loadreg INT -1)) ; outputs
+	 () ; profile action (default)
+	 )
+  )
+)
+
+; Units common to sh5 and above with fp
+(define-pmacro (sh5-media-fp-units)
+  (
+   ; Set fp unit
+   (unit u-set-fp "Set FP Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 () ; inputs
+	 ((loadreg INT -1)) ; outputs
+	 () ; profile action (default)
+	 )
+
+   ; Set fv unit
+   (unit u-set-fv "Set FV Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 () ; inputs
+	 ((loadreg INT -1)) ; outputs
+	 () ; profile action (default)
+	 )
+
+   ; Set mtrx unit
+   (unit u-set-mtrx "Set MTRX Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 () ; inputs
+	 ((loadreg INT -1)) ; outputs
+	 () ; profile action (default)
+	 )
+
+   ; Load fp unit
+   (unit u-load-fp "Load FP Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 () ; inputs
+	 ((loadreg INT -1)) ; outputs
+	 () ; profile action (default)
+	 )
+
+   ; Load fv unit
+   (unit u-load-fv "Load FV Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 () ; inputs
+	 ((loadreg INT -1)) ; outputs
+	 () ; profile action (default)
+	 )
+
+   ; Load mtrx unit
+   (unit u-load-mtrx "Load MTRX Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 () ; inputs
+	 ((loadreg INT -1)) ; outputs
+	 () ; profile action (default)
+	 )
+
+   ; Use fp unit -- stalls if FP not ready
+   (unit u-use-fp "Use DR Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 ((usereg INT -1)) ; inputs
+	 () ; outputs
+	 () ; profile action (default)
+	 )
+
+   ; Use fv unit -- stalls if FV not ready
+   (unit u-use-fv "Use DR Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 ((usereg INT -1)) ; inputs
+	 () ; outputs
+	 () ; profile action (default)
+	 )
+
+   ; Use mtrx unit -- stalls if MTRX not ready
+   (unit u-use-mtrx "Use DR Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 ((usereg INT -1)) ; inputs
+	 () ; outputs
+	 () ; profile action (default)
+	 )
+
+   ; Use TR unit -- stalls if TR not ready
+   (unit u-use-tr "Use TR Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 ((usereg INT -1)) ; inputs
+	 () ; outputs
+	 () ; profile action (default)
+	 )
+
+   ; BLINK unit
+   (unit u-blink "BLINK Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 ((targetreg INT -1)) ; inputs
+	 ((pc)) ; outputs
+	 () ; profile action (default)
+	 )
+
+   ; Conditional Branch unit
+   (unit u-cond-branch "Conditional branch Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 ((targetreg INT -1)) ; inputs
+	 ((pc)) ; outputs
+	 () ; profile action (default)
+	 )
+
+   ; FDIV.D unit
+   (unit u-fdivd "FDIV.D Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 () ; inputs
+	 ((loadreg INT -1)) ; outputs
+	 () ; profile action (default)
+	 )
+
+   ; FSQRT.D unit
+   (unit u-fsqrtd "FSQRT.D Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 () ; inputs
+	 ((loadreg INT -1)) ; outputs
+	 () ; profile action (default)
+	 )
+
+   ; FTRV.S unit
+   (unit u-ftrvs "FTRVS Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 () ; inputs
+	 ((loadreg INT -1)) ; outputs
+	 () ; profile action (default)
+	 )
+
+   ; PT* unit
+   (unit u-pt "PT* Unit" ()
+	 0 0 ; issue done
+	 () ; state
+	 () ; inputs
+	 ((targetreg INT -1)) ; outputs
+	 () ; profile action (default)
+	 )
+
+   ; GETCFG unit
+   (unit u-getcfg "GETCFG unit" ()
+	 0 0 ; issue done
+	 () () () ())
+
+   ; PUTCFG unit
+   (unit u-putcfg "PUTCFG unit" ()
+	 0 0 ; issue done
+	 () () () ())
+  )
+)
+
+; This macro is for all machines with identical timing
+(define-pmacro (common-model xmach)
+  (.splice define-model
+    (name xmach)
+    (comment (.str xmach " reference implementation"))
+    (mach xmach)
+    (.unsplice (common-units))
+;    (unit u-set-sr "Set SR Unit" ()
+;	  0 1 ; issue done
+;	  () () () ())
+  )
+)
+
+; This macro is for all fpu enabled machines with identical timing
+(define-pmacro (common-model-with-fp xmach)
+  (.splice define-model
+    (name xmach)
+    (comment (.str xmach " reference implementation"))
+    (mach xmach)
+    (.unsplice (common-units))
+    (.unsplice (common-fp-units))
+;    (unit u-set-sr "Set SR Unit" ()
+;	  0 1 ; issue done
+;	  () () () ())
+  )
+)
+
+; This macro is for all machines sh3 and up with identical timing
+(define-pmacro (sh3-model xmach)
+  (.splice define-model
+    (name xmach)
+    (comment (.str xmach " reference implementation"))
+    (mach xmach)
+    (.unsplice (common-units))
+;    (.unsplice (sh3-common-units))
+  )
+)
+
+; This macro is for all fpu enabled machines sh3e and up with identical timing
+(define-pmacro (sh3e-model xmach)
+  (.splice define-model
+    (name xmach)
+    (comment (.str xmach " reference implementation"))
+    (mach xmach)
+    (.unsplice (common-units))
+    (.unsplice (common-fp-units))
+;    (.unsplice (sh3-common-units))
+  )
+)
+
+; The actual models
+; sh2a-nofpu model
+(.splice define-model
+  (name sh2a-nofpu)
+  (comment "sh2a-nofpu reference implementation")
+  (mach sh2a-nofpu)
+  (.unsplice (common-units))
+;  (unit u-set-sr "Set SR Unit" ()
+;	0 1 ; issue done
+;	() () () ())
+  (.unsplice (sh2a-nofpu-units))
+)
+
+; sh2a-fpu model
+(.splice define-model
+  (name sh2a-fpu)
+  (comment "sh2a-fpu reference implementation")
+  (mach sh2a-fpu)
+  (.unsplice (common-units))
+  (.unsplice (common-fp-units))
+;  (unit u-set-sr "Set SR Unit" ()
+;	0 1 ; issue done
+;	() () () ())
+  (.unsplice (sh2a-nofpu-units))
+  (.unsplice (sh2a-fpu-units))
+)
+
+; sh4-nofpu model
+(.splice define-model
+  (name sh4-nofpu)
+  (comment "sh4 nofpu reference implementation")
+  (mach sh4-nofpu)
+  (.unsplice (common-units))
+;  (.unsplice (sh3-common-units))
+  (.unsplice (sh2a-nofpu-units))
+  (.unsplice (sh4-nofpu-units))
+)
+
+; sh4 model
+(.splice define-model
+  (name sh4)
+  (comment "sh4 reference implementation")
+  (mach sh4)
+  (.unsplice (common-units))
+  (.unsplice (common-fp-units))
+;  (.unsplice (sh3-common-units))
+  (.unsplice (sh2a-fpu-units))
+  (.unsplice (sh2a-nofpu-units))
+  (.unsplice (sh4-nofpu-units))
+  (.unsplice (sh4-common-fp-units))
+)
+
+; sh4a-nofpu model
+(.splice define-model
+  (name sh4a-nofpu)
+  (comment "sh4a no fpu reference implementation")
+  (mach sh4a-nofpu)
+  (.unsplice (common-units))
+  (.unsplice (common-fp-units))
+  (.unsplice (sh2a-nofpu-units))
+;  (.unsplice (sh3-common-units))
+  (.unsplice (sh4-nofpu-units))
+)
+
+; sh4a model
+(.splice define-model
+  (name sh4a)
+  (comment "sh4a reference implementation")
+  (mach sh4a)
+  (.unsplice (common-units))
+  (.unsplice (common-fp-units))
+  (.unsplice (sh2a-nofpu-units))
+;  (.unsplice (sh3-common-units))
+  (.unsplice (sh4-nofpu-units))
+  (.unsplice (sh4-common-fp-units))
+)
+
+; sh4al model
+(.splice define-model
+  (name sh4al)
+  (comment "sh4al reference implementation")
+  (mach sh4al)
+  (.unsplice (common-units))
+  (.unsplice (common-fp-units))
+  (.unsplice (sh2a-nofpu-units))
+;  (.unsplice (sh3-common-units))
+  (.unsplice (sh4-nofpu-units))
+)
+
+; sh5 model
+(.splice define-model
+  (name sh5)
+  (comment "sh5 reference implementation")
+  (mach sh5)
+  (.unsplice (common-units))
+  (.unsplice (common-fp-units))
+;  (.unsplice (sh3-common-units))
+  (.unsplice (sh2a-fpu-units))
+  (.unsplice (sh2a-nofpu-units))
+  (.unsplice (sh4-nofpu-units))
+  (.unsplice (sh4-common-fp-units))
+)
+
+; sh5-media model
+(.splice define-model
+  (name sh5-media)
+  (comment "sh5 media reference implementation")
+  (mach sh5)
+; ------ some of are not used --- should be separated into
+; comon_model/compact_model
+  (.unsplice (common-units))
+  (.unsplice (common-fp-units))
+;  (.unsplice (sh3-common-units))
+  (.unsplice (sh2a-fpu-units))
+  (.unsplice (sh2a-nofpu-units))
+  (.unsplice (sh4-nofpu-units))
+  (.unsplice (sh4-common-fp-units))
+; --------------------------------------------------------
+  (.unsplice (sh5-media-units))
+  (.unsplice (sh5-media-fp-units))
+)
+
+; Generate all the remaining models.
+(common-model         sh2)
+(common-model-with-fp sh2e)
+(sh3-model            sh3)
+(sh3e-model           sh3e)
+
+; Used to generate a timing which is the same for all models
+(define-pmacro (all-models units)
+  ((.splice sh2        (.unsplice units))
+   (.splice sh2e       (.unsplice units))
+   (.splice sh2a-fpu   (.unsplice units))
+   (.splice sh2a-nofpu (.unsplice units))
+   (.splice sh3        (.unsplice units))
+   (.splice sh3e       (.unsplice units))
+   (.splice sh4-nofpu  (.unsplice units))
+   (.splice sh4        (.unsplice units))
+   (.splice sh4a-nofpu (.unsplice units))
+   (.splice sh4a       (.unsplice units))
+   (.splice sh4al      (.unsplice units))
+   (.splice sh5        (.unsplice units)))
+)
+
+; Used to generate a timing which is the same for sh2e and up.
+(define-pmacro (sh2e-models units)
+  ((.splice sh2e       (.unsplice units))
+   (.splice sh2a-fpu   (.unsplice units))
+   (.splice sh3e       (.unsplice units))
+   (.splice sh4        (.unsplice units))
+   (.splice sh4a       (.unsplice units))
+   (.splice sh5        (.unsplice units)))
+)
+
+; Used to generate a timing which is the same for sh2a and up.
+(define-pmacro (sh2a-nofpu-models units)
+  ((.splice sh2a-fpu   (.unsplice units))
+   (.splice sh2a-nofpu (.unsplice units))
+   (.splice sh4        (.unsplice units))
+   (.splice sh4-nofpu  (.unsplice units))
+   (.splice sh5        (.unsplice units)))
+)
+
+; Used to generate a timing which is the same for sh2a and up.
+(define-pmacro (sh2a-fpu-models units)
+  ((.splice sh2a-fpu   (.unsplice units))
+   (.splice sh4        (.unsplice units))
+   (.splice sh5        (.unsplice units)))
+)
+
+; Used to generate a timing which is the same for sh3 and up.
+(define-pmacro (sh3-models units)
+  ((.splice sh3        (.unsplice units))
+   (.splice sh3e       (.unsplice units))
+   (.splice sh4-nofpu  (.unsplice units))
+   (.splice sh4        (.unsplice units))
+   (.splice sh4a-nofpu (.unsplice units))
+   (.splice sh4a       (.unsplice units))
+   (.splice sh4al      (.unsplice units))
+   (.splice sh5        (.unsplice units)))
+)
+
+; Used to generate a timing which is the same for sh3e and up.
+(define-pmacro (sh3e-models units)
+  ((.splice sh3e       (.unsplice units))
+   (.splice sh4        (.unsplice units))
+   (.splice sh4a       (.unsplice units))
+   (.splice sh5        (.unsplice units)))
+)
+
+; Used to generate a timing which is the same for sh4-nofpu and up.
+(define-pmacro (sh4-nofpu-models units)
+  ((.splice sh4-nofpu  (.unsplice units))
+   (.splice sh4        (.unsplice units))
+   (.splice sh4a-nofpu (.unsplice units))
+   (.splice sh4a       (.unsplice units))
+   (.splice sh4al      (.unsplice units))
+   (.splice sh5        (.unsplice units)))
+)
+
+; Used to generate a timing which is the same for sh4 and up.
+(define-pmacro (sh4-models units)
+  ((.splice sh4   (.unsplice units))
+   (.splice sh4a  (.unsplice units))
+   (.splice sh5   (.unsplice units)))
+)
+
+; Used to generate a timing which is the same for sh4-nofpu and up.
+(define-pmacro (sh4a-nofpu-models units)
+  ((.splice sh4a-nofpu (.unsplice units))
+   (.splice sh4a       (.unsplice units))
+   (.splice sh4al      (.unsplice units))
+   (.splice sh5        (.unsplice units)))
+)
+
+; Used to generate a timing which is the same for sh5 and up.
+(define-pmacro (sh5-media-models units)
+  ((.splice sh5-media (.unsplice units)))
+)
+
+; Used to generate timing for SHAD insn
+(define-pmacro (shad-models units)
+  ((.splice sh2a-fpu   (.unsplice units))
+   (.splice sh2a-nofpu (.unsplice units))
+   (.splice sh3        (.unsplice units))
+   (.splice sh3e       (.unsplice units))
+   (.splice sh4-nofpu  (.unsplice units))
+   (.splice sh4        (.unsplice units))
+   (.splice sh4a-nofpu (.unsplice units))
+   (.splice sh4a       (.unsplice units))
+   (.splice sh4al      (.unsplice units))
+   (.splice sh5        (.unsplice units)))
+)
+
+; Used to generate a timing for the FSQRT insn
+(define-pmacro (fsqrt-models units)
+  ((.splice sh2a-fpu   (.unsplice units))
+   (.splice sh3e       (.unsplice units))
+   (.splice sh4        (.unsplice units))
+   (.splice sh4a       (.unsplice units))
+   (.splice sh5        (.unsplice units)))
+)
+
+
+; Hardware elements.
+
+(define-hardware
+  (name h-pc)
+  (comment "Program counter")
+  (attrs PC PROFILE (ISA compact,media))
+  (type pc UDI)
+  (get () (raw-reg h-pc))
+  (set (newval) (sequence ()
+			  (set (raw-reg h-ism) (and newval 1))
+			  (set (raw-reg h-pc) (and newval (inv UDI 1)))))
+)
+
+(define-pmacro (-build-greg-name n) ((.sym r n) n))
+
+(define-hardware
+  (name h-gr)
+  (comment "General purpose integer registers")
+  (attrs PROFILE (ISA media,compact))
+  (type register DI (64))
+  (indices keyword "" (.map -build-greg-name (.iota 64)))
+  (get (index)
+       (if DI (eq index 63)
+	   (const 0)
+	   (raw-reg h-gr index)))
+  (set (index newval)
+       (if (ne index 63)
+	   (set (raw-reg h-gr index) newval)
+	   (nop)))
+)
+
+(define-hardware
+  (name h-grc)
+  (comment "General purpose integer registers (SHcompact view)")
+  (attrs VIRTUAL PROFILE (ISA compact))
+  (type register SI (16))
+  (indices keyword "" (.map -build-greg-name (.iota 16)))
+  (get (index)
+	(and (raw-reg h-gr index) (zext DI #xFFFFFFFF)))
+  (set (index newval)
+       (set (raw-reg h-gr index) (ext DI newval)))
+)
+
+(define-pmacro (-build-creg-name n) ((.sym cr n) n))
+
+(define-hardware
+  (name h-cr)
+  (comment "Control registers")
+  (attrs (ISA media))
+  (type register DI (64))
+  (indices keyword "" (.map -build-creg-name (.iota 64)))
+  (get (index)
+       (if DI (eq index 0)
+	   (zext DI (reg h-sr))
+	   (raw-reg h-cr index)))
+  (set (index newval)
+       (if (eq index 0)
+	   (set (raw-reg h-sr) newval)
+	   (set (raw-reg h-cr index) newval)))
+)
+
+(define-hardware
+  (name h-sr)
+  (comment "Status register")
+  (attrs (ISA compact,media))
+  (type register SI)
+)
+
+(define-hardware
+  (name h-fpscr)
+  (comment "Floating point status and control register")
+  (attrs (ISA compact,media))
+  (type register SI)
+)
+
+(define-hardware
+  (name h-frbit)
+  (comment "Floating point register file bit")
+  (attrs (ISA media,compact) VIRTUAL)
+  (type register BI)
+  (get () (and (srl (reg h-fpscr) 21) 1))
+  (set (newvalue) (set (reg h-fpscr) (or (and (reg h-fpscr) (inv (sll 1 21))) (sll SI newvalue 21))))
+)
+
+(define-hardware
+  (name h-szbit)
+  (comment "Floating point transfer size bit")
+  (attrs (ISA media,compact) VIRTUAL)
+  (type register BI)
+  (get () (and (srl (reg h-fpscr) 20) 1))
+  (set (newvalue) (set (reg h-fpscr) (or (and (reg h-fpscr) (inv (sll 1 20))) (sll SI newvalue 20))))
+)
+
+(define-hardware
+  (name h-prbit)
+  (comment "Floating point precision bit")
+  (attrs (ISA media,compact) VIRTUAL)
+  (type register BI)
+  (get () (and (srl (reg h-fpscr) 19) 1))
+  (set (newvalue) (set (reg h-fpscr) (or (and (reg h-fpscr) (inv (sll 1 19))) (sll SI newvalue 19))))
+)
+
+(define-hardware
+  (name h-sbit)
+  (comment "Multiply-accumulate saturation flag")
+  (attrs (ISA compact) VIRTUAL)
+  (type register BI)
+  (get () (and (srl (reg h-sr) 1) 1))
+  (set (newvalue) (set (reg h-sr) (or (and (reg h-sr) (inv 2)) (sll SI newvalue 1))))
+)
+
+(define-hardware
+  (name h-mbit)
+  (comment "Divide-step M flag")
+  (attrs (ISA compact) VIRTUAL)
+  (type register BI)
+  (get () (and (srl (reg h-sr) 9) 1))
+  (set (newvalue) (set (reg h-sr) (or (and (reg h-sr) (inv (sll 1 9))) (sll SI newvalue 9))))
+)
+
+(define-hardware
+  (name h-qbit)
+  (comment "Divide-step Q flag")
+  (attrs (ISA compact) VIRTUAL)
+  (type register BI)
+  (get () (and (srl (reg h-sr) 8) 1))
+  (set (newvalue) (set (reg h-sr) (or (and (reg h-sr) (inv (sll 1 8))) (sll SI newvalue 8))))
+)
+
+(define-pmacro (-build-freg-name n) ((.sym fr n) n))
+
+(define-hardware
+  (name h-fr)
+  (comment "Single precision floating point registers")
+  (attrs PROFILE (ISA media,compact))
+  (type register SF (64))
+  (indices keyword "" (.map -build-freg-name (.iota 64)))
+)
+
+
+(define-pmacro (-build-fpair-name n) ((.sym fp n) n))
+
+(define-hardware
+  (name h-fp)
+  (comment "Single precision floating point register pairs")
+  (attrs VIRTUAL PROFILE (ISA media,compact))
+  (type register SF (64))
+  (indices keyword "" (.map -build-fpair-name
+			    (0 2 4 6 8 10 12 14 16 18 20 22 24 26 28 30
+			     32 34 36 38 40 42 44 46 48 50 52 54 56 58 60 62)))
+  (get (index) (reg h-fr index))
+  (set (index newval) (set (reg h-fr index) newval))
+)
+
+(define-pmacro (-build-fvec-name n) ((.sym fv n) n))
+
+(define-hardware
+  (name h-fv)
+  (comment "Single precision floating point vectors")
+  (attrs VIRTUAL PROFILE (ISA media,compact))
+  (type register SF (64))
+  (indices keyword "" (.map -build-fvec-name
+			    (0 4 8 12 16 20 24 28 32 36 40 44 48 52 56 60)))
+  (get (index) (reg h-fr index))
+  (set (index newval) (set (reg h-fr index) newval))
+)
+
+(define-hardware
+  (name h-fmtx)
+  (comment "Single precision floating point matrices")
+  (attrs VIRTUAL PROFILE (ISA media))
+  (type register SF (64))
+  (indices keyword "" ((mtrx0 0) (mtrx16 16) (mtrx32 32) (mtrx48 48)))
+  (get (index) (reg h-fr index))
+  (set (index newval) (set (reg h-fr index) newval))
+)
+
+(define-pmacro (-build-dreg-name n) ((.sym dr n) n))
+
+(define-hardware
+  (name h-dr)
+  (comment "Double precision floating point registers")
+  (attrs VIRTUAL PROFILE (ISA media,compact))
+  (type register DF (64))
+  (indices keyword "" (.map -build-dreg-name
+			    (0 2 4 6 8 10 12 14 16 18 20 22 24 26 28 30
+			     32 34 36 38 40 42 44 46 48 50 52 54 56 58 60 62)))
+  (get (index)
+       (subword DF
+		(or
+		 (sll DI (zext DI (subword SI (reg h-fr index) 0)) 32)
+		 (zext DI (subword SI (reg h-fr (add index 1)) 0))) 0))
+  (set (index newval)
+       (sequence ()
+		 (set (reg h-fr index)
+		      (subword SF (subword SI newval 0) 0))
+		 (set (reg h-fr (add index 1))
+		      (subword SF (subword SI newval 1) 0))))
+)
+
+(define-hardware
+  (name h-fsd)
+  (comment "Single/Double precision floating point registers")
+  (attrs PROFILE (ISA compact,media) (SH2e-MACH))
+  (type register DF (16))
+  (indices keyword "" (.map -build-freg-name (.iota 16)))
+  (get (index)
+       (if DF prbit (reg h-drc index) (fext DF (reg h-fr index))))
+  (set (index newval)
+       (if prbit
+	   (set (reg h-drc index) newval)
+	   (set (reg h-frc index) (ftrunc SF newval))))
+)
+
+(define-pmacro (even x) (eq (and x 1) 0))
+(define-pmacro (odd x)  (eq (and x 1) 1))
+(define-pmacro (extd x) (odd x))
+
+(define-hardware
+  (name h-fmov)
+  (comment "floating point registers for fmov")
+  (attrs PROFILE (ISA compact,media) (SH2e-MACH))
+  (type register DF (16))
+  (indices keyword "" (.map -build-freg-name (.iota 16)))
+  (get (index)
+       (if DF (not szbit)
+	   ; single precision operation
+	   (fext DF (reg h-frc index))
+	   ; double or extended operation
+	   (if DF (extd index)
+	       (reg h-xd (and index (inv 1)))
+	       (reg h-dr index))))
+  (set (index newval)
+       (if (not szbit)
+	   ; single precision operation
+	   (set (reg h-frc index) (ftrunc SF newval))
+	   ; double or extended operation
+	   (if (extd index)
+	       (set (reg h-xd (and index (inv 1))) newval)
+	       (set (reg h-dr index) newval))))
+)
+
+(define-hardware
+  (name h-tr)
+  (comment "Branch target registers")
+  (attrs (ISA media) PROFILE)
+  (type register DI (8))
+  (indices keyword "" ((tr0 0) (tr1 1) (tr2 2) (tr3 3) (tr4 4) (tr5 5) (tr6 6) (tr7 7)))
+)
+
+(define-hardware
+  (name h-endian)
+  (comment "Current endian mode")
+  (attrs (ISA compact,media) VIRTUAL)
+  (type register BI)
+  (get () (c-call BI "sh64_endian"))
+  (set (newval) (error "cannot alter target byte order mid-program"))
+)
+
+(define-hardware
+  (name h-ism)
+  (comment "Current instruction set mode")
+  (attrs (ISA compact,media))
+  (type register BI)
+  (get () (raw-reg h-ism))
+  (set (newval) (error "cannot set ism directly"))
+)
+
+
+; Operands.
+
+(dnop endian "Endian mode" ((ISA compact,media)) h-endian f-nil)
+(dnop ism    "Instruction set mode" ((ISA compact,media)) h-ism f-nil)
+
+; Universally useful macros.
+
+; A pmacro for use in semantic bodies of unimplemented insns.
+(define-pmacro (unimp mnemonic) (nop))
+
+; Join 2 ints together in natural bit order.
+(define-pmacro (-join-si s1 s0)
+  (or (sll (zext DI s1) 32)
+      (zext DI s0)))
+
+; Join 4 half-ints together in natural bit order.
+(define-pmacro (-join-hi h3 h2 h1 h0)
+  (or (sll (zext DI h3) 48)
+      (or (sll (zext DI h2) 32)
+	  (or (sll (zext DI h1) 16)
+	      (zext DI h0)))))
+
+; Join 8 quarter-ints together in natural bit order.
+(define-pmacro (-join-qi b7 b6 b5 b4 b3 b2 b1 b0)
+  (or (sll (zext DI b7) 56)
+      (or (sll (zext DI b6) 48)
+	  (or (sll (zext DI b5) 40)
+	      (or (sll (zext DI b4) 32)
+		  (or (sll (zext DI b3) 24)
+		      (or (sll (zext DI b2) 16)
+			  (or (sll (zext DI b1) 8)
+			      (zext DI b0)))))))))
+
+
+; Include the two instruction set descriptions from their respective
+; source files.
+
+(if (keep-isa? (compact))
+    (include "sh64-compact.cpu"))
+
+(if (keep-isa? (media))
+    (include "sh64-media.cpu"))

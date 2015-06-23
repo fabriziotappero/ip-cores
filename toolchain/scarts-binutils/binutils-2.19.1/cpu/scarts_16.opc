@@ -1,0 +1,216 @@
+/* SCARTS_16 architecture description.  -*- Scheme -*-
+   Copyright 2000, 2001 Free Software Foundation, Inc.
+   Contributed by Martin Walter <mwalter@opencores.org>
+
+   This file is part of the GNU Binutils.
+
+   This program is free software; you can redistribute it and/or modify
+   it under the terms of the GNU General Public License as published by
+   the Free Software Foundation; either version 2 of the License, or
+   (at your option) any later version.
+
+   This program is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+   GNU General Public License for more details.
+
+   You should have received a copy of the GNU General Public License
+   along with this program; if not, write to the Free Software
+   Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+*/
+
+/* This file is an addendum to scarts_16.cpu. Heavy use of C code isn't
+   appropriate in .cpu files, so it resides here. This especially applies
+   to assembly/disassembly where parsing/printing can be quite involved.
+   Such things aren't really part of the specification of the cpu, per se,
+   so .cpu files provide the general framework and .opc files handle the
+   nitty-gritty details as necessary.
+
+   Each section is delimited with start and end markers.
+
+   <arch>-opc.h additions use: "-- opc.h"
+   <arch>-opc.c additions use: "-- opc.c"
+   <arch>-asm.c additions use: "-- asm.c"
+   <arch>-dis.c additions use: "-- dis.c"
+   <arch>-ibd.h additions use: "-- ibd.h".
+*/
+
+/* -- opc.h */
+#define CGEN_DIS_HASH_SIZE 1
+#define CGEN_DIS_HASH(buffer, value) 0
+
+#define CGEN_VALIDATE_INSN_SUPPORTED
+#define CGEN_VERBOSE_ASSEMBLER_ERRORS
+
+extern int scarts_16_cgen_insn_supported(CGEN_CPU_DESC, const CGEN_INSN *);
+
+/* -- */
+
+/* -- opc.c */
+/* -- */
+
+/* -- asm.c */
+static const char * MISSING_CLOSING_PARENTHESIS = N_("missing `)'");
+
+int
+scarts_16_cgen_insn_supported (CGEN_CPU_DESC cd, const CGEN_INSN *insn)
+{
+  return (CGEN_INSN_ATTR_VALUE(insn, CGEN_INSN_MACH) & cd->machs) != 0;
+}
+
+static const char *
+parse_simm8 (CGEN_CPU_DESC cd, const char **strp, int opindex, long *valuep)
+{
+  const char *errmsg;
+  enum cgen_parse_operand_result result_type;
+  unsigned long result;
+
+  if (strncasecmp(*strp, "lo(", 3) == 0)
+  {
+    bfd_vma value;
+
+    *strp += 3;
+    errmsg = cgen_parse_address(cd, strp, opindex, BFD_RELOC_SCARTS_16_LO, &result_type, &value);
+
+    if (**strp != ')')
+      return MISSING_CLOSING_PARENTHESIS;
+
+    *strp += 1;
+    if (errmsg == NULL && result_type == CGEN_PARSE_OPERAND_RESULT_NUMBER)
+    {
+      if (value & 0x1)
+        return _("immediate value must be even");
+
+      value >>= 1;
+    }
+
+    result = value;
+  }
+  else if (strncasecmp(*strp, "hi(", 3) == 0)
+  {
+    bfd_vma value;
+
+    *strp += 3;
+    errmsg = cgen_parse_address(cd, strp, opindex, BFD_RELOC_SCARTS_16_HI, &result_type, &value);
+
+    if (**strp != ')')
+      return MISSING_CLOSING_PARENTHESIS;
+
+    *strp += 1;
+    if (errmsg == NULL && result_type == CGEN_PARSE_OPERAND_RESULT_NUMBER)
+    {
+      if (value & 0x1)
+        return _("immediate value must be even");
+ 
+      value >>= 9;
+    }
+
+    result = value;
+  }
+  else
+  {
+    if (**strp == '-')
+    {
+      long value;
+
+      errmsg = cgen_parse_signed_integer(cd, strp, opindex, &value);
+      result = value;
+    }
+    else
+    {
+      unsigned long value;
+
+      errmsg = cgen_parse_unsigned_integer(cd, strp, opindex, &value);
+      result = value;
+    }
+  }
+
+  *valuep = ((result & 0xFF) ^ 0x80) - 0x80;
+  return errmsg;
+}
+
+static const char *
+parse_uimm8 (CGEN_CPU_DESC cd, const char **strp, int opindex, unsigned long *valuep)
+{
+  const char *errmsg;
+  enum cgen_parse_operand_result result_type;
+  unsigned long result;
+
+  if (strncasecmp(*strp, "lo(", 3) == 0)
+  {
+    bfd_vma value;
+
+    *strp += 3;
+    errmsg = cgen_parse_address(cd, strp, opindex, BFD_RELOC_SCARTS_16_LO, &result_type, &value);
+    
+    if (**strp != ')')
+      return MISSING_CLOSING_PARENTHESIS;
+    
+    *strp += 1;
+    if (errmsg == NULL && result_type == CGEN_PARSE_OPERAND_RESULT_NUMBER)
+    {
+      if (value & 0x1)
+        return _("immediate value must be even");
+
+      value >>= 1;
+    }
+
+    result = value;
+  }
+  else if (strncasecmp(*strp, "hi(", 3) == 0)
+  {
+    bfd_vma value;
+
+    *strp += 3;
+    errmsg = cgen_parse_address(cd, strp, opindex, BFD_RELOC_SCARTS_16_HI, &result_type, &value);
+    
+    if (**strp != ')')
+      return MISSING_CLOSING_PARENTHESIS;
+    
+    *strp += 1;
+    if (errmsg == NULL && result_type == CGEN_PARSE_OPERAND_RESULT_NUMBER)
+    {
+      if (value & 0x1)
+        return _("immediate value must be even");
+
+      value >>= 9;
+    }
+
+    result = value;
+  }
+  else
+  {
+    unsigned long value;
+    
+    errmsg = cgen_parse_unsigned_integer(cd, strp, opindex, &value);
+    result = value;
+  }
+
+  *valuep = result & 0xFF;
+  return errmsg;
+}
+
+static const char *
+parse_saddr10_pcrel (CGEN_CPU_DESC cd, const char **strp, int opindex, long *valuep)
+{
+  const char *errmsg;
+  enum cgen_parse_operand_result result_type;
+  bfd_vma value;
+
+  errmsg = cgen_parse_address(cd, strp, opindex, BFD_RELOC_SCARTS_16_PCREL_10, &result_type, &value);
+  if (errmsg == NULL && result_type == CGEN_PARSE_OPERAND_RESULT_NUMBER)
+  {
+    if (value & 0x1)
+      return _("immediate value must be even");
+  }
+
+  *valuep = ((value & 0x3FF) ^ 0x200) - 0x200;
+  return errmsg;
+}
+/* -- */
+
+/* -- dis.c */
+/* -- */
+
+/* -- ibd.h */
+/* -- */

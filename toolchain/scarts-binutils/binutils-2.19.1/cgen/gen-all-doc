@@ -1,0 +1,131 @@
+#! /bin/sh
+# Utility script to generate html docs for all ports.
+
+# Run this script in the src/cgen directory.
+
+# Exit on any error.
+set -e
+
+# For debugging.
+set -x
+
+# ??? Some are missing, need to add them after some research.
+#../cpu/m32c.cpu
+#../cpu/xc16x.cpu
+archs="
+cpu/fr30.cpu
+cpu/arm.cpu
+../cpu/frv.cpu
+cpu/i960.cpu
+cpu/ip2k.cpu
+../cpu/iq2000.cpu
+../cpu/lm32.cpu
+../cpu/m32r.cpu
+cpu/mep.cpu
+../cpu/mt.cpu
+cpu/openrisc.cpu
+cpu/xstormy16.cpu
+"
+
+if [ ! -f sim.scm ]
+then
+    echo "Not in the src/cgen directory." >& 2
+    exit 1
+fi
+
+export builddir=tmp-doc
+
+rm -rf $builddir
+mkdir $builddir
+
+export cgendir=`pwd`
+
+(
+  set -e
+  set -x
+  cd $builddir
+  $cgendir/configure --prefix /tmp/junk --target m32r-elf
+
+  for a in $archs
+  do
+    archfile=../$a
+    arch=$(basename $archfile .cpu)
+
+    case $arch in
+    arm)
+      make html ARCH=$arch ARCHFILE=$archfile ISAS=arm INSN_FILE_NAME=arm-arm-insn.html
+      mv arm.html arm-arm.html
+      mv arm-insn.html arm-arm-insn.html
+      make html ARCH=$arch ARCHFILE=$archfile ISAS=thumb INSN_FILE_NAME=arm-thumb-insn.html
+      mv arm.html arm-thumb.html
+      mv arm-insn.html arm-thumb-insn.html
+      ;;
+    frv)
+      make html ARCH=$arch ARCHFILE=$archfile MACHS="frv,simple,tomcat,fr400" INSN_FILE_NAME=frv-1-insn.html
+      mv frv.html frv-1.html
+      mv frv-insn.html frv-1-insn.html
+      make html ARCH=$arch ARCHFILE=$archfile MACHS="fr500" INSN_FILE_NAME=frv-2-insn.html
+      mv frv.html frv-2.html
+      mv frv-insn.html frv-2-insn.html
+      make html ARCH=$arch ARCHFILE=$archfile MACHS="fr550" INSN_FILE_NAME=frv-3-insn.html
+      mv frv.html frv-3.html
+      mv frv-insn.html frv-3-insn.html
+      ;;
+    *)
+      make html ARCH=$arch ARCHFILE=$archfile
+      ;;
+    esac
+  done
+)
+
+(
+  set -e
+  set -x
+  cd $builddir
+
+  rm -f index.html
+
+  cat > index.html <<EOF
+<html>
+<head>
+<title>CGEN Machine Generated Documentation</title>
+</head>
+<body>
+
+<h1>Machine Generated Documentation</h1>
+
+<ul>
+EOF
+
+  lower="abcdefghijklmnopqrstuvwxyz"
+  upper="ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+  for html in *.html
+  do
+    name=""
+
+    case $html in
+    *-insn.html) ;;
+    index.html) ;;
+    arm-arm.*) name="ARM" ;;
+    arm-thumb.*) name="ARM Thumb" ;;
+    frv-1.*) name="FRV FR400" ;;
+    frv-2.*) name="FRV FR500" ;;
+    openrisc.*) name="Openrisc" ;;
+    xstormy16.*) name="Xstormy16" ;;
+    *) name=`echo ${html/.html} | tr $lower $upper` ;;
+    esac
+
+    if [ "$name" != "" ]
+    then
+      echo "<li><a href=\"$html\">$name</a>" >> index.html
+    fi
+  done
+
+  cat >> index.html <<EOF
+</ul>
+
+</body>
+</html>
+EOF
+)

@@ -1,0 +1,766 @@
+; SPARC 32/64 CPU description.  -*- Scheme -*-
+; This file contains instructions common to both sparc32/sparc64.
+; It also contains sparc32/64 specific insns, but only when they are a variant
+; of a collection of common ones.
+; Copyright (C) 2000 Red Hat, Inc.
+; This file is part of CGEN.
+; See file COPYING.CGEN for details.
+
+; Notes:
+; - sparc64 support wip
+; - fp support todo
+; - source file layout wip
+; - cpu family layout wip
+
+; Lots of sparc insns have either reg/reg or reg/simm13 cases.  */
+
+(define-pmacro (op3-reg-fmt op3-code)
+  (+ OP_2 op3-code rd rs1 rs2 (f-i 0) (f-res-asi 0))
+)
+(define-pmacro (op3-imm-fmt op3-code)
+  (+ OP_2 op3-code rd rs1 (f-i 1) simm13)
+)
+
+; Load/Store ops
+
+(define-pmacro (ld-op name comment attrs op3 mode dest)
+  (begin
+    (dnmi (.sym name "-reg+g0") comment attrs
+	  (.str name " [$rs1],$" dest)
+	  (emit (.sym name -reg+reg) rs1 (rs2 0) dest))
+    (dnmi (.sym name "-reg+0") comment attrs
+	  (.str name " [$rs1],$" dest)
+	  (emit (.sym name -reg+imm) rs1 (simm13 0) dest))
+    (dni (.sym name "-reg+reg") comment attrs
+	 (.str name " [$rs1+$rs2],$" dest)
+	 (+ OP_3 op3 dest rs1 (f-i 0) (f-res-asi 0) rs2)
+	 (set mode dest (mem mode (add WI rs1 rs2)))
+	 ())
+    (dni (.sym name "-reg+imm") comment attrs
+	 (.str name " [$rs1+$simm13],$" dest)
+	 (+ OP_3 op3 dest rs1 (f-i 1) simm13)
+	 (set mode dest (mem mode (add WI rs1 simm13)))
+	 ())
+    (dnmi (.sym name "-reg/asi") comment attrs
+	  (.str name " [$rs1]$asi,$" dest)
+	  (emit (.sym name -reg+reg/asi) rs1 (rs2 0) asi dest))
+    (dni (.sym name "-reg+reg/asi") comment attrs
+	 (.str name " [$rs1+$rs2]$asi,$" dest)
+	 (+ OP_3 (.sym op3 A) dest rs1 (f-i 0) asi rs2)
+	 (set mode dest (mem mode (add WI rs1 rs2)))
+	 ())
+    )
+)
+(ld-op ldsb "load signed byte"       ()         OP3_LDSB QI  rd)
+(ld-op ldub "load unsigned byte"     ()         OP3_LDUB UQI rd)
+(ld-op ldsh "load signed halfword"   ()         OP3_LDSH HI  rd)
+(ld-op lduh "load unsigned halfword" ()         OP3_LDUH UHI rd)
+(ld-op ldsw "load signed word"       ()         OP3_LDSW SI  rd)
+(ld-op lduw "load unsigned word"     ()         OP3_LDUW USI rd)
+(ld-op ldx  "load extended word"     ((MACH64)) OP3_LDX  DI  rd)
+
+; Aliases are treated as such (ALIAS attribute) so we can use ld-op.
+; ??? Perhaps lduw should be the alias.  Let's leave it like this for now.
+(ld-op ld   "load word"              (ALIAS)  OP3_LDUW SI  rd)
+
+; ??? This would work with special operand get/set support but
+; it's not clear this case justifies implementing that yet.
+;(ld-op ldd  "load double reg"        ()       OP3_LDD  DI  rdd)
+
+(dnmi ldd-reg+g0 "load double reg, reg+g0" ()
+      "ldd [$rs1],$rdd"
+      (emit ldd-reg+reg rs1 (rs2 0) rdd)
+)
+(dnmi ldd-reg+0 "load double reg, reg+0" ()
+      "ldd [$rs1],$rdd"
+      (emit ldd-reg+imm rs1 (simm13 0) rdd)
+)
+(dni ldd-reg+reg "load double reg, reg+reg" ()
+     "ldd [$rs1+$rs2],$rdd"
+     (+ OP_3 OP3_LDD rdd rs1 (f-i 0) (f-res-asi 0) rs2)
+     (sequence ((DI temp))
+	       (set temp (mem DI (add WI rs1 rs2)))
+	       (set rdd (subword SI temp (const 0)))
+	       (set (reg h-gr (add (regno rdd) (const 1)))
+		    (subword SI temp (const 1))))
+     ()
+)
+(dni ldd-reg+imm "load double reg, reg+imm" ()
+     "ldd [$rs1+$simm13],$rdd"
+     (+ OP_3 OP3_LDD rdd rs1 (f-i 1) simm13)
+     (sequence ()
+	       (set rdd (mem SI (add WI rs1 simm13)))
+	       (set (reg h-gr (add (regno rdd) (const 1)))
+		    (mem SI (add rs1 (add simm13 (const 4))))))
+     ()
+)
+(dnmi ldd-reg/asi "load double reg, reg+g0/asi" ()
+      "ldd [$rs1]$asi,$rdd"
+      (emit ldd-reg+reg/asi rs1 (rs2 0) asi rdd)
+)
+(dni ldd-reg+reg/asi "load double reg, reg+reg/asi" ()
+     "ldd [$rs1+$rs2]$asi,$rdd"
+     (+ OP_3 OP3_LDDA rdd rs1 (f-i 0) asi rs2)
+     (sequence ()
+	       (set rdd (mem SI (add WI rs1 rs2)))
+	       (set (reg h-gr (add (regno rdd) (const 1)))
+		    (mem SI (add rs1 (add rs2 (const 4))))))
+     ()
+)
+
+(define-pmacro (st-op name comment attrs op3 mode src)
+  (begin
+    (dnmi (.sym name "-reg+g0") comment attrs
+	  (.str name " $" src ",[$rs1]")
+	  (emit (.sym name -reg+reg) src rs1 (rs2 0)))
+    (dnmi (.sym name "-reg+0") comment attrs
+	  (.str name " $" src ",[$rs1]")
+	  (emit (.sym name -reg+imm) src rs1 (simm13 0)))
+    (dni (.sym name "-reg+reg") comment attrs
+	 (.str name " $" src ",[$rs1+$rs2]")
+	 (+ OP_3 op3 src rs1 (f-i 0) (f-res-asi 0) rs2)
+	 (set mode (mem mode (add WI rs1 rs2)) src)
+	 ())
+    (dni (.sym name "-reg+imm") comment attrs
+	 (.str name " $" src ",[$rs1+$simm13]")
+	 (+ OP_3 op3 src rs1 (f-i 1) simm13)
+	 (set mode (mem mode (add WI rs1 simm13)) src)
+	 ())
+    (dnmi (.sym name "-reg/asi") comment attrs
+	  (.str name " $" src ",[$rs1]$asi")
+	  (emit (.sym name -reg+reg/asi) src rs1 (rs2 0) asi))
+    (dni (.sym name "-reg+reg/asi") comment attrs
+	 (.str name " $" src ",[$rs1+$rs2]$asi")
+	 (+ OP_3 (.sym op3 A) src rs1 (f-i 0) asi rs2)
+	 (set mode (mem mode (add WI rs1 rs2)) src)
+	 ())
+    )
+)
+(st-op stb "store byte"          ()       OP3_STB QI rd)
+(st-op sth "store halfword"      ()       OP3_STH HI rd)
+(st-op st  "store word"          ()       OP3_STW SI rd)
+(st-op stx "store extended word" ((MACH64)) OP3_STX DI rd)
+
+; ??? This would work with special operand get/set support but
+; it's not clear this case justifies implementing that yet.
+;(st-op std "store double reg"    ()       OP3_STD DI rdd)
+
+(dnmi std-reg+g0 "store double reg, reg+g0" ()
+      "std $rdd,[$rs1]"
+      (emit std-reg+reg rdd rs1 (rs2 0))
+)
+(dnmi std-reg+0 "store double reg, reg+0" ()
+      "std $rdd,[$rs1]"
+      (emit std-reg+imm rdd rs1 (simm13 0))
+)
+(dni std-reg+reg "store double reg, reg+reg" ()
+     "std $rdd,[$rs1+$rs2]"
+     (+ OP_3 OP3_STD rdd rs1 (f-i 0) (f-res-asi 0) rs2)
+     (sequence ()
+	       (set (mem SI (add rs1 rs2)) rdd)
+	       (set (mem SI (add rs1 (add rs2 (const 4))))
+		    (reg h-gr (add (regno rdd) (const 1)))))
+     ()
+)
+(dni std-reg+imm "store double reg, reg+imm" ()
+     "std $rdd,[$rs1+$simm13]"
+     (+ OP_3 OP3_STD rdd rs1 (f-i 1) simm13)
+     (sequence ()
+	       (set (mem SI (add rs1 simm13)) rdd)
+	       (set (mem SI (add rs1 (add simm13 (const 4))))
+		    (reg h-gr (add (regno rdd) (const 1)))))
+     ()
+)
+(dnmi std-reg/asi "store double reg, reg+g0/asi" ()
+      "std $rdd,[$rs1]$asi"
+      (emit std-reg+reg/asi rdd rs1 (rs2 0) asi)
+)
+(dni std-reg+reg/asi "store double reg, reg+reg/asi" ()
+     "std $rdd,[$rs1+$rs2]$asi"
+     (+ OP_3 OP3_STDA rdd rs1 (f-i 0) asi rs2)
+     (sequence ()
+	       (set (mem SI (add rs1 rs2)) rdd)
+	       (set (mem SI (add rs1 (add rs2 (const 4))))
+		    (reg h-gr (add (regno rdd) (const 1)))))
+     ()
+)
+
+; nop
+; A nop is defined to be a sethi of %g0.
+; This needn't be a macro-insn, but making it one greatly simplifies decode.c
+; as code needn't be generated to confirm hi22 == 0.
+; On the other hand spending a little time in the decoder is often worth it.
+
+(dnmi nop "nop"
+      ()
+      "nop"
+      (emit sethi (rd 0) (hi22 0))
+)
+
+; sethi
+
+(dni sethi "sethi" ()
+     "sethi $hi22,$rd"
+     (+ OP_0 rd OP2_SETHI hi22)
+     (set rd (sll USI hi22 (const 10))) ; (set SI rd hi22)
+     ()
+)
+
+; Add/Subtract
+
+(define-pmacro (s32-set-addc-flags a b carry)
+  (sequence ((SI x))
+	    (set x (addc a b carry))
+	    (set icc-c (add-cflag a b carry))
+	    (set icc-v (add-oflag a b carry))
+	    (set icc-n (nflag x))
+	    (set icc-z (zflag x)))
+)
+(define-pmacro (s32-set-subc-flags a b carry)
+  (sequence ((SI x))
+	    (set x (subc a b carry))
+	    (set icc-c (sub-cflag a b carry))
+	    (set icc-v (sub-oflag a b carry))
+	    (set icc-n (nflag x))
+	    (set icc-z (zflag x)))
+)
+
+(define-pmacro (s64-set-addc-flags a b carry)
+  (sequence ((SI x32) (DI x))
+	    (set x (addc a b carry))
+	    (set x32 x)
+	    (set icc-c (add-cflag SI a b carry))
+	    (set icc-v (add-oflag SI a b carry))
+	    (set icc-n (nflag x32))
+	    (set icc-z (zflag x32))
+	    (set xcc-c (add-cflag a b carry))
+	    (set xcc-v (add-oflag a b carry))
+	    (set xcc-n (nflag x))
+	    (set xcc-z (zflag x)))
+)
+(define-pmacro (s64-set-subc-flags a b carry)
+  (sequence ((SI x32) (DI x))
+	    (set x (subc a b carry))
+	    (set x32 x)
+	    (set icc-c (sub-cflag SI a b carry))
+	    (set icc-v (sub-oflag SI a b carry))
+	    (set icc-n (nflag x32))
+	    (set icc-z (zflag x32))
+	    (set xcc-c (sub-cflag a b carry))
+	    (set xcc-v (sub-oflag a b carry))
+	    (set xcc-n (nflag x))
+	    (set xcc-z (zflag x)))
+)
+
+(define-pmacro (arith-binop name comment page attrs op3 sem-op)
+  (begin
+    (dni name
+	 (.str comment ", " page)
+	 attrs
+	 (.str name " $rs1,$rs2,$rd")
+	 (+ OP_2 op3 rd rs1 rs2 (f-i 0) (f-res-asi 0))
+	 (set rd (sem-op rs1 rs2))
+	 ())
+    (dni (.sym name -imm)
+	 (.str comment " immediate, " page)
+	 attrs
+	 (.str name " $rs1,$simm13,$rd")
+	 (+ OP_2 op3 rd rs1 (f-i 1) simm13)
+	 (set rd (sem-op rs1 simm13))
+	 ())
+    )
+)
+(define-pmacro (arith-cc-binop name comment page attrs op3 sem-op
+			       s32-set-flags s64-set-flags)
+  (begin
+    (dni name
+	 (.str comment ", setting cc, " page)
+	 attrs
+	 (.str name " $rs1,$rs2,$rd")
+	 (+ OP_2 op3 rd rs1 rs2 (f-i 0) (f-res-asi 0))
+	 (sequence ()
+		   (if (eq-attr (current-mach) ARCH64 TRUE)
+		       (s64-set-flags rs1 rs2 (const 0))
+		       (s32-set-flags rs1 rs2 (const 0)))
+		   (set rd (sem-op rs1 rs2))
+		   )
+	 ())
+    (dni (.sym name -imm)
+	 (.str comment " immediate, setting cc, " page)
+	 attrs
+	 (.str name " $rs1,$simm13,$rd")
+	 (+ OP_2 op3 rd rs1 (f-i 1) simm13)
+	 (sequence ()
+		   (if (eq-attr (current-mach) ARCH64 TRUE)
+		       (s64-set-flags rs1 simm13 (const 0))
+		       (s32-set-flags rs1 simm13 (const 0)))
+		   (set rd (sem-op rs1 simm13))
+		   )
+	 ())
+    )
+)
+(arith-binop add "add" "v8 page ??, v9 page 135" () OP3_ADD add)
+(arith-binop sub "subtract" "v8 page ??, v9 page 230" () OP3_SUB sub)
+(arith-cc-binop addcc "add" "v8 page ??, v9 page 135" () OP3_ADDCC add
+		s32-set-addc-flags s64-set-addc-flags)
+(arith-cc-binop subcc "subtract" "v8 page ??, v9 page 230" () OP3_SUBCC sub
+		s32-set-subc-flags s64-set-subc-flags)
+
+; Same except include carry bit.
+
+(define-pmacro (arith-carry-binop name comment page attrs op3 sem-op)
+  (begin
+    (dni name
+	 (.str comment " with carry, " page)
+	 attrs
+	 (.str name " $rs1,$rs2,$rd")
+	 (+ OP_2 op3 rd rs1 rs2 (f-i 0) (f-res-asi 0))
+	 (set rd (sem-op rs1 rs2 icc-c))
+	 ())
+    (dni (.sym name -imm)
+	 (.str comment " immediate with carry, " page)
+	 attrs
+	 (.str name " $rs1,$simm13,$rd")
+	 (+ OP_2 op3 rd rs1 (f-i 1) simm13)
+	 (set rd (sem-op rs1 simm13 icc-c))
+	 ())
+    )
+)
+(define-pmacro (arith-carry-cc-binop name comment page attrs op3 sem-op set-flags)
+  (begin
+    (dni name
+	 (.str comment " with carry, setting cc, " page)
+	 attrs
+	 (.str name " $rs1,$rs2,$rd")
+	 (+ OP_2 op3 rd rs1 rs2 (f-i 0) (f-res-asi 0))
+	 (sequence ()
+		   (set-flags rs1 rs2 icc-c)
+		   (set rd (sem-op rs1 rs2 icc-c))
+		   )
+	 ())
+    (dni (.sym name -imm)
+	 (.str comment " immediate with carry, setting cc, " page)
+	 attrs
+	 (.str name " $rs1,$simm13,$rd")
+	 (+ OP_2 op3 rd rs1 (f-i 1) simm13)
+	 (sequence ()
+		   (set-flags rs1 simm13 icc-c)
+		   (set rd (sem-op rs1 simm13 icc-c))
+		   )
+	 ())
+    )
+)
+; mach32 versions
+(arith-carry-binop addx "add" "v8 page ??" ((MACH32)) OP3_ADDX addc)
+(arith-carry-binop subx "subtract" "v8 page ??" ((MACH32)) OP3_SUBX subc)
+(arith-carry-cc-binop addxcc "add" "v8 page ??" ((MACH32)) OP3_ADDXCC addc
+		      s32-set-addc-flags)
+(arith-carry-cc-binop subxcc "subtract" "v8 page ??" ((MACH32)) OP3_SUBXCC subc
+		      s32-set-subc-flags)
+; mach64 versions
+; same as mach32 except mnemonic is different
+(arith-carry-binop addc "add" "v9 page 135" ((MACH64)) OP3_ADDC addc)
+(arith-carry-binop subc "subtract" "v9 page 230" ((MACH64)) OP3_SUBC subc)
+(arith-carry-cc-binop addccc "add" "v9 page 135" ((MACH64)) OP3_ADDCCC addc
+		      s64-set-addc-flags)
+(arith-carry-cc-binop subccc "subtract" "v9 page 230" ((MACH64)) OP3_SUBCCC subc
+		      s64-set-subc-flags)
+
+; Binary boolean ops
+
+(define-pmacro (s32-set-bool-flags x)
+  (sequence ()
+	    (set icc-z (zflag x))
+	    (set icc-n (nflag x))
+	    (set icc-c (const 0))
+	    (set icc-v (const 0))
+	    )
+)
+(define-pmacro (s64-set-bool-flags x)
+  (sequence ()
+	    (set icc-z (zflag (trunc SI x)))
+	    (set icc-n (nflag (trunc SI x)))
+	    (set icc-c (const 0))
+	    (set icc-v (const 0))
+	    (set xcc-z (zflag x))
+	    (set xcc-n (nflag x))
+	    (set xcc-c (const 0))
+	    (set xcc-v (const 0))
+	    )
+)
+
+(define-pmacro (bool-binop name page op3 sem-op)
+  (begin
+    (dni name (.str name ", " page) ()
+	 (.str name " $rs1,$rs2,$rd")
+	 (+ OP_2 op3 rd rs1 rs2 (f-i 0) (f-res-asi 0))
+	 (set rd (sem-op rs1 rs2))
+	 ())
+    (dni (.sym name -imm) (.str name " immediate, " page) ()
+	 (.str name " $rs1,$simm13,$rd")
+	 (+ OP_2 op3 rd rs1 (f-i 1) simm13)
+	 (set rd (sem-op rs1 simm13))
+	 ())
+    (dni (.sym name cc) (.str name ", setting cc, " page) ()
+	 (.str name "cc $rs1,$rs2,$rd")
+	 (+ OP_2 (.sym op3 CC) rd rs1 rs2 (f-i 0) (f-res-asi 0))
+	 (sequence ()
+		   (if (eq-attr (current-mach) ARCH64 TRUE)
+		       (s64-set-bool-flags (sem-op rs1 rs2))
+		       (s32-set-bool-flags (sem-op rs1 rs2)))
+		   (set rd (sem-op rs1 rs2))
+		   )
+	 ())
+    (dni (.sym name cc-imm) (.str name " immediate, setting cc, " page) ()
+	 (.str name "cc $rs1,$simm13,$rd")
+	 (+ OP_2 (.sym op3 CC) rd rs1 (f-i 1) simm13)
+	 (sequence ()
+		   (if (eq-attr (current-mach) ARCH64 TRUE)
+		       (s64-set-bool-flags (sem-op rs1 simm13))
+		       (s32-set-bool-flags (sem-op rs1 simm13)))
+		   (set rd (sem-op rs1 simm13))
+		   )
+	 ())
+    )
+)
+(bool-binop and "v9 page 181" OP3_AND and)
+(bool-binop or  "v9 page 181" OP3_OR  or)
+(bool-binop xor "v9 page 181" OP3_XOR xor)
+
+; Early experiments.
+;(dsmn (andn a b) (list 'and a (list 'inv b)))
+;(dsmn (orn a b) (list 'or a (list 'inv b)))
+;(dsmn (xorn a b) (list 'xor a (list 'inv b)))
+
+(define-pmacro (sem-andn a b) (and a (inv b)))
+(define-pmacro (sem-orn a b) (or a (inv b)))
+(define-pmacro (sem-xorn a b) (xor a (inv b)))
+
+(bool-binop andn "v9 page 181" OP3_ANDN sem-andn)
+(bool-binop orn  "v9 page 181" OP3_ORN  sem-orn)
+(bool-binop xnor "v9 page 181" OP3_XNOR sem-xorn)
+
+; Shifts
+
+(define-pmacro (shift-binop name comment op3 sem-op)
+  (begin
+     (dni name comment ()
+	  (.str name " $rs1,$rs2,$rd")
+	  (+ OP_2 op3 rd rs1 rs2 (f-i 0) (f-res-asi 0))
+	  (set rd (sem-op rs1 (and rs2 (const 31))))
+	  ())
+     (dni (.sym name -imm) (.str comment -imm) ()
+	  (.str name " $rs1,$simm13,$rd")
+	  (+ OP_2 op3 rd rs1 (f-i 1) simm13)
+	  ; ??? v9 uses only the low bits.  v8?
+	  (set rd (sem-op rs1 (and simm13 (const 31))))
+	  ())
+     )
+)
+(shift-binop sll "shift left logical" OP3_SLL sll)
+(shift-binop srl "shift right logical" OP3_SRL srl)
+(shift-binop sra "shift right arithmetic" OP3_SRA sra)
+
+; Multiply/Divide
+
+(define-pmacro (mult-binop name comment op3 sem-op ext-op)
+  (begin
+     (dni name comment ()
+	  (.str name " $rs1,$rs2,$rd")
+	  (+ OP_2 op3 rd rs1 rs2 (f-i 0) (f-res-asi 0))
+	  (sequence ((DI res))
+		    (set res (sem-op (ext-op DI rs1) (ext-op DI rs2)))
+		    (set (reg WI h-y) (trunc SI (srl res (const 32))))
+		    (set rd (trunc SI res))
+		    )
+	  ())
+     (dni (.sym name -imm) (.str comment -imm) ()
+	  (.str name " $rs1,$simm13,$rd")
+	  (+ OP_2 op3 rd rs1 (f-i 1) simm13)
+	  (sequence ((DI res))
+		    (set res (sem-op (ext-op DI rs1) (ext-op DI simm13)))
+		    (set (reg WI h-y) (trunc SI (srl res (const 32))))
+		    (set rd (trunc SI res))
+		    )
+	  ())
+     (dni (.sym name -cc) (.str comment -cc) ()
+	  (.str name "cc $rs1,$rs2,$rd")
+	  (+ OP_2 (.sym op3 CC) rd rs1 rs2 (f-i 0) (f-res-asi 0))
+	  (sequence ((DI res))
+		    (set res (sem-op (ext-op DI rs1) (ext-op DI rs2)))
+		    (set (reg WI h-y) (trunc SI (srl res (const 32))))
+		    (set rd (trunc SI res))
+		    ; We use bool-flags here 'cus it works (FIXME:revisit).
+		    ; We can't use rd here 'cus it might be %g0.
+		    (s32-set-bool-flags (trunc SI res))
+		    )
+	  ())
+     (dni (.sym name -cc-imm) (.str comment -cc-imm) ()
+	  (.str name "cc $rs1,$simm13,$rd")
+	  (+ OP_2 (.sym op3 CC) rd rs1 (f-i 1) simm13)
+	  (sequence ((DI res))
+		    (set res (sem-op (ext-op DI rs1) (ext-op DI simm13)))
+		    (set (reg WI h-y) (trunc SI (srl res (const 32))))
+		    (set rd (trunc SI res))
+		    ; We use bool-flags here 'cus it works (FIXME:revisit).
+		    ; We can't use rd here 'cus it might be %g0.
+		    (s32-set-bool-flags (trunc SI res))
+		    )
+	  ())
+     )
+)
+(mult-binop smul "smul" OP3_SMUL mul ext)
+(mult-binop umul "umul" OP3_UMUL mul zext)
+
+(define-pmacro (div-binop name comment mach-attrs op3 sem-op ext-op set-flags)
+  (begin
+    (dni name (.str comment ", v9 page 152") ((mach-attrs))
+	 (.str name " $rs1,$rs2,$rd")
+	 (+ OP_2 op3 rd rs1 rs2 (f-i 0) (f-res-asi 0))
+	 (sequence ((DI dividend))
+		   (set dividend (join DI SI (reg SI h-y) rs1))
+		   (set rd (trunc SI (sem-op dividend (ext-op DI rs2))))
+		   ; FIXME: Overflow,etc. handling.
+		   )
+	 ())
+    (dni (.sym name -imm) (.str comment -imm ", v9 page 152") ((mach-attrs))
+	 (.str name " $rs1,$simm13,$rd")
+	 (+ OP_2 op3 rd rs1 (f-i 1) simm13)
+	 (sequence ((DI dividend))
+		   (set dividend (join DI SI (reg SI h-y) rs1))
+		   (set rd (trunc SI (sem-op dividend (ext-op DI simm13))))
+		   ; FIXME: Overflow,etc. handling.
+		   )
+	 ())
+    (dni (.sym name -cc) (.str comment -cc ", v9 page 152") ((mach-attrs))
+	 (.str name "cc $rs1,$rs2,$rd")
+	 (+ OP_2 (.sym op3 CC) rd rs1 rs2 (f-i 0) (f-res-asi 0))
+	 (sequence ((DI dividend))
+		   (set dividend (join DI SI (reg SI h-y) rs1))
+		   (set rd (trunc SI (sem-op dividend (ext-op DI rs2))))
+		   ; FIXME: Overflow,etc. handling.
+		   set-flags
+		   )
+	 ())
+    (dni (.sym name -cc-imm) (.str comment -cc-imm ", v9 page 152") ((mach-attrs))
+	 (.str name "cc $rs1,$simm13,$rd")
+	 (+ OP_2 (.sym op3 CC) rd rs1 (f-i 1) simm13)
+	 (sequence ((DI dividend))
+		   (set dividend (join DI SI (reg SI h-y) rs1))
+		   (set rd (trunc SI (sem-op dividend (ext-op DI simm13))))
+		   ; FIXME: Overflow,etc. handling.
+		   set-flags
+		   )
+	 ())
+    )
+)
+(div-binop sdiv "sdiv" MACH32 OP3_SDIV div ext (s32-set-bool-flags rd))
+(div-binop udiv "udiv" MACH32 OP3_UDIV div zext (s32-set-bool-flags rd))
+
+; Multiply/Step
+
+(dni mulscc "multiply step" ()
+     "mulscc $rs1,$rs2,$rd"
+     (+ OP_2 OP3_MULSCC rd rs1 rs2 (f-i 0) (f-res-asi 0))
+     (sequence ((SI tmp) (SI add-tmp) (SI rd-tmp))
+	       ; v8 page 112, step 2
+	       (set tmp (srl SI rs1 (const 1)))
+	       (if (ne (xor BI (reg BI h-icc-n) (reg BI h-icc-v))
+		       (const 0))
+		   (set tmp (or SI tmp (const SI #x80000000))))
+	       ; step 3
+	       (if (ne (and SI (reg SI h-y) (const 1)) (const 0))
+		   (set add-tmp rs2)
+		   (set add-tmp (const 0)))
+	       ; step 4
+	       (set rd-tmp (add tmp add-tmp))
+	       ; step 5
+	       (s32-set-addc-flags tmp add-tmp (const 0))
+	       ;(set (reg UQI h-cc) (addc-cc tmp add-tmp (const 0)))
+	       ; step 6
+	       (set (reg SI h-y) (srl SI (reg SI h-y) (const 1)))
+	       (if (ne (and SI rs1 (const 1)) (const 0))
+		   (set (reg SI h-y) (or SI (reg SI h-y) (const SI #x80000000))))
+	       ; rd first created in rd-tmp so step 6 gets right value for rs1
+	       (set SI rd rd-tmp)
+	       )
+     ()
+)
+
+; Window ops
+; V8 page 117
+
+(define-pmacro (window-binop name comment op3 handler)
+  (begin
+     (dni name comment ()
+	  (.str name " $rs1,$rs2,$rd")
+	  (+ OP_2 op3 rd rs1 rs2 (f-i 0) (f-res-asi 0))
+	  (set rd (c-call WI handler pc rs1 rs2))
+	  ())
+     (dni (.sym name -imm) (.str comment -imm) ()
+	  (.str name " $rs1,$simm13,$rd")
+	  (+ OP_2 op3 rd rs1 (f-i 1) simm13)
+	  (set rd (c-call WI handler pc rs1 simm13))
+	  ())
+     )
+)
+(window-binop save "save caller's window" OP3_SAVE "@cpu@_do_save")
+(window-binop restore "restore caller's window" OP3_RESTORE "@cpu@_do_restore")
+
+; Trap stuff
+
+(dni rett "return from trap" ()
+     "rett $rs1,$rs2"
+     (+ OP_2 OP3_RETT (f-rd 0) rs1 rs2 (f-i 0) (f-res-asi 0))
+     (delay (const 1)
+	    (set pc (c-call WI "@cpu@_do_rett" pc rs1 rs2)))
+     ()
+)
+(dni rett-imm "return from trap, immediate" ()
+     "rett $rs1,$simm13"
+     (+ OP_2 OP3_RETT (f-rd 0) rs1 (f-i 1) simm13)
+     (delay (const 1)
+	    (set pc (c-call WI "@cpu@_do_rett" pc rs1 simm13)))
+     ()
+)
+
+; Misc.
+
+(dni unimp "unimplemented" ()
+     "unimp $imm22"
+     (+ OP_0 (f-rd-res 0) OP2_UNIMP imm22)
+     (c-call VOID "@arch@_do_unimp" pc imm22)
+     ()
+)
+
+; Subroutine calls, returns.
+
+(dnmi call-reg,0 "call reg,0" ()
+     "call $rs1,0" ; FIXME: what's the ,0 suffix for?
+     (emit jmpl rs1 (rd 15) (rs2 0))
+)
+
+(dnmi call-reg "call reg" ()
+     "call $rs1"
+     (emit jmpl rs1 (rd 15) (rs2 0))
+)
+
+(dnmi call,0 "call,0" ()
+     "call $disp30,0" ; FIXME: what's the ,0 suffix for?
+     (emit call disp30)
+)
+
+(dni call "call" (DELAY-SLOT)
+     "call $disp30"
+     (+ OP_1 disp30)
+     (sequence ()
+	       (set (reg h-gr 15) pc)
+	       (delay (const 1)
+		      (set pc disp30)))
+     ()
+)
+
+(dni jmpl "jmpl" (DELAY-SLOT)
+     "jmpl $rs1+$rs2,$rd"
+     (op3-reg-fmt OP3_JMPL)
+     (sequence ()
+	       (set rd pc)
+	       (delay (const 1)
+		      (set pc (add WI rs1 rs2))))
+     ()
+)
+
+(dni jmpl-imm "jmpl" (DELAY-SLOT)
+     "jmpl $rs1+$simm13,$rd"
+     (op3-imm-fmt OP3_JMPL)
+     (sequence ()
+	       (set rd pc)
+	       (delay (const 1)
+		      (set pc (add WI rs1 simm13))))
+     ()
+)
+
+;(dsn (icc-op op) (cx:make BI (string-append "icc (" op ")")))
+;(dsn (icc-op op) (list 'c-call: 'BI "icc" (reg UQI h-cc) (.str op)))
+;(dsmn (icc-op op) (list 'c-call: 'BI "icc" '(reg UQI h-cc) (.str op)))
+;(define-pmacro (icc-op op) (c-call BI "icc" (reg UQI h-cc) (.str op)))
+
+; Branches
+
+(define-pmacro (bicc-branch bname tname comment cond test br-sem)
+  (begin
+    (dni bname (.str "branch " comment) (V9-DEPRECATED)
+	 (.str bname "$a $disp22")
+	 (+ OP_0 a cond OP2_BICC disp22)
+	 (br-sem test icc)
+	 ())
+    (dni tname (.str "trap " comment) (TRAP)
+	 (.str tname " $rs1,$rs2")
+	 (+ OP_2 (f-a 0) cond (f-op3 #x3a) rs1 (f-i 0) (f-res-asi 0) rs2)
+	 (if (test icc)
+	     (set pc (c-call IAI "@cpu@_sw_trap" pc rs1 rs2)))
+	  ())
+    (dni (.sym tname -imm) (.str "trap-imm " comment) (TRAP)
+	  (.str tname " $rs1,$simm13")
+	  (+ OP_2 (f-a 0) cond (f-op3 #x3a) rs1 (f-i 1) simm13)
+	  (if (test icc)
+	      (set pc (c-call IAI "@cpu@_sw_trap" pc rs1 simm13)))
+	  ())
+    )
+)
+; test-*,uncond-br-sem,cond-br-sem are defined in sparc.cpu.
+(bicc-branch ba   ta   "always" CC_A   test-always uncond-br-sem)
+(bicc-branch bn   tn   "never"  CC_N   test-never uncond-br-sem)
+(bicc-branch bne  tne  "ne"     CC_NE  test-ne cond-br-sem)
+(bicc-branch be   te   "eq"     CC_E   test-eq cond-br-sem)
+(bicc-branch bg   tg   "gt"     CC_G   test-gt cond-br-sem)
+(bicc-branch ble  tle  "le"     CC_LE  test-le cond-br-sem)
+(bicc-branch bge  tge  "ge"     CC_GE  test-ge cond-br-sem)
+(bicc-branch bl   tl   "lt"     CC_L   test-lt cond-br-sem)
+(bicc-branch bgu  tgu  "gtu"    CC_GU  test-gtu cond-br-sem)
+(bicc-branch bleu tleu "leu"    CC_LEU test-leu cond-br-sem)
+(bicc-branch bcc  tcc  "geu"    CC_CC  test-geu cond-br-sem)
+(bicc-branch bcs  tcs  "ltu"    CC_CS  test-ltu cond-br-sem)
+(bicc-branch bpos tpos "pos"    CC_POS test-pos cond-br-sem)
+(bicc-branch bneg tneg "neg"    CC_NEG test-neg cond-br-sem)
+(bicc-branch bvc  tvc  "vc"     CC_VC  test-vc cond-br-sem)
+(bicc-branch bvs  tvs  "vs"     CC_VS  test-vs cond-br-sem)
+
+; Atomic load/stores.
+
+(define-pmacro (atomic-op name comment attrs op3 do_fn)
+  (begin
+    (dnmi (.sym name "-reg") comment attrs
+	  (.str name " [$rs1],$rd")
+	  (emit (.sym name -reg+reg) rs1 (rs2 0) rd))
+    (dnmi (.sym name "-reg+0") comment attrs
+	  (.str name " [$rs1],$rd")
+	  (emit (.sym name -reg+imm) rs1 (simm13 0) rd))
+    (dni (.sym name "-reg+reg") comment attrs
+	 (.str name " [$rs1+$rs2],$rd")
+	 (+ OP_3 op3 rd rs1 (f-i 0) (f-res-asi 0) rs2)
+	 (c-call do_fn pc (regno rd) rs1 rs2 (const -1))
+	 ())
+    (dni (.sym name "-reg+imm") comment attrs
+	 (.str name " [$rs1+$simm13],$rd")
+	 (+ OP_3 op3 rd rs1 (f-i 1) simm13)
+	 (c-call do_fn pc (regno rd) rs1 simm13 (const -1))
+	 ())
+    (dnmi (.sym name "-reg/asi") comment attrs
+	  (.str name " [$rs1]$asi,$rd")
+	  (emit (.sym name "-reg+reg/asi") rs1 (rs2 0) asi rd))
+    (dni (.sym name "-reg+reg/asi") comment attrs
+	 (.str name " [$rs1+$rs2]$asi,$rd")
+	 (+ OP_3 (.sym op3 A) rd rs1 (f-i 0) asi rs2)
+	 (c-call do_fn pc (regno rd) rs1 rs2 asi)
+	 ())
+    )
+)
+(atomic-op ldstub "atomic load-store unsigned byte, v9 page 179" ()
+	 OP3_LDSTUB "@cpu@_do_ldstub")
+(atomic-op swap "atomic swap reg with mem" (V9-DEPRECATED)
+	 OP3_SWAP "@cpu@_do_swap")
+
+; TODO:
+; - tagged add/sub
+; - synthetic insns

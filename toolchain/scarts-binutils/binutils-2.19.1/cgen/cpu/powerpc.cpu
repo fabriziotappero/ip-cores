@@ -1,0 +1,1381 @@
+; CPU description for PowerPC family.  -*- Scheme -*-
+; Copyright (C) 2002 Red Hat, Inc.
+; Written by Johan Rydberg, jrydberg@rtmk.org
+;
+; This program is free software; you can redistribute it and/or modify
+; it under the terms of the GNU General Public License as published by
+; the Free Software Foundation; either version 2 of the License, or
+; (at your option) any later version.
+;
+; This program is distributed in the hope that it will be useful,
+; but WITHOUT ANY WARRANTY; without even the implied warranty of
+; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+; GNU General Public License for more details.
+;
+; You should have received a copy of the GNU General Public License
+; along with this program; if not, write to the Free Software
+; Foundation, Inc., 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.
+
+; Notes:
+
+; Remaining todo is to implement floating point insns.
+; Remaining todo is to implement string integer insns.
+; Remaining todo is to add timing/unit information.
+; Remaining todo is to add insn-level attrs for insns. (partly done)
+; Remaining todo is to add arch-level attrs for insns. (partly done)
+; Remaining todo is to verify insns.
+; Remaining todo is to clean up this file.
+
+(include "simplify.inc")
+
+(define-arch
+  (name powerpc)
+  (comment "PowerPC family")
+  (insn-lsb0? #f)
+  (machs ppc603)
+  (isas ppcisa)
+)
+
+(define-isa
+  (name ppcisa)
+  (base-insn-bitsize 32)
+  (decode-assist (0 1 2 3 4 5))
+)
+  
+(define-cpu
+  (name ppcbf)
+  (comment "PowerPC family")
+  (endian big)
+  (word-bitsize 32)
+)
+
+(define-mach
+  (name ppc603)
+  (comment "PowerPC 603")
+  (cpu ppcbf)
+  (bfd-name "powerpc:603")
+)
+
+; ??? Incomplete.  Pipeline and unit info wrong.
+
+(define-model
+  (name ppc603e) 
+  (comment "PowerPC 603e") 
+  (attrs)
+  (mach ppc603)
+  ;(pipeline all "" () ((fetch) (decode) (execute) (writeback)))
+
+  (unit u-exec "Execution Unit"      () 1 1 () () () ())
+  (unit u-iu  "Integer unit"         () 1 1 () () () ())
+  (unit u-sru "System Register Unit" () 1 1 () () () ())
+  (unit u-fpu "Floating Point Unit"  () 1 1 () () () ())
+  (unit u-lsu "Load/Store Unit"      () 1 1 () () () ())
+  (unit u-bpu "Branch Unit"          () 1 1 () () () ())
+)
+
+; Attributes.
+
+; An attribute to describe which architecture level an insn belongs to.
+(define-attr
+  (for insn)
+  (type enum)
+  (name ARCH-LEVEL)
+  (comment "insn arch selection")
+  (values UISA OEA VEA)
+)
+
+; An attribute to describe if a insn is supervisor-level only.
+(define-attr
+  (for insn)
+  (type enum)
+  (name INSN-LEVEL)
+  (comment "insn level selection")
+  (values USER SUPERVISOR)
+)
+
+
+; Instruction fields.
+
+; Attributes:
+; PCREL-ADDR: pc relative value (for reloc and disassembly purposes)
+; ABS-ADDR: absolute address (for reloc and disassembly purposes?)
+; RESERVED: bits are not used to decode insn, must be all 0
+
+; All of the fields for a I-FORM format instruction.
+
+(dnf f-opcd  "primary opcode field"    () 0  6)
+(dnf f-aa    "aa bit"                  () 30 1)
+(dnf f-lk    "lk bit"                  () 31 1)
+
+; ??? encode/decode RTL for absolute-address?
+(df  f-li    "li"                      (ABS-ADDR) 6  24 INT #f #f)
+
+; Extra fields needed for a B-FORM format instruction.
+
+(dnf f-bo    "bo"                      () 6  5)
+(dnf f-bi    "bi"                      () 11 5)
+(df  f-bd    "bd"                      (ABS-ADDR) 16 14 INT #f #f)
+
+; Extra fields needed for a D-FORM format instruction.
+
+(df  f-simm  "16-bit signed imm"       () 16 16 INT #f #f)
+(dnf f-uimm  "16-bit unsigned imm"     () 16 16)
+(df  f-d     "16-bit signed disp"      () 16 16 INT #f #f)
+(dnf f-l     "l"                       () 10 1)
+
+(dnf f-rd    "gpr destination"         () 6  5)
+(dnf f-ra    "gpr source/destination"  () 11 5)
+(dnf f-rs    "gpr source"              () 6  5)
+(dnf f-crfd  "crfd"                    () 6  3)
+(dnf f-to    "to"                      () 6  5)
+
+; Extra fields needed for a X-FORM instruction.
+
+(dnf f-xo    "extended opcode field"   () 22 9)
+(dnf f-rb    "gpr source"              () 16 5)
+(dnf f-oe    "oe bit"                  () 21 1)
+(dnf f-rc    "rc bit"                  () 31 1)
+(dnf f-mb    "mask begin"              () 21 5)
+(dnf f-me    "mask end"                () 26 5)
+(dnf f-sh    "shift value"             () 16 5)
+(dnf f-crfs  "crfs"                    () 6  3)
+(dnf f-sr    "sr"                      () 12 4)
+
+; FIXME Srm IMM, NB
+
+; Extra fields needed for a XL-FORM instruction.
+
+(dnf f-crba  "cond bit a"              () 11 5)
+(dnf f-crbb  "cond bit b"              () 16 5)
+(dnf f-crbd  "cond bit d"              () 6  5)
+
+; FIXME XFX-FORM, A-FORM, XFL-FORM
+
+(dnf f-tbr   "tbr"                     () 11 10)
+
+(dnf f-spr/l "spr (low)"               () 11 5)
+(dnf f-spr/h "spr (high)"              () 16 5)
+
+(define-multi-ifield
+  (name f-spr)
+  (comment "spr")
+  (attrs)
+  (mode UINT)
+  (subfields f-spr/l f-spr/h)
+  (insert (sequence ()
+		    (set (ifield f-spr/l) (and (ifield f-spr) (const #x1f)))
+		    (set (ifield f-spr/h) (srl (ifield f-spr) (const 5)))))
+  (extract (sequence ()
+		     (set (ifield f-spr) (or (sll (ifield f-spr/h) (const 5))
+					     (ifield f-spr/l)))))
+)
+
+; Rest;
+(dnf f-res/9-1  "reserved" (RESERVED) 9  1)
+(dnf f-res/9-2  "reserved" (RESERVED) 9  2)
+(dnf f-res/14-2 "reserved" (RESERVED) 14 2) 
+(dnf f-res/11-1 "reserved" (RESERVED) 11 1)
+
+
+; Enums.
+
+; insn-opcode
+(define-normal-insn-enum insn-opcd "primary opcode" () OPCD_ f-opcd
+  (.map .str (.iota 64))
+)
+
+(define-normal-insn-enum insn-xof "extended opcode" () XOF_ f-xo
+  (.map .str (.iota 1024))
+)
+
+
+; Hardware pieces
+
+(dnh h-pc "program counter" (PC PROFILE) (pc) () () ())
+
+(define-hardware
+  (name h-gpr)
+  (comment "general purpose registers")
+  (attrs PROFILE)
+  (type register WI (32))
+  (indices keyword ""
+           ; Normal register names
+           ((r0 0)   (r1 1)   (r2 2)   (r3 3)   (r4 4)   (r5 5)   (r6 6)   (r7 7)
+            (r8 8)   (r9 9)   (r10 10) (r11 11) (r12 12) (r13 13) (r14 14) (r15 15) 
+            (r16 16) (r17 17) (r18 18) (r19 19) (r20 20) (r21 21) (r22 22) (r23 23) 
+            (r24 24) (r25 25) (r26 26) (r27 27) (r28 28) (r29 29) (r30 30) (r31 31)
+
+            ; We also support simple integers
+            ("0" 0)   ("1" 1)   ("2" 2)   ("3" 3)   ("4" 4)   ("5" 5)   ("6" 6)   ("7" 7)
+            ("8" 8)   ("9" 9)   ("10" 10) ("11" 11) ("12" 12) ("13" 13) ("14" 14) ("15" 15) 
+            ("16" 16) ("17" 17) ("18" 18) ("19" 19) ("20" 20) ("21" 21) ("22" 22) ("23" 23) 
+            ("24" 24) ("25" 25) ("26" 26) ("27" 27) ("28" 28) ("29" 29) ("30" 30) ("31" 31)))
+)
+
+(define-hardware
+  (name h-spr)
+  (comment "special purpose registers")
+  (attrs PROFILE)
+  (type register WI (1024))
+
+  ; ??? we must check if we're in supervisor mode for registers above
+  ;     10. should we do it here? escape into C code? 
+  (get (index)
+       (cond WI
+	     ((eq index (const 8)) (raw-reg h-lr))
+	     ((eq index (const 9)) (raw-reg h-ctr))
+	     (else (raw-reg h-spr index))))
+
+  (set (index value)
+       (case VOID index
+	     ((8) (set (raw-reg h-lr) value))
+	     ((9) (set (raw-reg h-ctr) value))
+	     (else (set (raw-reg h-spr index) value))))
+)
+
+(define-hardware
+  (name h-tbr)
+  (comment "time base registers")
+  (attrs PROFILE)
+  (type register WI (2)) ; ??? 
+
+  (get (index)
+       (cond WI 
+             ((eq index (const 268)) (raw-reg h-spr 284))
+             ((eq index (const 269)) (raw-reg h-spr 285))
+             (else (const 0)))) ; ??? undefined result
+  ; ??? NYI setter
+)
+
+(define-hardware
+  (name h-sr)
+  (comment "segment registers")
+  (attrs PROFILE)
+  (type register WI (16))
+)
+
+; ??? floating point insns is not yet implemented.
+(define-hardware
+  (name h-fpr)
+  (comment "floating point registers")
+  (attrs PROFILE)
+  (type register DF (32))
+)
+
+(define-hardware
+  (name h-cr)
+  (comment "condition register")
+  (attrs PROFILE)
+  (type register WI)
+)
+
+(define-hardware
+  (name h-cr/s)
+  (comment "condition register split into 8 parts (cr0 ... cr7)")
+  (attrs PROFILE)
+  (type register QI (8))
+  (indices keyword ""
+           ((cr0 0) (cr1 1) (cr2 2) (cr3 3) (cr4 4) (cr5 5) (cr6 6) (cr7 7)
+            ("0" 0) ("1" 1) ("2" 2) ("3" 3) ("4" 4) ("5" 5) ("6" 6) ("7" 7)))
+
+  ; CR fields (0-7) is located on reversed order in CR register; CR0...CR7.
+  (get (index)        
+       (and (srl (reg h-cr) (mul (sub (const 7) index) (const 4))) #xf))
+  (set (index value)
+       (set (reg h-cr) 
+            (or (and (reg h-cr) 
+		     (inv (sll #xf (mul (sub (const 7) index) (const 4)))))
+                (sll value (mul (sub (const 7) index) (const 4))))))
+)
+
+(define-hardware
+  (name h-rc)
+  (comment "record bit")
+  (type immediate (UINT 1))
+  (values keyword "" (("" 0) ("." 1)))
+)
+
+(define-hardware
+  (name h-oe)
+  (comment "overflow bit")
+  (type immediate (UINT 1))
+  (values keyword "" (("" 0) ("o" 1)))
+)
+
+(define-hardware
+  (name h-aa)
+  (comment "absolute address bit")
+  (type immediate (UINT 1))
+  (values keyword "" (("" 0) ("a" 1)))
+)
+
+(define-hardware
+  (name h-lk)
+  (comment "link bit")
+  (type immediate (UINT 1))
+  (values keyword "" (("" 0) ("l" 1)))
+)
+
+; ??? These are actually a part of the XER register.
+(dsh h-xer-so "xer/so bit" () (register BI))
+(dsh h-xer-ov "xer/ov bit" () (register BI))
+(dsh h-xer-ca "xer/ca bit" () (register BI))
+
+; ??? These are actually special purpose registers.
+(dsh h-lr     "lr reg"     () (register WI))
+(dsh h-ctr    "ctr reg"    () (register WI))
+
+(dsh h-msr    "msr reg"    () (register WI))
+
+
+; Instruction Operands.
+; These entries provide a layer between the assembler and the raw hardware
+; description, and are used to refer to hardware elements in the semantic
+; code.  Usually there's a bit of over-specification, but in more complicated
+; instruction sets there isn't.
+
+; Operand fields for a I-FORM format instruction.
+
+(dnop lk     "lk bit"                  () h-lk    f-lk)
+(dnop aa     "aa bit"                  () h-aa    f-aa)
+(dnop li     "li"                      () h-iaddr f-li)
+
+; Operand fields for a B-FORM format instruction.
+
+(dnop bo     "???"                     () h-uint  f-bo)
+(dnop bi     "???"                     () h-uint  f-bi)
+(dnop bd     "bd"                      () h-iaddr f-bd)
+
+; Operand fields for a D-FORM format instruction.
+
+(dnop ra     "source register"         () h-gpr   f-ra)
+(dnop rd     "destination register"    () h-gpr   f-rd)
+(dnop rs     "destination register"    () h-gpr   f-rs)
+
+(dnop simm   "16 bit signed imm"       () h-sint  f-simm)
+(dnop uimm   "16 bit unsigned imm"     () h-uint  f-uimm)
+(dnop crfd   "cond reg dst"            () h-cr/s  f-crfd)
+(dnop d      "16-bit signed disp"      () h-sint  f-d)
+(dnop l      "???"                     () h-uint  f-l)
+(dnop to     "to"                      () h-uint  f-to)
+
+; Operand fields for a X-FORM format instruction.
+
+(dnop rb     "source register"         () h-gpr   f-rb)
+(dnop rc     "rc bit"                  () h-rc    f-rc) ; XXX
+(dnop oe     "oe bit"                  () h-oe    f-oe) ; XXX
+(dnop mb     "mask begin"              () h-uint  f-mb)
+(dnop me     "mask end"                () h-uint  f-me)
+(dnop sh     "shift value"             () h-uint  f-sh)
+(dnop crfs   "cond reg src"            () h-cr/s  f-crfs)
+(dnop sr     "segment reg"             () h-sr    f-sr)
+
+; Operand fields for a XL-FORM format instruction.
+
+(dnop crba   "crba"                    () h-uint  f-crba)
+(dnop crbb   "crbb"                    () h-uint  f-crbb)
+(dnop crbd   "crbd"                    () h-uint  f-crbd)
+
+; Other operand fields.
+
+(dnop spr    "spr"                     () h-spr   f-spr)
+(dnop tbr    "tbr"                     () h-tbr   f-tbr)
+
+(dnop xer-so "xer/so bit"              () h-xer-so f-nil)
+(dnop xer-ov "xer/ov bit"              () h-xer-ov f-nil)
+(dnop xer-ca "xer/ca bit"              () h-xer-ca f-nil)
+
+(dnop lr     "lr"                      () h-lr     f-nil)
+(dnop ctr    "ctr"                     () h-ctr    f-nil)
+
+
+; Misc macros.
+
+(define-pmacro (bit-set? reg bit) (and (srl reg bit) #x1))
+(define-pmacro (bit-set  reg bit) (set reg (or  reg (sll (const 1) bit))))
+(define-pmacro (bit-clr  reg bit) (set reg (and reg (inv (sll (const 1) bit)))))
+
+(define-pmacro (emit-exception exc) (set pc (c-call IAI "@cpu@_trap" pc exc)))
+
+; We do not use a get/set pair for GPRs, since sometimes register 0
+; is not treated as zero. 
+; ??? this can be implemented in CGEN RTL (using (cond ...) and (regno ...)).
+(define-pmacro (reg0? r) (c-call WI "@cpu@_get_reg_or_zero" (regno r)))
+
+; Macro for setting overflow bits in xer register.
+(define-pmacro (set-ov-bits value)
+  (sequence ()
+            (if VOID (eq alu-ov (const 1))
+                (if VOID (eq xer-so (const 0))
+                    (set-quiet xer-so alu-ov)))
+            (set-quiet xer-ov alu-ov))
+)
+
+; Macro for setting carry bit in xer register.
+(define-pmacro (set-ca-bits value) (set-quiet xer-ca value))
+
+; Macro for setting condition bits in cr0 register.
+(define-pmacro (set-cond-bits result)
+  (sequence ((QI value))
+	    (set-quiet value #x0)
+	    (if (lt (ext SI result) (const 0)) (set value (or value #x8)))
+	    (if (gt (ext SI result) (const 0)) (set value (or value #x4)))
+	    (if (eq (ext SI result) (const 0)) (set value (or value #x2)))
+	    ; ??? xer-so?
+	    (set (reg h-cr/s 0) value))
+
+)
+
+(define-pmacro (align-check ea align)
+  (if (ne (const 0) (and ea (sub align 1)))
+      (emit-exception #x1)))
+
+
+; Instruction definitions.
+
+(define-pmacro (alu-op3 name opcd xof sem-op)
+  (dni name (.str name) ()
+       (.str name "$oe$rc $rd,$ra,$rb")
+       (+ opcd xof rd ra rb oe rc)
+       (sequence ((BI alu-ov) (BI alu-ca))
+                 (sem-op rd ra rb)
+                 (if oe (set-ov-bits alu-ov))
+                 (if rc (set-cond-bits rd)))
+       ()
+  )
+)
+
+(define-pmacro (alu-op2 name opcd xof sem-op)
+  (dni name (.str name) ()
+       (.str name "$oe$rc $rd,$ra")
+       (+ opcd xof rd ra (f-rb 0) oe rc)
+       (sequence ((BI alu-ov) (BI alu-ca))
+                 (sem-op rd ra)
+                 (if oe (set-ov-bits alu-ov))
+                 (if rc (set-cond-bits rd)))
+       ()
+  )
+)
+
+(define-pmacro (alu-opimm name opcd sem-op)
+  (dni (.sym name) (.str name) ()
+       (.str name " $rd,$ra,$simm")
+       (+ opcd rd ra simm)
+       (sequence ((BI alu-ov) (BI alu-ca))
+                 (sem-op rd ra simm))
+       ()
+  )
+)
+
+(define-pmacro (mult/reg-op name opcd xof sem-op)
+  (dni name (.str name) ()
+       (.str name "$rc $rd,$ra,$rb")
+       (+ opcd xof rd ra rb (f-oe 0) rc)
+       (sequence ()
+                 (sem-op rd ra rb)
+                 (if rc (set-cond-bits rd)))
+       ()
+  )
+)
+
+(define-pmacro (mult/imm-op name opcd sem-op)
+  (dni name (.str name) ()
+       (.str name " $rd,$ra,$simm")
+       (+ opcd rd ra simm)
+       (sequence ()
+                 (sem-op rd ra simm)
+                 (if rc (set-cond-bits rd)))
+       ()
+  )
+)
+
+(define-pmacro (alu-add dst src1 src2 src3)
+  (sequence ()
+            (set alu-ov (add-oflag src1 src2 src3))
+            (set alu-ca (add-cflag src1 src2 src3))
+            (set dst (addc src1 src2 src3)))
+)
+
+(define-pmacro (alu-sub dst src1 src2 src3)
+  (sequence ()
+            (set alu-ca (sub-cflag src1 src2 src3))
+            (set dst (subc src1 src2 src3)))
+
+)
+
+(define-pmacro (mulhw-expr dst expr1 expr2)
+  (sequence ((DI res))
+            (set res (mul (ext DI expr1) (ext DI expr2)))
+            (set dst (trunc SI (srl res (const 32)))))
+)
+
+(define-pmacro (mulhwu-expr dst expr1 expr2)
+  (sequence ((DI res))
+            (set res (mul (zext DI expr1) (zext DI expr2)))
+            (set dst (trunc SI (srl res (const 32)))))
+)
+
+(define-pmacro (mull-expr dst expr1 expr2)
+  (sequence ()
+            (set dst (mul expr1 expr2)))
+)
+
+(define-pmacro (add-expr dst src1 src2)  (alu-add dst src1 src2 (const 0)))
+(define-pmacro (addc-expr dst src1 src2) 
+  (sequence () (alu-add dst src1 src2 (const 0)) (set-ca-bits alu-ca)))
+(define-pmacro (adde-expr dst src1 src2) 
+  (sequence () (alu-add dst src1 src2 xer-ca) (set-ca-bits alu-ca)))
+(define-pmacro (addme-expr dst src1) 
+  (sequence () (alu-add dst src1 (const -1) xer-ca) (set-ca-bits alu-ca)))
+(define-pmacro (addze-expr dst src1) 
+  (sequence () (alu-add dst src1 (const 0) xer-ca) (set-ca-bits alu-ca)))
+
+(define-pmacro (addis-expr dst src imm) 
+  (alu-add dst (reg0? src) (sll imm (const 16)) (const 0)))
+(define-pmacro (addi-expr dst src imm) (alu-add dst (reg0? src) imm (const 0)))
+(define-pmacro (addic-expr dst src imm)
+  (sequence () (alu-add dst src imm (const 0)) (set-ca-bits alu-ca)))
+(define-pmacro (addicp-expr dst src imm)
+  (sequence () (alu-add dst src imm (const 0)) 
+            (set-ca-bits alu-ca) (set-cond-bits dst)))
+
+(define-pmacro (subf-expr dst src1 src2) (alu-add dst (inv src1) src2 (const 1)))
+(define-pmacro (subfe-expr dst src1 src2) 
+  (sequence () (alu-add dst (inv src1) src2 xer-ca) (set-ca-bits alu-ca)))
+(define-pmacro (subfc-expr dst src1 src2) 
+  (sequence () (alu-add dst (inv src1) src2 (const 1)) (set-ca-bits alu-ca)))
+(define-pmacro (subfic-expr dst src imm)
+  (sequence () (alu-add dst (inv src) (add imm (const 1)) (const 0)) (set-ca-bits alu-ca)))
+(define-pmacro (subfme-expr dst src1) 
+  (sequence () (alu-add dst (inv src1) (const -1) xer-ca) (set-ca-bits alu-ca)))
+(define-pmacro (subfze-expr dst src1) 
+  (sequence () (alu-add dst (inv src1) (const 0) xer-ca)  (set-ca-bits alu-ca)))
+
+(define-pmacro (neg-expr dst src1) (alu-add dst (inv src1) (const 1) (const 0)))
+
+; ??? These two does not handle overflow as they should!
+(define-pmacro (divw-expr dst src1 src2)  (set dst (div src1 src2)))
+(define-pmacro (divwu-expr dst src1 src2) (set dst (udiv src1 src2)))
+
+(alu-op3 add  OPCD_31 XOF_266 add-expr)
+(alu-op3 addc OPCD_31 XOF_10  addc-expr)
+(alu-op3 adde OPCD_31 XOF_138 adde-expr)
+
+(alu-op2 addme OPCD_31 XOF_234 addme-expr)
+(alu-op2 addze OPCD_31 XOF_202 addze-expr)
+
+(alu-opimm addic  OPCD_12 addic-expr)
+(alu-opimm addic. OPCD_13 addicp-expr)
+(alu-opimm addi   OPCD_14 addi-expr)
+(alu-opimm addis  OPCD_15 addis-expr)
+
+(alu-op2 neg   OPCD_31 XOF_104 neg-expr)
+
+(alu-op3 subf   OPCD_31 XOF_40  subf-expr)
+(alu-op3 subfc  OPCD_31 XOF_8   subfc-expr)
+(alu-op3 subfe  OPCD_31 XOF_136 subfe-expr)
+(alu-op2 subfme OPCD_31 XOF_232 subfme-expr)
+(alu-op2 subfze OPCD_31 XOF_200 subfze-expr)
+
+(alu-op3 divw   OPCD_31 XOF_491 divw-expr)
+(alu-op3 divwu  OPCD_31 XOF_459 divwu-expr)
+
+(alu-opimm subfic  OPCD_8 subfic-expr)
+
+(mult/reg-op mulhw  OPCD_31 XOF_75  mulhw-expr)
+(mult/reg-op mulhwu OPCD_31 XOF_11  mulhwu-expr)
+(mult/imm-op mulli  OPCD_7          mull-expr)
+(alu-op3     mullw  OPCD_31 XOF_235 mull-expr)
+
+; Simplified mnmemonics for addi:
+(dnmi li "li" () "li $rd,$simm"
+      (emit addi rd (ra 0) simm)) ; addi %rd,0,%simm
+
+(dnmi la "la" () "la $rd,$simm($ra)"
+      (emit addi rd ra simm))
+
+(dnmi subi "subi" () "subi $rd,$ra,$simm"
+      (emit addi rd ra simm))
+
+
+; Compare insns
+
+(define-pmacro (cmp-norm name xof1 xof2 sem-op1 sem-op2)
+  (begin
+    (dni (.sym name) (.str name) ()
+         (.str name " $crfd,$l,$ra,$rb")
+         (+ OPCD_31 xof1 crfd (f-res/9-1 0) l ra rb (f-oe 0) (f-rc 0))
+         (set crfd (sem-op1 ra rb)) ; FIXME xer-so
+         ()
+    )
+
+    (dni (.sym name l) (.str name l) ()
+         (.str name "l $crfd,$l,$ra,$rb")
+         (+ OPCD_31 xof2 crfd (f-res/9-1 0) l ra rb (f-oe 0) (f-rc 0))
+         (set crfd (sem-op2 ra rb)) ; FIXME xer-so
+         ()
+    )
+  )
+)
+
+(define-pmacro (cmp-imm name1 name2 opcd1 opcd2 sem-op1 sem-op2)
+  (begin
+    (dni (.sym name1 x) (.str name1 x) ()
+         (.str name1 " $crfd,$l,$ra,$simm")
+         (+ opcd1 crfd (f-res/9-1 0) l ra simm)
+         (set crfd (sem-op1 ra simm)) ; FIXME xer-so
+         ()
+    )
+
+    (dni (.sym name2 x) (.str name2 x) ()
+         (.str name2 " $crfd,$l,$ra,$uimm")
+         (+ opcd2 crfd (f-res/9-1 0) l ra uimm)
+         (set crfd (sem-op2 ra uimm)) ; FIXME xer-so
+         ()
+    )
+  )
+)
+
+(define-pmacro (cmp-expr/s a b)
+  (cond QI 
+        ((lt SI a b) (const #x8)) 
+        ((gt SI a b) (const #x4)) 
+        (else (const #x2))))
+
+(define-pmacro (cmp-expr/u a b)
+  (cond QI 
+        ((ltu USI a b) (const #x8)) 
+        ((gtu USI a b) (const #x4)) 
+        (else (const #x2))))
+
+(cmp-imm  cmpi cmpli OPCD_11 OPCD_10 cmp-expr/s cmp-expr/u)
+(cmp-norm cmp        XOF_0   XOF_32  cmp-expr/s cmp-expr/u) 
+
+
+; Logical insns
+
+(define-pmacro (logic-op3 name opcd xof sem-op)
+  (dni name (.str name x) ()
+       (.str name "$rc $ra,$rs,$rb")
+       (+ opcd xof rs ra rb (f-oe 0) rc)
+       (sequence ((BI alu-ov) (BI alu-ca))
+                 (sem-op ra rs rb)
+                 (if rc (set-cond-bits ra)))
+       ()
+  )
+)
+
+(define-pmacro (ext-op2 name opcd xof sem-op)
+  (dni name (.str name) ()
+       (.str name "$rc $ra,$rs")
+       (+ opcd xof rs ra (f-rb 0) (f-oe 0) rc)
+       (sequence ((BI alu-ov) (BI alu-ca))
+                 (sem-op ra rs)
+                 (if rc (set-cond-bits ra)))
+       ()
+  )
+)
+
+(define-pmacro (logic-opimm name opcd sem-op)
+  (dni (.sym name) (.str name) ()
+       (.str name " $ra,$rs,$uimm")
+       (+ opcd rs ra uimm)
+       (sequence ((BI alu-ov) (BI alu-ca))
+                 (sem-op ra rs uimm))
+       ()
+  )
+)
+
+
+(define-pmacro (and-expr dst src1 src2)   (set dst (and src1 src2)))
+(define-pmacro (andc-expr dst src1 src2)  (set dst (and src1 (inv src2))))
+(define-pmacro (andi-expr dst src1 src2)  
+  (sequence () (set dst (and src1 src2)) (set-cond-bits dst)))
+(define-pmacro (andis-expr dst src1 src2) 
+  (sequence () (set dst (and src1 (sll src2 (const 16)))) (set-cond-bits dst)))
+
+(define-pmacro (or-expr dst src1 src2)    (set dst (or src1 src2)))
+(define-pmacro (orc-expr dst src1 src2)   (set dst (or src1 (inv src2))))
+(define-pmacro (ori-expr dst src1 src2)   (set dst (or src1 src2)))
+(define-pmacro (oris-expr dst src1 src2)  (set dst (or src1 (sll src2 (const 16)))))
+
+(define-pmacro (nor-expr dst src1 src2)   (set dst (inv (or src1 src2))))
+(define-pmacro (nand-expr dst src1 src2)  (set dst (inv (and src1 src2))))
+(define-pmacro (eqv-expr dst src1 src2)   (set dst (inv (xor src1 src2))))
+
+(define-pmacro (xor-expr dst src1 src2)   (set dst (xor src1 src2)))
+(define-pmacro (xori-expr dst src1 src2)  (set dst (xor src1 src2)))
+(define-pmacro (xoris-expr dst src1 src2) (set dst (xor src1 (sll src2 (const 16)))))
+
+(define-pmacro (extsb-expr dst src) (set dst (ext SI (trunc QI src))))
+(define-pmacro (extsh-expr dst src) (set dst (ext SI (trunc HI src))))
+
+(logic-op3 and      OPCD_31 XOF_28 and-expr)
+(logic-op3 andc     OPCD_31 XOF_60 andc-expr)
+(logic-opimm andi.  OPCD_28        andi-expr)
+(logic-opimm andis. OPCD_29        andis-expr)
+
+(logic-op3 or       OPCD_31 XOF_444 or-expr)
+(logic-op3 orc      OPCD_31 XOF_412 orc-expr)
+(logic-op3 nor      OPCD_31 XOF_124 nor-expr)
+(logic-op3 nand     OPCD_31 XOF_476 nand-expr)
+(logic-op3 eqv      OPCD_31 XOF_284 eqv-expr)
+
+(logic-op3 xor      OPCD_31 XOF_316 xor-expr)
+(logic-opimm xori   OPCD_26         xori-expr)
+(logic-opimm xoris  OPCD_27         xoris-expr)
+
+(logic-opimm ori    OPCD_24         ori-expr)
+(logic-opimm oris   OPCD_25         oris-expr)
+
+(ext-op2 extsb      OPCD_31 XOF_954 extsb-expr)
+(ext-op2 extsh      OPCD_31 XOF_922 extsh-expr)
+
+; FIXME cntlzwx???
+
+
+; Integer Rotate and Shift Instructions
+
+; The rotate and shift insns employ a mask generator. The mask is 32 bits 
+; long and consists of 1 bits from a start bit, MB, through and including
+; a stop bit, ME, and 0 bits elsewhere.  If MB > ME, the 1 bits wrap around
+; from position 31 to 0.
+
+; ??? does this work?
+(define-pmacro (gen-bit-mask mb me)
+         (xor (sub (sll (const 1) mb) (const 1)) (sub (sll (const 2) me) (const 1))))
+  
+;(define-pmacro (mask-gen mb me)
+;  (cond WI
+;        ; mb <= me
+;        ((le mb me) (gen-bit-mask mb me))
+;        ; else
+;        (else (or (gen-bit-mask mb 31) (gen-bit-mask 0 me)))))
+
+(define-pmacro (mask-gen mb me) 
+  (c-raw-call WI "MASK" (add mb (const 32)) (add me (const 32))))
+
+(define-pmacro (rotate/imm-op5 name opcd sem-op)
+  (dni name (.str name) ()
+       (.str name "$rc $ra,$rs,$sh,$mb,$me")
+       (+ opcd rs ra sh mb me rc)
+       (sequence ((BI alu-ov) (BI alu-ca))
+                 (sem-op ra rs sh mb me)
+                 (if rc (set-cond-bits ra)))
+       ()
+  )
+)
+
+(define-pmacro (rotate/reg-op5 name opcd sem-op)
+  (dni name (.str name) ()
+       (.str name "$rc $ra,$rs,$rb,$mb,$me")
+       (+ opcd rs ra rb mb me rc)
+       (sequence ((BI alu-ov) (BI alu-ca))
+                 (sem-op ra rs (and rb #x1f) mb me)
+                 (if rc (set-cond-bits ra)))
+       ()
+  )
+)
+
+(define-pmacro (shift/imm-op3 name opcd xof sem-op)
+  (dni name (.str name) ()
+       (.str name "$rc $ra,$rs,$sh")
+       (+ opcd xof rs ra sh (f-oe 0) rc)
+       (sequence ((BI alu-ov) (BI alu-ca))
+                 (set ra (sem-op rs sh))
+                 (if rc (set-cond-bits ra)))
+       ()
+  )
+)
+
+(define-pmacro (shift/reg-op3 name opcd xof sem-op)
+  (dni name (.str name) ()
+       (.str name "$rc $ra,$rs,$rb")
+       (+ opcd xof rs ra rb (f-oe 0) rc)
+       (sequence ((BI alu-ov) (BI alu-ca))
+                 (set ra (sem-op rs (and rb #x3f)))
+                 (if rc (set-cond-bits ra)))
+       ()
+  )
+)
+
+(define-pmacro (rlwimi-expr dst src sh mb me) 
+  (sequence ((WI m) (WI r))
+            (set r (rol src sh))
+            (set m (mask-gen mb me))
+            (set dst (or (and r m) (and src (inv m))))))
+
+
+(define-pmacro (rlwinm-expr dst src sh mb me) 
+  (sequence ((WI m) (WI r))
+            (set r (rol src sh))
+            (set m (mask-gen mb me))
+            (set dst (and r m))))
+
+(rotate/imm-op5 rlwimi OPCD_20 rlwimi-expr)
+(rotate/imm-op5 rlwinm OPCD_21 rlwinm-expr)
+(rotate/reg-op5 rlwnm  OPCD_23 rlwinm-expr)
+
+(shift/reg-op3 slw    OPCD_31 XOF_24  sll)
+(shift/reg-op3 sraw   OPCD_31 XOF_792 sra)
+(shift/imm-op3 srawi  OPCD_31 XOF_824 sra)
+(shift/imm-op3 srw    OPCD_31 XOF_536 srl)
+
+
+; Load insns.
+
+(define-pmacro (load/imm-op name opcd1 opcd2 mode sem)
+  (begin
+    (dni (.sym name) (.str name) ()
+         (.str name " $rd,$d($ra)")
+         (+ opcd1 rd ra d)
+         (sequence ()
+                   (set rd (sem SI (mem mode (add (reg0? ra) d)))))
+         ()
+    )
+    (dni (.sym name u) (.str name u) ()
+         (.str name "u $rd,$d($ra)")
+         (+ opcd2 rd ra d)
+         (sequence ()
+                   (set rd (sem SI (mem mode (add ra d))))
+                   (set ra (add ra d)))
+         ()
+    )
+  )
+)
+
+(define-pmacro (load/reg-op name xof1 xof2 mode sem)
+  (begin
+    (dni (.sym name ux) (.str name u) ()
+         (.str name "ux $rd,$ra,$rb")
+         (+ OPCD_31 xof1 rd ra rb (f-oe 0) (f-rc 0))
+         (sequence ()
+                   (set rd (sem SI (mem mode (add ra rb))))
+                   (set ra (add ra rb)))
+         ()
+    )
+    
+    (dni (.sym name x) (.str name x) ()
+         (.str name "x $rd,$ra,$rb")
+         (+ OPCD_31 xof2 rd ra rb (f-oe 0) (f-rc 0))
+         (sequence ()
+                   (set rd (sem SI (mem mode (add (reg0? ra) rb)))))
+         ()
+    )
+  )
+)
+
+(load/imm-op lbz OPCD_34 OPCD_35 QI zext)
+(load/reg-op lbz XOF_119 XOF_87  QI zext)
+
+(load/imm-op lha OPCD_42 OPCD_43 HI ext)
+(load/reg-op lha XOF_375 XOF_343 HI ext)
+(load/imm-op lhz OPCD_40 OPCD_41 HI zext)
+(load/reg-op lhz XOF_311 XOF_279 HI zext)
+
+(load/imm-op lwz OPCD_32 OPCD_33 SI zext)
+(load/reg-op lwz XOF_55  XOF_23  SI zext)
+
+; ??? a pmacro for these?
+
+(define-pmacro (nop-mem-expr dst-expr ea-expr mode) 
+  (set dst-expr (mem mode ea-expr)))
+
+(define-pmacro (load/reverse name xof mode sem-op)
+  (dni name (.str name) ()
+       (.str name " $rd,$ra,$rb")
+       (+ OPCD_31 xof rd ra rb (f-oe 0) (f-rc 0))
+       (sem-op rd (add ra rb) mode)
+       ()
+  )
+)
+
+(load/reverse lhbrx XOF_790 HI nop-mem-expr)
+(load/reverse lwbrx XOF_534 WI nop-mem-expr)
+(load/reverse lwarx XOF_20  WI nop-mem-expr)
+
+
+(define-pmacro (lmw-sem-op ea n)
+  (sequence ()
+            (set (reg h-gpr n) (mem WI ea))
+            (set ea (add ea (const 4)))
+            (set n  (add n  (const 1))))
+)
+
+(dni lmw "lmw" ()
+     "lmw $rd,$d($ra)"
+     (+ OPCD_46 rd ra d)
+     (sequence ((AI ea) (SI n))
+               (set ea (add ra d))
+               (set n  (regno rd))
+
+               (align-check ea #x4) ; EA must be aligned.
+
+               (if (ge n (const  0)) (lmw-sem-op ea n)) ; needed?
+               (if (ge n (const  1)) (lmw-sem-op ea n))
+               (if (ge n (const  2)) (lmw-sem-op ea n))
+               (if (ge n (const  3)) (lmw-sem-op ea n))
+               (if (ge n (const  4)) (lmw-sem-op ea n))
+               (if (ge n (const  5)) (lmw-sem-op ea n))
+               (if (ge n (const  6)) (lmw-sem-op ea n))
+               (if (ge n (const  7)) (lmw-sem-op ea n))
+               (if (ge n (const  8)) (lmw-sem-op ea n))
+               (if (ge n (const  9)) (lmw-sem-op ea n))
+               (if (ge n (const 10)) (lmw-sem-op ea n))
+               (if (ge n (const 11)) (lmw-sem-op ea n))
+               (if (ge n (const 12)) (lmw-sem-op ea n))
+               (if (ge n (const 13)) (lmw-sem-op ea n))
+               (if (ge n (const 14)) (lmw-sem-op ea n))
+               (if (ge n (const 15)) (lmw-sem-op ea n))
+               (if (ge n (const 16)) (lmw-sem-op ea n))
+               (if (ge n (const 17)) (lmw-sem-op ea n))
+               (if (ge n (const 18)) (lmw-sem-op ea n))
+               (if (ge n (const 19)) (lmw-sem-op ea n))
+               (if (ge n (const 20)) (lmw-sem-op ea n))
+               (if (ge n (const 21)) (lmw-sem-op ea n))
+               (if (ge n (const 22)) (lmw-sem-op ea n))
+               (if (ge n (const 23)) (lmw-sem-op ea n))
+               (if (ge n (const 24)) (lmw-sem-op ea n))
+               (if (ge n (const 25)) (lmw-sem-op ea n))
+               (if (ge n (const 26)) (lmw-sem-op ea n))
+               (if (ge n (const 27)) (lmw-sem-op ea n))
+               (if (ge n (const 28)) (lmw-sem-op ea n))
+               (if (ge n (const 29)) (lmw-sem-op ea n))
+               (if (ge n (const 30)) (lmw-sem-op ea n))
+               (if (ge n (const 31)) (lmw-sem-op ea n)))
+     ()
+)
+
+; FIXME lswi
+; FIXME lswx
+
+
+; Store insns.
+
+(define-pmacro (store/imm-op name opcd1 opcd2 mode)
+  (begin
+    (dni (.sym name) (.str name) ()
+         (.str name " $rs,$d($ra)")
+         (+ opcd1 rs ra d)
+         (sequence ()
+                   (set (mem mode (add (reg0? ra) d)) rs))
+         ()
+    )
+    (dni (.sym name u) (.str name u) ()
+         (.str name "u $rs,$d($ra)")
+         (+ opcd2 rs ra d)
+         (sequence ()
+                   (set (mem mode (add ra d)) rs)
+                   (set ra (add ra d)))
+         ()
+    )
+  )
+)
+
+(define-pmacro (store/reg-op name xof1 xof2 mode)
+  (begin
+    (dni (.sym name ux) (.str name u) ()
+         (.str name "ux $rs,$ra,$rb")
+         (+ OPCD_31 xof1 rs ra rb (f-oe 0) (f-rc 0))
+         (sequence ()
+                   (set (mem mode (add ra rb)) rs)
+                   (set ra (add ra rb)))
+         ()
+    )
+    (dni (.sym name x) (.str name x) ()
+         (.str name "x $rd,$ra,$rb")
+         (+ OPCD_31 xof2 rs ra rb (f-oe 0) (f-rc 0))
+         (sequence ()
+                   (set (mem mode (add (reg0? ra) rb)) rs))
+         ()
+    )
+  )
+)
+
+(store/imm-op stb OPCD_38 OPCD_39 QI)
+(store/reg-op stb XOF_247 XOF_215 QI)
+
+(store/imm-op sth OPCD_44 OPCD_45 HI)
+(store/reg-op sth XOF_439 XOF_407 HI)
+
+; FIXME sthbrx
+; FIXME stswi
+; FIXME stswx
+; FIXME stwbrx
+; FIXME stwcx.
+
+(store/imm-op stw OPCD_36 OPCD_37 WI)
+(store/reg-op stw XOF_183 XOF_151 WI)
+
+(define-pmacro (stmw-sem-op ea n)
+  (sequence ()
+            (set (mem WI ea) (reg h-gpr n))
+            (set ea (add ea (const 4)))
+            (set n  (add n  (const 1))))
+)
+
+(dni stmw "stmw" ()
+     "stmw $rs,$d($ra)"
+     (+ OPCD_47 rs ra d)
+     (sequence ((AI ea) (SI n))
+               (set ea (add ra d))
+               (set n  (regno rs))
+
+               (align-check ea #x4) ; EA must be aligned.
+
+               (if (ge n (const  0)) (stmw-sem-op ea n)) ; needed?
+               (if (ge n (const  1)) (stmw-sem-op ea n))
+               (if (ge n (const  2)) (stmw-sem-op ea n))
+               (if (ge n (const  3)) (stmw-sem-op ea n))
+               (if (ge n (const  4)) (stmw-sem-op ea n))
+               (if (ge n (const  5)) (stmw-sem-op ea n))
+               (if (ge n (const  6)) (stmw-sem-op ea n))
+               (if (ge n (const  7)) (stmw-sem-op ea n))
+               (if (ge n (const  8)) (stmw-sem-op ea n))
+               (if (ge n (const  9)) (stmw-sem-op ea n))
+               (if (ge n (const 10)) (stmw-sem-op ea n))
+               (if (ge n (const 11)) (stmw-sem-op ea n))
+               (if (ge n (const 12)) (stmw-sem-op ea n))
+               (if (ge n (const 13)) (stmw-sem-op ea n))
+               (if (ge n (const 14)) (stmw-sem-op ea n))
+               (if (ge n (const 15)) (stmw-sem-op ea n))
+               (if (ge n (const 16)) (stmw-sem-op ea n))
+               (if (ge n (const 17)) (stmw-sem-op ea n))
+               (if (ge n (const 18)) (stmw-sem-op ea n))
+               (if (ge n (const 19)) (stmw-sem-op ea n))
+               (if (ge n (const 20)) (stmw-sem-op ea n))
+               (if (ge n (const 21)) (stmw-sem-op ea n))
+               (if (ge n (const 22)) (stmw-sem-op ea n))
+               (if (ge n (const 23)) (stmw-sem-op ea n))
+               (if (ge n (const 24)) (stmw-sem-op ea n))
+               (if (ge n (const 25)) (stmw-sem-op ea n))
+               (if (ge n (const 26)) (stmw-sem-op ea n))
+               (if (ge n (const 27)) (stmw-sem-op ea n))
+               (if (ge n (const 28)) (stmw-sem-op ea n))
+               (if (ge n (const 29)) (stmw-sem-op ea n))
+               (if (ge n (const 30)) (stmw-sem-op ea n))
+               (if (ge n (const 31)) (stmw-sem-op ea n)))
+     ()
+)
+
+
+
+; Trap insns.
+
+(define-pmacro (trap/reg-op name opcd xof sem-op)
+  (dni name (.str name) ()
+       (.str name " $to,$ra,$rb")
+       (+ opcd xof to ra rb (f-oe 0) (f-rc 0))
+       (sem-op to ra rb)
+       ()
+  )
+)
+
+(define-pmacro (trap/imm-op name opcd sem-op)
+  (dni name (.str name) ()
+       (.str name " $to,$ra,$simm")
+       (+ opcd to ra simm)
+       (sem-op to ra simm)
+       ()
+  )
+)
+
+(define-pmacro (tw-expr to expr1 expr2)
+  (sequence ()
+            (if (lt  expr1 expr2) (if (bit-set? to 0) (emit-exception #x7)))
+            (if (gt  expr1 expr2) (if (bit-set? to 1) (emit-exception #x7)))
+            (if (eq  expr1 expr2) (if (bit-set? to 2) (emit-exception #x7)))
+            (if (ltu expr1 expr2) (if (bit-set? to 3) (emit-exception #x7)))
+            (if (gtu expr1 expr2) (if (bit-set? to 4) (emit-exception #x7))))
+)
+
+(trap/reg-op tw  OPCD_31 XOF_4 tw-expr)
+(trap/imm-op twi OPCD_3        tw-expr)
+
+(dni sc "sc" ((ARCH-LEVEL OEA))
+     "sc"
+     (+ OPCD_17 XOF_1 (f-rd 0) (f-ra 0) (f-rb 0) (f-oe 0) (f-rc 0))
+     (emit-exception #xc)
+     ()
+)
+
+(dni rfi "rfi" ((ARCH-LEVEL OEA) (INSN-LEVEL SUPERVISOR))
+     "rfi"
+     (+ OPCD_19 XOF_50 (f-rd 0) (f-ra 0) (f-rb 0) (f-oe 0) (f-rc 0))
+     (set pc (c-call IAI "@cpu@_rfi"))
+     ()
+)
+
+
+; Branch insns.
+
+(define-pmacro (branch-via-reg reg)
+  (sequence ((IAI nia))
+	    (set nia reg)
+            (if lk (set lr (add pc 4)))
+            (set pc nia))
+)
+
+(define-pmacro (branch-via-addr taddr)
+  (sequence ()
+            (if lk (set lr (add pc 4)))
+            (set pc 
+                 (cond IAI
+                       ((eq (ifield f-aa) (const 1)) (sll taddr (const 2)))
+                       (else (add pc (sll taddr (const 2)))))))
+)
+
+(dni b "b" ()
+     "b${lk}${aa} $li"
+     (+ OPCD_18 li aa lk)
+     (branch-via-addr li)
+     ()
+)
+
+; FIXME These are not implemented yet!
+
+(define-pmacro (bc-expr bo bi bd)
+  (sequence ((INT cond_ok) (INT ctr_ok))
+	    (if (not (bit-set? bo 2)) (set ctr (sub ctr (const 1))))
+	    (set ctr_ok  (c-call INT "@cpu@_cti_resolv_ctr"  bo bi))
+	    (set cond_ok (c-call INT "@cpu@_cti_resolv_cond" bo bi))
+	    (if (andif ctr_ok cond_ok)
+		(branch-via-addr bd)))
+)
+
+(define-pmacro (bctr-expr bo bi)  
+  (sequence ((INT cond_ok))
+	    (set cond_ok (c-call INT "@cpu@_cti_resolv_cond" bo bi))
+	    (if cond_ok
+		(branch-via-reg ctr)))
+)
+
+(define-pmacro (blr-expr bo bi)
+  (sequence ((INT cond_ok) (INT ctr_ok))
+	    (if (not (bit-set? bo 2)) (set ctr (sub ctr (const 1))))
+	    (set ctr_ok  (c-call INT "@cpu@_cti_resolv_ctr"  bo bi))
+	    (set cond_ok (c-call INT "@cpu@_cti_resolv_cond" bo bi))
+	    (if (andif ctr_ok cond_ok)
+		(branch-via-reg lr)))
+)
+	    
+;(define-pmacro (bctr-expr bo bi)  (sequence () (branch-via-reg ctr)))
+;(define-pmacro (blr-expr bo bi)   (sequence () (branch-via-reg lr)))
+;(define-pmacro (bc-expr bo bi bd) (sequence () (branch-via-addr bd)))
+
+(define-pmacro (cond/reg-branch name xof sem-op)
+  (dni (.sym name) (.str name) ()
+       (.str name "${lk} $bo,$bi")
+       (+ OPCD_19 xof bo bi (f-rb 0) (f-oe 0) lk) ; FIXME oe???
+       (sequence ()
+                 (sem-op bo bi))
+       ()
+  )
+)
+
+(define-pmacro (cond/disp-branch name opcd sem-op)
+  (dni (.sym name) (.str name) ()
+       (.str name "${lk}${aa} $bo,$bi,$bd")
+       (+ opcd bo bi bd lk aa)
+       (sequence ()
+                 (sem-op bo bi bd))
+       ()
+  )
+)
+
+(cond/reg-branch  bcctr XOF_528 bctr-expr)
+(cond/reg-branch  bclr  XOF_16  blr-expr)
+(cond/disp-branch bc    OPCD_16 bc-expr)
+
+
+; Condition register insns.
+
+(define-pmacro (cr-op name xof sem-op)
+  (dni name (.str name) ()
+       (.str name " $crbd,$crba,$crbb")
+       (+ OPCD_19 xof crbd crba crbb (f-oe 0) (f-rc 0))
+       (sequence ((BI result))
+                 (set result 
+                      (sem-op (bit-set? (reg h-cr) crba) 
+                              (bit-set? (reg h-cr) crbb)))
+                 (if result 
+                     (bit-set (reg h-cr) crbd)
+                     (bit-clr (reg h-cr) crbd)))
+       ()
+  )
+)
+
+(define-pmacro (move/cr-op name opcd xof sem-op)
+  (dni name (.str name) ()
+       (.str name " $crfd,$crfs")
+       (+ opcd xof crfd crfs (f-res/9-2 0) (f-res/14-2 0) (f-rb 0) (f-oe 0) (f-rc 0))
+       (sem-op crfd crfs)
+       ()
+  )
+)
+
+(define-pmacro (move/xer-op name opcd xof sem-op)
+  (dni name (.str name) ()
+       (.str name " $crfd")
+       (+ opcd xof crfd (f-ra 0) (f-res/9-2 0) (f-rb 0) (f-oe 0) (f-rc 0))
+       (sem-op crfd)
+       ()
+  )
+)
+
+(define-pmacro (crandc-expr a b) (and a (inv b)))
+(define-pmacro (creqv-expr a b)  (not (xor a b))) ; ???
+;(define-pmacro (crandc-expr a b) (and a (inv b)))
+(define-pmacro (crnand-expr a b) (inv (and a b)))
+(define-pmacro (crnor-expr a b)  (inv (or a b)))
+(define-pmacro (crorc-expr a b)  (or a (inv b)))
+
+(cr-op crand  XOF_257 and)
+(cr-op cror   XOF_449 or)
+(cr-op crxor  XOF_193 xor)
+(cr-op crandc XOF_129 crandc-expr)
+(cr-op creqv  XOF_289 creqv-expr)
+(cr-op crnand XOF_225 crnand-expr)
+(cr-op crnor  XOF_33  crnor-expr)
+(cr-op crorc  XOF_417 crorc-expr)
+
+(define-pmacro (mcrf-expr dst src) (set dst src))
+(define-pmacro (mcrxr-expr dst) (set dst (and (reg h-spr 1) #xf)))
+
+(move/cr-op  mcrf  OPCD_19 XOF_0  mcrf-expr)
+(move/xer-op mcrxr OPCD_31 XOF_512 mcrxr-expr)
+
+(dni mfcr "mfcr" ()
+     "mfcr $rd"
+     (+ OPCD_31 XOF_19 rd (f-ra 0) (f-rb 0) (f-oe 0) (f-rc 0))
+     (set rd (reg h-cr))
+     ()
+)
+
+
+; Cache related insns.
+
+(define-pmacro (cache-op name xof attrs)
+  (dni name (.str name) attrs
+       (.str name " $ra,$rb")
+       (+ OPCD_31 xof ra rb (f-rd 0) (f-oe 0) (f-rc 0))
+       (nop)
+       ()
+  )
+)
+
+(define-pmacro (sync-op name opcd xof attrs)
+  (dni name (.str name) attrs
+       (.str name)
+       (+ opcd xof (f-ra 0) (f-rb 0) (f-rd 0) (f-oe 0) (f-rc 0))
+       (nop)
+       ()
+  )
+)
+
+(define-pmacro (tlb-op name xof)
+  (dni name (.str name) ((ARCH-LEVEL OEA) (INSN-LEVEL SUPERVISOR))
+       (.str name " $rb")
+       (+ OPCD_31 xof (f-ra 0) (f-rd 0) rb (f-oe 0) (f-rc 0))
+       (nop)
+       ()
+  )
+)
+
+(cache-op dcba   XOF_758  ((ARCH-LEVEL VEA)))
+(cache-op dcbf   XOF_86   ((ARCH-LEVEL VEA)))
+(cache-op dcbi   XOF_470  ((ARCH-LEVEL OEA) (INSN-LEVEL SUPERVISOR)))
+(cache-op dcbst  XOF_54   ((ARCH-LEVEL VEA)))
+(cache-op dcbt   XOF_278  ((ARCH-LEVEL VEA)))
+(cache-op dcbtst XOF_246  ((ARCH-LEVEL VEA)))
+(cache-op dcbz   XOF_1014 ((ARCH-LEVEL VEA)))
+(cache-op icbi   XOF_982  ((ARCH-LEVEL VEA)))
+
+(sync-op isync   OPCD_19 XOF_150 ((ARCH-LEVEL VEA)))
+(sync-op sync    OPCD_31 XOF_598 ((ARCH-LEVEL UISA)))
+(sync-op tlbia   OPCD_31 XOF_370 ((ARCH-LEVEL OEA) (INSN-LEVEL SUPERVISOR)))
+(sync-op tlbsync OPCD_31 XOF_566 ((ARCH-LEVEL OEA) (INSN-LEVEL SUPERVISOR)))
+(tlb-op  tlbie   XOF_306)
+
+
+; External Control insns.
+
+(define-pmacro (extern-op name xof arg1)
+  (dni name (.str name) ((ARCH-LEVEL VEA))
+       (.str name " $" arg1 ",$ra,$rb")
+       (+ OPCD_31 xof arg1 ra rb (f-oe 0) (f-rc 0))
+       (nop)
+       ()
+  )
+)
+
+(extern-op eciwx XOF_310 rd)
+(extern-op ecowx XOF_438 rs)
+
+(dni eieio "eieio" ((ARCH-LEVEL VEA))
+     "eieio"
+     (+ OPCD_31 XOF_854 (f-rd 0) (f-ra 0) (f-rb 0) (f-oe 0) (f-rc 0))
+     (nop)
+     ()
+)
+
+
+; Special Register insns.
+
+; Move from/to Machine State Register
+
+(define-pmacro (move/msr-op name xof sem-op)
+  (dni name (.str name) ((ARCH-LEVEL OEA))
+       (.str name " $rd")
+       (+ OPCD_31 xof rd (f-ra 0) (f-rb 0) (f-oe 0) (f-rc 0))
+       (sem-op rd)
+       ()
+  )
+)
+
+(define-pmacro (move/spr-op name xof arg1 sem-op)
+  (dni name (.str name) ((ARCH-LEVEL OEA))
+       (.str name " $" arg1 ",$spr") ; ???
+       (+ OPCD_31 xof arg1 spr (f-oe 0) (f-rc 0))
+       (sem-op arg1 spr)
+       ()
+  )
+)
+
+(define-pmacro (move/sr-op name xof arg1 arg2 sem-op)
+  (dni name (.str name) ((ARCH-LEVEL OEA) (INSN-LEVEL SUPERVISOR))
+       (.str name " $" arg1 ",$" arg2) 
+       (+ OPCD_31 xof arg1 arg2 (f-res/11-1 0) (f-rb 0) (f-oe 0) (f-rc 0))
+       (sem-op arg1 arg2)
+       ()
+  )
+)
+
+(define-pmacro (move/tbr-op name xof sem-op)
+  (dni name (.str name) ((ARCH-LEVEL VEA))
+       (.str name " $rd,$tbr")
+       (+ OPCD_31 xof rd tbr (f-oe 0) (f-rc 0))
+       (sem-op rd tbr)
+       ()
+  )
+)
+
+(define-pmacro (mfmsr-expr dst) (set dst (reg h-msr)))
+(define-pmacro (mtmsr-expr src) (set (reg h-msr) src))
+(define-pmacro (mfspr-expr dst spr) (set dst spr))
+(define-pmacro (mtspr-expr src spr) (set spr src))
+
+(define-pmacro (mtsr-expr expr1 expr2) (set expr1 expr2))
+(define-pmacro (mfsr-expr expr1 expr2) (set expr1 expr2))
+
+(move/msr-op mfmsr XOF_83  mfmsr-expr)
+(move/msr-op mtmsr XOF_146 mtmsr-expr)
+
+(move/spr-op mfspr XOF_339 rd mfspr-expr)
+(move/spr-op mtspr XOF_467 rs mtspr-expr)
+
+(move/sr-op mtsr XOF_210 sr rs mtsr-expr)
+(move/sr-op mfsr XOF_595 rd sr mfsr-expr)
+; ??? NYA mtsrin mfsrin
+
+(move/tbr-op mftb XOF_371 set)

@@ -1,0 +1,1338 @@
+; Intel 80960 CPU description.  -*- Scheme -*-
+; Copyright (C) 2000 Red Hat, Inc.
+; This file is part of CGEN.
+; See file COPYING.CGEN for details.
+
+; Misc CGEN related problems.
+
+; ??? CGEN assumes that the program counter is called PC.  On the i960, it
+; is called IP (Instruction Pointer).
+
+; ??? Try using (f-m3 1) instead of M3_1.
+
+; ??? Try using the RESERVED attribute for instruction fields.
+
+(include "simplify.inc")
+
+
+; Architecture and cpu family definitions.
+
+; ??? This should be using (insn-lsb0? #t), but it doesn't work yet.
+
+(define-arch
+  (name i960)
+  (comment "Intel 80960 architecture")
+  (machs i960:ka_sa i960:ca)
+  (isas i960)
+)
+
+(define-isa
+  (name i960)
+  (base-insn-bitsize 32)
+  (decode-assist (0 1 2 3 4 5 6 7))
+  (liw-insns 1)
+  (parallel-insns 1)
+)
+
+(define-cpu
+  (name i960base)
+  (comment "Intel 80960 cpu family")
+  (endian little)
+  (word-bitsize 32)
+)
+
+(define-mach
+  (name i960:ka_sa)
+  (comment "I960 KA and SA processors")
+  (cpu i960base)
+)
+
+; ??? Incomplete.  Pipeline and unit info wrong.
+
+(define-model
+  (name i960KA)
+  (comment "I960 KA processor")
+  (mach i960:ka_sa)
+  (pipeline all "" () ((fetch) (decode) (execute) (writeback)))
+  (unit u-exec "Execution Unit" () 1 1
+	() () () ())
+)
+
+(define-mach
+  (name i960:ca)
+  (comment "I960 CA processor")
+  (cpu i960base)
+)
+
+; ??? Incomplete.  Pipeline and unit info wrong.
+
+(define-model
+  (name i960CA)
+  (comment "I960 CA processor")
+  (mach i960:ca)
+  (pipeline all "" () ((fetch) (decode) (execute) (writeback)))
+  (unit u-exec "Execution Unit" () 1 1
+	() () () ())
+)
+
+; Instruction fields.
+;
+; Attributes:
+; PCREL-ADDR: pc relative value (for reloc and disassembly purposes)
+; ABS-ADDR: absolute address (for reloc and disassembly purposes?)
+; RESERVED: bits are not used to decode insn, must be all 0
+
+; All of the fields for a REG format instruction.
+
+(dnf f-opcode	"opcode"		() 0 8)
+(dnf f-srcdst	"src/dst"		() 8 5)
+(dnf f-src2	"src2"			() 13 5)
+(dnf f-m3	"m3"			() 18 1)
+(dnf f-m2	"m2"			() 19 1)
+(dnf f-m1	"m1"			() 20 1)
+(dnf f-opcode2	"opcode2"		() 21 4)
+(dnf f-zero	"zero"			() 25 2)
+(dnf f-src1	"src1"			() 27 5)
+
+; Extra fields needed for a MEMA format instruction.
+
+(dnf f-abase	"abase"			() 13 5)
+(dnf f-modea	"modea"			() 18 1)
+(dnf f-zeroa	"zeroa"			() 19 1)
+(dnf f-offset	"offset"		() 20 12)
+
+; Extra fields needed for a MEMB format instruction.
+
+(dnf f-modeb	"modeb"			() 18 4)
+(dnf f-scale	"scale"			() 22 3)
+(dnf f-zerob	"zerob"			() 25 2)
+(dnf f-index	"index"			() 27 5)
+(dnf f-optdisp	"optional displacement" () 32 32)
+
+; Extra fields needed for a COBR format instruction.
+
+(dnf f-br-src1	"branch src1"		() 8 5)
+(dnf f-br-src2	"branch src2"		() 13 5)
+(dnf f-br-m1	"branch m1"		() 18 1)
+(df  f-br-disp	"branch displacement"	(PCREL-ADDR) 19 11 INT
+     ((value pc) (sra WI (sub WI value pc) (const 2)))
+     ((value pc) (add WI (sll WI value (const 2)) pc)))
+(dnf f-br-zero	"branch zero"		() 30 2)
+
+; Extra fields needed for a CRTL format instruction.
+
+(df  f-ctrl-disp "ctrl branch disp"	(PCREL-ADDR) 8 22 INT
+     ((value pc) (sra WI (sub WI value pc) (const 2)))
+     ((value pc) (add WI (sll WI value (const 2)) pc)))
+(dnf f-ctrl-zero "ctrl branch zero"	() 30 2)
+
+
+; Enums.
+
+(define-pmacro (build-hex2 num) (.hex num 2))
+
+; insn-opcode
+(define-normal-insn-enum insn-opcode "insn opcode enums" () OPCODE_ f-opcode
+  (.map .upcase (.map build-hex2 (.iota 256))) ; "00" -> "FF"
+)
+
+(define-normal-insn-enum insn-opcode2 "insn opcode2 enums" () OPCODE2_
+  f-opcode2
+  (.map .upcase (.map .hex (.iota 16))) ; "0" -> "F"
+)
+
+(define-normal-insn-enum insn-m3 "insn m3 enums" () M3_
+  f-m3
+  ("0" "1")
+)
+
+(define-normal-insn-enum insn-m2 "insn m3 enums" () M2_
+  f-m2
+  ("0" "1")
+)
+
+(define-normal-insn-enum insn-m1 "insn m1 enums" () M1_
+  f-m1
+  ("0" "1")
+)
+
+(define-normal-insn-enum insn-zero "insn zero enums" () ZERO_
+  f-zero
+  ("0")
+)
+
+(define-normal-insn-enum insn-modea "insn mode a enums" () MODEA_
+  f-modea
+  ("OFFSET" "INDIRECT-OFFSET")
+)
+
+(define-normal-insn-enum insn-zeroa "insn zero a enums" () ZEROA_
+  f-zeroa
+  ("0")
+)
+
+(define-normal-insn-enum insn-modeb "insn mode b enums" () MODEB_
+  f-modeb
+  ("ILL0" "ILL1" "ILL2" "ILL3" "INDIRECT" "IP-DISP" "RES6" "INDIRECT-INDEX"
+   "ILL8" "ILL9" "ILL10" "ILL11" "DISP" "INDIRECT-DISP" "INDEX-DISP"
+   "INDIRECT-INDEX-DISP")
+)
+
+(define-normal-insn-enum insn-zerob "insn zero b enums" () ZEROB_
+  f-zerob
+  ("0")
+)
+
+(define-normal-insn-enum insn-br-m1 "insn branch m1 enums" () BR_M1_
+  f-br-m1
+  ("0" "1")
+)
+
+(define-normal-insn-enum insn-br-zero "insn branch zero enums" () BR_ZERO_
+  f-br-zero
+  ("0")
+)
+
+(define-normal-insn-enum insn-ctrl-zero "insn ctrl zero enums" () CTRL_ZERO_
+  f-ctrl-zero
+  ("0")
+)
+
+
+; Hardware pieces
+
+(dnh h-pc "program counter" (PC PROFILE) (pc) () () ())
+
+(define-hardware
+  (name h-gr)
+  (comment "general registers")
+  (attrs PROFILE CACHE-ADDR)
+  (type register WI (32))
+  (indices keyword ""
+	   ((fp 31) (sp 1)
+	    (r0 0) (r1 1) (r2 2) (r3 3) (r4 4) (r5 5) (r6 6) (r7 7)
+	    (r8 8) (r9 9) (r10 10) (r11 11) (r12 12) (r13 13) (r14 14) (r15 15)
+	    (g0 16) (g1 17) (g2 18) (g3 19) (g4 20) (g5 21) (g6 22) (g7 23)
+	    (g8 24) (g9 25) (g10 26) (g11 27) (g12 28) (g13 29) (g14 30) (g15 31)
+	    ))
+)
+
+; ??? This is actually part of the AC register.
+
+(define-hardware
+  (name h-cc)
+  (comment "condition code")
+  (attrs PROFILE CACHE-ADDR)
+  (type register WI)
+  (indices keyword "" ((cc 0)))
+)
+
+;(define-hardware
+;  (name h-pc)
+;  (comment "program counter")
+;  (attrs PC)
+;  (type register WI)
+;  ; (handlers (print "ip"))
+;)
+
+; ??? Incomplete.
+
+
+; Instruction Operands.
+; These entries provide a layer between the assembler and the raw hardware
+; description, and are used to refer to hardware elements in the semantic
+; code.  Usually there's a bit of over-specification, but in more complicated
+; instruction sets there isn't.
+
+; Operand fields for a REG format instruction.
+
+(dnop src1	"source register 1"	() h-gr   f-src1)
+(dnop src2	"source register 2"	() h-gr   f-src2)
+(dnop dst	"source/dest register"  () h-gr   f-srcdst)
+
+(dnop lit1	"literal 1"		() h-uint f-src1)
+(dnop lit2	"literal 2"		() h-uint f-src2)
+
+; Operand fields for a MEMA format instruction.
+
+(dnop st_src	"store src"		() h-gr   f-srcdst)
+(dnop abase	"abase"			() h-gr   f-abase)
+(dnop offset	"offset"		() h-uint f-offset)
+
+; Operand fields for a MEMB format instruction.
+
+(dnop scale	"scale"			() h-uint f-scale)
+(dnop indx	"index"			() h-gr   f-index)
+(dnop optdisp	"optional displacement" () h-uint f-optdisp)
+
+; Operand fields for a COBR format instruction.
+
+(dnop br_src1	"branch src1"		() h-gr	  f-br-src1)
+(dnop br_src2	"branch src2"		() h-gr   f-br-src2)
+(dnop br_disp	"branch displacement"	() h-iaddr f-br-disp)
+
+(dnop br_lit1	"branch literal 1"	() h-uint f-br-src1)
+
+; Operand fields for a CRTL format instruction.
+
+(dnop ctrl_disp "ctrl branch disp"	() h-iaddr f-ctrl-disp)
+
+
+; Instruction definitions.
+
+; IDOC attribute for instruction documentation.
+
+(define-attr
+  (for insn)
+  (type enum)
+  (name IDOC)
+  (comment "insn kind for documentation")
+  (attrs META)
+  (values
+   (MEM - () "Memory")
+   (ALU - () "ALU")
+   (FPU - () "FPU")
+   (BR - () "Branch")
+   (PRIV - () "Priviledged")
+   (MISC - () "Miscellaneous")
+  )
+)
+
+; ??? Maybe I should just reverse the operands in the alu-op macro.
+
+(define-pmacro (divo-expr expr1 expr2) (udiv expr2 expr1))
+(define-pmacro (divi-expr expr1 expr2) (div expr2 expr1))
+(define-pmacro (remo-expr expr1 expr2) (umod expr2 expr1))
+(define-pmacro (remi-expr expr1 expr2) (mod expr2 expr1))
+
+(define-pmacro (sub-expr expr1 expr2) (sub expr2 expr1))
+
+(define-pmacro (notbit-expr expr1 expr2)
+  (xor (sll (const 1) expr1) expr2))
+(define-pmacro (andnot-expr expr1 expr2)
+  (and expr2 (inv expr1)))
+(define-pmacro (setbit-expr expr1 expr2)
+  (or (sll (const 1) expr1) expr2))
+(define-pmacro (notand-expr expr1 expr2)
+  (and (inv expr2) expr1))
+(define-pmacro (nor-expr expr1 expr2)
+  (and (inv expr2) (inv expr1)))
+(define-pmacro (xnor-expr expr1 expr2)
+  (inv (xor expr1 expr2)))
+(define-pmacro (not-expr expr1 expr2)
+  (inv expr1))
+(define-pmacro (ornot-expr expr1 expr2)
+  (or expr2 (inv expr1)))
+(define-pmacro (clrbit-expr expr1 expr2)
+  (and (inv (sll (const 1) expr1)) expr2))
+
+; A shift of 32 or more shifts out all input bits.
+
+(define-pmacro (sll-expr expr1 expr2)
+  (cond WI
+	 ((geu UWI expr1 (const 32)) (const 0))
+	 (else (sll expr2 expr1))))
+(define-pmacro (srl-expr expr1 expr2)
+  (cond WI
+	 ((geu UWI expr1 (const 32)) (const 0))
+	 (else (srl expr2 expr1))))
+(define-pmacro (sra-expr expr1 expr2)
+  (cond WI
+	 ((geu UWI expr1 (const 32)) (sra expr2 (const 31)))
+	 (else (sra expr2 expr1))))
+
+(define-pmacro (alu-op mnemonic opcode-op opcode2-op sem-op)
+  (begin
+    (dni mnemonic
+	 (.str mnemonic " reg/reg")
+	 ()
+	 (.str mnemonic " $src1, $src2, $dst")
+	 (+ opcode-op dst src2 M3_0 M2_0 M1_0 opcode2-op ZERO_0 src1)
+	 (set dst (sem-op src1 src2))
+	 ()
+    )
+    (dni (.sym mnemonic "1")
+	 (.str mnemonic " lit/reg")
+	 ()
+	 (.str mnemonic " $lit1, $src2, $dst")
+	 (+ opcode-op dst src2 M3_0 M2_0 M1_1 opcode2-op ZERO_0 lit1)
+	 (set dst (sem-op lit1 src2))
+	 ()
+    )
+    (dni (.sym mnemonic "2")
+	 (.str mnemonic " reg/lit")
+	 ()
+	 (.str mnemonic " $src1, $lit2, $dst")
+	 (+ opcode-op dst lit2 M3_0 M2_1 M1_0 opcode2-op ZERO_0 src1)
+	 (set dst (sem-op src1 lit2))
+	 ()
+    )
+    (dni (.sym mnemonic "3")
+	 (.str mnemonic " lit/lit")
+	 ()
+	 (.str mnemonic " $lit1, $lit2, $dst")
+	 (+ opcode-op dst lit2 M3_0 M2_1 M1_1 opcode2-op ZERO_0 lit1)
+	 (set dst (sem-op lit1 lit2))
+	 ()
+    )
+  )
+)
+
+(alu-op mulo OPCODE_70 OPCODE2_1 mul)
+(alu-op remo OPCODE_70 OPCODE2_8 remo-expr)
+(alu-op divo OPCODE_70 OPCODE2_B divo-expr)
+(alu-op remi OPCODE_74 OPCODE2_8 remi-expr)
+(alu-op divi OPCODE_74 OPCODE2_B divi-expr)
+
+(alu-op addo OPCODE_59 OPCODE2_0 add)
+(alu-op subo OPCODE_59 OPCODE2_2 sub-expr)
+
+(alu-op notbit OPCODE_58 OPCODE2_0 notbit-expr)
+(alu-op and  OPCODE_58 OPCODE2_1 and)
+(alu-op andnot OPCODE_58 OPCODE2_2 andnot-expr)
+(alu-op setbit OPCODE_58 OPCODE2_3 setbit-expr)
+(alu-op notand OPCODE_58 OPCODE2_4 notand-expr)
+(alu-op xor  OPCODE_58 OPCODE2_6 xor)
+(alu-op or   OPCODE_58 OPCODE2_7 or)
+(alu-op nor  OPCODE_58 OPCODE2_8 nor-expr)
+(alu-op xnor OPCODE_58 OPCODE2_9 xnor-expr)
+(alu-op not  OPCODE_58 OPCODE2_A not-expr)
+(alu-op ornot OPCODE_58 OPCODE2_B ornot-expr)
+(alu-op clrbit OPCODE_58 OPCODE2_C clrbit-expr)
+
+; ??? Incomplete.  Does not handle overflow for integer shifts.
+
+(alu-op shlo OPCODE_59 OPCODE2_C sll-expr)
+(alu-op shro OPCODE_59 OPCODE2_8 srl-expr)
+(alu-op shli OPCODE_59 OPCODE2_E sll-expr)
+(alu-op shri OPCODE_59 OPCODE2_B sra-expr)
+
+
+; ??? Does not verify alignment of dest reg.
+
+(define-pmacro (emul-expr dest expr1 expr2)
+  (sequence ((DI temp) (SI dregno))
+	    (set temp (mul DI (zext DI expr1) (zext DI expr2)))
+	    ; ??? Workaround cgen s-i-o-o bug.
+	    (set dregno (ifield f-srcdst))
+	    (set dest (trunc SI temp))
+	    (set (reg h-gr (add (index-of dest) (const 1)))
+		 (trunc SI (srl temp (const 32))))))
+
+; ??? Needless duplicate of alu-op.  Should eliminate alu-op.
+
+(define-pmacro (alu2-op mnemonic opcode-op opcode2-op sem-op)
+  (begin
+    (dni mnemonic
+	 (.str mnemonic " reg/reg")
+	 ()
+	 (.str mnemonic " $src1, $src2, $dst")
+	 (+ opcode-op dst src2 M3_0 M2_0 M1_0 opcode2-op ZERO_0 src1)
+	 (sem-op dst src1 src2)
+	 ()
+    )
+    (dni (.sym mnemonic "1")
+	 (.str mnemonic " lit/reg")
+	 ()
+	 (.str mnemonic " $lit1, $src2, $dst")
+	 (+ opcode-op dst src2 M3_0 M2_0 M1_1 opcode2-op ZERO_0 lit1)
+	 (sem-op dst lit1 src2)
+	 ()
+    )
+    (dni (.sym mnemonic "2")
+	 (.str mnemonic " reg/lit")
+	 ()
+	 (.str mnemonic " $src1, $lit2, $dst")
+	 (+ opcode-op dst lit2 M3_0 M2_1 M1_0 opcode2-op ZERO_0 src1)
+	 (sem-op dst src1 lit2)
+	 ()
+    )
+    (dni (.sym mnemonic "3")
+	 (.str mnemonic " lit/lit")
+	 ()
+	 (.str mnemonic " $lit1, $lit2, $dst")
+	 (+ opcode-op dst lit2 M3_0 M2_1 M1_1 opcode2-op ZERO_0 lit1)
+	 (sem-op dst lit1 lit2)
+	 ()
+    )
+  )
+)
+
+(alu2-op emul OPCODE_67 OPCODE2_0 emul-expr)
+
+
+
+; ??? lit2 must be zero.
+; ??? should verify multi-word reg alignment.
+
+(define-pmacro (mov-expr expr1 expr2)
+  (set expr1 expr2))
+(define-pmacro (movl-expr expr1 expr2)
+  (sequence ((SI dregno) (SI sregno))
+	    ; ??? Workaround cgen s-i-o-o bug.
+	    (set dregno (ifield f-srcdst))
+	    (set sregno (ifield f-src1))
+	    (set expr1 expr2)
+	    (set (reg h-gr (add (index-of expr1) (const 1)))
+		 (reg h-gr (add (index-of expr2) (const 1))))))
+(define-pmacro (movllit-expr expr1 expr2)
+  (sequence ((SI dregno))
+	    ; ??? Workaround cgen s-i-o-o bug.
+	    (set dregno (ifield f-srcdst))
+	    (set expr1 expr2)
+	    (set (reg h-gr (add (index-of expr1) (const 1)))
+		 (const 0))))
+(define-pmacro (movt-expr expr1 expr2)
+  (sequence ((SI dregno) (SI sregno))
+	    ; ??? Workaround cgen s-i-o-o bug.
+	    (set dregno (ifield f-srcdst))
+	    (set sregno (ifield f-src1))
+	    (set expr1 expr2)
+	    (set (reg h-gr (add (index-of expr1) (const 1)))
+		 (reg h-gr (add (index-of expr2) (const 1))))
+	    (set (reg h-gr (add (index-of expr1) (const 2)))
+		 (reg h-gr (add (index-of expr2) (const 2))))))
+(define-pmacro (movtlit-expr expr1 expr2)
+  (sequence ((SI dregno))
+	    ; ??? Workaround cgen s-i-o-o bug.
+	    (set dregno (ifield f-srcdst))
+	    (set expr1 expr2)
+	    (set (reg h-gr (add (index-of expr1) (const 1)))
+		 (const 0))
+	    (set (reg h-gr (add (index-of expr1) (const 2)))
+		 (const 0))))
+(define-pmacro (movq-expr expr1 expr2)
+  (sequence ((SI dregno) (SI sregno))
+	    ; ??? Workaround cgen s-i-o-o bug.
+	    (set dregno (ifield f-srcdst))
+	    (set sregno (ifield f-src1))
+	    (set expr1 expr2)
+	    (set (reg h-gr (add (index-of expr1) (const 1)))
+		 (reg h-gr (add (index-of expr2) (const 1))))
+	    (set (reg h-gr (add (index-of expr1) (const 2)))
+		 (reg h-gr (add (index-of expr2) (const 2))))
+	    (set (reg h-gr (add (index-of expr1) (const 3)))
+		 (reg h-gr (add (index-of expr2) (const 3))))))
+(define-pmacro (movqlit-expr expr1 expr2)
+  (sequence ((SI dregno))
+	    ; ??? Workaround cgen s-i-o-o bug.
+	    (set dregno (ifield f-srcdst))
+	    (set expr1 expr2)
+	    (set (reg h-gr (add (index-of expr1) (const 1)))
+		 (const 0))
+	    (set (reg h-gr (add (index-of expr1) (const 2)))
+		 (const 0))
+	    (set (reg h-gr (add (index-of expr1) (const 3)))
+		 (const 0))))
+
+(define-pmacro (move-op mnemonic opcode-op opcode2-op sem-op semlit-op)
+  (begin
+    (dni mnemonic
+	 (.str mnemonic " reg")
+	 ()
+	 (.str mnemonic " $src1, $dst")
+	 (+ opcode-op dst lit2 M3_0 M2_1 M1_0 opcode2-op ZERO_0 src1)
+	 (sem-op dst src1)
+	 ()
+    )
+    (dni (.sym mnemonic "1")
+	 (.str mnemonic " lit")
+	 ()
+	 (.str mnemonic " $lit1, $dst")
+	 (+ opcode-op dst lit2 M3_0 M2_1 M1_1 opcode2-op ZERO_0 lit1)
+	 (semlit-op dst lit1)
+	 ()
+    )
+  )
+)
+
+(move-op mov OPCODE_5C OPCODE2_C mov-expr mov-expr)
+(move-op movl OPCODE_5D OPCODE2_C movl-expr movllit-expr)
+(move-op movt OPCODE_5E OPCODE2_C movt-expr movtlit-expr)
+(move-op movq OPCODE_5F OPCODE2_C movq-expr movqlit-expr)
+
+; ??? This is very incomplete.  This does not handle src1 or src2 as literals.
+; This doesn't implement any of the effects of the instruction.
+(dni modpc "modpc"
+     ()
+     "modpc $src1, $src2, $dst"
+     (+ OPCODE_65 dst src1 M3_0 M2_0 M1_0 OPCODE2_5 ZERO_0 src2)
+     (set dst src2)
+     ()
+)
+
+; ??? This is very incomplete.  This does not handle src1 or src2 as literals.
+; This doesn't implement any of the effects of the instruction.
+(dni modac "modac"
+     ()
+     "modac $src1, $src2, $dst"
+     (+ OPCODE_64 dst src1 M3_0 M2_0 M1_0 OPCODE2_5 ZERO_0 src2)
+     (set dst src2)
+     ()
+)
+
+; ??? Incomplete.  Only handles 8 of the 10 addressing modes.
+; Does not handle sign/zero extend operations.  Does not handle
+; different modes.
+
+; ??? should verify multi-word reg alignment.
+
+; ??? index-index scale disasssembles wrong
+
+; ??? See also the store-op macro below.
+
+(define-pmacro (lda-expr expr1 expr2)
+  (set expr1 expr2))
+
+(define-pmacro (ld-expr expr1 expr2)
+  (set expr1 (mem WI expr2)))
+(define-pmacro (ldob-expr expr1 expr2)
+  (set expr1 (mem UQI expr2)))
+(define-pmacro (ldos-expr expr1 expr2)
+  (set expr1 (mem UHI expr2)))
+(define-pmacro (ldib-expr expr1 expr2)
+  (set expr1 (mem QI expr2)))
+(define-pmacro (ldis-expr expr1 expr2)
+  (set expr1 (mem HI expr2)))
+(define-pmacro (ldl-expr expr1 expr2)
+  (sequence ((WI temp) (SI dregno))
+	    ; ??? Workaround cgen s-i-o-o bug.
+	    (set dregno (ifield f-srcdst))
+	    (set temp expr2)
+	    (set expr1 (mem WI temp))
+	    (set (reg h-gr (add (index-of expr1) (const 1)))
+		 (mem WI (add temp (const 4))))))
+(define-pmacro (ldt-expr expr1 expr2)
+  (sequence ((WI temp) (SI dregno))
+	    ; ??? Workaround cgen s-i-o-o bug.
+	    (set dregno (ifield f-srcdst))
+	    (set temp expr2)
+	    (set expr1 (mem WI temp))
+	    (set (reg h-gr (add (index-of expr1) (const 1)))
+		 (mem WI (add temp (const 4))))
+	    (set (reg h-gr (add (index-of expr1) (const 2)))
+		 (mem WI (add temp (const 8))))))
+(define-pmacro (ldq-expr expr1 expr2)
+  (sequence ((WI temp) (SI dregno))
+	    ; ??? Workaround cgen s-i-o-o bug.
+	    (set dregno (ifield f-srcdst))
+	    ; Evaluate the address first, for correctness, in case an address
+	    ; reg will be loaded into.  Also, makes the simulator faster.
+	    (set temp expr2)
+	    (set expr1 (mem WI temp))
+	    (set (reg h-gr (add (index-of expr1) (const 1)))
+		 (mem WI (add temp (const 4))))
+	    (set (reg h-gr (add (index-of expr1) (const 2)))
+		 (mem WI (add temp (const 8))))
+	    (set (reg h-gr (add (index-of expr1) (const 3)))
+		 (mem WI (add temp (const 12))))))
+
+(define-pmacro (load-op suffix opcode-op sem-op)
+  (begin
+    (dni (.sym ld suffix -offset) (.str "ld" suffix "-offset")
+	 ()
+	 (.str "ld" suffix " $offset, $dst")
+	 (+ opcode-op dst abase MODEA_OFFSET ZEROA_0 offset)
+	 (sem-op dst offset)
+	 ()
+    )
+    (dni (.sym ld suffix -indirect-offset)
+	 (.str "ld" suffix "-indirect-offset")
+	 ()
+	 (.str "ld" suffix " $offset($abase), $dst")
+	 (+ opcode-op dst abase MODEA_INDIRECT-OFFSET ZEROA_0 offset)
+	 (sem-op dst (add offset abase))
+	 ()
+    )
+    (dni (.sym ld suffix -indirect) (.str "ld" suffix "-indirect")
+	 ()
+	 (.str "ld" suffix " ($abase), $dst")
+	 (+ opcode-op dst abase MODEB_INDIRECT scale ZEROB_0 indx)
+	 (sem-op dst abase)
+	 ()
+    )
+    (dni (.sym ld suffix -indirect-index) (.str "ld" suffix "-indirect-index")
+	 ()
+	 (.str "ld" suffix " ($abase)[$indx*S$scale], $dst")
+	 (+ opcode-op dst abase MODEB_INDIRECT-INDEX scale ZEROB_0 indx)
+	 (sem-op dst (add abase (mul indx (sll (const 1) scale))))
+	 ()
+    )
+    (dni (.sym ld suffix -disp) (.str "ld" suffix "-disp")
+	 ()
+	 (.str "ld" suffix " $optdisp, $dst")
+	 (+ opcode-op dst abase MODEB_DISP scale ZEROB_0 indx optdisp)
+	 (sem-op dst optdisp)
+	 ()
+    )
+    (dni (.sym ld suffix -indirect-disp) (.str "ld" suffix "-indirect-disp")
+	 ()
+	 (.str "ld" suffix " $optdisp($abase), $dst")
+	 (+ opcode-op dst abase MODEB_INDIRECT-DISP scale ZEROB_0 indx optdisp)
+	 (sem-op dst (add optdisp abase))
+	 ()
+    )
+    (dni (.sym ld suffix -index-disp) (.str "ld" suffix "-index-disp")
+	 ()
+	 (.str "ld" suffix " $optdisp[$indx*S$scale], $dst")
+	 (+ opcode-op dst abase MODEB_INDEX-DISP scale ZEROB_0 indx optdisp)
+	 (sem-op dst (add optdisp (mul indx (sll (const 1) scale))))
+	 ()
+    )
+    (dni (.sym ld suffix -indirect-index-disp)
+	 (.str "ld" suffix "-indirect-index-disp")
+	 ()
+	 (.str "ld" suffix " $optdisp($abase)[$indx*S$scale], $dst")
+	 (+ opcode-op dst abase MODEB_INDIRECT-INDEX-DISP scale ZEROB_0 indx optdisp)
+	 (sem-op dst (add optdisp (add abase
+				       (mul indx (sll (const 1) scale)))))
+	 ()
+    )
+  )
+)
+
+(load-op "a" OPCODE_8C lda-expr)
+
+(load-op ""  OPCODE_90 ld-expr)
+(load-op "ob" OPCODE_80 ldob-expr)
+(load-op "os" OPCODE_88 ldos-expr)
+(load-op "ib" OPCODE_C0 ldib-expr)
+(load-op "is" OPCODE_C8 ldis-expr)
+(load-op "l" OPCODE_98 ldl-expr)
+(load-op "t" OPCODE_A0 ldt-expr)
+(load-op "q" OPCODE_B0 ldq-expr)
+
+; ??? Incomplete.  This is a near duplicate of the above load-op macro.
+
+; ??? For efficiency, should eval the address only once.  See the load patterns
+; above.
+
+(define-pmacro (st-expr expr1 expr2)
+  (set (mem WI expr1) expr2))
+(define-pmacro (stob-expr expr1 expr2)
+  (set (mem QI expr1) expr2))
+(define-pmacro (stos-expr expr1 expr2)
+  (set (mem HI expr1) expr2))
+(define-pmacro (stl-expr expr1 expr2)
+  (sequence ((SI sregno))
+	    ; ??? Workaround cgen s-i-o-o bug.
+	    (set sregno (ifield f-srcdst))
+	    (set (mem WI expr1) expr2)
+	    (set (mem WI (add expr1 (const 4)))
+		 (reg h-gr (add (index-of expr2) (const 1))))))
+(define-pmacro (stt-expr expr1 expr2)
+  (sequence ((SI sregno))
+	    ; ??? Workaround cgen s-i-o-o bug.
+	    (set sregno (ifield f-srcdst))
+	    (set (mem WI expr1) expr2)
+	    (set (mem WI (add expr1 (const 4)))
+		 (reg h-gr (add (index-of expr2) (const 1))))
+	    (set (mem WI (add expr1 (const 8)))
+		 (reg h-gr (add (index-of expr2) (const 2))))))
+(define-pmacro (stq-expr expr1 expr2)
+  (sequence ((SI sregno))
+	    ; ??? Workaround cgen s-i-o-o bug.
+	    (set sregno (ifield f-srcdst))
+	    (set (mem WI expr1) expr2)
+	    (set (mem WI (add expr1 (const 4)))
+		 (reg h-gr (add (index-of expr2) (const 1))))
+	    (set (mem WI (add expr1 (const 8)))
+		 (reg h-gr (add (index-of expr2) (const 2))))
+	    (set (mem WI (add expr1 (const 12)))
+		 (reg h-gr (add (index-of expr2) (const 3))))))
+
+(define-pmacro (store-op suffix opcode-op sem-op)
+  (begin
+    (dni (.sym st suffix -offset) (.str "st" suffix "-offset")
+	 ()
+	 (.str "st" suffix " $st_src, $offset")
+	 (+ opcode-op st_src abase MODEA_OFFSET ZEROA_0 offset)
+	 (sem-op offset st_src)
+	 ()
+    )
+    (dni (.sym st suffix -indirect-offset)
+	 (.str "st" suffix "-indirect-offset")
+	 ()
+	 (.str "st" suffix " $st_src, $offset($abase)")
+	 (+ opcode-op st_src abase MODEA_INDIRECT-OFFSET ZEROA_0 offset)
+	 (sem-op (add offset abase) st_src)
+	 ()
+    )
+    (dni (.sym st suffix -indirect) (.str "st" suffix "-indirect")
+	 ()
+	 (.str "st" suffix " $st_src, ($abase)")
+	 (+ opcode-op st_src abase MODEB_INDIRECT scale ZEROB_0 indx)
+	 (sem-op abase st_src)
+	 ()
+    )
+    (dni (.sym st suffix -indirect-index) (.str "st" suffix "-indirect-index")
+	 ()
+	 (.str "st" suffix " $st_src, ($abase)[$indx*S$scale]")
+	 (+ opcode-op st_src abase MODEB_INDIRECT-INDEX scale ZEROB_0 indx)
+	 (sem-op (add abase (mul indx (sll (const 1) scale))) st_src)
+	 ()
+    )
+    (dni (.sym st suffix -disp) (.str "st" suffix "-disp")
+	 ()
+	 (.str "st" suffix " $st_src, $optdisp")
+	 (+ opcode-op st_src abase MODEB_DISP scale ZEROB_0 indx optdisp)
+	 (sem-op optdisp st_src)
+	 ()
+    )
+    (dni (.sym st suffix -indirect-disp) (.str "st" suffix "-indirect-disp")
+	 ()
+	 (.str "st" suffix " $st_src, $optdisp($abase)")
+	 (+ opcode-op st_src abase MODEB_INDIRECT-DISP scale ZEROB_0 indx optdisp)
+	 (sem-op (add optdisp abase) st_src)
+	 ()
+    )
+    (dni (.sym st suffix -index-disp) (.str "st" suffix "-index-disp")
+	 ()
+	 (.str "st" suffix " $st_src, $optdisp[$indx*S$scale")
+	 (+ opcode-op st_src abase MODEB_INDEX-DISP scale ZEROB_0 indx optdisp)
+	 (sem-op (add optdisp (mul indx (sll (const 1) scale))) st_src)
+	 ()
+    )
+    (dni (.sym st suffix -indirect-index-disp)
+	 (.str "st" suffix "-indirect-index-disp")
+	 ()
+	 (.str "st" suffix " $st_src, $optdisp($abase)[$indx*S$scale]")
+	 (+ opcode-op st_src abase MODEB_INDIRECT-INDEX-DISP scale ZEROB_0 indx optdisp)
+	 (sem-op (add optdisp (add abase (mul indx (sll (const 1) scale))))
+		 st_src)
+	 ()
+    )
+  )
+)
+
+(store-op "" OPCODE_92 st-expr)
+(store-op "ob" OPCODE_82 stob-expr)
+(store-op "os" OPCODE_8A stos-expr)
+(store-op "l" OPCODE_9A stl-expr)
+(store-op "t" OPCODE_A2 stt-expr)
+(store-op "q" OPCODE_B2 stq-expr)
+
+; ??? Incomplete, does not set condition code register.
+
+; ??? Without these functions, I end up with a call to the undefined
+; function EQUSI, because br_lit1 is an unsigned field.  Should be a better
+; way to solve this.
+
+(define-pmacro (eq-expr expr1 expr2) (eq WI expr1 expr2))
+(define-pmacro (ne-expr expr1 expr2) (ne WI expr1 expr2))
+(define-pmacro (ltu-expr expr1 expr2) (ltu UWI expr1 expr2))
+(define-pmacro (leu-expr expr1 expr2) (leu UWI expr1 expr2))
+(define-pmacro (gtu-expr expr1 expr2) (gtu UWI expr1 expr2))
+(define-pmacro (geu-expr expr1 expr2) (geu UWI expr1 expr2))
+(define-pmacro (lt-expr expr1 expr2) (lt WI expr1 expr2))
+(define-pmacro (le-expr expr1 expr2) (le WI expr1 expr2))
+(define-pmacro (gt-expr expr1 expr2) (gt WI expr1 expr2))
+(define-pmacro (ge-expr expr1 expr2) (ge WI expr1 expr2))
+
+; ??? Does not handle shifts greater than 32 correctly.
+
+(define-pmacro (bbc-expr expr1 expr2)
+  (eq WI (and (sll (const 1) expr1) expr2) (const 0)))
+(define-pmacro (bbs-expr expr1 expr2)
+  (ne WI (and (sll (const 1) expr1) expr2) (const 0)))
+
+(define-pmacro (cmp-op mnemonic opcode-op sem-op)
+  (begin
+    (dni (.sym mnemonic -reg)
+	 (.str mnemonic " reg")
+	 ()
+	 (.str mnemonic " $br_src1, $br_src2, $br_disp")
+	 (+ opcode-op br_src1 br_src2 BR_M1_0 br_disp BR_ZERO_0)
+	 (if (sem-op br_src1 br_src2) (set pc br_disp))
+	 ()
+    )
+    (dni (.sym mnemonic -lit)
+	 (.str mnemonic " lit")
+	 ()
+	 (.str mnemonic " $br_lit1, $br_src2, $br_disp")
+	 (+ opcode-op br_lit1 br_src2 BR_M1_1 br_disp BR_ZERO_0)
+	 (if (sem-op br_lit1 br_src2) (set pc br_disp))
+	 ()
+    )
+  )
+)
+
+(cmp-op "cmpobe" OPCODE_32 eq-expr)
+(cmp-op "cmpobne" OPCODE_35 ne-expr)
+(cmp-op "cmpobl" OPCODE_34 ltu-expr)
+(cmp-op "cmpoble" OPCODE_36 leu-expr)
+(cmp-op "cmpobg" OPCODE_31 gtu-expr)
+(cmp-op "cmpobge" OPCODE_33 geu-expr)
+
+(cmp-op "cmpibe" OPCODE_3A eq-expr)
+(cmp-op "cmpibne" OPCODE_3D ne-expr)
+(cmp-op "cmpibl" OPCODE_3C lt-expr)
+(cmp-op "cmpible" OPCODE_3E le-expr)
+(cmp-op "cmpibg" OPCODE_39 gt-expr)
+(cmp-op "cmpibge" OPCODE_3B ge-expr)
+
+(cmp-op "bbc" OPCODE_30 bbc-expr)
+(cmp-op "bbs" OPCODE_37 bbs-expr)
+
+; ??? This is a near copy of alu-op, but without the dst field.
+; ??? Should create fake operands instead of using h-cc.
+; ??? M3 can be either 0 or 1.  We only handle a value of 1 here.
+
+; ??? The else clause if not optional.
+
+(define-pmacro (cmpi-expr expr1 expr2)
+  (cond WI
+   ((lt WI expr1 expr2) (const 4))
+   ((eq WI expr1 expr2) (const 2))
+   ; gt: WI
+   (else (const 1))))
+(define-pmacro (cmpo-expr expr1 expr2)
+  (cond WI
+   ((ltu UWI expr1 expr2) (const 4))
+   ((eq  WI expr1 expr2) (const 2))
+   ; gtu: UWI
+   (else (const 1))))
+
+(define-pmacro (cc-op mnemonic opcode-op opcode2-op sem-op)
+  (begin
+    (dni mnemonic
+	 (.str mnemonic " reg/reg")
+	 ()
+	 (.str mnemonic " $src1, $src2")
+	 (+ opcode-op dst src2 M3_1 M2_0 M1_0 opcode2-op ZERO_0 src1)
+	 (set (reg h-cc 0) (sem-op src1 src2))
+	 ()
+    )
+    (dni (.sym mnemonic "1")
+	 (.str mnemonic " lit/reg")
+	 ()
+	 (.str mnemonic " $lit1, $src2")
+	 (+ opcode-op dst src2 M3_1 M2_0 M1_1 opcode2-op ZERO_0 lit1)
+	 (set (reg h-cc 0) (sem-op lit1 src2))
+	 ()
+    )
+    (dni (.sym mnemonic "2")
+	 (.str mnemonic " reg/lit")
+	 ()
+	 (.str mnemonic " $src1, $lit2")
+	 (+ opcode-op dst lit2 M3_1 M2_1 M1_0 opcode2-op ZERO_0 src1)
+	 (set (reg h-cc 0) (sem-op src1 lit2))
+	 ()
+    )
+    (dni (.sym mnemonic "3")
+	 (.str mnemonic " lit/lit")
+	 ()
+	 (.str mnemonic " $lit1, $lit2")
+	 (+ opcode-op dst lit2 M3_1 M2_1 M1_1 opcode2-op ZERO_0 lit1)
+	 (set (reg h-cc 0) (sem-op lit1 lit2))
+	 ()
+    )
+  )
+)
+
+(cc-op "cmpi" OPCODE_5A OPCODE2_1 cmpi-expr)
+(cc-op "cmpo" OPCODE_5A OPCODE2_0 cmpo-expr)
+
+; ??? The M1 field should be ignored.
+
+(define-pmacro (testno-expr)
+  (eq WI (reg h-cc 0) (const 0)))
+(define-pmacro (testg-expr)
+  (ne WI (and (reg h-cc 0) (const 1)) (const 0)))
+(define-pmacro (teste-expr)
+  (ne WI (and (reg h-cc 0) (const 2)) (const 0)))
+(define-pmacro (testge-expr)
+  (ne WI (and (reg h-cc 0) (const 3)) (const 0)))
+(define-pmacro (testl-expr)
+  (ne WI (and (reg h-cc 0) (const 4)) (const 0)))
+(define-pmacro (testne-expr)
+  (ne WI (and (reg h-cc 0) (const 5)) (const 0)))
+(define-pmacro (testle-expr)
+  (ne WI (and (reg h-cc 0) (const 6)) (const 0)))
+(define-pmacro (testo-expr)
+  (ne WI (and (reg h-cc 0) (const 7)) (const 0)))
+
+
+(define-pmacro (test-op mnemonic opcode-op sem-op)
+  (dni (.sym mnemonic -reg)
+       (.str mnemonic " reg")
+       ()
+       (.str mnemonic " $br_src1")
+       (+ opcode-op br_src1 br_src2 BR_M1_0 br_disp BR_ZERO_0)
+       (set br_src1 (sem-op))
+       ()
+  )
+)
+
+(test-op "testno" OPCODE_20 testno-expr)
+(test-op "testg" OPCODE_21 testg-expr)
+(test-op "teste" OPCODE_22 teste-expr)
+(test-op "testge" OPCODE_23 testge-expr)
+(test-op "testl" OPCODE_24 testl-expr)
+(test-op "testne" OPCODE_25 testne-expr)
+(test-op "testle" OPCODE_26 testle-expr)
+(test-op "testo" OPCODE_27 testo-expr)
+
+(define-pmacro (branch-op mnemonic opcode-op sem-op)
+  (dni (.sym mnemonic) (.str mnemonic)
+       ()
+       (.str mnemonic " $ctrl_disp")
+       (+ opcode-op ctrl_disp CTRL_ZERO_0)
+       (if (sem-op) (set pc ctrl_disp))
+       ()
+  )
+)
+
+(branch-op "bno" OPCODE_10 testno-expr)
+(branch-op "bg" OPCODE_11 testg-expr)
+(branch-op "be" OPCODE_12 teste-expr)
+(branch-op "bge" OPCODE_13 testge-expr)
+(branch-op "bl" OPCODE_14 testl-expr)
+(branch-op "bne" OPCODE_15 testne-expr)
+(branch-op "ble" OPCODE_16 testle-expr)
+(branch-op "bo" OPCODE_17 testo-expr)
+
+(dni b "b"
+     ()
+     "b $ctrl_disp"
+     (+ OPCODE_08 ctrl_disp CTRL_ZERO_0)
+     (set pc ctrl_disp)
+     ()
+)
+
+; ??? Incomplete.  Only handles 5 of 10 addressing modes.
+; Should be a macro.
+
+(dni bx-indirect-offset "bx-indirect-offset"
+     ()
+     "bx $offset($abase)"
+     (+ OPCODE_84 dst abase MODEA_INDIRECT-OFFSET ZEROA_0 offset)
+     (set pc (add offset abase))
+     ()
+)
+
+(dni bx-indirect "bx-indirect"
+     ()
+     "bx ($abase)"
+     (+ OPCODE_84 dst abase MODEB_INDIRECT scale ZEROB_0 indx)
+     (set pc abase)
+     ()
+)
+
+(dni bx-indirect-index "bx-indirect-index"
+     ()
+     "bx ($abase)[$indx*S$scale]"
+     (+ OPCODE_84 dst abase MODEB_INDIRECT-INDEX scale ZEROB_0 indx)
+     (set pc (add abase (mul indx (sll (const 1) scale))))
+     ()
+)
+
+(dni bx-disp "bx-disp"
+     ()
+     "bx $optdisp"
+     (+ OPCODE_84 dst abase MODEB_DISP scale ZEROB_0 indx optdisp)
+     (set pc optdisp)
+     ()
+)
+
+(dni bx-indirect-disp "bx-indirect-disp"
+     ()
+     "bx $optdisp($abase)"
+     (+ OPCODE_84 dst abase MODEB_INDIRECT-DISP scale ZEROB_0 indx optdisp)
+     (set pc (add optdisp abase))
+     ()
+)
+
+; ??? Incomplete.  Only handles 3 of 10 addressing modes.  Only handles
+; one local register set.
+
+; ??? If we don't want all of the set-quiet calls, then we need to increase
+; SIZE_TRACE_BUF in sim/common/cgen-trace.c.
+
+(dni callx-disp "callx-disp"
+     ()
+     "callx $optdisp"
+     (+ OPCODE_86 dst abase MODEB_DISP scale ZEROB_0 indx optdisp)
+     (sequence ((WI temp))
+	       (set temp (and (add (reg h-gr 1) (const 63)) (inv (const 63))))
+	       ; ??? This doesn't seem right.  Why do I have to add 8?.
+	       (set (reg h-gr 2) (add pc (const 8)))
+	       ; Save current local reg set on stack.
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 0)))
+			  (reg h-gr 0))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 4)))
+			  (reg h-gr 1))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 8)))
+			  (reg h-gr 2))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 12)))
+			  (reg h-gr 3))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 16))) 
+			  (reg h-gr 4))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 20)))
+			  (reg h-gr 5))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 24)))
+			  (reg h-gr 6))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 28)))
+			  (reg h-gr 7))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 32)))
+			  (reg h-gr 8))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 36)))
+			  (reg h-gr 9))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 40)))
+			  (reg h-gr 10))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 44)))
+			  (reg h-gr 11))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 48)))
+			  (reg h-gr 12))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 52)))
+			  (reg h-gr 13))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 56)))
+			  (reg h-gr 14))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 60)))
+			  (reg h-gr 15))
+	       (set pc optdisp)
+	       ; Allocate new local reg set.
+	       (set-quiet (reg h-gr 0) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 1) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 2) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 3) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 4) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 5) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 6) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 7) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 8) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 9) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 10) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 11) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 12) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 13) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 14) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 15) (const #xDEADBEEF))
+	       (set (reg h-gr 0) (reg h-gr 31))
+	       (set (reg h-gr 31) temp)
+	       (set (reg h-gr 1) (add temp (const 64))))
+     ()
+)
+
+; ??? This should be macro-ized somehow.
+
+; ??? This adds 4 to pc.  The above pattern adds 8.
+
+(dni callx-indirect "callx-indirect"
+     ()
+     "callx ($abase)"
+     (+ OPCODE_86 dst abase MODEB_INDIRECT scale ZEROB_0 indx)
+     (sequence ((WI temp))
+	       (set temp (and (add (reg h-gr 1) (const 63)) (inv (const 63))))
+	       ; ??? This doesn't seem right.  Why do I have to add 4?.
+	       (set (reg h-gr 2) (add pc (const 4)))
+	       ; Save current local reg set on stack.
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 0)))
+			  (reg h-gr 0))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 4)))
+			  (reg h-gr 1))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 8)))
+			  (reg h-gr 2))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 12)))
+			  (reg h-gr 3))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 16)))
+			  (reg h-gr 4))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 20)))
+			  (reg h-gr 5))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 24)))
+			  (reg h-gr 6))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 28)))
+			  (reg h-gr 7))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 32)))
+			  (reg h-gr 8))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 36)))
+			  (reg h-gr 9))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 40)))
+			  (reg h-gr 10))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 44)))
+			  (reg h-gr 11))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 48)))
+			  (reg h-gr 12))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 52)))
+			  (reg h-gr 13))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 56)))
+			  (reg h-gr 14))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 60)))
+			  (reg h-gr 15))
+	       ; We do this first, because abase might be a local reg.
+	       (set pc abase)
+	       ; Allocate new local reg set.
+	       (set-quiet (reg h-gr 0) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 1) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 2) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 3) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 4) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 5) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 6) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 7) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 8) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 9) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 10) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 11) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 12) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 13) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 14) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 15) (const #xDEADBEEF))
+	       (set (reg h-gr 0) (reg h-gr 31))
+	       (set (reg h-gr 31) temp)
+	       (set (reg h-gr 1) (add temp (const 64))))
+     ()
+)
+
+; ??? This adds 4 to pc.
+
+; ??? This should be macro-ized somehow.
+
+(dni callx-indirect-offset "callx-indirect-offset"
+     ()
+     "callx $offset($abase)"
+     (+ OPCODE_86 dst abase MODEA_INDIRECT-OFFSET ZEROA_0 offset)
+     (sequence ((WI temp))
+	       (set temp (and (add (reg h-gr 1) (const 63)) (inv (const 63))))
+	       ; ??? This doesn't seem right.  Why do I have to add 4?.
+	       (set (reg h-gr 2) (add pc (const 4)))
+	       ; Save current local reg set on stack.
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 0)))
+			  (reg h-gr 0))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 4)))
+			  (reg h-gr 1))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 8)))
+			  (reg h-gr 2))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 12)))
+			  (reg h-gr 3))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 16)))
+			  (reg h-gr 4))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 20)))
+			  (reg h-gr 5))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 24)))
+			  (reg h-gr 6))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 28)))
+			  (reg h-gr 7))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 32)))
+			  (reg h-gr 8))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 36)))
+			  (reg h-gr 9))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 40)))
+			  (reg h-gr 10))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 44)))
+			  (reg h-gr 11))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 48)))
+			  (reg h-gr 12))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 52)))
+			  (reg h-gr 13))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 56)))
+			  (reg h-gr 14))
+	       (set-quiet (mem WI (add (reg h-gr 31) (const 60)))
+			  (reg h-gr 15))
+	       ; We do this first, because abase might be a local reg.
+	       (set pc (add offset abase))
+	       ; Allocate new local reg set.
+	       (set-quiet (reg h-gr 0) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 1) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 2) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 3) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 4) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 5) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 6) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 7) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 8) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 9) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 10) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 11) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 12) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 13) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 14) (const #xDEADBEEF))
+	       (set-quiet (reg h-gr 15) (const #xDEADBEEF))
+	       (set (reg h-gr 0) (reg h-gr 31))
+	       (set (reg h-gr 31) temp)
+	       (set (reg h-gr 1) (add temp (const 64))))
+     ()
+)
+
+; ??? Incomplete.  Does not handle return status in PFP.
+
+(dni ret "ret"
+     ()
+     "ret"
+     (+ OPCODE_0A ctrl_disp CTRL_ZERO_0)
+     (sequence ()
+	       (set (reg h-gr 31) (reg h-gr 0))
+	       (set-quiet (reg h-gr 0)
+			  (mem WI (add (reg h-gr 31) (const 0))))
+	       (set-quiet (reg h-gr 1)
+			  (mem WI (add (reg h-gr 31) (const 4))))
+	       (set-quiet (reg h-gr 2)
+			  (mem WI (add (reg h-gr 31) (const 8))))
+	       (set-quiet (reg h-gr 3)
+			  (mem WI (add (reg h-gr 31) (const 12))))
+	       (set-quiet (reg h-gr 4)
+			  (mem WI (add (reg h-gr 31) (const 16))))
+	       (set-quiet (reg h-gr 5)
+			  (mem WI (add (reg h-gr 31) (const 20))))
+	       (set-quiet (reg h-gr 6)
+			  (mem WI (add (reg h-gr 31) (const 24))))
+	       (set-quiet (reg h-gr 7)
+			  (mem WI (add (reg h-gr 31) (const 28))))
+	       (set-quiet (reg h-gr 8)
+			  (mem WI (add (reg h-gr 31) (const 32))))
+	       (set-quiet (reg h-gr 9)
+			  (mem WI (add (reg h-gr 31) (const 36))))
+	       (set-quiet (reg h-gr 10)
+			  (mem WI (add (reg h-gr 31) (const 40))))
+	       (set-quiet (reg h-gr 11)
+			  (mem WI (add (reg h-gr 31) (const 44))))
+	       (set-quiet (reg h-gr 12)
+			  (mem WI (add (reg h-gr 31) (const 48))))
+	       (set-quiet (reg h-gr 13)
+			  (mem WI (add (reg h-gr 31) (const 52))))
+	       (set-quiet (reg h-gr 14)
+			  (mem WI (add (reg h-gr 31) (const 56))))
+	       (set-quiet (reg h-gr 15)
+			  (mem WI (add (reg h-gr 31) (const 60))))
+	       (set pc (reg h-gr 2)))
+     ()
+)
+
+; ??? Incomplete, does not do any system operations.
+
+; ??? Should accept either reg or lit for src1.
+
+; ??? M3/M2 should not matter.
+
+(dni calls "calls"
+     ()
+     "calls $src1"
+     (+ OPCODE_66 dst src2 M3_1 M2_1 M1_0 OPCODE2_0 ZERO_0 src1)
+     (set WI pc (c-call WI "i960_trap" pc src1))
+     ()
+)
+
+; ??? Incomplete, does not do any system operations.
+
+; ??? M3/M2/M1 should not matter.
+
+(dni fmark "fmark"
+     ()
+     "fmark"
+     (+ OPCODE_66 dst src2 M3_1 M2_1 M1_1 OPCODE2_C ZERO_0 src1)
+     (set WI pc (c-call WI "i960_breakpoint" pc))
+     ()
+)
+
+; ??? Incomplete.  This doesn't actually have to do anything, because we
+; currently support only one set of local registers.
+
+; ??? The settings of the M1/2/3 bits shouldn't matter.
+
+(dni flushreg "flushreg"
+     ()
+     "flushreg"
+     (+ OPCODE_66 dst src2 M3_1 M2_1 M1_1 OPCODE2_D ZERO_0 src1)
+     (nop)
+     ()
+)

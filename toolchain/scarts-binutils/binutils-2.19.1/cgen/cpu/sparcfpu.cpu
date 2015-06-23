@@ -1,0 +1,527 @@
+; SPARC 32/64 FPU description.  -*- Scheme -*-
+; This file contains fpu instructions common to both sparc32/sparc64.
+; It also contains sparc32/64 specific insns, but only when they are a variant
+; of a collection of common ones (at least that's the current theory).
+; Copyright (C) 2000 Red Hat, Inc.
+; This file is part of CGEN.
+; See file COPYING.CGEN for details.
+
+; FP support is defined even for cpu's without an fpu as the instructions
+; still have to be assembled and the simulator still has to recognize them
+; so that the appropriate trap can be generated.
+;
+; The physical registers are stored as an array of SI values: here `SI'
+; denotes "set of 32 bits" rather than "32 bit signed integer".
+;
+; wip: currently evaluating the various possibilities
+
+; Floating point hardware.
+
+; The description needs to know whether the fpu is present.
+; Creating a utility register for this purposes seems reasonable.
+; Might want an attribute to denote it as such.
+
+(dsh h-fpu? "h/w fpu present?" () (register BI))
+(dnop fpu? "h/w fpu present?" () h-fpu? f-nil)
+
+(define-pmacro (build-freg-name n) ((.sym f n) n))
+
+(define-hardware
+  (name h-fr32)
+  (semantic-name h-fr)
+  (comment "sparc32 floating point regs")
+  (attrs (MACH32))
+  (type register SI (32))
+  (indices keyword "%" (.map build-freg-name (.iota 32)))
+)
+(define-hardware
+  (name h-fr64)
+  (semantic-name h-fr)
+  (comment "sparc64 floating point regs")
+  (attrs (MACH64))
+  (type register SI (64))
+  (indices keyword "%" (.map build-freg-name (.iota 64)))
+)
+
+(define-hardware
+  (name h-frd32)
+  (semantic-name h-frd)
+  (comment "sparc32 double precision floating point regs")
+  (attrs VIRTUAL (MACH32))
+  (type register DI (16))
+  ; ??? This works, but multiple copies of all the register names might be
+  ; unpalatable.  Another way is to specify a register table plus a constraint.
+  ;(indices keyword "%" (.map build-freg-name (.iota 16 0 2)))
+  (get (index) (join DI SI
+		      (reg h-fr index)
+		      (reg h-fr (add index 1))))
+  (set (index newval)
+       (sequence ()
+		 (set (reg h-fr index) (subword SI newval 0))
+		 (set (reg h-fr (add index 1)) (subword SI newval 1))))
+)
+
+(define-hardware
+  (name h-frq32)
+  (semantic-name h-frq)
+  (comment "sparc32 quad precision floating point regs")
+  (attrs VIRTUAL (MACH32))
+  (type register TF (8))
+  (indices keyword "%" (.map build-freg-name (.iota 8 0 4)))
+  (get (index) (join TF SI
+		      (reg h-fr index)
+		      (reg h-fr (add index (const 1)))
+		      (reg h-fr (add index (const 2)))
+		      (reg h-fr (add index (const 3)))))
+  (set (index newval)
+       (sequence ()
+		 (set (reg h-fr index) (subword SI newval 0))
+		 (set (reg h-fr (add index (const 1))) (subword SI newval 1))
+		 (set (reg h-fr (add index (const 2))) (subword SI newval 2))
+		 (set (reg h-fr (add index (const 3))) (subword SI newval 3))))
+)
+
+(define-hardware
+  (name h-frd64)
+  (semantic-name h-frd)
+  (comment "sparc64 double precision floating point regs")
+  (attrs VIRTUAL (MACH64))
+  (type register DF (32))
+  (indices keyword "%" (.map build-freg-name (.iota 32 0 2)))
+  (get (index) (join DF SI
+		      (reg h-fr index)
+		      (reg h-fr (add index (const 1)))))
+  (set (index newval)
+       (sequence ()
+		 (set (reg h-fr index) (subword SI newval 0))
+		 (set (reg h-fr (add index (const 1))) (subword SI newval 1))))
+)
+
+(define-hardware
+  (name h-frq64)
+  (semantic-name h-frq)
+  (comment "sparc64 quad precision floating point regs")
+  (attrs VIRTUAL (MACH64))
+  (type register TF (16))
+  (indices keyword "%" (.map build-freg-name (.iota 16 0 4)))
+  (get (index) (join TF SI
+		      (reg h-fr index)
+		      (reg h-fr (add index (const 1)))
+		      (reg h-fr (add index (const 2)))
+		      (reg h-fr (add index (const 3)))))
+  (set (index newval)
+       (sequence ()
+		 (set (reg h-fr index) (subword SI newval 0))
+		 (set (reg h-fr (add index (const 1))) (subword SI newval 1))
+		 (set (reg h-fr (add index (const 2))) (subword SI newval 2))
+		 (set (reg h-fr (add index (const 3))) (subword SI newval 3))))
+)
+
+; fp condition codes
+
+(dsh h-fcc0 "%fcc0" ()         (register (UINT 2)))
+(dsh h-fcc1 "%fcc1" ((MACH64)) (register (UINT 2)))
+(dsh h-fcc2 "%fcc2" ((MACH64)) (register (UINT 2)))
+(dsh h-fcc3 "%fcc3" ((MACH64)) (register (UINT 2)))
+
+; sparc64 fpu control regs
+
+(dsh h-fsr-rd "fsr rounding direction" ((MACH64)) (register UQI))
+(dsh h-fsr-tem "fsr trap enable mask" ((MACH64)) (register UQI))
+(dsh h-fsr-ns "fsr nonstandard fp" ((MACH64)) (register BI))
+(dsh h-fsr-ver "fsr version" ((MACH64)) (register UQI))
+(dsh h-fsr-ftt "fsr fp trap type" ((MACH64)) (register UQI))
+(dsh h-fsr-qne "fsr queue not empty" ((MACH64)) (register BI))
+(dsh h-fsr-aexc "fsr accrued exception" ((MACH64)) (register UQI))
+(dsh h-fsr-cexc "fsr current exception" ((MACH64)) (register UQI))
+;(dsh h-fsr "floating point state" ((MACH64)) (register UDI))
+
+(dsh h-fpsr-fef "fpsr enable fp" ((MACH64)) (register BI))
+(dsh h-fpsr-du "fpsr dirty upper" ((MACH64)) (register BI))
+(dsh h-fpsr-dl "fpsr dirty lower" ((MACH64)) (register BI))
+
+(define-hardware
+  (name h-fpsr)
+  (comment "fp regs state")
+  (attrs VIRTUAL (MACH64))
+  (type register UQI)
+  (get () (const 0)) ; FIXME
+  (set (newval) (set (raw-reg UQI h-fpsr) (const 0))) ; FIXME
+)
+
+; Floating point operands.
+
+(define-operand
+  (name frs1s)
+  (comment "single precision floating point source register 1")
+  (type h-fr)
+  (index f-rs1)
+  (mode SF)
+)
+(define-operand
+  (name frs2s)
+  (comment "single precision floating point source register 2")
+  (type h-fr)
+  (index f-rs2)
+  (mode SF)
+)
+(define-operand
+  (name frds)
+  (comment "single precision floating point dest'n register")
+  (type h-fr)
+  (index f-rd)
+  (mode SF)
+)
+
+(define-operand
+  (name frs1d)
+  (comment "double precision floating point source register 1")
+  (attrs (MACH32))
+  (type h-frd)
+  (index f-rs1)
+  (mode DF)
+)
+(define-operand
+  (name frs2d)
+  (comment "double precision floating point source register 2")
+  (attrs (MACH32))
+  (type h-frd)
+  (index f-rs2)
+  (mode DF)
+)
+(define-operand
+  (name frdd)
+  (comment "double precision floating point dest'n register")
+  (attrs (MACH32))
+  (type h-frd)
+  (index f-rd)
+  (mode DF)
+)
+
+(dnop frs1q "quad precision floating point source register 1" ((MACH32))
+      h-frq f-rs1)
+(dnop frs2q "quad precision floating point source register 2" ((MACH32))
+      h-frq f-rs2)
+(dnop frdq  "quad precision floating point dest'n register"   ((MACH32))
+      h-frq f-rd)
+
+; Encoding/decoding of field for sparc64 requires extra effort.
+; See v9 page 40: 5.1.4.1 Floating-Point Register Number Encoding.
+(df   f-frs1d-64 "rs1 field for sparc64 DF regs" ((MACH64)) 18 5 UINT
+      ((value pc) (or INT (srl value (const 5)) (and value (const #x1e))))
+      ((value pc) (or INT (sll (and value (const 1)) (const 5))
+		       (and value (const #x1e))))
+)
+(df   f-frs2d-64 "rs2 field for sparc64 DF regs" ((MACH64)) 4 5 UINT
+      ((value pc) (or INT (srl value (const 5)) (and value (const #x1e))))
+      ((value pc) (or INT (sll (and value (const 1)) (const 5))
+		       (and value (const #x1e))))
+)
+(df   f-frdd-64  "rd field for sparc64 DF regs" ((MACH64)) 29 5 UINT
+      ((value pc) (or INT (srl value (const 5)) (and value (const #x1e))))
+      ((value pc) (or INT (sll (and value (const 1)) (const 5))
+		       (and value (const #x1e))))
+)
+(dnop frs1d "double precision floating point source register 1" ((MACH64))
+      h-frd f-frs1d-64)
+(dnop frs2d "double precision floating point source register 2" ((MACH64))
+      h-frd f-frs2d-64)
+(dnop frdd  "double precision floating point dest'n register"   ((MACH64))
+      h-frd f-frdd-64)
+
+; Encoding/decoding of field for sparc64 requires extra effort.
+; See v9 page 40: 5.1.4.1 Floating-Point Register Number Encoding.
+(df   f-frs1q-64 "rs1 field for sparc64 TF regs" ((MACH64)) 18 5 UINT
+      ((value pc) (or INT (srl value (const 5)) (and value (const #x1e))))
+      ((value pc) (or INT (sll (and value (const 1)) (const 5))
+		       (and value (const #x1e))))
+)
+(df   f-frs2q-64 "rs2 field for sparc64 TF regs" ((MACH64)) 4 5 UINT
+      ((value pc) (or INT (srl value (const 5)) (and value (const #x1e))))
+      ((value pc) (or INT (sll (and value (const 1)) (const 5))
+		       (and value (const #x1e))))
+)
+(df   f-frdq-64  "rd field for sparc64 TF regs" ((MACH64)) 29 5 UINT
+      ((value pc) (or INT (srl value (const 5)) (and value (const #x1e))))
+      ((value pc) (or INT (sll (and value (const 1)) (const 5))
+		       (and value (const #x1e))))
+)
+(dnop frs1q "quad precision floating point source register 1" ((MACH64))
+      h-frq f-frs1q-64)
+(dnop frs2q "quad precision floating point source register 2" ((MACH64))
+      h-frq f-frs2q-64)
+(dnop frdq  "quad precision floating point dest'n register"   ((MACH64))
+      h-frq f-frdq-64)
+
+(dnop fcc0 "%fcc0" () h-fcc0 f-nil)
+
+; Misc. support macros.
+; FIXME: TRAP32 wip
+; FIXME: sparc32/sparc64 differences
+; FIXME: trap handling in general (c-call's used until more thought invested)
+
+; Check if fpu is present and enabled.
+
+(define-pmacro (check-fp-enabled)
+  ; FIXME: more things to check
+  (if (not fpu?)
+      (c-call VOID "@cpu@_hw_trap" pc (c-code INT "TRAP32_FP_DIS")))
+)
+
+; Return pointer to FPU.
+; ??? wip.  maybe move `snan?' to language proper?
+
+(define-pmacro (current-fpu) (c-call PTR "CGEN_CPU_FPU"))
+
+; Issue appropriate trap if x is an snan.
+
+(define-pmacro (check-sf-snan x)
+  (if (c-raw-call BI "cgen_sf_snan_p" (current-fpu) x)
+      (c-call VOID "@cpu@_hw_trap" pc (c-code INT "TRAP32_FP_DIS"))) ; FIXME
+)
+
+(define-pmacro (check-df-snan x)
+  (if (c-raw-call BI "cgen_df_snan_p" (current-fpu) x)
+      (c-call VOID "@cpu@_hw_trap" pc (c-code INT "TRAP32_FP_DIS"))) ; FIXME
+)
+
+; Floating point memory ops.
+
+; Note: the startup code uses a load to %f0 to see if an fpu is present.
+; Other startup code tries to set the EF bit in the PSR.
+
+(define-pmacro (fp-ld-op name comment op3 mode dest)
+  (begin
+    (dnmi (.sym name "f-reg") comment ()
+	  (.str name " [$rs1],$" dest)
+	  (emit (.sym name f-reg+reg) rs1 (rs2 0) dest))
+    (dnmi (.sym name "f-reg+0") comment ()
+	  (.str name " [$rs1],$" dest)
+	  (emit (.sym name f-reg+imm) rs1 (simm13 0) dest))
+    (dni (.sym name "f-reg+reg") comment ()
+	 (.str name " [$rs1+$rs2],$" dest)
+	 (+ OP_3 op3 dest rs1 (f-i 0) (f-res-asi 0) rs2)
+	 (sequence ()
+		   (check-fp-enabled)
+		   (set dest (mem mode (add WI rs1 rs2))))
+	 ())
+    (dni (.sym name "f-reg+imm") comment ()
+	 (.str name " [$rs1+$simm13],$" dest)
+	 (+ OP_3 op3 dest rs1 (f-i 1) simm13)
+	 (sequence ()
+		   (check-fp-enabled)
+		   (set dest (mem mode (add WI rs1 simm13))))
+	 ())
+    (dnmi (.sym name "f-reg/asi") comment ()
+	  (.str name " [$rs1]$asi,$" dest)
+	  (emit (.sym name f-reg+reg/asi) rs1 (rs2 0) asi dest))
+    (dni (.sym name "f-reg+reg/asi") comment ()
+	 (.str name " [$rs1+$rs2]$asi,$" dest)
+	 (+ OP_3 (.sym op3 A) dest rs1 (f-i 0) asi rs2)
+	 (sequence ()
+		   (check-fp-enabled)
+		   (set dest (mem mode (add WI rs1 rs2))))
+	 ())
+    )
+)
+(fp-ld-op ld "fp SF load" OP3_LDF SF frds)
+(fp-ld-op ldd "fp DF load" OP3_LDDF DF frdd)
+
+(define-pmacro (fp-st-op name comment op3 mode src)
+  (begin
+    (dnmi (.sym name "f-reg") comment ()
+	  (.str name " $" src ",[$rs1]")
+	  (emit (.sym name f-reg+reg) rs1 (rs2 0) src))
+    (dnmi (.sym name "f-reg+0") comment ()
+	  (.str name " $" src ",[$rs1]")
+	  (emit (.sym name f-reg+imm) rs1 (simm13 0) src))
+    (dni (.sym name "f-reg+reg") comment ()
+	 (.str name " $" src ",[$rs1+$rs2]")
+	 (+ OP_3 op3 src rs1 (f-i 0) (f-res-asi 0) rs2)
+	 (sequence ()
+		   (check-fp-enabled)
+		   (set (mem mode (add WI rs1 rs2)) src))
+	 ())
+    (dni (.sym name "f-reg+imm") comment ()
+	 (.str name " $" src ",[$rs1+$simm13]")
+	 (+ OP_3 op3 src rs1 (f-i 1) simm13)
+	 (sequence ()
+		   (check-fp-enabled)
+		   (set (mem mode (add WI rs1 simm13)) src))
+	 ())
+    (dnmi (.sym name "f-reg/asi") comment ()
+	  (.str name " $" src ",[$rs1]$asi")
+	  (emit (.sym name -reg+reg/asi) rs1 (rs2 0) asi src))
+    (dni (.sym name "f-reg+reg/asi") comment ()
+	 (.str name " $" src ",[$rs1+$rs2]$asi")
+	 (+ OP_3 (.sym op3 A) src rs1 (f-i 0) asi rs2)
+	 (sequence ()
+		   (check-fp-enabled)
+		   (set (mem mode (add WI rs1 rs2)) src))
+	 ())
+    )
+)
+(fp-st-op st "fp SF store" OP3_STF SF frds)
+(fp-st-op std "fp DF store" OP3_STDF DF frdd)
+
+; SF mode arithmetic ops.
+
+(define-pmacro (sf-unary-op name comment op3 fpop1 fn)
+  (begin
+    (dni name comment ()
+	 (.str name " $frs1s,$frds")
+	 (+ OP_2 op3 fpop1 frds frs1s (f-rs2 0))
+	 (sequence ()
+		   (check-fp-enabled)
+		   (set frds (fn frs1s))
+		   ; ??? dest is modified if snan, assign to tmp first?
+		   ; [grep for all check-*-snan's]
+		   (check-sf-snan frds))
+	 ())
+    )
+)
+
+(define-pmacro (sf-binary-op name comment op3 fpop1 fn)
+  (begin
+    (dni name comment ()
+	 (.str name " $frs1s,$frs2s,$frds")
+	 (+ OP_2 op3 fpop1 frds frs1s frs2s)
+	 (sequence ()
+		   (check-fp-enabled)
+		   (set frds (fn frs1s frs2s))
+		   (check-sf-snan frds))
+	 ())
+    )
+)
+
+(sf-unary-op fnegs "32 bit fp neg" OP3_FPOPS1 FPOPS1_FNEGS neg)
+(sf-unary-op fabss "32 bit fp abs" OP3_FPOPS1 FPOPS1_FABSS abs)
+
+(sf-binary-op fadds "32 bit fp add" OP3_FPOPS1 FPOPS1_FADDS add)
+(sf-binary-op fsubs "32 bit fp sub" OP3_FPOPS1 FPOPS1_FSUBS sub)
+(sf-binary-op fmuls "32 bit fp mul" OP3_FPOPS1 FPOPS1_FMULS mul)
+(sf-binary-op fdivs "32 bit fp div" OP3_FPOPS1 FPOPS1_FDIVS div)
+
+; ??? floating point compares are wip
+
+(dni fp-fcmps "32 bit compare" ()
+     "fcmps $frs1s,$frs2s"
+     (+ OP_2 OP3_FPOPS2 FPOPS2_FCMPS (f-rd 0) frs1s frs2s)
+     (sequence ()
+	       (check-fp-enabled)
+	       (set fcc0 (c-call UINT "SFCMP" frs1s frs2s)))
+     ()
+)
+
+(dni fp-fcmpse "32 bit compare, signal if any nans" ()
+     "fcmpse $frs1s,$frs2s"
+     (+ OP_2 OP3_FPOPS2 FPOPS2_FCMPSE (f-rd 0) frs1s frs2s)
+     (sequence ()
+	       (check-fp-enabled)
+	       (check-sf-snan frs1s)
+	       (check-sf-snan frs2s)
+	       (set fcc0 (c-call UINT "SFCMP" frs1s frs2s)))
+     ()
+)
+
+; DF mode arithmetic ops.
+
+(define-pmacro (df-unary-op name comment op3 fpop1 fn)
+  (begin
+    (dni name comment ()
+	 (.str name " $frs1d,$frdd")
+	 (+ OP_2 op3 fpop1 frdd frs1d (f-rs2 0))
+	 (sequence ()
+		   (check-fp-enabled)
+		   (set frdd (fn frs1d))
+		   (check-df-snan frdd))
+	 ())
+    )
+)
+
+(define-pmacro (df-binary-op name comment op3 fpop1 fn)
+  (begin
+    (dni name comment ()
+	 (.str name " $frs1d,$frs2d,$frdd")
+	 (+ OP_2 op3 fpop1 frdd frs1d frs2d)
+	 (sequence ()
+		   (check-fp-enabled)
+		   (set frdd (fn frs1d frs2d))
+		   (check-df-snan frdd))
+	 ())
+    )
+)
+
+(df-unary-op fnegd "64 bit fp neg" OP3_FPOPS1 FPOPS1_FNEGD neg)
+(df-unary-op fabsd "64 bit fp abs" OP3_FPOPS1 FPOPS1_FABSD abs)
+
+(df-binary-op faddd "64 bit fp add" OP3_FPOPS1 FPOPS1_FADDD add)
+(df-binary-op fsubd "64 bit fp sub" OP3_FPOPS1 FPOPS1_FSUBD sub)
+(df-binary-op fmuld "64 bit fp mul" OP3_FPOPS1 FPOPS1_FMULD mul)
+(df-binary-op fdivd "64 bit fp div" OP3_FPOPS1 FPOPS1_FDIVD div)
+
+; ??? floating point compares are wip
+
+(dni fp-fcmpd "64 bit compare" ()
+     "fcmpd $frs1d,$frs2d"
+     (+ OP_2 OP3_FPOPS2 FPOPS2_FCMPD (f-rd 0) frs1d frs2d)
+     (sequence ()
+	       (check-fp-enabled)
+	       (set fcc0 (c-call UINT "DFCMP" frs1d frs2d)))
+     ()
+)
+
+(dni fp-fcmpde "64 bit compare, signal if any nans" ()
+     "fcmpde $frs1d,$frs2d"
+     (+ OP_2 OP3_FPOPS2 FPOPS2_FCMPDE (f-rd 0) frs1d frs2d)
+     (sequence ()
+	       (check-fp-enabled)
+	       (check-df-snan frs1d)
+	       (check-df-snan frs2d)
+	       (set fcc0 (c-call UINT "DFCMP" frs1d frs2d)))
+     ()
+)
+
+; Branches
+
+; CC is one of fcc0,fcc
+(define-pmacro (ftest-u cc) (eq cc FCC_UN))
+(define-pmacro (ftest-g cc) (eq cc FCC_GT))
+(define-pmacro (ftest-ug cc) (orif (eq cc FCC_UN) (eq cc FCC_GT)))
+(define-pmacro (ftest-l cc)  (eq cc FCC_LT))
+(define-pmacro (ftest-ul cc) (orif (eq cc FCC_UN) (eq cc FCC_LT)))
+(define-pmacro (ftest-lg cc) (orif (eq cc FCC_LT) (eq cc FCC_GT)))
+(define-pmacro (ftest-ne cc) (ne cc FCC_EQ))
+(define-pmacro (ftest-e cc) (eq cc FCC_EQ))
+(define-pmacro (ftest-ue cc) (orif (eq cc FCC_UN) (eq cc FCC_EQ)))
+(define-pmacro (ftest-ge cc) (orif (eq cc FCC_GT) (eq cc FCC_EQ)))
+(define-pmacro (ftest-uge cc) (ne cc FCC_LT))
+(define-pmacro (ftest-le cc) (orif (eq cc FCC_LT) (eq cc FCC_EQ)))
+(define-pmacro (ftest-ule cc) (ne cc FCC_GT))
+(define-pmacro (ftest-o cc) (ne cc FCC_UN))
+
+(define-pmacro (fbfcc-branch bname comment cond test br-sem)
+  (begin
+    (dni bname (.str "fp branch " comment) (V9-DEPRECATED)
+	 (.str bname "$a $disp22")
+	 (+ OP_0 a cond OP2_FBFCC disp22)
+	 (br-sem test fcc0)
+	 ())
+    )
+)
+(fbfcc-branch fba   "always"               FCOND_A  test-always uncond-br-sem)
+(fbfcc-branch fbn   "never"                FCOND_N  test-never uncond-br-sem)
+(fbfcc-branch fbu   "unordered"            FCOND_U  ftest-u cond-br-sem)
+(fbfcc-branch fbg   "greater"              FCOND_G  ftest-g cond-br-sem)
+(fbfcc-branch fbug  "unordered or greater" FCOND_UG ftest-ug cond-br-sem)
+(fbfcc-branch fbl   "less"                 FCOND_L  ftest-l cond-br-sem)
+(fbfcc-branch fbul  "unordered or less"    FCOND_UL ftest-ul cond-br-sem)
+(fbfcc-branch fblg  "less or greater"      FCOND_LG ftest-lg cond-br-sem)
+(fbfcc-branch fbne  "not equal"            FCOND_NE ftest-ne cond-br-sem)
+(fbfcc-branch fbe   "equal"                FCOND_E  ftest-e cond-br-sem)
+(fbfcc-branch fbue  "unordered or equal"   FCOND_UE ftest-ue cond-br-sem)
+(fbfcc-branch fbge  "greater or equal"     FCOND_GE ftest-ge cond-br-sem)
+(fbfcc-branch fbuge "unordered or greater or equal" FCOND_UGE ftest-uge cond-br-sem)
+(fbfcc-branch fble  "less or equal"        FCOND_LE ftest-le cond-br-sem)
+(fbfcc-branch fbule "unordered or less or equal" FCOND_ULE  ftest-ule cond-br-sem)
+(fbfcc-branch fbo   "ordered"              FCOND_O  ftest-o cond-br-sem)
