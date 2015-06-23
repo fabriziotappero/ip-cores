@@ -1,0 +1,51 @@
+#!/bin/sh
+# $Id: gccrom,v 1.18 2008-05-01 08:35:04 sybreon Exp $
+
+# Compile using C pre-processor
+ELFFILE="out/rom"
+XILFLAGS="-mtune=v5.00 -mxl-soft-div -msoft-float -mxl-barrel-shift -mno-xl-soft-mul "
+CXXFLAGS="-O2 -nostartfiles "
+LNKFLAGS="-Wl,-defsym -Wl,_STACK_SIZE=0x400 -Wl,-defsym -Wl,_HEAP_SIZE=0x400 -T xilinx.ld"
+LIBFLAGS=""
+INCFLAGS="-Icc/"
+RAMSIZE="3FFF" #for aeMB ramwith of 12
+
+INPUT="custom_crt/crt0.s custom_crt/crtinit.s"
+
+mb-g++ $XILFLAGS $CXXFLAGS $LNKFLAGS $LIBFLAGS $INCFLAGS -specs=aemb.specs $INPUT $@ -o $ELFFILE && \
+#echo "xgcc=$?" && \
+
+
+# Create a text listing of the compiled code
+mb-objdump -dDSCz $ELFFILE > $ELFFILE.dump && \
+#echo "dump=$?" && \
+
+# Convert the ELF file to an SREC file
+mb-objcopy  -O  srec $ELFFILE $ELFFILE.srec && \
+#echo "copy=$?" && \
+
+# Generate a Verilog VMEM file from the SREC file
+srec_cat $ELFFILE.srec -fill 0xFF -within $ELFFILE.srec --range-pad 4 -o out/dump.vmem -vmem 32 && \
+#echo "srec=$?" && \
+
+
+# Convert the ELF file to an IHEX file
+mb-objcopy -O ihex $ELFFILE $ELFFILE.ihex && \
+#echo "copy2ihex=$?" && \
+
+# Generate a MIF file from the IHEX file
+ihex/ihex2mif -f $ELFFILE.ihex -e $RAMSIZE -o out/ram0.mif && \
+echo "ihex2mif=$?" && \
+
+
+
+# Generate a Verilog VMEM file from the SREC file
+#srec_cat $ELFFILE.srec -o ../sim/dump.vmem -vmem 32 && \
+#echo "srec=$?" && \
+
+# echo the checksum
+MD5=$(sha1sum $ELFFILE | cut -c1-32) && \
+echo "sha1=$MD5" && \
+
+# Cleanup code
+rm $ELFFILE.srec && rm $ELFFILE.ihex
