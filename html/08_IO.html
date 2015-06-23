@@ -1,0 +1,534 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN"
+"http://www.w3.org/TR/html4/strict.dtd">
+<HTML>
+<HEAD>
+<TITLE>html/IO</TITLE>
+<META NAME="generator" CONTENT="HTML::TextToHTML v2.46">
+<LINK REL="stylesheet" TYPE="text/css" HREF="lecture.css">
+</HEAD>
+<BODY>
+<P><table class="ttop"><th class="tpre"><a href="07_Opcode_Decoder.html">Previous Lesson</a></th><th class="ttop"><a href="toc.html">Table of Content</a></th><th class="tnxt"><a href="09_Toolchain_Setup.html">Next Lesson</a></th></table>
+<hr>
+
+<H1><A NAME="section_1">8 INPUT/OUTPUT</A></H1>
+
+<P>The last piece in the design is the input/output unit. Strictly speaking
+it does not belong to the CPU as such, but we discuss it briefly to
+see how it connects to the CPU.
+
+<H2><A NAME="section_1_1">8.1 Interface to the CPU</A></H2>
+
+<P>As we have already seen in the top level design, the I/O unit uses the same
+clock as the CPU (which greatly simplifies its design).
+
+<P>The interface towards the CPU consist of the following signals:
+
+<TABLE>
+<TR><TD>ADR_IO</TD><TD>The number of an individual I/O register
+</TD></TR><TR><TD>DIN</TD><TD>Data to an I/O register (I/O write)
+</TD></TR><TR><TD>RD_IO</TD><TD>Read Strobe
+</TD></TR><TR><TD>WR_IO</TD><TD>Write Strobe
+</TD></TR><TR><TD>DOUT</TD><TD>Data from an I/O register (I/O read cycle.
+</TD></TR>
+</TABLE>
+<P>These signals are well known from other I/O devices like UARTs,
+Ethernet Controllers, and the like.
+
+<P>The CPU supports two kinds of accesses to I/O registers: I/O reads
+(with the IN or LDS instructions, but also for the skip instructions
+SBIC and SBIS), and I/O writes (with the OUT or STS instructions,
+but also with the bit instructions CBI and SBI).
+
+<P>The skip instructions SBIC and SBIS execute in 2 cycles; in the first
+cycle an I/O read is performed while the skip (or not) decision is made
+in the second cycle. The reason for this is that the combinational delay
+for a single cycle would have been too long.
+
+<P>From the I/O unit's perspective, I/O reads and writes are performed
+in a single cycle (even if the CPU needs another cycle to complete an
+instruction.
+
+<P>The I/O unit generates an interrupt vector on its <STRONG>INTVEC</STRONG> output.
+The upper bit of the <STRONG>INTVEC</STRONG> output is set if an interrupt is pending.
+
+<H2><A NAME="section_1_2">8.2 CLR Signal</A></H2>
+
+<P>Some I/O components need a <STRONG>CLR</STRONG> signal to bring them into a defined state.
+The <STRONG>CLR</STRONG> signal of the CPU is used for this purpose.
+
+<H2><A NAME="section_1_3">8.3 Connection the FPGA Pins</A></H2>
+
+<P>The remaining signals into and out of the I/O unit are more or less
+directly connected to FPGA pins.
+
+<P>The <STRONG>RX</STRONG> input comes from an RS232 receiver/driver chip and is the serial
+input for an UART (active low). The TX output (also active low) is the
+serial output from that UART and goes back to the RS232 receiver/driver chip:
+
+<P><br>
+
+<pre class="vhdl">
+
+ 89	                I_RX       => I_RX,
+ 90	
+ 91	                Q_TX       => Q_TX,
+<pre class="filename">
+src/io.vhd
+</pre></pre>
+<P>
+
+<P>The <STRONG>SWITCH</STRONG> input comes from a DIP switch on the board.
+The values of the switch can be read from I/O register <STRONG>PINB</STRONG> (0x36).
+
+<P><br>
+
+<pre class="vhdl">
+
+132	            when X"36"  => Q_DOUT <= I_SWITCH;  -- PINB
+<pre class="filename">
+src/io.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<P>The 7_<STRONG>SEGMENT</STRONG> output drives the 7 segments of a 7-segment display.
+This output can be set from software by writing to the <STRONG>PORTB</STRONG> (0x38)
+I/O register. The segments can also be driven by a debug function which
+shows the current <STRONG>PC</STRONG> and the current opcode of the CPU.
+
+<P><br>
+
+<pre class="vhdl">
+
+147	                    when X"38"  => Q_7_SEGMENT <= I_DIN(6 downto 0);    -- PORTB
+<pre class="filename">
+src/io.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<P>The choice between the debug display and the software controlled
+display function is made by the DIP switch setting:
+
+<P><br>
+
+<pre class="vhdl">
+
+183	
+<pre class="filename">
+src/avr_fpga.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<H2><A NAME="section_1_4">8.4 I/O Read</A></H2>
+
+<P>I/O read cycles are indicated by the <STRONG>RD_IO</STRONG> signal. If <STRONG>RD_IO</STRONG> is applied,
+then the address of the I/O register to be read is provided on the <STRONG>ADR_IO</STRONG>
+input and the value of that register is expected on <STRONG>DOUT</STRONG> at the next
+<STRONG>CLK</STRONG> edge.
+
+<P>This is accomplished by the I/O read process:
+
+<P><br>
+
+<pre class="vhdl">
+
+ 98	    iord: process(I_ADR_IO, I_SWITCH,
+ 99	                  U_RX_DATA, U_RX_READY, L_RX_INT_ENABLED,
+100	                  U_TX_BUSY, L_TX_INT_ENABLED)
+101	    begin
+102	        -- addresses for mega8 device (use iom8.h or #define __AVR_ATmega8__).
+103	        --
+104	        case I_ADR_IO is
+105	            when X"2A"  => Q_DOUT <=             -- UCSRB:
+106	                               L_RX_INT_ENABLED  -- Rx complete int enabled.
+107	                             & L_TX_INT_ENABLED  -- Tx complete int enabled.
+108	                             & L_TX_INT_ENABLED  -- Tx empty int enabled.
+109	                             & '1'               -- Rx enabled
+110	                             & '1'               -- Tx enabled
+111	                             & '0'               -- 8 bits/char
+112	                             & '0'               -- Rx bit 8
+113	                             & '0';              -- Tx bit 8
+114	            when X"2B"  => Q_DOUT <=             -- UCSRA:
+115	                               U_RX_READY       -- Rx complete
+116	                             & not U_TX_BUSY    -- Tx complete
+117	                             & not U_TX_BUSY    -- Tx ready
+118	                             & '0'              -- frame error
+119	                             & '0'              -- data overrun
+120	                             & '0'              -- parity error
+121	                             & '0'              -- double dpeed
+122	                             & '0';             -- multiproc mode
+123	            when X"2C"  => Q_DOUT <= U_RX_DATA; -- UDR
+124	            when X"40"  => Q_DOUT <=            -- UCSRC
+125	                               '1'              -- URSEL
+126	                             & '0'              -- asynchronous
+127	                             & "00"             -- no parity
+128	                             & '1'              -- two stop bits
+129	                             & "11"             -- 8 bits/char
+130	                             & '0';             -- rising clock edge
+131	
+132	            when X"36"  => Q_DOUT <= I_SWITCH;  -- PINB
+133	            when others => Q_DOUT <= X"AA";
+134	        end case;
+135	    end process;
+<pre class="filename">
+src/io.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<P>I/O registers that are not implemented (i.e almost all) set <STRONG>DOUT</STRONG>
+to 0xAA as a debugging aid.
+
+<P>The outputs of sub-components (like the UART) are selected in the I/O read
+process.
+
+<H2><A NAME="section_1_5">8.5 I/O Write</A></H2>
+
+<P>I/O write cycles are indicated by the <STRONG>WR_IO</STRONG> signal. If <STRONG>WR_IO</STRONG> is applied,
+then the address of the I/O register to be written is provided on the <STRONG>ADR_IO</STRONG>
+input and the value to be written is supplied on the DIN input:
+
+<P><br>
+
+<pre class="vhdl">
+
+139	    iowr: process(I_CLK)
+140	    begin
+141	        if (rising_edge(I_CLK)) then
+142	            if (I_CLR = '1') then
+143	                L_RX_INT_ENABLED  <= '0';
+144	                L_TX_INT_ENABLED  <= '0';
+145	            elsif (I_WE_IO = '1') then
+146	                case I_ADR_IO is
+147	                    when X"38"  => Q_7_SEGMENT <= I_DIN(6 downto 0);    -- PORTB
+148	                                   L_LEDS <= not L_LEDS;
+149	                    when X"40"  =>  -- handled by uart
+150	                    when X"41"  =>  -- handled by uart
+151	                    when X"43"  => L_RX_INT_ENABLED <= I_DIN(0);
+152	                                   L_TX_INT_ENABLED <= I_DIN(1);
+153	                    when others =>
+154	                end case;
+155	            end if;
+156	        end if;
+157	    end process;
+<pre class="filename">
+src/io.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<P>In the I/O read process the outputs of sub-component were multiplexed
+into the final output <STRONG>DOUT</STRONG> and hence their register numbers (like 0x2C
+for the <STRONG>UDR</STRONG> read register) were visible, In the I/O write process, however, 
+the inputs of sub-components (again like 0x2C for the <STRONG>UDR</STRONG> write register)
+are not visible in the write process and decoding of the <STRONG>WR</STRONG> (and <STRONG>RD</STRONG> where
+needed)  strobes for sub components is done outside of these processes:
+
+<P><br>
+
+<pre class="vhdl">
+
+182	    L_WE_UART <= I_WE_IO when (I_ADR_IO = X"2C") else '0'; -- write UART UDR
+183	    L_RD_UART <= I_RD_IO when (I_ADR_IO = X"2C") else '0'; -- read  UART UDR
+184	
+<pre class="filename">
+src/io.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<H2><A NAME="section_1_6">8.6 Interrupts</A></H2>
+
+<P>Some I/O components raise interrupts, which are coordinated in the
+I/O interrupt process:
+
+<P><br>
+
+<pre class="vhdl">
+
+161	    ioint: process(I_CLK)
+162	    begin
+163	        if (rising_edge(I_CLK)) then
+164	            if (I_CLR = '1') then
+165	                L_INTVEC <= "000000";
+166	            else
+167	                if (L_RX_INT_ENABLED and U_RX_READY) = '1' then
+168	                    if (L_INTVEC(5) = '0') then     -- no interrupt pending
+169	                        L_INTVEC <= "101011";       -- _VECTOR(11)
+170	                    end if;
+171	                elsif (L_TX_INT_ENABLED and not U_TX_BUSY) = '1' then
+172	                    if (L_INTVEC(5) = '0') then     -- no interrupt pending
+173	                        L_INTVEC <= "101100";       -- _VECTOR(12)
+174	                    end if;
+175	                else                                -- no interrupt
+176	                    L_INTVEC <= "000000"; 
+177	                end if;
+178	            end if;
+179	        end if;
+180	    end process;
+<pre class="filename">
+src/io.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<H2><A NAME="section_1_7">8.7 The UART</A></H2>
+
+<P>The UART is an important facility for debugging programs that are more
+complex than out <STRONG>hello.c</STRONG>. We use a fixed baud rate of 38400 Baud
+and a fixed data format of 8 data bits and 2 stop bits.
+Therefore the corresponding bits in the UART control registers of the
+original AVR CPU are not implemented. The fixed values are properly
+reported, however.
+
+<P>The UART consists of 3 independent sub-components: a baud rate generator,
+a receiver, and a transmitter.
+
+<H3><A NAME="section_1_7_1">8.7.1 The UART Baud Rate Generator</A></H3>
+
+<P>The baud rate generator is clocked with a frequency of <STRONG>clock_freq</STRONG>
+and is supposed to generate a x1 clock of <STRONG>baud_rate</STRONG> for the transmitter
+and a x16 clock of 16*<STRONG>baud_rate</STRONG> for the receiver.
+
+<P>The x16 clock is generated like this:
+
+<P><br>
+
+<pre class="vhdl">
+
+ 54	 
+ 55	    baud16: process(I_CLK)
+ 56	    begin
+ 57	        if (rising_edge(I_CLK)) then
+ 58	            if (I_CLR = '1') then
+ 59	                L_COUNTER <= X"00000000";
+ 60	            elsif (L_COUNTER >= LIMIT) then
+ 61	                L_COUNTER <= L_COUNTER - LIMIT;
+ 62	            else
+ 63	                L_COUNTER <= L_COUNTER + BAUD_16;
+ 64	            end if;
+ 65	        end if;
+ 66	    end process;
+ 67	 
+ 68	    baud1: process(I_CLK)
+<pre class="filename">
+src/baudgen.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<P>We have done a little trick here. Most baud rate generators divide the
+input clock by a fixed integer number (like the one shown below for the
+x1 clock). That is fine if the input clock is a multiple of the output
+clock. More often than not is the CPU clock not a multiple of the the
+baud rate. Therefore, if an integer divider is used (like in the original
+AVR CPU, where the integer divisor was written into the UBRR I/O register)
+then the error in the baud rate cumulates over all bits transmitted. This can
+cause transmission errors when many characters are sent back to back.
+An integer divider would have set <STRONG>L_COUNTER</STRONG> to 0 after reaching <STRONG>LIMIT</STRONG>,
+which would have cause an absolute error of <STRONG>COUNTER</STRONG> - <STRONG>LIMIT</STRONG>. What we
+do instead is to subtract <STRONG>LIMIT</STRONG>, which does no discard the error but
+makes the next cycle a little shorter instead.
+
+<P>Instead of using a fixed baud rate interval of N times the clock interval
+(as fixed integer dividers would), we have used a variable baud rate interval;
+the length of the interval varies slightly over time, but the total error
+remains bounded. The error does not cumulate as for fixed integer
+dividers.
+
+<P>If you want to make the baud rate programmable, then you can replace the
+generic <STRONG>baud_rate</STRONG> by a signal (and the trick would still work).
+
+<P>The x1 clock is generated by dividing the x16 clock by 16:
+
+<P><br>
+
+<pre class="vhdl">
+
+ 70	        if (rising_edge(I_CLK)) then
+ 71	            if (I_CLR = '1') then
+ 72	                L_CNT_16 <= "0000";
+ 73	            elsif (L_CE_16 = '1') then
+ 74	                L_CNT_16 <= L_CNT_16 + "0001";
+ 75	            end if;
+ 76	        end if;
+ 77	    end process;
+ 78	
+ 79	    L_CE_16 <= '1' when (L_COUNTER >= LIMIT) else '0';
+ 80	    Q_CE_16 <= L_CE_16;
+ 81	    Q_CE_1 <= L_CE_16 when L_CNT_16 = "1111" else '0';
+<pre class="filename">
+src/baudgen.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<H3><A NAME="section_1_7_2">8.7.2 The UART Transmitter</A></H3>
+
+<P>The UART transmitter is a shift register that is loaded with
+the character to be transmitted (prepended with a start bit):
+
+<P><br>
+
+<pre class="vhdl">
+
+ 67	                elsif (L_FLAG /= I_FLAG) then       -- new byte
+ 68	                    Q_TX <= '0';                    -- start bit
+ 69	                    L_BUF <= I_DATA;                -- data bits
+ 70	                    L_TODO <= "1001";
+ 71	                end if;
+<pre class="filename">
+src/uart_tx.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<P>The <STRONG>TODO</STRONG> signal holds the number of bits that remain to be shifted out.
+The transmitter is clocked with the x1 baud rate:
+
+<P><br>
+
+<pre class="vhdl">
+
+ 59	            elsif (I_CE_1 = '1') then
+ 60	                if (L_TODO /= "0000") then          -- transmitting
+ 61	                    Q_TX <= L_BUF(0);               -- next bit
+ 62	                    L_BUF     <= '1' & L_BUF(7 downto 1);
+ 63	                    if (L_TODO = "0001") then
+ 64	                        L_FLAG <= I_FLAG;
+ 65	                    end if;
+ 66	                    L_TODO <= L_TODO - "0001";
+ 67	                elsif (L_FLAG /= I_FLAG) then       -- new byte
+ 68	                    Q_TX <= '0';                    -- start bit
+ 69	                    L_BUF <= I_DATA;                -- data bits
+ 70	                    L_TODO <= "1001";
+ 71	                end if;
+ 72	            end if;
+<pre class="filename">
+src/uart_tx.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<H3><A NAME="section_1_7_3">8.7.3 The UART Receiver</A></H3>
+
+<P>The UART transmitter runs synchronously with the CPU clock; but the UART
+receiver does not. We therefore clock the receiver input twice
+in order to synchronize it with the CPU clock:
+
+<P><br>
+
+<pre class="vhdl">
+
+ 56	    process(I_CLK)
+ 57	    begin
+ 58	        if (rising_edge(I_CLK)) then  
+ 59	            if (I_CLR = '1') then
+ 60	                L_SERIN <= '1';
+ 61	                L_SER_HOT <= '1';
+ 62	            else
+ 63	                L_SERIN   <= I_RX;
+ 64	                L_SER_HOT <= L_SERIN;
+ 65	            end if;
+ 66	        end if;
+ 67	    end process;
+<pre class="filename">
+src/uart_rx.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<P>The key signal in the UART receiver is <STRONG>POSITION</STRONG> which is the current
+position within the received character in units if 1/16 bit time. When the
+receiver is idle and a start bit is received, then <STRONG>POSITION</STRONG> is reset to
+1:
+
+<P><br>
+
+<pre class="vhdl">
+
+ 86	                if (L_POSITION = X"00") then            -- uart idle
+ 87	                    L_BUF  <= "1111111111";
+ 88	                    if (L_SER_HOT = '0')  then          -- start bit received
+ 89	                        L_POSITION <= X"01";
+ 90	                    end if;
+<pre class="filename">
+src/uart_rx.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<P>At every subsequent edge of the 16x baud rate, <STRONG>POSITION</STRONG> is incremented
+and the receiver input (<STRONG>SER_HOT</STRONG>) input is checked at the middle of each
+bit (i.e. when <STRONG>POSITION[3:0]</STRONG> = "0111").
+If the start bit has disappeared at the middle of the bit, then this is
+considered noise on the line rather than a valid start bit:
+
+<P><br>
+
+<pre class="vhdl">
+
+ 93	                    if (L_POSITION(3 downto 0) = "0111") then       -- 1/2 bit
+ 94	                        L_BUF <= L_SER_HOT & L_BUF(9 downto 1);     -- sample data
+ 95	                        --
+ 96	                        -- validate start bit
+ 97	                        --
+ 98	                        if (START_BIT and L_SER_HOT = '1') then     -- 1/2 start bit
+ 99	                            L_POSITION <= X"00";
+100	                        end if;
+101	 
+102	                        if (STOP_BIT) then                          -- 1/2 stop bit
+103	                            Q_DATA <= L_BUF(9 downto 2);
+104	                        end if;
+<pre class="filename">
+src/uart_rx.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<P>Reception of a byte already finishes at 3/4 of the stop bit. This is to
+allow for cumulated baud rate errors of 1/4 bit time (or about 2.5 %
+baud rate error for 10 bit (1 start, 8 data, and 1 stop bit) transmissions).
+The received data is stored in <STRONG>DATA</STRONG>:
+
+<P><br>
+
+<pre class="vhdl">
+
+105	                    elsif (STOP_POS) then                       -- 3/4 stop bit
+106	                        L_FLAG <= L_FLAG xor (L_BUF(9) and not L_BUF(0));
+107	                        L_POSITION <= X"00";
+<pre class="filename">
+src/uart_rx.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<P>If a greater tolerance against baud rate errors is needed, then one can
+decrease <STRONG>STOP_POS</STRONG> a little, but generally it would be safer to use 2
+stop bits on the sender side.
+
+<P>This finalizes the description of the FPGA. We will proceed with the
+design flow in the next lesson.
+
+<P><hr><BR>
+<table class="ttop"><th class="tpre"><a href="07_Opcode_Decoder.html">Previous Lesson</a></th><th class="ttop"><a href="toc.html">Table of Content</a></th><th class="tnxt"><a href="09_Toolchain_Setup.html">Next Lesson</a></th></table>
+</BODY>
+</HTML>

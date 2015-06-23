@@ -1,0 +1,165 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN"
+"http://www.w3.org/TR/html4/strict.dtd">
+<HTML>
+<HEAD>
+<TITLE>html/Listing_of_make_mem.cc</TITLE>
+<META NAME="generator" CONTENT="HTML::TextToHTML v2.46">
+<LINK REL="stylesheet" TYPE="text/css" HREF="lecture.css">
+</HEAD>
+<BODY>
+<P><table class="ttop"><th class="tpre"><a href="32_Listing_of_hello.c.html">Previous Lesson</a></th><th class="ttop"><a href="toc.html">Table of Content</a></th><th class="tnxt"><a href="34_Listing_of_end_conv.cc.html">Next Lesson</a></th></table>
+<hr>
+
+<H1><A NAME="section_1">33 LISTING OF make_mem.cc</A></H1>
+
+<pre class="vhdl">
+
+  1	#include "assert.h"
+  2	#include "stdio.h"
+  3	#include "stdint.h"
+  4	#include "string.h"
+  5	
+  6	const char * hex_file = 0;
+  7	const char * vhdl_file = 0;
+  8	
+  9	uint8_t buffer[0x10000];
+ 10	
+ 11	//-----------------------------------------------------------------------------
+ 12	uint32_t
+ 13	get_byte(const char *  cp)
+ 14	{
+ 15	uint32_t value;
+ 16	const char cc[3] = { cp[0], cp[1], 0 };
+ 17	const int cnt = sscanf(cc, "%X", &value);
+ 18	   assert(cnt == 1);
+ 19	   return value;
+ 20	}
+ 21	//-----------------------------------------------------------------------------
+ 22	void
+ 23	read_file(FILE * in)
+ 24	{
+ 25	   memset(buffer, 0xFF, sizeof(buffer));
+ 26	char line[200];
+ 27	   for (;;)
+ 28	       {
+ 29	         const char * s = fgets(line, sizeof(line) - 2, in);
+ 30	         if (s == 0)   return;
+ 31	         assert(*s++ == ':');
+ 32	         const uint32_t len     = get_byte(s);
+ 33	         const uint32_t ah      = get_byte(s + 2);
+ 34	         const uint32_t al      = get_byte(s + 4);
+ 35	         const uint32_t rectype = get_byte(s + 6);
+ 36	         const char * d = s + 8;
+ 37	         const uint32_t addr = ah << 8 | al;
+ 38	
+ 39	         uint32_t csum = len + ah + al + rectype;
+ 40	         assert((addr + len) <= 0x10000);
+ 41	         for (uint32_t l = 0; l < len; ++l)
+ 42	             {
+ 43	               const uint32_t byte = get_byte(d);
+ 44	               d += 2;
+ 45	               buffer[addr + l] = byte;
+ 46	               csum += byte;
+ 47	             }
+ 48	
+ 49	         csum = 0xFF & -csum;
+ 50	         const uint32_t sum = get_byte(d);
+ 51	         assert(sum == csum);
+ 52	       }
+ 53	}
+ 54	//-----------------------------------------------------------------------------
+ 55	void
+ 56	write_vector(FILE * out, bool odd, uint32_t mem, uint32_t v)
+ 57	{
+ 58	const uint8_t * base = buffer;
+ 59	
+ 60	   // total memory is 2 even bytes, 2 odd bytes, 2 even bytes, ...
+ 61	   //
+ 62	   if (odd)   base += 2;
+ 63	
+ 64	   // total memory is 4 kByte organized into 8 memories.
+ 65	   // thus each of the 16 vectors covers 256 bytes.
+ 66	   //
+ 67	   base += v*256;
+ 68	
+ 69	   // memories 0 and 1 are the low byte of the opcode while
+ 70	   // memories 2 and 3 are the high byte.
+ 71	   //
+ 72	   if (mem >= 2)   ++base;
+ 73	
+ 74	const char * px = odd ? "po" : "pe";
+ 75	   fprintf(out, "constant %s_%u_%2.2X : BIT_VECTOR := X\"", px, mem, v);
+ 76	   for (int32_t d = 63; d >= 0; --d)
+ 77	       {
+ 78	         uint32_t q = base[4*d];
+ 79	         if (mem & 1)   q >>= 4;     // high nibble
+ 80	         else           q &= 0x0F;   // low nibble
+ 81	         fprintf(out, "%X", q);
+ 82	       }
+ 83	
+ 84	   fprintf(out, "\";\r\n");
+ 85	}
+ 86	//-----------------------------------------------------------------------------
+ 87	void
+ 88	write_mem(FILE * out, bool odd, uint32_t mem)
+ 89	{
+ 90	const char * px = odd ? "po" : "pe";
+ 91	
+ 92	   fprintf(out, "-- content of %s_%u --------------------------------------"
+ 93	                "--------------------------------------------\r\n", px, mem);
+ 94	
+ 95	   for (uint32_t v = 0; v < 16; ++v)
+ 96	       write_vector(out, odd, mem, v);
+ 97	
+ 98	   fprintf(out, "\r\n");
+ 99	}
+100	//-----------------------------------------------------------------------------
+101	void
+102	write_file(FILE * out)
+103	{
+104	   fprintf(out,
+105	"\r\n"
+106	"library IEEE;\r\n"
+107	"use IEEE.STD_LOGIC_1164.all;\r\n"
+108	"\r\n"
+109	"package prog_mem_content is\r\n"
+110	"\r\n");
+111	
+112	   for (uint32_t m = 0; m < 4; ++m)
+113	       write_mem(out, false, m);
+114	
+115	   for (uint32_t m = 0; m < 4; ++m)
+116	       write_mem(out, true,  m);
+117	
+118	   fprintf(out,
+119	"end prog_mem_content;\r\n"
+120	"\r\n");
+121	}
+122	//-----------------------------------------------------------------------------
+123	int
+124	main(int argc, char * argv[])
+125	{
+126	   if (argc > 1)   hex_file = argv[1];
+127	   if (argc > 2)   vhdl_file = argv[2];
+128	
+129	FILE * in = stdin;
+130	   if (hex_file)   in = fopen(hex_file, "r");
+131	   assert(in);
+132	   read_file(in);
+133	   fclose(in);
+134	
+135	FILE * out = stdout;
+136	   if (vhdl_file)   out = fopen(vhdl_file, "w");
+137	   write_file(out);
+138	   assert(out);
+139	}
+140	//-----------------------------------------------------------------------------
+<pre class="filename">
+tools/make_mem.cc
+</pre></pre>
+<P>
+
+<P><hr><BR>
+<table class="ttop"><th class="tpre"><a href="32_Listing_of_hello.c.html">Previous Lesson</a></th><th class="ttop"><a href="toc.html">Table of Content</a></th><th class="tnxt"><a href="34_Listing_of_end_conv.cc.html">Next Lesson</a></th></table>
+</BODY>
+</HTML>

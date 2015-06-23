@@ -1,0 +1,217 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN"
+"http://www.w3.org/TR/html4/strict.dtd">
+<HTML>
+<HEAD>
+<TITLE>html/Listing_of_io.vhd</TITLE>
+<META NAME="generator" CONTENT="HTML::TextToHTML v2.46">
+<LINK REL="stylesheet" TYPE="text/css" HREF="lecture.css">
+</HEAD>
+<BODY>
+<P><table class="ttop"><th class="tpre"><a href="16_Listing_of_data_path.vhd.html">Previous Lesson</a></th><th class="ttop"><a href="toc.html">Table of Content</a></th><th class="tnxt"><a href="18_Listing_of_opc_deco.vhd.html">Next Lesson</a></th></table>
+<hr>
+
+<H1><A NAME="section_1">17 LISTING OF io.vhd</A></H1>
+
+<pre class="vhdl">
+
+  1	-------------------------------------------------------------------------------
+  2	-- 
+  3	-- Copyright (C) 2009, 2010 Dr. Juergen Sauermann
+  4	-- 
+  5	--  This code is free software: you can redistribute it and/or modify
+  6	--  it under the terms of the GNU General Public License as published by
+  7	--  the Free Software Foundation, either version 3 of the License, or
+  8	--  (at your option) any later version.
+  9	--
+ 10	--  This code is distributed in the hope that it will be useful,
+ 11	--  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ 12	--  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ 13	--  GNU General Public License for more details.
+ 14	--
+ 15	--  You should have received a copy of the GNU General Public License
+ 16	--  along with this code (see the file named COPYING).
+ 17	--  If not, see http://www.gnu.org/licenses/.
+ 18	--
+ 19	-------------------------------------------------------------------------------
+ 20	-------------------------------------------------------------------------------
+ 21	--
+ 22	-- Module Name:    io - Behavioral 
+ 23	-- Create Date:    13:59:36 11/07/2009 
+ 24	-- Description:    the I/O of a CPU (uart and general purpose I/O lines).
+ 25	--
+ 26	-------------------------------------------------------------------------------
+ 27	--
+ 28	library IEEE;
+ 29	use IEEE.STD_LOGIC_1164.ALL;
+ 30	use IEEE.STD_LOGIC_ARITH.ALL;
+ 31	use IEEE.STD_LOGIC_UNSIGNED.ALL;
+ 32	
+ 33	entity io is
+ 34	    port (  I_CLK       : in  std_logic;
+ 35	
+ 36	            I_CLR       : in  std_logic;
+ 37	            I_ADR_IO    : in  std_logic_vector( 7 downto 0);
+ 38	            I_DIN       : in  std_logic_vector( 7 downto 0);
+ 39	            I_SWITCH    : in  std_logic_vector( 7 downto 0);
+ 40	            I_RD_IO     : in  std_logic;
+ 41	            I_RX        : in  std_logic;
+ 42	            I_WE_IO     : in  std_logic;
+ 43	
+ 44	            Q_7_SEGMENT : out std_logic_vector( 6 downto 0);
+ 45	            Q_DOUT      : out std_logic_vector( 7 downto 0);
+ 46	            Q_INTVEC    : out std_logic_vector( 5 downto 0);
+ 47	            Q_LEDS      : out std_logic_vector( 1 downto 0);
+ 48	            Q_TX        : out std_logic);
+ 49	end io;
+ 50	
+ 51	architecture Behavioral of io is
+ 52	
+ 53	component uart
+ 54	    generic(CLOCK_FREQ  : std_logic_vector(31 downto 0);
+ 55	            BAUD_RATE   : std_logic_vector(27 downto 0));
+ 56	    port(   I_CLK       : in  std_logic;
+ 57	            I_CLR       : in  std_logic;
+ 58	            I_RD        : in  std_logic;
+ 59	            I_WE        : in  std_logic;
+ 60	            I_RX        : in  std_logic;          
+ 61	            I_TX_DATA   : in  std_logic_vector(7 downto 0);
+ 62	
+ 63	            Q_RX_DATA   : out std_logic_vector(7 downto 0);
+ 64	            Q_RX_READY  : out std_logic;
+ 65	            Q_TX        : out std_logic;
+ 66	            Q_TX_BUSY   : out std_logic);
+ 67	end component;
+ 68	
+ 69	signal U_RX_READY       : std_logic;
+ 70	signal U_TX_BUSY        : std_logic;
+ 71	signal U_RX_DATA        : std_logic_vector( 7 downto 0);
+ 72	
+ 73	signal L_INTVEC         : std_logic_vector( 5 downto 0);
+ 74	signal L_LEDS           : std_logic;
+ 75	signal L_RD_UART        : std_logic;
+ 76	signal L_RX_INT_ENABLED : std_logic;
+ 77	signal L_TX_INT_ENABLED : std_logic;
+ 78	signal L_WE_UART        : std_logic;
+ 79	
+ 80	begin
+ 81	    urt: uart
+ 82	    generic map(CLOCK_FREQ  => std_logic_vector(conv_unsigned(25000000, 32)),
+ 83	                BAUD_RATE   => std_logic_vector(conv_unsigned(   38400, 28)))
+ 84	    port map(   I_CLK      => I_CLK,
+ 85	                I_CLR      => I_CLR,
+ 86	                I_RD       => L_RD_UART,
+ 87	                I_WE       => L_WE_UART,
+ 88	                I_TX_DATA  => I_DIN(7 downto 0),
+ 89	                I_RX       => I_RX,
+ 90	
+ 91	                Q_TX       => Q_TX,
+ 92	                Q_RX_DATA  => U_RX_DATA,
+ 93	                Q_RX_READY => U_RX_READY,
+ 94	                Q_TX_BUSY  => U_TX_BUSY);
+ 95	
+ 96	    -- IO read process
+ 97	    --
+ 98	    iord: process(I_ADR_IO, I_SWITCH,
+ 99	                  U_RX_DATA, U_RX_READY, L_RX_INT_ENABLED,
+100	                  U_TX_BUSY, L_TX_INT_ENABLED)
+101	    begin
+102	        -- addresses for mega8 device (use iom8.h or #define __AVR_ATmega8__).
+103	        --
+104	        case I_ADR_IO is
+105	            when X"2A"  => Q_DOUT <=             -- UCSRB:
+106	                               L_RX_INT_ENABLED  -- Rx complete int enabled.
+107	                             & L_TX_INT_ENABLED  -- Tx complete int enabled.
+108	                             & L_TX_INT_ENABLED  -- Tx empty int enabled.
+109	                             & '1'               -- Rx enabled
+110	                             & '1'               -- Tx enabled
+111	                             & '0'               -- 8 bits/char
+112	                             & '0'               -- Rx bit 8
+113	                             & '0';              -- Tx bit 8
+114	            when X"2B"  => Q_DOUT <=             -- UCSRA:
+115	                               U_RX_READY       -- Rx complete
+116	                             & not U_TX_BUSY    -- Tx complete
+117	                             & not U_TX_BUSY    -- Tx ready
+118	                             & '0'              -- frame error
+119	                             & '0'              -- data overrun
+120	                             & '0'              -- parity error
+121	                             & '0'              -- double dpeed
+122	                             & '0';             -- multiproc mode
+123	            when X"2C"  => Q_DOUT <= U_RX_DATA; -- UDR
+124	            when X"40"  => Q_DOUT <=            -- UCSRC
+125	                               '1'              -- URSEL
+126	                             & '0'              -- asynchronous
+127	                             & "00"             -- no parity
+128	                             & '1'              -- two stop bits
+129	                             & "11"             -- 8 bits/char
+130	                             & '0';             -- rising clock edge
+131	
+132	            when X"36"  => Q_DOUT <= I_SWITCH;  -- PINB
+133	            when others => Q_DOUT <= X"AA";
+134	        end case;
+135	    end process;
+136	
+137	    -- IO write process
+138	    --
+139	    iowr: process(I_CLK)
+140	    begin
+141	        if (rising_edge(I_CLK)) then
+142	            if (I_CLR = '1') then
+143	                L_RX_INT_ENABLED  <= '0';
+144	                L_TX_INT_ENABLED  <= '0';
+145	            elsif (I_WE_IO = '1') then
+146	                case I_ADR_IO is
+147	                    when X"38"  => Q_7_SEGMENT <= I_DIN(6 downto 0);    -- PORTB
+148	                                   L_LEDS <= not L_LEDS;
+149	                    when X"40"  =>  -- handled by uart
+150	                    when X"41"  =>  -- handled by uart
+151	                    when X"43"  => L_RX_INT_ENABLED <= I_DIN(0);
+152	                                   L_TX_INT_ENABLED <= I_DIN(1);
+153	                    when others =>
+154	                end case;
+155	            end if;
+156	        end if;
+157	    end process;
+158	
+159	    -- interrupt process
+160	    --
+161	    ioint: process(I_CLK)
+162	    begin
+163	        if (rising_edge(I_CLK)) then
+164	            if (I_CLR = '1') then
+165	                L_RX_INT_ENABLED  <= '0';
+166	                L_TX_INT_ENABLED  <= '0';
+167	                L_INTVEC <= "000000";
+168	            else
+169	                if (L_RX_INT_ENABLED and U_RX_READY) = '1' then
+170	                    if (L_INTVEC(5) = '0') then     -- no interrupt pending
+171	                        L_INTVEC <= "101011";       -- _VECTOR(11)
+172	                    end if;
+173	                elsif (L_TX_INT_ENABLED and not U_TX_BUSY) = '1' then
+174	                    if (L_INTVEC(5) = '0') then     -- no interrupt pending
+175	                        L_INTVEC <= "101100";       -- _VECTOR(12)
+176	                    end if;
+177	                else                                -- no interrupt
+178	                    L_INTVEC <= "000000"; 
+179	                end if;
+180	            end if;
+181	        end if;
+182	    end process;
+183	
+184	    L_WE_UART <= I_WE_IO when (I_ADR_IO = X"2C") else '0'; -- write UART UDR
+185	    L_RD_UART <= I_RD_IO when (I_ADR_IO = X"2C") else '0'; -- read  UART UDR
+186	
+187	    Q_LEDS(1) <= L_LEDS;
+188	    Q_LEDS(0) <= not L_LEDS;
+189	    Q_INTVEC  <= L_INTVEC;
+190	
+191	end Behavioral;
+192	
+<pre class="filename">
+src/io.vhd
+</pre></pre>
+<P>
+
+<P><hr><BR>
+<table class="ttop"><th class="tpre"><a href="16_Listing_of_data_path.vhd.html">Previous Lesson</a></th><th class="ttop"><a href="toc.html">Table of Content</a></th><th class="tnxt"><a href="18_Listing_of_opc_deco.vhd.html">Next Lesson</a></th></table>
+</BODY>
+</HTML>

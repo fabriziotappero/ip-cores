@@ -1,0 +1,287 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN"
+"http://www.w3.org/TR/html4/strict.dtd">
+<HTML>
+<HEAD>
+<TITLE>html/Listing_of_prog_mem.vhd</TITLE>
+<META NAME="generator" CONTENT="HTML::TextToHTML v2.46">
+<LINK REL="stylesheet" TYPE="text/css" HREF="lecture.css">
+</HEAD>
+<BODY>
+<P><table class="ttop"><th class="tpre"><a href="20_Listing_of_prog_mem_content.vhd.html">Previous Lesson</a></th><th class="ttop"><a href="toc.html">Table of Content</a></th><th class="tnxt"><a href="22_Listing_of_reg_16.vhd.html">Next Lesson</a></th></table>
+<hr>
+
+<H1><A NAME="section_1">21 LISTING OF prog_mem.vhd</A></H1>
+
+<pre class="vhdl">
+
+  1	-------------------------------------------------------------------------------
+  2	-- 
+  3	-- Copyright (C) 2009, 2010 Dr. Juergen Sauermann
+  4	-- 
+  5	--  This code is free software: you can redistribute it and/or modify
+  6	--  it under the terms of the GNU General Public License as published by
+  7	--  the Free Software Foundation, either version 3 of the License, or
+  8	--  (at your option) any later version.
+  9	--
+ 10	--  This code is distributed in the hope that it will be useful,
+ 11	--  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ 12	--  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ 13	--  GNU General Public License for more details.
+ 14	--
+ 15	--  You should have received a copy of the GNU General Public License
+ 16	--  along with this code (see the file named COPYING).
+ 17	--  If not, see http://www.gnu.org/licenses/.
+ 18	--
+ 19	-------------------------------------------------------------------------------
+ 20	-------------------------------------------------------------------------------
+ 21	--
+ 22	-- Module Name:    prog_mem - Behavioral 
+ 23	-- Create Date:    14:09:04 10/30/2009 
+ 24	-- Description:    the program memory of a CPU.
+ 25	--
+ 26	----------------------------------------------------------------------------------
+ 27	library IEEE;
+ 28	use IEEE.STD_LOGIC_1164.ALL;
+ 29	use IEEE.STD_LOGIC_ARITH.ALL;
+ 30	use IEEE.STD_LOGIC_UNSIGNED.ALL;
+ 31	
+ 32	-- the content of the program memory.
+ 33	--
+ 34	use work.prog_mem_content.all;
+ 35	
+ 36	entity prog_mem is
+ 37	    port (  I_CLK       : in  std_logic;
+ 38	
+ 39	            I_WAIT      : in  std_logic;
+ 40	            I_PC        : in  std_logic_vector(15 downto 0); -- word address
+ 41	            I_PM_ADR    : in  std_logic_vector(11 downto 0); -- byte address
+ 42	
+ 43	            Q_OPC       : out std_logic_vector(31 downto 0);
+ 44	            Q_PC        : out std_logic_vector(15 downto 0);
+ 45	            Q_PM_DOUT   : out std_logic_vector( 7 downto 0));
+ 46	end prog_mem;
+ 47	
+ 48	architecture Behavioral of prog_mem is
+ 49	
+ 50	constant zero_256 : bit_vector := X"00000000000000000000000000000000"
+ 51	                                & X"00000000000000000000000000000000";
+ 52	
+ 53	component RAMB4_S4_S4
+ 54	    generic(INIT_00 : bit_vector := zero_256;
+ 55	            INIT_01 : bit_vector := zero_256;
+ 56	            INIT_02 : bit_vector := zero_256;
+ 57	            INIT_03 : bit_vector := zero_256;
+ 58	            INIT_04 : bit_vector := zero_256;
+ 59	            INIT_05 : bit_vector := zero_256;
+ 60	            INIT_06 : bit_vector := zero_256;
+ 61	            INIT_07 : bit_vector := zero_256;
+ 62	            INIT_08 : bit_vector := zero_256;
+ 63	            INIT_09 : bit_vector := zero_256;
+ 64	            INIT_0A : bit_vector := zero_256;
+ 65	            INIT_0B : bit_vector := zero_256;
+ 66	            INIT_0C : bit_vector := zero_256;
+ 67	            INIT_0D : bit_vector := zero_256;
+ 68	            INIT_0E : bit_vector := zero_256;
+ 69	            INIT_0F : bit_vector := zero_256);
+ 70	
+ 71	    port(   ADDRA   : in  std_logic_vector(9 downto 0);
+ 72	            ADDRB   : in  std_logic_vector(9 downto 0);
+ 73	            CLKA    : in  std_ulogic;
+ 74	            CLKB    : in  std_ulogic;
+ 75	            DIA     : in  std_logic_vector(3 downto 0);
+ 76	            DIB     : in  std_logic_vector(3 downto 0);
+ 77	            ENA     : in  std_ulogic;
+ 78	            ENB     : in  std_ulogic;
+ 79	            RSTA    : in  std_ulogic;
+ 80	            RSTB    : in  std_ulogic;
+ 81	            WEA     : in  std_ulogic;
+ 82	            WEB     : in  std_ulogic;
+ 83	
+ 84	            DOA     : out std_logic_vector(3 downto 0);
+ 85	            DOB     : out std_logic_vector(3 downto 0));
+ 86	end component;
+ 87	
+ 88	signal M_OPC_E      : std_logic_vector(15 downto 0);
+ 89	signal M_OPC_O      : std_logic_vector(15 downto 0);
+ 90	signal M_PMD_E      : std_logic_vector(15 downto 0);
+ 91	signal M_PMD_O      : std_logic_vector(15 downto 0);
+ 92	
+ 93	signal L_WAIT_N     : std_logic;
+ 94	signal L_PC_0       : std_logic;
+ 95	signal L_PC_E       : std_logic_vector(10 downto 1);
+ 96	signal L_PC_O       : std_logic_vector(10 downto 1);
+ 97	signal L_PMD        : std_logic_vector(15 downto 0);
+ 98	signal L_PM_ADR_1_0 : std_logic_vector( 1 downto 0);
+ 99	
+100	begin
+101	
+102	    pe_0 : RAMB4_S4_S4 ---------------------------------------------------------
+103	    generic map(INIT_00 => pe_0_00, INIT_01 => pe_0_01, INIT_02 => pe_0_02, 
+104	                INIT_03 => pe_0_03, INIT_04 => pe_0_04, INIT_05 => pe_0_05,
+105	                INIT_06 => pe_0_06, INIT_07 => pe_0_07, INIT_08 => pe_0_08,
+106	                INIT_09 => pe_0_09, INIT_0A => pe_0_0A, INIT_0B => pe_0_0B, 
+107	                INIT_0C => pe_0_0C, INIT_0D => pe_0_0D, INIT_0E => pe_0_0E,
+108	                INIT_0F => pe_0_0F)
+109	    port map(ADDRA => L_PC_E,                   ADDRB => I_PM_ADR(11 downto 2),
+110	             CLKA  => I_CLK,                    CLKB  => I_CLK,
+111	             DIA   => "0000",                   DIB   => "0000",
+112	             ENA   => L_WAIT_N,                 ENB   => '1',
+113	             RSTA  => '0',                      RSTB  => '0',
+114	             WEA   => '0',                      WEB   => '0',
+115	             DOA   => M_OPC_E(3 downto 0),      DOB   => M_PMD_E(3 downto 0));
+116	 
+117	    pe_1 : RAMB4_S4_S4 ---------------------------------------------------------
+118	    generic map(INIT_00 => pe_1_00, INIT_01 => pe_1_01, INIT_02 => pe_1_02,
+119	                INIT_03 => pe_1_03, INIT_04 => pe_1_04, INIT_05 => pe_1_05,
+120	                INIT_06 => pe_1_06, INIT_07 => pe_1_07, INIT_08 => pe_1_08,
+121	                INIT_09 => pe_1_09, INIT_0A => pe_1_0A, INIT_0B => pe_1_0B,
+122	                INIT_0C => pe_1_0C, INIT_0D => pe_1_0D, INIT_0E => pe_1_0E,
+123	                INIT_0F => pe_1_0F)
+124	    port map(ADDRA => L_PC_E,                   ADDRB => I_PM_ADR(11 downto 2),
+125	             CLKA  => I_CLK,                    CLKB  => I_CLK,
+126	             DIA   => "0000",                   DIB   => "0000",
+127	             ENA   => L_WAIT_N,                 ENB   => '1',
+128	             RSTA  => '0',                      RSTB  => '0',
+129	             WEA   => '0',                      WEB   => '0',
+130	             DOA   => M_OPC_E(7 downto 4),      DOB   => M_PMD_E(7 downto 4));
+131	 
+132	    pe_2 : RAMB4_S4_S4 ---------------------------------------------------------
+133	    generic map(INIT_00 => pe_2_00, INIT_01 => pe_2_01, INIT_02 => pe_2_02,
+134	                INIT_03 => pe_2_03, INIT_04 => pe_2_04, INIT_05 => pe_2_05,
+135	                INIT_06 => pe_2_06, INIT_07 => pe_2_07, INIT_08 => pe_2_08,
+136	                INIT_09 => pe_2_09, INIT_0A => pe_2_0A, INIT_0B => pe_2_0B,
+137	                INIT_0C => pe_2_0C, INIT_0D => pe_2_0D, INIT_0E => pe_2_0E,
+138	                INIT_0F => pe_2_0F)
+139	    port map(ADDRA => L_PC_E,                   ADDRB => I_PM_ADR(11 downto 2),
+140	             CLKA  => I_CLK,                    CLKB  => I_CLK,
+141	             DIA   => "0000",                   DIB   => "0000",
+142	             ENA   => L_WAIT_N,                 ENB   => '1',
+143	             RSTA  => '0',                      RSTB  => '0',
+144	             WEA   => '0',                      WEB   => '0',
+145	             DOA   => M_OPC_E(11 downto 8),     DOB   => M_PMD_E(11 downto 8));
+146	 
+147	    pe_3 : RAMB4_S4_S4 ---------------------------------------------------------
+148	    generic map(INIT_00 => pe_3_00, INIT_01 => pe_3_01, INIT_02 => pe_3_02,
+149	                INIT_03 => pe_3_03, INIT_04 => pe_3_04, INIT_05 => pe_3_05,
+150	                INIT_06 => pe_3_06, INIT_07 => pe_3_07, INIT_08 => pe_3_08,
+151	                INIT_09 => pe_3_09, INIT_0A => pe_3_0A, INIT_0B => pe_3_0B,
+152	                INIT_0C => pe_3_0C, INIT_0D => pe_3_0D, INIT_0E => pe_3_0E,
+153	                INIT_0F => pe_3_0F)
+154	    port map(ADDRA => L_PC_E,                   ADDRB => I_PM_ADR(11 downto 2),
+155	             CLKA  => I_CLK,                    CLKB  => I_CLK,
+156	             DIA   => "0000",                   DIB   => "0000",
+157	             ENA   => L_WAIT_N,                 ENB   => '1',
+158	             RSTA  => '0',                      RSTB  => '0',
+159	             WEA   => '0',                      WEB   => '0',
+160	             DOA   => M_OPC_E(15 downto 12),    DOB   => M_PMD_E(15 downto 12));
+161	 
+162	    po_0 : RAMB4_S4_S4 ---------------------------------------------------------
+163	    generic map(INIT_00 => po_0_00, INIT_01 => po_0_01, INIT_02 => po_0_02,
+164	                INIT_03 => po_0_03, INIT_04 => po_0_04, INIT_05 => po_0_05,
+165	                INIT_06 => po_0_06, INIT_07 => po_0_07, INIT_08 => po_0_08,
+166	                INIT_09 => po_0_09, INIT_0A => po_0_0A, INIT_0B => po_0_0B, 
+167	                INIT_0C => po_0_0C, INIT_0D => po_0_0D, INIT_0E => po_0_0E,
+168	                INIT_0F => po_0_0F)
+169	    port map(ADDRA => L_PC_O,                   ADDRB => I_PM_ADR(11 downto 2),
+170	             CLKA  => I_CLK,                    CLKB  => I_CLK,
+171	             DIA   => "0000",                   DIB   => "0000",
+172	             ENA   => L_WAIT_N,                 ENB   => '1',
+173	             RSTA  => '0',                      RSTB  => '0',
+174	             WEA   => '0',                      WEB   => '0',
+175	             DOA   => M_OPC_O(3 downto 0),      DOB   => M_PMD_O(3 downto 0));
+176	 
+177	    po_1 : RAMB4_S4_S4 ---------------------------------------------------------
+178	    generic map(INIT_00 => po_1_00, INIT_01 => po_1_01, INIT_02 => po_1_02,
+179	                INIT_03 => po_1_03, INIT_04 => po_1_04, INIT_05 => po_1_05,
+180	                INIT_06 => po_1_06, INIT_07 => po_1_07, INIT_08 => po_1_08,
+181	                INIT_09 => po_1_09, INIT_0A => po_1_0A, INIT_0B => po_1_0B, 
+182	                INIT_0C => po_1_0C, INIT_0D => po_1_0D, INIT_0E => po_1_0E,
+183	                INIT_0F => po_1_0F)
+184	    port map(ADDRA => L_PC_O,                   ADDRB => I_PM_ADR(11 downto 2),
+185	             CLKA  => I_CLK,                    CLKB  => I_CLK,
+186	             DIA   => "0000",                   DIB   => "0000",
+187	             ENA   => L_WAIT_N,                 ENB   => '1',
+188	             RSTA  => '0',                      RSTB  => '0',
+189	             WEA   => '0',                      WEB   => '0',
+190	             DOA   => M_OPC_O(7 downto 4),      DOB   => M_PMD_O(7 downto 4));
+191	 
+192	    po_2 : RAMB4_S4_S4 ---------------------------------------------------------
+193	    generic map(INIT_00 => po_2_00, INIT_01 => po_2_01, INIT_02 => po_2_02,
+194	                INIT_03 => po_2_03, INIT_04 => po_2_04, INIT_05 => po_2_05,
+195	                INIT_06 => po_2_06, INIT_07 => po_2_07, INIT_08 => po_2_08,
+196	                INIT_09 => po_2_09, INIT_0A => po_2_0A, INIT_0B => po_2_0B,
+197	                INIT_0C => po_2_0C, INIT_0D => po_2_0D, INIT_0E => po_2_0E,
+198	                INIT_0F => po_2_0F)
+199	    port map(ADDRA => L_PC_O,                   ADDRB => I_PM_ADR(11 downto 2),
+200	             CLKA  => I_CLK,                    CLKB  => I_CLK,
+201	             DIA   => "0000",                   DIB   => "0000",
+202	             ENA   => L_WAIT_N,                 ENB   => '1',
+203	             RSTA  => '0',                      RSTB  => '0',
+204	             WEA   => '0',                      WEB   => '0',
+205	             DOA   => M_OPC_O(11 downto 8),     DOB   => M_PMD_O(11 downto 8));
+206	 
+207	    po_3 : RAMB4_S4_S4 ---------------------------------------------------------
+208	    generic map(INIT_00 => po_3_00, INIT_01 => po_3_01, INIT_02 => po_3_02,
+209	                INIT_03 => po_3_03, INIT_04 => po_3_04, INIT_05 => po_3_05,
+210	                INIT_06 => po_3_06, INIT_07 => po_3_07, INIT_08 => po_3_08,
+211	                INIT_09 => po_3_09, INIT_0A => po_3_0A, INIT_0B => po_3_0B, 
+212	                INIT_0C => po_3_0C, INIT_0D => po_3_0D, INIT_0E => po_3_0E,
+213	                INIT_0F => po_3_0F)
+214	    port map(ADDRA => L_PC_O,                   ADDRB => I_PM_ADR(11 downto 2),
+215	             CLKA  => I_CLK,                    CLKB  => I_CLK,
+216	             DIA   => "0000",                   DIB   => "0000",
+217	             ENA   => L_WAIT_N,                 ENB   => '1',
+218	             RSTA  => '0',                      RSTB  => '0',
+219	             WEA   => '0',                      WEB   => '0',
+220	             DOA   => M_OPC_O(15 downto 12),    DOB   => M_PMD_O(15 downto 12));
+221	
+222	    -- remember I_PC0 and I_PM_ADR for the output mux.
+223	    --
+224	    pc0: process(I_CLK)
+225	    begin
+226	        if (rising_edge(I_CLK)) then
+227	            Q_PC <= I_PC;
+228	            L_PM_ADR_1_0 <= I_PM_ADR(1 downto 0);
+229	            if ((I_WAIT = '0')) then
+230	                L_PC_0 <= I_PC(0);
+231	            end if;
+232	        end if;
+233	    end process;
+234	
+235	    L_WAIT_N <= not I_WAIT;
+236	
+237	    -- we use two memory blocks _E and _O (even and odd).
+238	    -- This gives us a quad-port memory so that we can access
+239	    -- I_PC, I_PC + 1, and PM simultaneously.
+240	    --
+241	    -- I_PC and I_PC + 1 are handled by port A of the memory while PM
+242	    -- is handled by port B.
+243	    --
+244	    -- Q_OPC(15 ... 0) shall contain the word addressed by I_PC, while
+245	    -- Q_OPC(31 ... 16) shall contain the word addressed by I_PC + 1.
+246	    --
+247	    -- There are two cases:
+248	    --
+249	    -- case A: I_PC     is even, thus I_PC + 1 is odd
+250	    -- case B: I_PC + 1 is odd , thus I_PC is even
+251	    --
+252	    L_PC_O <= I_PC(10 downto 1);
+253	    L_PC_E <= I_PC(10 downto 1) + ("000000000" & I_PC(0));
+254	    Q_OPC(15 downto  0) <= M_OPC_E when L_PC_0 = '0' else M_OPC_O;
+255	    Q_OPC(31 downto 16) <= M_OPC_E when L_PC_0 = '1' else M_OPC_O;
+256	
+257	    L_PMD <= M_PMD_E               when (L_PM_ADR_1_0(1) = '0') else M_PMD_O;
+258	    Q_PM_DOUT <= L_PMD(7 downto 0) when (L_PM_ADR_1_0(0) = '0')
+259	            else L_PMD(15 downto 8);
+260	    
+261	end Behavioral;
+262	
+<pre class="filename">
+src/prog_mem.vhd
+</pre></pre>
+<P>
+
+<P><hr><BR>
+<table class="ttop"><th class="tpre"><a href="20_Listing_of_prog_mem_content.vhd.html">Previous Lesson</a></th><th class="ttop"><a href="toc.html">Table of Content</a></th><th class="tnxt"><a href="22_Listing_of_reg_16.vhd.html">Next Lesson</a></th></table>
+</BODY>
+</HTML>

@@ -1,0 +1,282 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN"
+"http://www.w3.org/TR/html4/strict.dtd">
+<HTML>
+<HEAD>
+<TITLE>html/Listing_of_data_path.vhd</TITLE>
+<META NAME="generator" CONTENT="HTML::TextToHTML v2.46">
+<LINK REL="stylesheet" TYPE="text/css" HREF="lecture.css">
+</HEAD>
+<BODY>
+<P><table class="ttop"><th class="tpre"><a href="15_Listing_of_data_mem.vhd.html">Previous Lesson</a></th><th class="ttop"><a href="toc.html">Table of Content</a></th><th class="tnxt"><a href="17_Listing_of_io.vhd.html">Next Lesson</a></th></table>
+<hr>
+
+<H1><A NAME="section_1">16 LISTING OF data_path.vhd</A></H1>
+
+<pre class="vhdl">
+
+  1	-------------------------------------------------------------------------------
+  2	-- 
+  3	-- Copyright (C) 2009, 2010 Dr. Juergen Sauermann
+  4	-- 
+  5	--  This code is free software: you can redistribute it and/or modify
+  6	--  it under the terms of the GNU General Public License as published by
+  7	--  the Free Software Foundation, either version 3 of the License, or
+  8	--  (at your option) any later version.
+  9	--
+ 10	--  This code is distributed in the hope that it will be useful,
+ 11	--  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ 12	--  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ 13	--  GNU General Public License for more details.
+ 14	--
+ 15	--  You should have received a copy of the GNU General Public License
+ 16	--  along with this code (see the file named COPYING).
+ 17	--  If not, see http://www.gnu.org/licenses/.
+ 18	--
+ 19	-------------------------------------------------------------------------------
+ 20	-------------------------------------------------------------------------------
+ 21	--
+ 22	-- Module Name:    data_path - Behavioral 
+ 23	-- Create Date:    13:24:10 10/29/2009 
+ 24	-- Description:    the data path of a CPU.
+ 25	--
+ 26	-------------------------------------------------------------------------------
+ 27	--
+ 28	library IEEE;
+ 29	use IEEE.std_logic_1164.ALL;
+ 30	use IEEE.std_logic_ARITH.ALL;
+ 31	use IEEE.std_logic_UNSIGNED.ALL;
+ 32	
+ 33	use work.common.ALL;
+ 34	
+ 35	entity data_path is
+ 36	    port(   I_CLK         : in  std_logic;
+ 37	
+ 38	            I_ALU_OP    : in  std_logic_vector( 4 downto 0);
+ 39	            I_AMOD      : in  std_logic_vector( 5 downto 0);
+ 40	            I_BIT       : in  std_logic_vector( 3 downto 0);
+ 41	            I_DDDDD     : in  std_logic_vector( 4 downto 0);
+ 42	            I_DIN       : in  std_logic_vector( 7 downto 0);
+ 43	            I_IMM       : in  std_logic_vector(15 downto 0);
+ 44	            I_JADR      : in  std_logic_vector(15 downto 0);
+ 45	            I_OPC       : in  std_logic_vector(15 downto 0);
+ 46	            I_PC        : in  std_logic_vector(15 downto 0);
+ 47	            I_PC_OP     : in  std_logic_vector( 2 downto 0);
+ 48	            I_PMS       : in  std_logic;  -- program memory select
+ 49	            I_RD_M      : in  std_logic;
+ 50	            I_RRRRR     : in  std_logic_vector( 4 downto 0);
+ 51	            I_RSEL      : in  std_logic_vector( 1 downto 0);
+ 52	            I_WE_01     : in  std_logic;
+ 53	            I_WE_D      : in  std_logic_vector( 1 downto 0);
+ 54	            I_WE_F      : in  std_logic;
+ 55	            I_WE_M      : in  std_logic_vector( 1 downto 0);
+ 56	            I_WE_XYZS   : in  std_logic;
+ 57	 
+ 58	            Q_ADR       : out std_logic_vector(15 downto 0);
+ 59	            Q_DOUT      : out std_logic_vector( 7 downto 0);
+ 60	            Q_INT_ENA   : out std_logic;
+ 61	            Q_LOAD_PC   : out std_logic;
+ 62	            Q_NEW_PC    : out std_logic_vector(15 downto 0);
+ 63	            Q_OPC       : out std_logic_vector(15 downto 0);
+ 64	            Q_PC        : out std_logic_vector(15 downto 0);
+ 65	            Q_RD_IO     : out std_logic;
+ 66	            Q_SKIP      : out std_logic;
+ 67	            Q_WE_IO     : out std_logic);
+ 68	end data_path;
+ 69	
+ 70	architecture Behavioral of data_path is
+ 71	
+ 72	component alu
+ 73	    port (  I_ALU_OP    : in  std_logic_vector( 4 downto 0);
+ 74	            I_BIT       : in  std_logic_vector( 3 downto 0);
+ 75	            I_D         : in  std_logic_vector(15 downto 0);
+ 76	            I_D0        : in  std_logic;
+ 77	            I_DIN       : in  std_logic_vector( 7 downto 0);
+ 78	            I_FLAGS     : in  std_logic_vector( 7 downto 0);
+ 79	            I_IMM       : in  std_logic_vector( 7 downto 0);
+ 80	            I_PC        : in  std_logic_vector(15 downto 0);
+ 81	            I_R         : in  std_logic_vector(15 downto 0);
+ 82	            I_R0        : in  std_logic;
+ 83	            I_RSEL      : in  std_logic_vector( 1 downto 0);
+ 84	
+ 85	            Q_FLAGS     : out std_logic_vector( 9 downto 0);
+ 86	            Q_DOUT      : out std_logic_vector(15 downto 0));
+ 87	end component;
+ 88	
+ 89	signal A_DOUT           : std_logic_vector(15 downto 0);
+ 90	signal A_FLAGS          : std_logic_vector( 9 downto 0);
+ 91	
+ 92	component register_file
+ 93	    port (  I_CLK       : in  std_logic;
+ 94	
+ 95	            I_AMOD      : in  std_logic_vector( 5 downto 0);
+ 96	            I_COND      : in  std_logic_vector( 3 downto 0);
+ 97	            I_DDDDD     : in  std_logic_vector( 4 downto 0);
+ 98	            I_DIN       : in  std_logic_vector(15 downto 0);
+ 99	            I_FLAGS     : in  std_logic_vector( 7 downto 0);
+100	            I_IMM       : in  std_logic_vector(15 downto 0);
+101	            I_RRRR      : in  std_logic_vector( 4 downto 1);
+102	            I_WE_01     : in  std_logic;
+103	            I_WE_D      : in  std_logic_vector( 1 downto 0);
+104	            I_WE_F      : in  std_logic;
+105	            I_WE_M      : in  std_logic;
+106	            I_WE_XYZS   : in  std_logic;
+107	
+108	            Q_ADR       : out std_logic_vector(15 downto 0);
+109	            Q_CC        : out std_logic;
+110	            Q_D         : out std_logic_vector(15 downto 0);
+111	            Q_FLAGS     : out std_logic_vector( 7 downto 0);
+112	            Q_R         : out std_logic_vector(15 downto 0);
+113	            Q_S         : out std_logic_vector( 7 downto 0);
+114	            Q_Z         : out std_logic_vector(15 downto 0));
+115	end component;
+116	
+117	signal F_ADR            : std_logic_vector(15 downto 0);
+118	signal F_CC             : std_logic;
+119	signal F_D              : std_logic_vector(15 downto 0);
+120	signal F_FLAGS          : std_logic_vector( 7 downto 0);
+121	signal F_R              : std_logic_vector(15 downto 0);
+122	signal F_S              : std_logic_vector( 7 downto 0);
+123	signal F_Z              : std_logic_vector(15 downto 0);
+124	
+125	component data_mem
+126	    port (  I_CLK       : in  std_logic;
+127	
+128	            I_ADR       : in  std_logic_vector(10 downto 0);
+129	            I_DIN       : in  std_logic_vector(15 downto 0);
+130	            I_WE        : in  std_logic_vector( 1 downto 0);
+131	
+132	            Q_DOUT      : out std_logic_vector(15 downto 0));
+133	end component;
+134	
+135	signal M_DOUT           : std_logic_vector(15 downto 0);
+136	
+137	signal L_DIN            : std_logic_vector( 7 downto 0);
+138	signal L_WE_SRAM        : std_logic_vector( 1 downto 0);
+139	signal L_FLAGS_98       : std_logic_vector( 9 downto 8);
+140	
+141	begin
+142	
+143	    alui : alu
+144	    port map(   I_ALU_OP    => I_ALU_OP,
+145	                I_BIT       => I_BIT,
+146	                I_D         => F_D,
+147	                I_D0        => I_DDDDD(0),
+148	                I_DIN       => L_DIN,
+149	                I_FLAGS     => F_FLAGS,
+150	                I_IMM       => I_IMM(7 downto 0),
+151	                I_PC        => I_PC,
+152	                I_R         => F_R,
+153	                I_R0        => I_RRRRR(0),
+154	                I_RSEL      => I_RSEL,
+155	
+156	                Q_FLAGS     => A_FLAGS,
+157	                Q_DOUT      => A_DOUT);
+158	
+159	    regs : register_file
+160	    port map(   I_CLK       => I_CLK,
+161	
+162	                I_AMOD      => I_AMOD,
+163	                I_COND(3)   => I_OPC(10),
+164	                I_COND(2 downto 0)=> I_OPC(2 downto 0),
+165	                I_DDDDD     => I_DDDDD,
+166	                I_DIN       => A_DOUT,
+167	                I_FLAGS     => A_FLAGS(7 downto 0),
+168	                I_IMM       => I_IMM,
+169	                I_RRRR      => I_RRRRR(4 downto 1),
+170	                I_WE_01     => I_WE_01,
+171	                I_WE_D      => I_WE_D,
+172	                I_WE_F      => I_WE_F,
+173	                I_WE_M      => I_WE_M(0),
+174	                I_WE_XYZS   => I_WE_XYZS,
+175	
+176	                Q_ADR       => F_ADR,
+177	                Q_CC        => F_CC,
+178	                Q_D         => F_D,
+179	                Q_FLAGS     => F_FLAGS,
+180	                Q_R         => F_R,
+181	                Q_S         => F_S,   -- Q_Rxx(F_ADR)
+182	                Q_Z         => F_Z);
+183	
+184	    sram : data_mem
+185	    port map(   I_CLK   => I_CLK,
+186	
+187	                I_ADR   => F_ADR(10 downto 0),
+188	                I_DIN   => A_DOUT,
+189	                I_WE    => L_WE_SRAM,
+190	
+191	                Q_DOUT  => M_DOUT);
+192	
+193	    -- remember A_FLAGS(9 downto 8) (within the current instruction).
+194	    --
+195	    flg98: process(I_CLK)
+196	    begin
+197	        if (rising_edge(I_CLK)) then
+198	            L_FLAGS_98 <= A_FLAGS(9 downto 8);
+199	        end if;
+200	    end process;
+201	
+202	    -- whether PC shall be loaded with NEW_PC or not.
+203	    -- I.e. if a branch shall be taken or not.
+204	    --
+205	    process(I_PC_OP, F_CC)
+206	    begin
+207	        case I_PC_OP is
+208	            when PC_BCC  => Q_LOAD_PC <= F_CC;      -- maybe (PC on I_JADR)
+209	            when PC_LD_I => Q_LOAD_PC <= '1';       -- yes: new PC on I_JADR
+210	            when PC_LD_Z => Q_LOAD_PC <= '1';       -- yes: new PC in Z
+211	            when PC_LD_S => Q_LOAD_PC <= '1';       -- yes: new PC on stack
+212	            when others  => Q_LOAD_PC <= '0';       -- no.
+213	        end case;
+214	    end process;
+215	
+216	    -- whether the next instruction shall be skipped or not.
+217	    --
+218	    process(I_PC_OP, L_FLAGS_98, F_CC)
+219	    begin
+220	        case I_PC_OP is
+221	            when PC_BCC    => Q_SKIP <= F_CC;           -- if cond met
+222	            when PC_LD_I   => Q_SKIP <= '1';            -- yes
+223	            when PC_LD_Z   => Q_SKIP <= '1';            -- yes
+224	            when PC_LD_S   => Q_SKIP <= '1';            -- yes
+225	            when PC_SKIP_Z => Q_SKIP <= L_FLAGS_98(8);  -- if Z set
+226	            when PC_SKIP_T => Q_SKIP <= L_FLAGS_98(9);  -- if T set
+227	            when others    => Q_SKIP <= '0';            -- no.
+228	        end case;
+229	    end process;
+230	
+231	    Q_ADR     <= F_ADR;
+232	    Q_DOUT    <= A_DOUT(7 downto 0);
+233	    Q_INT_ENA <= A_FLAGS(7);
+234	    Q_OPC     <= I_OPC;
+235	    Q_PC      <= I_PC;
+236	
+237	    Q_RD_IO   <= '0'                    when (F_ADR < X"20")
+238	            else (I_RD_M and not I_PMS) when (F_ADR < X"5D")
+239	            else '0';
+240	    Q_WE_IO   <= '0'                    when (F_ADR < X"20")
+241	            else I_WE_M(0)              when (F_ADR < X"5D")
+242	            else '0';
+243	    L_WE_SRAM <= "00"   when  (F_ADR < X"0060") else I_WE_M;
+244	    L_DIN     <= I_DIN  when (I_PMS = '1')
+245	            else F_S    when  (F_ADR < X"0020")
+246	            else I_DIN  when  (F_ADR < X"005D")
+247	            else F_S    when  (F_ADR < X"0060")
+248	            else M_DOUT(7 downto 0);
+249	
+250	    -- compute potential new PC value from Z, (SP), or IMM.
+251	    --
+252	    Q_NEW_PC <= F_Z    when I_PC_OP = PC_LD_Z       -- IJMP, ICALL
+253	           else M_DOUT when I_PC_OP = PC_LD_S       -- RET, RETI
+254	           else I_JADR;                             -- JMP adr
+255	
+256	end Behavioral;
+257	
+<pre class="filename">
+src/data_path.vhd
+</pre></pre>
+<P>
+
+<P><hr><BR>
+<table class="ttop"><th class="tpre"><a href="15_Listing_of_data_mem.vhd.html">Previous Lesson</a></th><th class="ttop"><a href="toc.html">Table of Content</a></th><th class="tnxt"><a href="17_Listing_of_io.vhd.html">Next Lesson</a></th></table>
+</BODY>
+</HTML>

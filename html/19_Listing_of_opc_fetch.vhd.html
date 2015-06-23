@@ -1,0 +1,170 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN"
+"http://www.w3.org/TR/html4/strict.dtd">
+<HTML>
+<HEAD>
+<TITLE>html/Listing_of_opc_fetch.vhd</TITLE>
+<META NAME="generator" CONTENT="HTML::TextToHTML v2.46">
+<LINK REL="stylesheet" TYPE="text/css" HREF="lecture.css">
+</HEAD>
+<BODY>
+<P><table class="ttop"><th class="tpre"><a href="18_Listing_of_opc_deco.vhd.html">Previous Lesson</a></th><th class="ttop"><a href="toc.html">Table of Content</a></th><th class="tnxt"><a href="20_Listing_of_prog_mem_content.vhd.html">Next Lesson</a></th></table>
+<hr>
+
+<H1><A NAME="section_1">19 LISTING OF opc_fetch.vhd</A></H1>
+
+<pre class="vhdl">
+
+  1	-------------------------------------------------------------------------------
+  2	-- 
+  3	-- Copyright (C) 2009, 2010 Dr. Juergen Sauermann
+  4	-- 
+  5	--  This code is free software: you can redistribute it and/or modify
+  6	--  it under the terms of the GNU General Public License as published by
+  7	--  the Free Software Foundation, either version 3 of the License, or
+  8	--  (at your option) any later version.
+  9	--
+ 10	--  This code is distributed in the hope that it will be useful,
+ 11	--  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ 12	--  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ 13	--  GNU General Public License for more details.
+ 14	--
+ 15	--  You should have received a copy of the GNU General Public License
+ 16	--  along with this code (see the file named COPYING).
+ 17	--  If not, see http://www.gnu.org/licenses/.
+ 18	--
+ 19	-------------------------------------------------------------------------------
+ 20	-------------------------------------------------------------------------------
+ 21	--
+ 22	-- Module Name:    opc_fetch - Behavioral 
+ 23	-- Create Date:    13:00:44 10/30/2009 
+ 24	-- Description:    the opcode fetch stage of a CPU.
+ 25	--
+ 26	-------------------------------------------------------------------------------
+ 27	--
+ 28	library IEEE;
+ 29	use IEEE.std_logic_1164.ALL;
+ 30	use IEEE.std_logic_ARITH.ALL;
+ 31	use IEEE.std_logic_UNSIGNED.ALL;
+ 32	
+ 33	entity opc_fetch is
+ 34	    port (  I_CLK       : in  std_logic;
+ 35	
+ 36	            I_CLR       : in  std_logic;
+ 37	            I_INTVEC    : in  std_logic_vector( 5 downto 0);
+ 38	            I_LOAD_PC   : in  std_logic;
+ 39	            I_NEW_PC    : in  std_logic_vector(15 downto 0);
+ 40	            I_PM_ADR    : in  std_logic_vector(11 downto 0);
+ 41	            I_SKIP      : in  std_logic;
+ 42	
+ 43	            Q_OPC       : out std_logic_vector(31 downto 0);
+ 44	            Q_PC        : out std_logic_vector(15 downto 0);
+ 45	            Q_PM_DOUT   : out std_logic_vector( 7 downto 0);
+ 46	            Q_T0        : out std_logic);
+ 47	end opc_fetch;
+ 48	
+ 49	architecture Behavioral of opc_fetch is
+ 50	
+ 51	component prog_mem
+ 52	    port (  I_CLK       : in  std_logic;
+ 53	
+ 54	            I_WAIT      : in  std_logic;
+ 55	            I_PC        : in  std_logic_vector (15 downto 0);
+ 56	            I_PM_ADR    : in  std_logic_vector (11 downto 0);
+ 57	
+ 58	            Q_OPC       : out std_logic_vector (31 downto 0);
+ 59	            Q_PC        : out std_logic_vector (15 downto 0);
+ 60	            Q_PM_DOUT   : out std_logic_vector ( 7 downto 0));
+ 61	end component;
+ 62	
+ 63	signal P_OPC            : std_logic_vector(31 downto 0);
+ 64	signal P_PC             : std_logic_vector(15 downto 0);
+ 65	
+ 66	signal L_INVALIDATE     : std_logic;
+ 67	signal L_LONG_OP        : std_logic;
+ 68	signal L_NEXT_PC        : std_logic_vector(15 downto 0);
+ 69	signal L_PC             : std_logic_vector(15 downto 0);
+ 70	signal L_T0             : std_logic;
+ 71	signal L_WAIT           : std_logic;
+ 72	
+ 73	begin
+ 74	
+ 75	    pmem : prog_mem
+ 76	    port map(   I_CLK       => I_CLK,
+ 77	
+ 78	                I_WAIT      => L_WAIT,
+ 79	                I_PC        => L_NEXT_PC,
+ 80	                I_PM_ADR    => I_PM_ADR,
+ 81	
+ 82	                Q_OPC       => P_OPC,
+ 83	                Q_PC        => P_PC,
+ 84	                Q_PM_DOUT   => Q_PM_DOUT);
+ 85	
+ 86	   lpc: process(I_CLK)
+ 87	    begin
+ 88	        if (rising_edge(I_CLK)) then
+ 89	            L_PC <= L_NEXT_PC;
+ 90	            L_T0 <= not L_WAIT;
+ 91	        end if;
+ 92	    end process;
+ 93	
+ 94	    L_INVALIDATE <= I_CLR or I_SKIP;
+ 95	
+ 96	    L_NEXT_PC <= X"0000"        when (I_CLR     = '1')
+ 97	            else L_PC           when (L_WAIT    = '1')
+ 98	            else I_NEW_PC       when (I_LOAD_PC = '1')
+ 99	            else L_PC + X"0002" when (L_LONG_OP = '1')
+100	            else L_PC + X"0001";
+101	
+102	    -- Two word opcodes:
+103	    --
+104	    --        9       3210
+105	    -- 1001 000d dddd 0000 kkkk kkkk kkkk kkkk - LDS
+106	    -- 1001 001d dddd 0000 kkkk kkkk kkkk kkkk - SDS
+107	    -- 1001 010k kkkk 110k kkkk kkkk kkkk kkkk - JMP
+108	    -- 1001 010k kkkk 111k kkkk kkkk kkkk kkkk - CALL
+109	    --
+110	    L_LONG_OP <= '1' when (((P_OPC(15 downto  9) = "1001010") and
+111	                            (P_OPC( 3 downto  2) = "11"))       -- JMP, CALL
+112	                       or  ((P_OPC(15 downto 10) = "100100") and
+113	                            (P_OPC( 3 downto  0) = "0000")))    -- LDS, STS
+114	            else '0';
+115	
+116	    -- Two cycle opcodes:
+117	    --
+118	    -- 1001 000d dddd .... - LDS etc.
+119	    -- 1001 0101 0000 1000 - RET
+120	    -- 1001 0101 0001 1000 - RETI
+121	    -- 1001 1001 AAAA Abbb - SBIC
+122	    -- 1001 1011 AAAA Abbb - SBIS
+123	    -- 1111 110r rrrr 0bbb - SBRC
+124	    -- 1111 111r rrrr 0bbb - SBRS
+125	
+126	
+127	    --
+128	    L_WAIT <= '0'  when (L_INVALIDATE = '1')
+129	         else '0'  when (I_INTVEC(5)  = '1')
+130	         else L_T0 when ((P_OPC(15 downto   9) = "1001000" )    -- LDS etc.
+131	                     or  (P_OPC(15 downto   8) = "10010101")    -- RET etc.
+132	                     or  ((P_OPC(15 downto 10) = "100110")      -- SBIC, SBIS
+133	                       and P_OPC(8) = '1')
+134	                     or  (P_OPC(15 downto  10) = "111111"))     -- SBRC, SBRS
+135	        else  '0';
+136	
+137	    Q_OPC <= X"00000000" when (L_INVALIDATE = '1')
+138	        else P_OPC       when (I_INTVEC(5) = '0')
+139	        else (X"000000" & "00" & I_INTVEC);     -- "interrupt opcode"
+140	
+141	    Q_PC <= P_PC;
+142	    Q_T0 <= L_T0;
+143	
+144	end Behavioral;
+145	
+<pre class="filename">
+src/opc_fetch.vhd
+</pre></pre>
+<P>
+
+<P><hr><BR>
+<table class="ttop"><th class="tpre"><a href="18_Listing_of_opc_deco.vhd.html">Previous Lesson</a></th><th class="ttop"><a href="toc.html">Table of Content</a></th><th class="tnxt"><a href="20_Listing_of_prog_mem_content.vhd.html">Next Lesson</a></th></table>
+</BODY>
+</HTML>

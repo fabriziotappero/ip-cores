@@ -1,0 +1,982 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN"
+"http://www.w3.org/TR/html4/strict.dtd">
+<HTML>
+<HEAD>
+<TITLE>html/Opcode_Decoder</TITLE>
+<META NAME="generator" CONTENT="HTML::TextToHTML v2.46">
+<LINK REL="stylesheet" TYPE="text/css" HREF="lecture.css">
+</HEAD>
+<BODY>
+<P><table class="ttop"><th class="tpre"><a href="06_Data_Path.html">Previous Lesson</a></th><th class="ttop"><a href="toc.html">Table of Content</a></th><th class="tnxt"><a href="08_IO.html">Next Lesson</a></th></table>
+<hr>
+
+<H1><A NAME="section_1">7 OPCODE DECODER</A></H1>
+
+<P>In this lesson we will describe the opcode decoder. We will also learn
+how the different instructions provided by the CPU will be implemented. We
+will not describe every opcode, but rather groups of instructions whose
+individual instructions are rather similar.
+
+<P>The opcode decoder is the middle state of our CPU pipeline. Therefore its
+inputs are defined by the outputs of the previous stage and its outputs
+are defined by the inputs of the next stage.
+
+<H2><A NAME="section_1_1">7.1 Inputs of the Opcode Decoder</A></H2>
+
+<UL>
+  <LI><STRONG>CLK</STRONG> is the clock signal. The opcode decoder is a pure pipeline stage
+  so that no internal state is kept between clock cycles. The output of
+  the opcode decoder is a pure function of its inputs.
+  <LI><STRONG>OPC</STRONG> is the opcode being decoded.
+  <LI><STRONG>PC</STRONG> is the program counter (the address in the program memory from
+  which OPC was fetched).
+  <LI><STRONG>T0</STRONG> is '1' in the first cycle of the execution of the opcode. This allows
+  for output signals of two-cycle instructions that are different in the
+  first and the second cycle.
+</UL>
+<H2><A NAME="section_1_2">7.2 Outputs of the Opcode Decoder</A></H2>
+
+<P>Most data buses of the CPU are contained in the data path. In contrast,
+most control signals are generated in the opcode decoder. We start with
+a complete list of these control signals and their purpose. There are
+two groups of signals: select signals and write enable signals. Select
+signals are used earlier in the execution of the opcode for controlling
+multiplexers. The write enable signals are used at the end of the execution
+to determine where results shall be stored. Select signals are generally
+more time-critical that write enable signals.
+
+<P>The select signals are:
+
+<UL>
+  <LI><STRONG>ALU_OP</STRONG> defines which particular ALU operation (like <STRONG>ADD</STRONG>, <STRONG>ADC</STRONG>, <STRONG>AND</STRONG>,
+  ...) the ALU shall perform.
+  <LI><STRONG>AMOD</STRONG> defines which addressing mode (like <STRONG>absolute</STRONG>, <STRONG>Z+</STRONG>, <STRONG>-SP</STRONG>, etc.)shall
+  be used for data memory accesses.
+  <LI><STRONG>BIT</STRONG> is a bit value (0 or 1) and a bit number used in bit instructions.
+  <LI><STRONG>DDDDD</STRONG> defines the destination register or register pair (if any)
+  for storing the result of an operation. It also defines the first
+  source register or register pair of a dyadic instructions.
+  <LI><STRONG>IMM</STRONG> defines an immediate value or branch address that is computed
+  from the opcode.
+  <LI><STRONG>JADR</STRONG> is a branch address.
+  <LI><STRONG>OPC</STRONG> is the opcode being decoded, or 0 if the opcode was invalidated
+  by means of <STRONG>SKIP</STRONG>.
+  <LI><STRONG>PC</STRONG> is the <STRONG>PC</STRONG> from which <STRONG>OPC</STRONG> was fetched.
+  <LI><STRONG>PC_OP</STRONG> defines an operation to be performed on the <STRONG>PC</STRONG> (such as branching).
+  <LI><STRONG>PMS</STRONG> is set when the address defined by <STRONG>AMOD</STRONG> is a program memory address
+  rather than a data memory address.
+  <LI><STRONG>RD_M</STRONG> is set for reads from the data memory.
+  <LI><STRONG>RRRRR</STRONG> defines the second register or register pair of a dyadic
+  instruction.
+  <LI><STRONG>RSEL</STRONG> selects the source of the second operand in the ALU.
+  This can be a register (on the <STRONG>R</STRONG> input), an immediate value (on
+  the <STRONG>IMM</STRONG> input), or data from memory or I/O (on the <STRONG>DIN</STRONG> input).
+</UL>
+<P>The write enable signals are:
+
+<UL>
+  <LI><STRONG>WE_01</STRONG> is set when register pair 0 shall be written. This is used for
+  multiplication instructions that store the multiplication product in
+  register pair 0.
+  <LI><STRONG>WE_D</STRONG> is set when the register or register pair <STRONG>DDDDD</STRONG> shall be written.
+  If both bits are set then the entire pair shall be written and <STRONG>DDDDD[0]</STRONG>
+  is 0. Otherwise <STRONG>WE_D[1]</STRONG> is 0, and one of the registers (as defined by
+  <STRONG>DDDDD[0]</STRONG>) shall be written, 
+  <LI><STRONG>WE_F</STRONG> is set when the status register (flags) shall be written.
+  <LI><STRONG>WE_M</STRONG> is set when the memory (including memory mapped general purpose
+  registers and I/O registers) shall be written. If set, then the <STRONG>AMOD</STRONG>
+  output defines how to compute the memory address.
+  <LI><STRONG>WE_XYZS</STRONG> is set when the stack pointer or one of the pointer register pairs
+  <STRONG>X</STRONG>, <STRONG>Y</STRONG>, or <STRONG>Z</STRONG> shall be written. Which of these register is meant is
+  encoded in <STRONG>AMOD</STRONG>.
+</UL>
+<H2><A NAME="section_1_3">7.3 Structure of the Opcode Decoder</A></H2>
+
+<P>The VHDL code of the opcode decoder consists essentially of a huge case
+statement. At the beginning of the case statement there is a section
+assigning a default value to each output. Then follows a case statement that
+decodes the upper 6 bits of the opcode:
+
+<P><br>
+
+<pre class="vhdl">
+
+ 66	    process(I_CLK)
+ 67	    begin
+ 68	    if (rising_edge(I_CLK)) then
+ 69	        --
+ 70	        -- set the most common settings as default.
+ 71	        --
+ 72	        Q_ALU_OP  <= ALU_D_MV_Q;
+ 73	        Q_AMOD    <= AMOD_ABS;
+ 74	        Q_BIT     <= I_OPC(10) & I_OPC(2 downto 0);
+ 75	        Q_DDDDD   <= I_OPC(8 downto 4);
+ 76	        Q_IMM     <= X"0000";
+ 77	        Q_JADR    <= I_OPC(31 downto 16);
+ 78	        Q_OPC     <= I_OPC(15 downto  0);
+ 79	        Q_PC      <= I_PC;
+ 80	        Q_PC_OP   <= PC_NEXT;
+ 81	        Q_PMS     <= '0';
+ 82	        Q_RD_M    <= '0';
+ 83	        Q_RRRRR   <= I_OPC(9) & I_OPC(3 downto 0);
+ 84	        Q_RSEL    <= RS_REG;
+ 85	        Q_WE_D    <= "00";
+ 86	        Q_WE_01   <= '0';
+ 87	        Q_WE_F    <= '0';
+ 88	        Q_WE_M    <= "00";
+ 89	        Q_WE_XYZS <= '0';
+ 90	
+ 91	        case I_OPC(15 downto 10) is
+ 92	            when "000000" =>
+<pre class="filename">
+src/opc_deco.vhd
+</pre></pre>
+<P>
+
+<P>...
+
+<pre class="vhdl">
+
+653	            when others =>
+654	        end case;
+655	    end if;
+656	    end process;
+<pre class="filename">
+src/opc_deco.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<H2><A NAME="section_1_4">7.4 Default Values for the Outputs</A></H2>
+
+<P>The opcode decoder generates quite a few outputs. A typical instruction,
+however, only sets a small fraction of them. For this reason we provide a
+default value for all outputs before the top level case statement,
+as shown above.<BR>
+For each instruction we then only need to specify those outputs that
+differ from the default value.
+
+<P>Every default value is either constant or a function of an input.
+Therefore the opcode decoder is a typical "stateless" pipeline stage.
+The default values are chosen so that they do not change
+anything in the other stages (except incrementing the PC, of course).
+In particular, the default values for all write enable signals are '0'.
+
+<H2><A NAME="section_1_5">7.5 Checklist for the Design of an Opcode.</A></H2>
+
+<P>Designing an opcode starts with asking a number of questions. The answers
+are found in the specification of the opcode. The answers identify the outputs
+that need to be set other than their default values.
+While the instructions are quite different, the questions are always the same:
+
+<OL>
+  <LI>What operation shall the ALU perform?
+   Set <STRONG>ALU_OP</STRONG> and <STRONG>Q_WE_F</STRONG> accordingly.
+  <LI>Is a destination register or destination register pair used?
+   If so, set <STRONG>DDDDD</STRONG> (and <STRONG>WE_D</STRONG> if written). 
+  <LI>Is a second register or register pair involved?
+   If so, set <STRONG>RRRRR</STRONG>.
+  <LI>Does the opcode access the memory?
+   If so, set <STRONG>AMOD</STRONG>, <STRONG>PMS</STRONG>, <STRONG>RSEL</STRONG>, <STRONG>RD_M</STRONG>, <STRONG>WE_M</STRONG>, and <STRONG>WE_XYZS</STRONG> accordingly.
+  <LI>Is an immediate or implied operand used?
+   If so, set <STRONG>IMM</STRONG> and <STRONG>RSEL</STRONG>.
+  <LI>Is the program counter modified (other than incrementing it)?
+   If so, set <STRONG>PC_OP</STRONG> and <STRONG>SKIP</STRONG>.
+  <LI>Is a bit number specified in the opcode ?
+   If so, set <STRONG>BIT</STRONG>.
+  <LI>Are instructions skipped?
+   If so, set <STRONG>SKIP</STRONG>.
+</OL>
+<P>Equipped with this checklist we can implement all instructions. We
+start with the simplest instructions and proceed to the more complex
+instructions.
+
+<H2><A NAME="section_1_6">7.6 Opcode Implementations</A></H2>
+
+<H3><A NAME="section_1_6_1">7.6.1 The NOP instruction</A></H3>
+
+<P>The simplest instruction is the NOP instruction which does - nothing.
+The default values set for all outputs do nothing either so there is
+no extra VHDL code needed for this instruction.
+
+<H3><A NAME="section_1_6_2">7.6.2 8-bit Monadic Instructions</A></H3>
+
+<P>We call an instruction <STRONG>monadic</STRONG> if its opcode contains one register
+number and if the instructions reads the register before computing
+a new value for it.
+
+<P>Only items 1. and 2. in our checklist apply. The default value for
+<STRONG>DDDDD</STRONG> is already correct. Thus only <STRONG>ALU_OP</STRONG>, <STRONG>WE_D</STRONG>, and <STRONG>WE_F</STRONG>
+need to be set. We take the <STRONG>DEC Rd</STRONG> instruction as an example:
+
+<P><br>
+
+<pre class="vhdl">
+
+465	                                --
+466	                                --  1001 010d dddd 1010 - DEC
+467	                                --
+468	                                Q_ALU_OP <= ALU_DEC;
+469	                                Q_WE_D <= "01";
+470	                                Q_WE_F <= '1';
+<pre class="filename">
+src/opc_deco.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<P>All monadic arithmetic/logic instructions are implemented in the same way;
+they differ by their <STRONG>ALU_OP</STRONG>.
+
+<H3><A NAME="section_1_6_3">7.6.3 8-bit Dyadic Instructions, Register/Register</A></H3>
+
+<P>We call an instruction <STRONG>dyadic</STRONG> if its opcode contains two data sources
+(a data source being a register number or an immediate operand).
+As a consequence of the two data sources, dyadic instructions
+occupy a larger fraction of the opcode space than monadic functions.
+
+<P>We take the <STRONG>ADD Rd, Rr</STRONG> opcode as an example. 
+
+<P>Compared to the monadic functions now item 3. in the checklist applies
+as well. This would mean we have to set <STRONG>RRRRR</STRONG> but by chance the default
+value is already correct. Therefore:
+
+<P><br>
+
+<pre class="vhdl">
+
+165	                --
+166	                -- 0000 11rd dddd rrrr - ADD
+167	                --
+168	                Q_ALU_OP <= ALU_ADD;
+169	                Q_WE_D <= "01";
+170	                Q_WE_F <= '1';
+<pre class="filename">
+src/opc_deco.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<P>The dyadic instructions do not use the I/O address space and therefore they
+completely execute inside the data path. The following figure shows the
+signals in the data path that are used by the <STRONG>ADD Rd, Rr</STRONG> instruction:
+
+<P><img src="opcode_decoder_1.png">
+
+<P>The opcode for <STRONG>ADD Rd, Rr</STRONG> is <STRONG> 0000</STRONG> <STRONG> 11rd</STRONG> <STRONG>dddd</STRONG> <STRONG>rrrr</STRONG>.
+The opcode decoder extracts the 'd' bits into the <STRONG>DDDDD</STRONG> signal (blue),
+the 'r' bits into the <STRONG>RRRRR</STRONG> signal (red), and computes <STRONG>ALU_OP</STRONG>, <STRONG>WE_D</STRONG>,
+and <STRONG>WE_F</STRONG> from the remaining bits (green) as above.
+
+<P>The register file converts the register numbers <STRONG>Rd</STRONG> and <STRONG>Rr</STRONG> that are
+encoded in the <STRONG>DDDDD</STRONG> and <STRONG>RRRRR</STRONG> signals to the contents of the register
+pairs at its <STRONG>D</STRONG> and <STRONG>R</STRONG> outputs. The lowest bit of the <STRONG>DDDDD</STRONG> and <STRONG>RRRRR</STRONG>
+signals also go to the ALU (inputs <STRONG>D0</STRONG> and <STRONG>R0</STRONG>) where the odd/even register
+selection from the two register pairs is performed.
+
+<P>The decoder also selects the proper <STRONG>ALU_OP</STRONG> from the opcode, which is
+<STRONG>ALU_ADD</STRONG> in this example. With this input, the ALU computes the sum of the
+its <STRONG>D</STRONG> and <STRONG>R</STRONG> inputs and drives its <STRONG>DOUT</STRONG> (pink) with the sum.
+It also computes the flags as defined for the <STRONG>ADD</STRONG> opcode.
+
+<P>The decoder sets the <STRONG>WE_D</STRONG> and <STRONG>WE_F</STRONG> inputs of the register file
+so that the <STRONG>DOUT</STRONG> and <STRONG>FLAGS</STRONG> outputs of the ALU are written back to the
+register file.
+
+<P>All this happens within a single clock cycle, so that the next instruction
+can be performed in the next clock cycle.
+
+<P>The other dyadic instructions are implemented similarly.
+Two instructions, <STRONG>CMP</STRONG> and <STRONG>CPC</STRONG>, deviate a little since they do not set
+<STRONG>WE_D</STRONG>. Only the flags are set as a result of the comparison.
+Apart from that, <STRONG>CMP</STRONG> and <STRONG>CPC</STRONG> are identical to the <STRONG>SUB</STRONG> and <STRONG>SBC</STRONG>;
+they don't have their own <STRONG>ALU_OP</STRONG> but use those of the <STRONG>SUB</STRONG> and <STRONG>SBC</STRONG>
+instructions.
+
+<P>The <STRONG>MOV Rd, Rr</STRONG> instruction is implemented as a dyadic function.
+It ignores it first argument and does not set any flags.
+
+<H3><A NAME="section_1_6_4">7.6.4 8-bit Dyadic Instructions, Register/Immediate</A></H3>
+
+<P>Some of the dyadic instructions have an immediate operand (i.e. the operand is
+contained in the opcode) rather than using a second register. For such
+instructions, for example <STRONG>ANDI</STRONG>, we extract the immediate operand from the
+opcode and set <STRONG>RSEL</STRONG>. Since the immediate operand takes quite some space in
+the opcode, the register range was restricted a little and hence the default
+<STRONG>DDDDD</STRONG> value needs a modification.
+
+<P><br>
+
+<pre class="vhdl">
+
+263	                --
+264	                -- 0111 KKKK dddd KKKK - ANDI
+265	                --
+266	                Q_ALU_OP <= ALU_AND;
+267	                Q_IMM(7 downto 0) <= I_OPC(11 downto 8) & I_OPC(3 downto 0);
+268	                Q_RSEL <= RS_IMM;
+269	                Q_DDDDD(4) <= '1';    -- Rd = 16...31
+270	                Q_WE_D <= "01";
+271	                Q_WE_F <= '1';
+<pre class="filename">
+src/opc_deco.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<H3><A NAME="section_1_6_5">7.6.5 16-bit Dyadic Instructions</A></H3>
+
+<P>Some of the dyadic 8-bit instructions have 16-bit variants, for example <STRONG>ADIW</STRONG>.
+The second operand of these 16-bit variants can be another register pair or an
+immediate operand.
+
+<P><br>
+
+<pre class="vhdl">
+
+499	                    --
+500	                    --  1001 0110 KKdd KKKK - ADIW
+501	                    --  1001 0111 KKdd KKKK - SBIW
+502	                    --
+503	                    if (I_OPC(8) = '0') then    Q_ALU_OP <= ALU_ADIW;
+504	                    else                        Q_ALU_OP <= ALU_SBIW;
+505	                    end if;
+506	                    Q_IMM(5 downto 4) <= I_OPC(7 downto 6);
+507	                    Q_IMM(3 downto 0) <= I_OPC(3 downto 0);
+508	                    Q_RSEL <= RS_IMM;
+509	                    Q_DDDDD <= "11" & I_OPC(5 downto 4) & "0";
+510	                    
+511	                    Q_WE_D <= "11";
+512	                    Q_WE_F <= '1';
+<pre class="filename">
+src/opc_deco.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<P>These instructions are implemented similar to their 8-bit relatives, but
+in contrast to them both <STRONG>WE_D</STRONG> bits are set. This causes the entire
+register pair to be updated. <STRONG>LDI</STRONG> and <STRONG>MOVW</STRONG> are also implemented as
+16-bit dyadic instruction.
+
+<H3><A NAME="section_1_6_6">7.6.6 Bit Instructions</A></H3>
+
+<P>There are some instructions that are very similar to monadic functions
+(in that they refer to only one register) but have a small immediate operand
+that addresses a bit in that register. Unlike dyadic functions with immediate
+operands, these bit instructions do not use the register/immediate
+multiplexer in the ALU (they don't have a register counterpart for the
+immediate operand). Instead, the bit number from the instruction is provided
+on the <STRONG>BIT</STRONG> output of the opcode decoder.
+The <STRONG>BIT</STRONG> output has 4 bits; in addition to the (lower) 3 bits needed to
+address the bit concerned, the fourth (upper) bit indicates the value
+(bit set or bit cleared) of the bit for those instructions that need it.
+
+<P>The ALU operations related to these bit instructions are <STRONG>ALU_BLD</STRONG> and
+<STRONG><STRONG>ALU_BIT_CS</STRONG>.</STRONG>
+
+<P><STRONG>ALU_BLD</STRONG> stores the T bit of the status register into a bit in a general
+purpose register; this is used to implement  the <STRONG>BLD</STRONG> instruction.
+
+<P><STRONG>ALU_BIT_CS</STRONG> is a dual-purpose function.
+
+<P>The first purpose is to copy a bit in a general purpose register into the
+<STRONG>T</STRONG> flag of the status register.  This use of <STRONG>ALU_BIT_CS</STRONG> is selected by
+setting (only) the <STRONG>WE_F</STRONG> signal so that the status register is updated
+with the new <STRONG>T</STRONG> flag. The <STRONG>BST</STRONG> instruction is implemented this way. The
+the bit value in <STRONG>BIT[3]</STRONG> is ignored.
+
+<P>The second purpose is to set or clear a bit in an I/O register.
+The ALU first computes a bitmask where only the bit indicated
+by <STRONG>BIT[2:0]</STRONG> is set. Depending on BIT[3] the register is then <STRONG>or</STRONG>'ed with
+the mask or <STRONG>and</STRONG>'ed with the complement of the mask. This sets or clears
+the bit in the current value of the register. This use of <STRONG>ALU_BIT_CS</STRONG>
+is selected by <STRONG>WE_M</STRONG> so the I/O register is updated with the new value.
+The <STRONG>CBI</STRONG> and <STRONG>SBI</STRONG> instructions are implemented this way.
+
+<P><STRONG>ALU_BIT_CS</STRONG> is also used by the skip instructions <STRONG>SBRC</STRONG> and <STRONG>SBRC</STRONG> that are
+described in the section about branching.
+
+<H3><A NAME="section_1_6_7">7.6.7 Multiplication Instructions</A></H3>
+
+<P>There is a zoo of multiplication instructions that differ in the
+signedness of their operands (<STRONG>MUL</STRONG>, <STRONG>MULS</STRONG>, <STRONG>MULSU</STRONG>) and in whether
+the final result is shifted (<STRONG>FMUL</STRONG>, <STRONG>FMULS</STRONG>, and <STRONG>FMULSU</STRONG>) or not.
+The opcode decoder sets certain bits in the IMM signal to indicate the
+type of multiplication:
+
+<TABLE>
+<TR><TD>IMM(7) = 1</TD><TD>shift (FMULxx)
+</TD></TR><TR><TD>IMM(6) = 1</TD><TD>Rd is signed
+</TD></TR><TR><TD>IMM(5) = 1</TD><TD>Rr is signed
+</TD></TR>
+</TABLE>
+<P>We also set the <STRONG>WE_01</STRONG> instead of the <STRONG>WE_D</STRONG> signal because the
+multiplication result is stored in register pair 0 rather than in the
+Rd register of the opcode.
+
+<P><br>
+
+<pre class="vhdl">
+
+129	                        --
+130	                        -- 0000 0011 0ddd 0rrr - _MULSU  SU "010"
+131	                        -- 0000 0011 0ddd 1rrr - FMUL    UU "100"
+132	                        -- 0000 0011 1ddd 0rrr - FMULS   SS "111"
+133	                        -- 0000 0011 1ddd 1rrr - FMULSU  SU "110"
+134	                        --
+135	                        Q_DDDDD(4 downto 3) <= "10";    -- regs 16 to 23
+136	                        Q_RRRRR(4 downto 3) <= "10";    -- regs 16 to 23
+137	                        Q_ALU_OP <= ALU_MULT;
+138	                        if I_OPC(7) = '0' then
+139	                            if I_OPC(3) = '0' then 
+140	                                Q_IMM(7 downto 5) <= MULT_SU;
+141	                            else
+142	                                Q_IMM(7 downto 5) <= MULT_FUU;
+143	                            end if;
+144	                        else
+145	                            if I_OPC(3) = '0' then 
+146	                                Q_IMM(7 downto 5) <= MULT_FSS;
+147	                            else
+148	                                Q_IMM(7 downto 5) <= MULT_FSU;
+149	                            end if;
+150	                        end if;
+151	                        Q_WE_01 <= '1';
+152	                        Q_WE_F <= '1';
+<pre class="filename">
+src/opc_deco.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<H3><A NAME="section_1_6_8">7.6.8 Instructions Writing To Memory or I/O</A></H3>
+
+<P>Instructions that write to memory or I/O registers need to set <STRONG>AMOD</STRONG>.
+<STRONG>AMOD</STRONG> selects the pointer register involved (<STRONG>X</STRONG>, <STRONG>Y</STRONG>, <STRONG>Z</STRONG>, <STRONG>SP</STRONG>, or none).
+If the addressing mode involves a pointer register and updates it, then
+<STRONG>WE_XYZS</STRONG> needs to be set as well.
+
+<P>The following code fragment shows a number of store functions and how
+<STRONG>AMOD</STRONG> is computed:
+
+<P><br>
+
+<pre class="vhdl">
+
+333	                    --
+334	                    -- 1001 00-1r rrrr 0000 - STS
+335	                    -- 1001 00-1r rrrr 0001 - ST Z+. Rr
+336	                    -- 1001 00-1r rrrr 0010 - ST -Z. Rr
+337	                    -- 1001 00-1r rrrr 1000 - ST Y. Rr
+338	                    -- 1001 00-1r rrrr 1001 - ST Y+. Rr
+339	                    -- 1001 00-1r rrrr 1010 - ST -Y. Rr
+340	                    -- 1001 00-1r rrrr 1100 - ST X. Rr
+341	                    -- 1001 00-1r rrrr 1101 - ST X+. Rr
+342	                    -- 1001 00-1r rrrr 1110 - ST -X. Rr
+343	                    -- 1001 00-1r rrrr 1111 - PUSH Rr
+344	                    --
+345	                    Q_ALU_OP <= ALU_D_MV_Q;
+346	                    Q_WE_M <= "01";
+347	                    Q_WE_XYZS <= '1';
+348	                    case I_OPC(3 downto 0) is
+349	                        when "0000" => Q_AMOD <= AMOD_ABS;  Q_WE_XYZS <= '0';
+350	                        when "0001" => Q_AMOD <= AMOD_Zi;
+351	                        when "0010" => Q_AMOD <= AMOD_dZ;
+352	                        when "1001" => Q_AMOD <= AMOD_Yi;
+353	                        when "1010" => Q_AMOD <= AMOD_dY;
+354	                        when "1100" => Q_AMOD <= AMOD_X;    Q_WE_XYZS <= '0';
+355	                        when "1101" => Q_AMOD <= AMOD_Xi;
+356	                        when "1110" => Q_AMOD <= AMOD_dX;
+357	                        when "1111" => Q_AMOD <= AMOD_dSP;
+358	                        when others =>
+359	                    end case;
+<pre class="filename">
+src/opc_deco.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<P><STRONG>ALU_OP</STRONG> is set to <STRONG>ALU_D_MOV_Q</STRONG>. This causes the source register
+indicated by <STRONG>DDDDD</STRONG> to be switched through the ALU unchanged so that is
+shows up at the input of the data memory and of the I/O block. We set
+<STRONG>WE_M</STRONG> so that the value of the source register will be written.
+
+<P>Write instructions to memory execute in a single cycle.
+
+<H3><A NAME="section_1_6_9">7.6.9 Instructions Reading From Memory or I/O</A></H3>
+
+<P>Instructions that read from memory set <STRONG>AMOD</STRONG> and possibly <STRONG>WE_XYZS</STRONG> in the
+same way as instructions writing to memory.
+
+<P>The following code fragment shows a number of load functions:
+
+<P><br>
+
+<pre class="vhdl">
+
+297	                Q_IMM <= I_OPC(31 downto 16);   -- absolute address for LDS/STS
+298	                if (I_OPC(9) = '0') then        -- LDD / POP
+299	                    --
+300	                    -- 1001 00-0d dddd 0000 - LDS
+301	                    -- 1001 00-0d dddd 0001 - LD Rd, Z+
+302	                    -- 1001 00-0d dddd 0010 - LD Rd, -Z
+303	                    -- 1001 00-0d dddd 0100 - (ii)  LPM Rd, (Z)
+304	                    -- 1001 00-0d dddd 0101 - (iii) LPM Rd, (Z+)
+305	                    -- 1001 00-0d dddd 0110 - ELPM Z        --- not mega8
+306	                    -- 1001 00-0d dddd 0111 - ELPM Z+       --- not mega8
+307	                    -- 1001 00-0d dddd 1001 - LD Rd, Y+
+308	                    -- 1001 00-0d dddd 1010 - LD Rd, -Y
+309	                    -- 1001 00-0d dddd 1100 - LD Rd, X
+310	                    -- 1001 00-0d dddd 1101 - LD Rd, X+
+311	                    -- 1001 00-0d dddd 1110 - LD Rd, -X
+312	                    -- 1001 00-0d dddd 1111 - POP Rd
+313	                    --
+314	                    Q_RSEL <= RS_DIN;
+315	                    Q_RD_M <= I_T0;
+316	                    Q_WE_D <= '0' & not I_T0;
+317	                    Q_WE_XYZS <= not I_T0;
+318	                    Q_PMS <= (not I_OPC(3)) and I_OPC(2) and (not I_OPC(1));
+319	                    case I_OPC(3 downto 0) is
+320	                        when "0000" => Q_AMOD <= AMOD_ABS;  Q_WE_XYZS <= '0';
+321	                        when "0001" => Q_AMOD <= AMOD_Zi;
+322	                        when "0100" => Q_AMOD <= AMOD_Z;    Q_WE_XYZS <= '0';
+323	                        when "0101" => Q_AMOD <= AMOD_Zi;
+324	                        when "1001" => Q_AMOD <= AMOD_Yi;
+325	                        when "1010" => Q_AMOD <= AMOD_dY;
+326	                        when "1100" => Q_AMOD <= AMOD_X;    Q_WE_XYZS <= '0';
+327	                        when "1101" => Q_AMOD <= AMOD_Xi;
+328	                        when "1110" => Q_AMOD <= AMOD_dX;
+329	                        when "1111" => Q_AMOD <= AMOD_SPi;
+330	                        when others =>                      Q_WE_XYZS <= '0';
+331	                    end case;
+<pre class="filename">
+src/opc_deco.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<P>The data read from memory now comes from the <STRONG>DIN</STRONG> input. We therefore
+set <STRONG>RSEL</STRONG> to <STRONG>RS_DIN</STRONG>. The data read from the memory is again switched
+through the ALU unchanged, but we use <STRONG>ALU_R_MOV_Q</STRONG> instead of <STRONG>ALU_D_MOV_Q</STRONG>
+because the data from memory is now routed via the multiplexer for <STRONG>R8</STRONG>
+rather than via the multiplexer for <STRONG>D8</STRONG>. We generate <STRONG>RD_M</STRONG> instead of <STRONG>WE_M</STRONG>
+since we are now reading and not writing. The result is stored in the
+register indicated by <STRONG>DDDDD</STRONG>, so we set <STRONG>WE_D</STRONG>.
+
+<P>One of the load instructions is <STRONG>LPM</STRONG> which reads from program store rather
+then from the data memory. For this instruction we set <STRONG>PMS</STRONG>.
+
+<P>Unlike store instructions, load instructions execute in two cycles. The reason
+is the internal memory modules which need one clock cycle to produce a result.
+We therefore generate the <STRONG>WE_D</STRONG> and <STRONG>WE_XYZS</STRONG> only on the second of the
+two cycles.
+
+<H3><A NAME="section_1_6_10">7.6.10 Jump and Call Instructions</A></H3>
+
+<H4><A NAME="section_1_6_10_1">7.6.10.1 Unconditional Jump to Absolute Address</A></H4>
+
+<P>The simplest case of a jump instruction is <STRONG>JMP</STRONG>, an unconditional jump to
+an absolute address:
+
+<P>The target address of the jump follows after the instruction. Due to our
+odd/even trick with the program memory, the target address is provided on
+the upper 16 bits of the opcode and we need not wait for it. We copy the
+target address from the upper 16 bits of the opcode to the <STRONG>IMM</STRONG> output.
+Then we set <STRONG>PC_OP</STRONG> to <STRONG>PC_LD_I</STRONG>:
+
+<P><br>
+
+<pre class="vhdl">
+
+478	                                --
+479	                                --  1001 010k kkkk 110k - JMP (k = 0 for 16 bit)
+480	                                --  kkkk kkkk kkkk kkkk
+481	                                --
+482	                                Q_PC_OP <= PC_LD_I;
+<pre class="filename">
+src/opc_deco.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<P>The execution stage will then cause the <STRONG>PC</STRONG> to be loaded from its <STRONG>JADR</STRONG> input:
+
+<P><br>
+
+<pre class="vhdl">
+
+209	            when PC_LD_I => Q_LOAD_PC <= '1';       -- yes: new PC on I_JADR
+<pre class="filename">
+src/data_path.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<P>The next opcode after the <STRONG>JMP</STRONG> is already in the pipeline and would be
+executed next. We invalidate the next opcode so that it will not be
+executed:
+
+<P><br>
+
+<pre class="vhdl">
+
+222	            when PC_LD_I   => Q_SKIP <= '1';            -- yes
+<pre class="filename">
+src/data_path.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<P>An instruction similar to <STRONG>JMP</STRONG> is <STRONG>IJMP</STRONG>. The difference is that the target
+address of the jump is not provided as an immediate address following the
+opcode, but is the content of the Z register. This case is handled by a
+different <STRONG>PC_OP</STRONG>:
+
+<P><br>
+
+<pre class="vhdl">
+
+450	                                --
+451	                                --  1001 0100 0000 1001 IJMP
+452	                                --  1001 0100 0001 1001 EIJMP   -- not mega8
+453	                                --  1001 0101 0000 1001 ICALL
+454	                                --  1001 0101 0001 1001 EICALL   -- not mega8
+455	                                --
+456	                                Q_PC_OP <= PC_LD_Z;
+<pre class="filename">
+src/opc_deco.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<P>The execution stage, which contains the <STRONG>Z</STRONG> register, performs the
+selection of the target address, as we have already seen in the discussion
+of the data path.
+
+<H4><A NAME="section_1_6_10_2">7.6.10.2 Unconditional Jump to Relative Address</A></H4>
+
+<P>The <STRONG>RJMP</STRONG> instruction is similar to the <STRONG>JMP</STRONG> instruction. The target
+address of the jump is, however, an address relative to the current <STRONG>PC</STRONG>
+(plus 1). We sign-extend the relative address (by replicating <STRONG>OPC(11)</STRONG>
+until a 16-bit value is reached) and add the current <STRONG>PC</STRONG>.
+
+<P><br>
+
+<pre class="vhdl">
+
+580	                --
+581	                -- 1100 kkkk kkkk kkkk - RJMP
+582	                --
+583	                Q_JADR <= I_PC + (I_OPC(11) & I_OPC(11) & I_OPC(11) & I_OPC(11)
+584	                                & I_OPC(11 downto 0)) + X"0001";
+585	                Q_PC_OP <= PC_LD_I;
+<pre class="filename">
+src/opc_deco.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<P>The rest of <STRONG>RJMP</STRONG> is the same as for <STRONG>JMP</STRONG>.
+
+<H4><A NAME="section_1_6_10_3">7.6.10.3 Conditional Jump to Relative Address</A></H4>
+
+<P>There is a number of conditional jump instructions that differ by the
+bit in the status register that controls whether the branch is taken or not.
+<STRONG>BRCS</STRONG> and <STRONG>BRCC</STRONG> branch if bit 0 (the carry flag) is set resp. cleared.
+<STRONG>BREQ</STRONG> and <STRONG>BRNE</STRONG> branch if bit 1 (the zero flag) is set resp. cleared,
+and so on.
+
+<P>There is also a generic form where the bit number is an operand of the
+opcode. <STRONG>BRBS</STRONG> branches if a status register flag is set while <STRONG>BRBC</STRONG>
+branches if a bit is cleared. This means that <STRONG>BRCS</STRONG>, <STRONG>BREQ</STRONG>, ... are
+just different names for the <STRONG>BRBS</STRONG> instruction, while <STRONG>BRCC</STRONG>, <STRONG>BRNE</STRONG>, ...
+are different name for the <STRONG>BRBC</STRONG> instruction.
+
+<P>The relative address (i.e. the offset from the PC) for <STRONG>BRBC</STRONG>/<STRONG>BRBS</STRONG> is
+shorter (7 bit) than for <STRONG>RJMP</STRONG> (12 bit). Therefore the sign bit of the
+offset is replicated more often in order to get a 16-bit signed offset
+that can be added to the <STRONG>PC</STRONG>.
+
+<P><br>
+
+<pre class="vhdl">
+
+610	                --
+611	                -- 1111 00kk kkkk kbbb - BRBS
+612	                -- 1111 01kk kkkk kbbb - BRBC
+613	                --       v
+614	                -- bbb: status register bit
+615	                -- v: value (set/cleared) of status register bit
+616	                --
+617	                Q_JADR <= I_PC + (I_OPC(9) & I_OPC(9) & I_OPC(9) & I_OPC(9)
+618	                                & I_OPC(9) & I_OPC(9) & I_OPC(9) & I_OPC(9)
+619	                                & I_OPC(9) & I_OPC(9 downto 3)) + X"0001";
+620	                Q_PC_OP <= PC_BCC;
+<pre class="filename">
+src/opc_deco.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<P>The decision to branch or not is taken in the execution stage, because
+at the time where the conditional branch is decoded, the relevant bit
+in the status register is not yet valid.
+
+<H4><A NAME="section_1_6_10_4">7.6.10.4 Call Instructions</A></H4>
+
+<P>Many unconditional jump instructions have "call" variant. The "call"
+variant are executed like the corresponding jump instruction. In
+addition (and at the same time), the <STRONG>PC</STRONG> after the instruction is pushed
+onto the stack. We take <STRONG>CALL</STRONG>, the brother of <STRONG>JMP</STRONG> as an example:
+
+<P><br>
+
+<pre class="vhdl">
+
+485	                                --
+486	                                --  1001 010k kkkk 111k - CALL (k = 0)
+487	                                --  kkkk kkkk kkkk kkkk
+488	                                --
+489	                                Q_ALU_OP <= ALU_PC_2;
+490	                                Q_AMOD <= AMOD_ddSP;
+491	                                Q_PC_OP <= PC_LD_I;
+492	                                Q_WE_M <= "11";     -- both PC bytes
+493	                                Q_WE_XYZS <= '1';
+<pre class="filename">
+src/opc_deco.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<P>The new things are an <STRONG>ALU_OP</STRONG> of <STRONG>ALU_PC_2</STRONG>. The ALU adds 2 to the <STRONG>PC</STRONG>,
+since the <STRONG>CALL</STRONG> instructions is 2 words long. The <STRONG>RCALL</STRONG> instruction,
+which is only 1 word long would use <STRONG>ALU_PC_1</STRONG> instead. <STRONG>AMOD</STRONG> is
+pre-decrement of the <STRONG>SP</STRONG> by 2 (since the return address is 2 bytes long).
+Both bits of <STRONG>WE_M</STRONG> are set since we write 2 bytes.
+
+<H4><A NAME="section_1_6_10_5">7.6.10.5 Skip Instructions</A></H4>
+
+<P>Skip instructions do not modify the PC, but they invalidate the next
+instruction. Like for conditional branch instructions, the condition
+is checked in the execution stage.
+
+<P>We take <STRONG>SBIC</STRONG> as an example:
+
+<P><br>
+
+<pre class="vhdl">
+
+516	                --
+517	                --  1001 1000 AAAA Abbb - CBI
+518	                --  1001 1001 AAAA Abbb - SBIC
+519	                --  1001 1010 AAAA Abbb - SBI
+520	                --  1001 1011 AAAA Abbb - SBIS
+521	                --
+522	                Q_ALU_OP <= ALU_BIT_CS;
+523	                Q_AMOD <= AMOD_ABS;
+524	                Q_BIT(3) <= I_OPC(9);   -- set/clear
+525	
+526	                -- IMM = AAAAAA + 0x20
+527	                --
+528	                Q_IMM(4 downto 0) <= I_OPC(7 downto 3);
+529	                Q_IMM(6 downto 5) <= "01";
+530	
+531	                Q_RD_M <= I_T0;
+532	                if ((I_OPC(8) = '0') ) then     -- CBI or SBI
+533	                    Q_WE_M(0) <= '1';
+534	                else                            -- SBIC or SBIS
+535	                    if (I_T0 = '0') then        -- second cycle.
+536	                        Q_PC_OP <= PC_SKIP_T;
+537	                    end if;
+538	                end if;
+<pre class="filename">
+src/opc_deco.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<P>First of all, <STRONG>AMOD</STRONG>, <STRONG>IMM</STRONG>, and <STRONG>RSEL</STRONG> are set such that the value
+from the I/O register indicated by <STRONG>IMM</STRONG> reaches the ALU.
+<STRONG>ALU_OP</STRONG> and <STRONG>BIT</STRONG> are set such that the relevant bit reaches
+<STRONG>FLAGS_98(9)</STRONG> in the data path. The access of the bit followed by a
+skip decision would have taken too long for a single cycle.
+We therefore extract the bit in the first cycle and store it in
+the <STRONG>FLAGS_98(9)</STRONG> signal in the data path. In the next cycle,
+the decision to skip or not is taken.
+
+<P>The <STRONG>PC_OP</STRONG> of <STRONG>PC_SKIP_T</STRONG> causes the <STRONG>SKIP</STRONG> output of the execution stage
+to be raised if <STRONG>FLAGS_98(9)</STRONG> is set:
+
+<P><br>
+
+<pre class="vhdl">
+
+226	            when PC_SKIP_T => Q_SKIP <= L_FLAGS_98(9);  -- if T set
+<pre class="filename">
+src/data_path.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<P>A similar instruction is CPSE, which skips the next instruction when a
+comparison (rather than a bit in an I/O register) indicates equality.
+It works like a CP instruction, but raises <STRONG>SKIP</STRONG> in the execution stage
+rather than updating the status register.
+
+<H4><A NAME="section_1_6_10_6">7.6.10.6 Interrupts</A></H4>
+
+<P>We have seen earlier, that the opcode fetch stage inserts "interrupt
+instructions" into the pipeline when an interrupt occurs. These interrupt
+instructions are similar to <STRONG>CALL</STRONG> instructions. In contrast to <STRONG>CALL</STRONG>
+instructions, however, we use <STRONG>ALU_INTR</STRONG> instead of <STRONG>ALU_PC_2</STRONG>. This
+copies the <STRONG>PC</STRONG> (rather than <STRONG>PC</STRONG> + 2) to the output of the ALU (due to
+the fact that we have overridden a valid instruction and want to continue
+with exactly that instruction after returning from the interrupt, Another
+thing that <STRONG>ALU_INTR</STRONG> does is to clear the <STRONG>I</STRONG> flag in the status register.
+
+<P>The interrupt opcodes are implemented as follows:
+
+<P><br>
+
+<pre class="vhdl">
+
+ 95	                        --
+ 96	                        -- 0000 0000 0000 0000 - NOP
+ 97	                        -- 0000 0000 001v vvvv - INTERRUPT
+ 98	                        --
+ 99	                        if (I_OPC(5)) = '1' then   -- interrupt
+100	                            Q_ALU_OP <= ALU_INTR;
+101	                            Q_AMOD <= AMOD_ddSP;
+102	                            Q_JADR <= "0000000000" & I_OPC(4 downto 0) & "0";
+103	                            Q_PC_OP <= PC_LD_I;
+104	                            Q_WE_F <= '1';
+105	                            Q_WE_M <= "11";
+106	                        end if;
+<pre class="filename">
+src/opc_deco.vhd
+</pre></pre>
+<P>
+
+<P><br>
+
+<H3><A NAME="section_1_6_11">7.6.11 Instructions Not Implemented</A></H3>
+
+<P>A handful of instructions was not implemented. The reasons for not
+implementing them is one of the following:
+
+<OL>
+  <LI>The instruction is only available in particular devices, typically due
+   to extended capabilities of these devices (<STRONG>EICALL</STRONG>, <STRONG>EIJMP</STRONG>, <STRONG>ELPM</STRONG>).
+  <LI>The instruction uses capabilities that are somewhat unusual in
+   general (<STRONG>BREAK</STRONG>, <STRONG>DES</STRONG>, <STRONG>SLEEP</STRONG>, <STRONG>WDR</STRONG>).
+</OL>
+<P>These instructions are normally not generated by C/C++ compilers, but
+need to be generated by means of #<STRONG>asm</STRONG> directives. At this point the
+reader should have learned enough to implement these functions when needed.
+
+<H2><A NAME="section_1_7">7.7 Index of all Instructions</A></H2>
+
+<P>The following table lists all CPU instructions and a reference
+to the chapter where they are (supposed to be) described.
+
+<TABLE>
+<TR><TD>ADC</TD><TD>7.6.3</TD><TD>8-bit Dyadic Instructions, Register/Register
+</TD></TR><TR><TD>ADD</TD><TD>7.6.3</TD><TD>8-bit Dyadic Instructions, Register/Register
+</TD></TR><TR><TD>ADIW</TD><TD>7.6.5</TD><TD>16-bit Dyadic Instructions
+</TD></TR><TR><TD>AND</TD><TD>7.6.3</TD><TD>8-bit Dyadic Instructions, Register/Register
+</TD></TR><TR><TD>ANDI</TD><TD>7.6.4</TD><TD>8-bit Dyadic Instructions, Register/Immediate
+</TD></TR><TR><TD>ASR</TD><TD>7.6.2</TD><TD>8-bit Monadic Instructions
+</TD></TR><TR><TD>BCLR</TD><TD>7.6.2</TD><TD>8-bit Monadic Instructions
+</TD></TR><TR><TD>BLD</TD><TD>7.6.2</TD><TD>8-bit Monadic Instructions
+</TD></TR><TR><TD>BRcc</TD><TD>7.6.10</TD><TD>Jump and Call Instructions
+</TD></TR><TR><TD>BREAK</TD><TD>7.6.11</TD><TD>Instructions Not Implemented
+</TD></TR><TR><TD>BSET</TD><TD>7.6.2</TD><TD>8-bit Monadic Instructions
+</TD></TR><TR><TD>BST</TD><TD>7.6.2</TD><TD>8-bit Monadic Instructions
+</TD></TR><TR><TD>CALL</TD><TD>7.6.10</TD><TD>Jump and Call Instructions
+</TD></TR><TR><TD>CBI</TD><TD>7.6.6</TD><TD>Bit Instructions
+</TD></TR><TR><TD>CBR</TD><TD>-</TD><TD>see ANDI
+</TD></TR><TR><TD>CL&lt;flag&gt;</TD><TD>-</TD><TD>see BCLR
+</TD></TR><TR><TD>CLR</TD><TD>-</TD><TD>see LDI
+</TD></TR><TR><TD>COM</TD><TD>7.6.2</TD><TD>8-bit Monadic Instructions
+</TD></TR><TR><TD>CP</TD><TD>7.6.3</TD><TD>8-bit Dyadic Instructions, Register/Register
+</TD></TR><TR><TD>CPC</TD><TD>7.6.3</TD><TD>8-bit Dyadic Instructions, Register/Register
+</TD></TR><TR><TD>CPI</TD><TD>7.6.4</TD><TD>8-bit Dyadic Instructions, Register/Immediate
+</TD></TR><TR><TD>CPSE</TD><TD>7.6.10</TD><TD>Jump and Call Instructions
+</TD></TR><TR><TD>DEC</TD><TD>7.6.2</TD><TD>8-bit Monadic Instructions
+</TD></TR><TR><TD>DES</TD><TD>7.6.11</TD><TD>Instructions Not Implemented
+</TD></TR><TR><TD>EICALL</TD><TD>7.6.11</TD><TD>Instructions Not Implemented
+</TD></TR><TR><TD>EIJMP</TD><TD>7.6.11</TD><TD>Instructions Not Implemented
+</TD></TR><TR><TD>ELPM</TD><TD>7.6.11</TD><TD>Instructions Not Implemented
+</TD></TR><TR><TD>EOR</TD><TD>7.6.3</TD><TD>8-bit Dyadic Instructions, Register/Register
+</TD></TR><TR><TD>FMUL[SU]</TD><TD>7.6.7</TD><TD>Multiplication Instructions
+</TD></TR><TR><TD>ICALL</TD><TD>7.6.10</TD><TD>Jump and Call Instructions
+</TD></TR><TR><TD>IN</TD><TD>7.6.9</TD><TD>Instructions Reading From Memory or I/O
+</TD></TR><TR><TD>INC</TD><TD>7.6.2</TD><TD>8-bit Monadic Instructions
+</TD></TR><TR><TD>IJMP</TD><TD>7.6.10</TD><TD>Jump and Call Instructions
+</TD></TR><TR><TD>JMP</TD><TD>7.6.10</TD><TD>Jump and Call Instructions
+</TD></TR><TR><TD>LDD</TD><TD>7.6.9</TD><TD>Instructions Reading From Memory or I/O
+</TD></TR><TR><TD>LDI</TD><TD>7.6.5</TD><TD>16-bit Dyadic Instructions
+</TD></TR><TR><TD>LDS</TD><TD>7.6.9</TD><TD>Instructions Reading From Memory or I/O
+</TD></TR><TR><TD>LSL</TD><TD>7.6.2</TD><TD>8-bit Monadic Instructions
+</TD></TR><TR><TD>LSR</TD><TD>7.6.2</TD><TD>8-bit Monadic Instructions
+</TD></TR><TR><TD>MOV</TD><TD>7.6.3</TD><TD>8-bit Dyadic Instructions, Register/Register
+</TD></TR><TR><TD>MOVW</TD><TD>7.6.5</TD><TD>16-bit Dyadic Instructions
+</TD></TR><TR><TD>MUL[SU]</TD><TD>7.6.7</TD><TD>Multiplication Instructions
+</TD></TR><TR><TD>NEG</TD><TD>7.6.2</TD><TD>8-bit Monadic Instructions
+</TD></TR><TR><TD>NOP</TD><TD>7.6.1</TD><TD>The NOP instruction
+</TD></TR><TR><TD>NOT</TD><TD>7.6.2</TD><TD>8-bit Monadic Instructions
+</TD></TR><TR><TD>OR</TD><TD>7.6.3</TD><TD>8-bit Dyadic Instructions, Register/Register
+</TD></TR><TR><TD>ORI</TD><TD>7.6.4</TD><TD>8-bit Dyadic Instructions, Register/Immediate
+</TD></TR><TR><TD>OUT</TD><TD>7.6.8</TD><TD>Instructions Writing To Memory or I/O
+</TD></TR><TR><TD>POP</TD><TD>7.6.9</TD><TD>Instructions Reading From Memory or I/O
+</TD></TR><TR><TD>PUSH</TD><TD>7.6.8</TD><TD>Instructions Writing To Memory or I/O
+</TD></TR><TR><TD>RCALL</TD><TD>7.6.10</TD><TD>Jump and Call Instructions
+</TD></TR><TR><TD>RET</TD><TD>7.6.10</TD><TD>Jump and Call Instructions
+</TD></TR><TR><TD>RETI</TD><TD>7.6.10</TD><TD>Jump and Call Instructions
+</TD></TR><TR><TD>RJMP</TD><TD>7.6.10</TD><TD>Jump and Call Instructions
+</TD></TR><TR><TD>ROL</TD><TD>7.6.2</TD><TD>8-bit Monadic Instructions
+</TD></TR><TR><TD>SBC</TD><TD>7.6.3</TD><TD>8-bit Dyadic Instructions, Register/Register
+</TD></TR><TR><TD>SBCI</TD><TD>7.6.4</TD><TD>8-bit Dyadic Instructions, Register/Immediate
+</TD></TR><TR><TD>SBI</TD><TD>7.6.6</TD><TD>Bit Instructions
+</TD></TR><TR><TD>SBIC</TD><TD>7.6.10</TD><TD>Jump and Call Instructions
+</TD></TR><TR><TD>SBIS</TD><TD>7.6.10</TD><TD>Jump and Call Instructions
+</TD></TR><TR><TD>SBIW</TD><TD>7.6.5</TD><TD>16-bit Dyadic Instructions
+</TD></TR><TR><TD>SBR</TD><TD>-</TD><TD>see ORI
+</TD></TR><TR><TD>SBRC</TD><TD>7.6.10</TD><TD>Jump and Call Instructions
+</TD></TR><TR><TD>SBRS</TD><TD>7.6.10</TD><TD>Jump and Call Instructions
+</TD></TR><TR><TD>SE&lt;flag&gt;</TD><TD>-</TD><TD>see BSET
+</TD></TR><TR><TD>SER</TD><TD>-</TD><TD>see LDI
+</TD></TR><TR><TD>SLEEP</TD><TD>7.6.11</TD><TD>Instructions Not Implemented
+</TD></TR><TR><TD>SPM</TD><TD>7.6.8</TD><TD>Instructions Writing To Memory or I/O
+</TD></TR><TR><TD>STD</TD><TD>7.6.8</TD><TD>Instructions Writing To Memory or I/O
+</TD></TR><TR><TD>STS</TD><TD>7.6.8</TD><TD>Instructions Writing To Memory or I/O
+</TD></TR><TR><TD>SUB</TD><TD>7.6.3</TD><TD>8-bit Dyadic Instructions, Register/Register
+</TD></TR><TR><TD>SUBI</TD><TD>7.6.4</TD><TD>8-bit Dyadic Instructions, Register/Immediate
+</TD></TR><TR><TD>SWAP</TD><TD>7.6.2</TD><TD>8-bit Monadic Instructions
+</TD></TR><TR><TD>WDR</TD><TD>7.6.11</TD><TD>Instructions Not Implemented
+</TD></TR>
+</TABLE>
+<P>This concludes the discussion of the CPU. In the next lesson we will
+proceed with the input/output unit.
+
+<P><hr><BR>
+<table class="ttop"><th class="tpre"><a href="06_Data_Path.html">Previous Lesson</a></th><th class="ttop"><a href="toc.html">Table of Content</a></th><th class="tnxt"><a href="08_IO.html">Next Lesson</a></th></table>
+</BODY>
+</HTML>

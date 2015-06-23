@@ -1,0 +1,409 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN"
+"http://www.w3.org/TR/html4/strict.dtd">
+<HTML>
+<HEAD>
+<TITLE>html/Listing_of_alu_vhd</TITLE>
+<META NAME="generator" CONTENT="HTML::TextToHTML v2.46">
+<LINK REL="stylesheet" TYPE="text/css" HREF="lecture.css">
+</HEAD>
+<BODY>
+<P><table class="ttop"><th class="tpre"><a href="09_Toolchain_Setup.html">Previous Lesson</a></th><th class="ttop"><a href="toc.html">Table of Content</a></th><th class="tnxt"><a href="11_Listing_of_avr_fpga.vhd.html">Next Lesson</a></th></table>
+<hr>
+
+<H1><A NAME="section_1">10 LISTING OF alu.vhd</A></H1>
+
+<pre class="vhdl">
+
+  1	-------------------------------------------------------------------------------
+  2	-- 
+  3	-- Copyright (C) 2009, 2010 Dr. Juergen Sauermann
+  4	-- 
+  5	--  This code is free software: you can redistribute it and/or modify
+  6	--  it under the terms of the GNU General Public License as published by
+  7	--  the Free Software Foundation, either version 3 of the License, or
+  8	--  (at your option) any later version.
+  9	--
+ 10	--  This code is distributed in the hope that it will be useful,
+ 11	--  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ 12	--  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ 13	--  GNU General Public License for more details.
+ 14	--
+ 15	--  You should have received a copy of the GNU General Public License
+ 16	--  along with this code (see the file named COPYING).
+ 17	--  If not, see http://www.gnu.org/licenses/.
+ 18	--
+ 19	-------------------------------------------------------------------------------
+ 20	-------------------------------------------------------------------------------
+ 21	--
+ 22	-- Module Name:    alu - Behavioral 
+ 23	-- Create Date:    13:51:24 11/07/2009 
+ 24	-- Description:    arithmetic logic unit of a CPU
+ 25	--
+ 26	-------------------------------------------------------------------------------
+ 27	--
+ 28	library IEEE;
+ 29	use IEEE.std_logic_1164.ALL;
+ 30	use IEEE.std_logic_ARITH.ALL;
+ 31	use IEEE.std_logic_UNSIGNED.ALL;
+ 32	
+ 33	use work.common.ALL;
+ 34	
+ 35	entity alu is
+ 36	    port (  I_ALU_OP    : in  std_logic_vector( 4 downto 0);
+ 37	            I_BIT       : in  std_logic_vector( 3 downto 0);
+ 38	            I_D         : in  std_logic_vector(15 downto 0);
+ 39	            I_D0        : in  std_logic;
+ 40	            I_DIN       : in  std_logic_vector( 7 downto 0);
+ 41	            I_FLAGS     : in  std_logic_vector( 7 downto 0);
+ 42	            I_IMM       : in  std_logic_vector( 7 downto 0);
+ 43	            I_PC        : in  std_logic_vector(15 downto 0);
+ 44	            I_R         : in  std_logic_vector(15 downto 0);
+ 45	            I_R0        : in  std_logic;
+ 46	            I_RSEL      : in  std_logic_vector( 1 downto 0);
+ 47	
+ 48	            Q_FLAGS     : out std_logic_vector( 9 downto 0);
+ 49	            Q_DOUT      : out std_logic_vector(15 downto 0));
+ 50	end alu;
+ 51	
+ 52	architecture Behavioral of alu is
+ 53	
+ 54	function ze(A: std_logic_vector(7 downto 0)) return std_logic is
+ 55	begin
+ 56	    return not (A(0) or A(1) or A(2) or A(3) or
+ 57	                A(4) or A(5) or A(6) or A(7));
+ 58	end;
+ 59	
+ 60	function cy(D, R, S: std_logic) return std_logic is
+ 61	begin
+ 62	    return (D and R) or (D and not S) or (R and not S);
+ 63	end;
+ 64	
+ 65	function ov(D, R, S: std_logic) return std_logic is
+ 66	begin
+ 67	    return (D and R and (not S)) or ((not D) and (not R) and S);
+ 68	end;
+ 69	
+ 70	function si(D, R, S: std_logic) return std_logic is
+ 71	begin
+ 72	    return S xor ov(D, R, S);
+ 73	end;
+ 74	
+ 75	signal L_ADC_DR     : std_logic_vector( 7 downto 0);    -- D + R + Carry
+ 76	signal L_ADD_DR     : std_logic_vector( 7 downto 0);    -- D + R
+ 77	signal L_ADIW_D     : std_logic_vector(15 downto 0);    -- D + IMM
+ 78	signal L_AND_DR     : std_logic_vector( 7 downto 0);    -- D and R
+ 79	signal L_ASR_D      : std_logic_vector( 7 downto 0);    -- (signed D) >> 1
+ 80	signal L_D8         : std_logic_vector( 7 downto 0);    -- D(7 downto 0)
+ 81	signal L_DEC_D      : std_logic_vector( 7 downto 0);    -- D - 1
+ 82	signal L_DOUT       : std_logic_vector(15 downto 0);
+ 83	signal L_INC_D      : std_logic_vector( 7 downto 0);    -- D + 1
+ 84	signal L_LSR_D      : std_logic_vector( 7 downto 0);    -- (unsigned) D >> 1
+ 85	signal L_MASK_I     : std_logic_vector( 7 downto 0);    -- 1 << IMM
+ 86	signal L_NEG_D      : std_logic_vector( 7 downto 0);    -- 0 - D
+ 87	signal L_NOT_D      : std_logic_vector( 7 downto 0);    -- 0 not D
+ 88	signal L_OR_DR      : std_logic_vector( 7 downto 0);    -- D or R
+ 89	signal L_PROD       : std_logic_vector(17 downto 0);    -- D * R
+ 90	signal L_R8         : std_logic_vector( 7 downto 0);    -- odd or even R
+ 91	signal L_RI8        : std_logic_vector( 7 downto 0);    -- R8 or IMM
+ 92	signal L_RBIT       : std_logic;
+ 93	signal L_SBIW_D     : std_logic_vector(15 downto 0);    -- D - IMM
+ 94	signal L_ROR_D      : std_logic_vector( 7 downto 0);    -- D rotated right
+ 95	signal L_SBC_DR     : std_logic_vector( 7 downto 0);    -- D - R - Carry
+ 96	signal L_SIGN_D     : std_logic;
+ 97	signal L_SIGN_R     : std_logic;
+ 98	signal L_SUB_DR     : std_logic_vector( 7 downto 0);    -- D - R
+ 99	signal L_SWAP_D     : std_logic_vector( 7 downto 0);    -- D swapped
+100	signal L_XOR_DR     : std_logic_vector( 7 downto 0);    -- D xor R
+101	
+102	begin
+103	
+104	    dinbit: process(I_DIN, I_BIT(2 downto 0))
+105	    begin
+106	        case I_BIT(2 downto 0) is
+107	            when "000"  => L_RBIT <= I_DIN(0);   L_MASK_I <= "00000001";
+108	            when "001"  => L_RBIT <= I_DIN(1);   L_MASK_I <= "00000010";
+109	            when "010"  => L_RBIT <= I_DIN(2);   L_MASK_I <= "00000100";
+110	            when "011"  => L_RBIT <= I_DIN(3);   L_MASK_I <= "00001000";
+111	            when "100"  => L_RBIT <= I_DIN(4);   L_MASK_I <= "00010000";
+112	            when "101"  => L_RBIT <= I_DIN(5);   L_MASK_I <= "00100000";
+113	            when "110"  => L_RBIT <= I_DIN(6);   L_MASK_I <= "01000000";
+114	            when others => L_RBIT <= I_DIN(7);   L_MASK_I <= "10000000";
+115	        end case;
+116	    end process;
+117	
+118	    process(L_ADC_DR, L_ADD_DR, L_ADIW_D, I_ALU_OP, L_AND_DR, L_ASR_D,
+119	            I_BIT, I_D, L_D8, L_DEC_D, I_DIN, I_FLAGS, I_IMM, L_MASK_I,
+120	            L_INC_D, L_LSR_D, L_NEG_D, L_NOT_D, L_OR_DR, I_PC, L_PROD,
+121	            I_R, L_RI8, L_RBIT, L_ROR_D, L_SBIW_D, L_SUB_DR, L_SBC_DR,
+122	            L_SIGN_D, L_SIGN_R, L_SWAP_D, L_XOR_DR)
+123	    begin
+124	        Q_FLAGS <= "00" & I_FLAGS;
+125	        L_DOUT <= X"0000";
+126	
+127	        case I_ALU_OP is
+128	            when ALU_ADC =>
+129	                L_DOUT <= L_ADC_DR & L_ADC_DR;
+130	                Q_FLAGS(0) <= cy(L_D8(7), L_RI8(7), L_ADC_DR(7));   -- Carry
+131	                Q_FLAGS(1) <= ze(L_ADC_DR);                         -- Zero
+132	                Q_FLAGS(2) <= L_ADC_DR(7);                          -- Negative
+133	                Q_FLAGS(3) <= ov(L_D8(7), L_RI8(7), L_ADC_DR(7));   -- Overflow
+134	                Q_FLAGS(4) <= si(L_D8(7), L_RI8(7), L_ADC_DR(7));   -- Signed
+135	                Q_FLAGS(5) <= cy(L_D8(3), L_RI8(3), L_ADC_DR(3));   -- Halfcarry
+136	
+137	            when ALU_ADD =>
+138	                L_DOUT <= L_ADD_DR & L_ADD_DR;
+139	                Q_FLAGS(0) <= cy(L_D8(7), L_RI8(7), L_ADD_DR(7));   -- Carry
+140	                Q_FLAGS(1) <= ze(L_ADD_DR);                         -- Zero
+141	                Q_FLAGS(2) <= L_ADD_DR(7);                          -- Negative
+142	                Q_FLAGS(3) <= ov(L_D8(7), L_RI8(7), L_ADD_DR(7));   -- Overflow
+143	                Q_FLAGS(4) <= si(L_D8(7), L_RI8(7), L_ADD_DR(7));   -- Signed
+144	                Q_FLAGS(5) <= cy(L_D8(3), L_RI8(3), L_ADD_DR(3));   -- Halfcarry
+145	
+146	            when ALU_ADIW =>
+147	                L_DOUT <= L_ADIW_D;
+148	                Q_FLAGS(0) <= L_ADIW_D(15) and not I_D(15);         -- Carry
+149	                Q_FLAGS(1) <= ze(L_ADIW_D(15 downto 8)) and
+150	                              ze(L_ADIW_D(7 downto 0));             -- Zero
+151	                Q_FLAGS(2) <= L_ADIW_D(15);                         -- Negative
+152	                Q_FLAGS(3) <= I_D(15) and not L_ADIW_D(15);         -- Overflow
+153	                Q_FLAGS(4) <= (L_ADIW_D(15) and not I_D(15))
+154	                          xor (I_D(15) and not L_ADIW_D(15));       -- Signed
+155	                
+156	            when ALU_AND =>
+157	                L_DOUT <= L_AND_DR & L_AND_DR;
+158	                Q_FLAGS(1) <= ze(L_AND_DR);                         -- Zero
+159	                Q_FLAGS(2) <= L_AND_DR(7);                          -- Negative
+160	                Q_FLAGS(3) <= '0';                                  -- Overflow
+161	                Q_FLAGS(4) <= L_AND_DR(7);                          -- Signed
+162	
+163	            when ALU_ASR =>
+164	                L_DOUT <= L_ASR_D & L_ASR_D;
+165	                Q_FLAGS(0) <= L_D8(0);                              -- Carry
+166	                Q_FLAGS(1) <= ze(L_ASR_D);                          -- Zero
+167	                Q_FLAGS(2) <= L_D8(7);                              -- Negative
+168	                Q_FLAGS(3) <= L_D8(0) xor L_D8(7);                  -- Overflow
+169	                Q_FLAGS(4) <= L_D8(0);                              -- Signed
+170	                
+171	            when ALU_BLD =>     -- copy T flag to DOUT
+172	                case I_BIT(2 downto 0) is
+173	                    when "000"  => L_DOUT( 0) <= I_FLAGS(6);
+174	                                   L_DOUT( 8) <= I_FLAGS(6);
+175	                    when "001"  => L_DOUT( 1) <= I_FLAGS(6);
+176	                                   L_DOUT( 9) <= I_FLAGS(6);
+177	                    when "010"  => L_DOUT( 2) <= I_FLAGS(6);
+178	                                   L_DOUT(10) <= I_FLAGS(6);
+179	                    when "011"  => L_DOUT( 3) <= I_FLAGS(6);
+180	                                   L_DOUT(11) <= I_FLAGS(6);
+181	                    when "100"  => L_DOUT( 4) <= I_FLAGS(6);
+182	                                   L_DOUT(12) <= I_FLAGS(6);
+183	                    when "101"  => L_DOUT( 5) <= I_FLAGS(6);
+184	                                   L_DOUT(13) <= I_FLAGS(6);
+185	                    when "110"  => L_DOUT( 6) <= I_FLAGS(6);
+186	                                   L_DOUT(14) <= I_FLAGS(6);
+187	                    when others => L_DOUT( 7) <= I_FLAGS(6);
+188	                                   L_DOUT(15) <= I_FLAGS(6);
+189	                end case;
+190	
+191	            when ALU_BIT_CS =>  -- copy I_DIN to T flag
+192	                Q_FLAGS(6) <= L_RBIT xor not I_BIT(3);
+193	                Q_FLAGS(9) <= L_RBIT xor not I_BIT(3);
+194	                if (I_BIT(3) = '0') then    -- clear
+195	                    L_DOUT(15 downto 8) <= I_DIN and not L_MASK_I;
+196	                    L_DOUT( 7 downto 0) <= I_DIN and not L_MASK_I;
+197	                else                        -- set
+198	                    L_DOUT(15 downto 8) <= I_DIN or L_MASK_I;
+199	                    L_DOUT( 7 downto 0) <= I_DIN or L_MASK_I;
+200	                end if;
+201	                
+202	            when ALU_COM =>
+203	                L_DOUT <= L_NOT_D & L_NOT_D;
+204	                Q_FLAGS(0) <= '1';                                  -- Carry
+205	                Q_FLAGS(1) <= ze(not L_D8);                         -- Zero
+206	                Q_FLAGS(2) <= not L_D8(7);                          -- Negative
+207	                Q_FLAGS(3) <= '0';                                  -- Overflow
+208	                Q_FLAGS(4) <= not L_D8(7);                          -- Signed
+209	
+210	            when ALU_DEC =>
+211	                L_DOUT <= L_DEC_D & L_DEC_D;
+212	                Q_FLAGS(1) <= ze(L_DEC_D);                          -- Zero
+213	                Q_FLAGS(2) <= L_DEC_D(7);                           -- Negative
+214	                if (L_D8 = X"80") then
+215	                    Q_FLAGS(3) <= '1';                              -- Overflow
+216	                    Q_FLAGS(4) <= not L_DEC_D(7);                   -- Signed
+217	                else
+218	                    Q_FLAGS(3) <= '0';                              -- Overflow
+219	                    Q_FLAGS(4) <= L_DEC_D(7);                       -- Signed
+220	                end if;
+221	
+222	            when ALU_EOR =>
+223	                L_DOUT <= L_XOR_DR & L_XOR_DR;
+224	                Q_FLAGS(1) <= ze(L_XOR_DR);                         -- Zero
+225	                Q_FLAGS(2) <= L_XOR_DR(7);                          -- Negative
+226	                Q_FLAGS(3) <= '0';                                  -- Overflow
+227	                Q_FLAGS(4) <= L_XOR_DR(7);                          -- Signed
+228	
+229	            when ALU_INC =>
+230	                L_DOUT <= L_INC_D & L_INC_D;
+231	                Q_FLAGS(1) <= ze(L_INC_D);                          -- Zero
+232	                Q_FLAGS(2) <= L_INC_D(7);                           -- Negative
+233	                if (L_D8 = X"7F") then
+234	                    Q_FLAGS(3) <= '1';                              -- Overflow
+235	                    Q_FLAGS(4) <= not L_INC_D(7);                   -- Signed
+236	                else
+237	                    Q_FLAGS(3) <= '0';                              -- Overflow
+238	                    Q_FLAGS(4) <= L_INC_D(7);                       -- Signed
+239	                end if;
+240	
+241	            when ALU_INTR =>
+242	                L_DOUT <= I_PC;
+243	                Q_FLAGS(7) <= I_IMM(6);    -- ena/disable interrupts
+244	
+245	            when ALU_LSR  =>
+246	                L_DOUT <= L_LSR_D & L_LSR_D;
+247	                Q_FLAGS(0) <= L_D8(0);                              -- Carry
+248	                Q_FLAGS(1) <= ze(L_LSR_D);                          -- Zero
+249	                Q_FLAGS(2) <= '0';                                  -- Negative
+250	                Q_FLAGS(3) <= L_D8(0);                              -- Overflow
+251	                Q_FLAGS(4) <= L_D8(0);                              -- Signed
+252	
+253	            when ALU_D_MV_Q =>
+254	                L_DOUT <= L_D8 & L_D8;
+255	                
+256	            when ALU_R_MV_Q =>
+257	                L_DOUT <= L_RI8 & L_RI8;
+258	
+259	            when ALU_MV_16 =>
+260	                L_DOUT <= I_R(15 downto 8) & L_RI8;
+261	
+262	            when ALU_MULT =>
+263	                Q_FLAGS(0) <= L_PROD(15);                           -- Carry
+264	                if I_IMM(7) = '0' then              -- MUL
+265	                    L_DOUT <= L_PROD(15 downto 0);
+266	                    Q_FLAGS(1) <= ze(L_PROD(15 downto 8))           -- Zero
+267	                            and ze(L_PROD( 7 downto 0));
+268	                else                                -- FMUL
+269	                    L_DOUT <= L_PROD(14 downto 0) & "0";
+270	                    Q_FLAGS(1) <= ze(L_PROD(14 downto 7))           -- Zero
+271	                            and ze(L_PROD( 6 downto 0) & "0");
+272	                end if;
+273	                
+274	            when ALU_NEG =>
+275	                L_DOUT <= L_NEG_D & L_NEG_D;
+276	                Q_FLAGS(0) <= not ze(L_D8);                         -- Carry
+277	                Q_FLAGS(1) <= ze(L_NEG_D);                          -- Zero
+278	                Q_FLAGS(2) <= L_NEG_D(7);                           -- Negative
+279	                if (L_D8 = X"80") then
+280	                    Q_FLAGS(3) <= '1';                              -- Overflow
+281	                    Q_FLAGS(4) <= not L_NEG_D(7);                   -- Signed
+282	                else
+283	                    Q_FLAGS(3) <= '0';                              -- Overflow
+284	                    Q_FLAGS(4) <= L_NEG_D(7);                       -- Signed
+285	                end if;
+286	                Q_FLAGS(5) <= L_D8(3) or L_NEG_D(3);                -- Halfcarry
+287	
+288	            when ALU_OR =>
+289	                L_DOUT <= L_OR_DR & L_OR_DR;
+290	                Q_FLAGS(1) <= ze(L_OR_DR);                          -- Zero
+291	                Q_FLAGS(2) <= L_OR_DR(7);                           -- Negative
+292	                Q_FLAGS(3) <= '0';                                  -- Overflow
+293	                Q_FLAGS(4) <= L_OR_DR(7);                           -- Signed
+294	
+295	            when ALU_PC_1 =>    -- ICALL, RCALL
+296	                L_DOUT <= I_PC + X"0001";
+297	
+298	            when ALU_PC_2 =>    -- CALL
+299	                L_DOUT <= I_PC + X"0002";
+300	
+301	            when ALU_ROR =>
+302	                L_DOUT <= L_ROR_D & L_ROR_D;
+303	                Q_FLAGS(1) <= ze(L_ROR_D);                          -- Zero
+304	                Q_FLAGS(2) <= I_FLAGS(0);                           -- Negative
+305	                Q_FLAGS(3) <= I_FLAGS(0) xor L_D8(0);               -- Overflow
+306	                Q_FLAGS(4) <= I_FLAGS(0);                           -- Signed
+307	
+308	            when ALU_SBC =>
+309	                L_DOUT <= L_SBC_DR & L_SBC_DR;
+310	                Q_FLAGS(0) <= cy(L_SBC_DR(7), L_RI8(7), L_D8(7));   -- Carry
+311	                Q_FLAGS(1) <= ze(L_SBC_DR) and I_FLAGS(1);          -- Zero
+312	                Q_FLAGS(2) <= L_SBC_DR(7);                          -- Negative
+313	                Q_FLAGS(3) <= ov(L_SBC_DR(7), L_RI8(7), L_D8(7));   -- Overflow
+314	                Q_FLAGS(4) <= si(L_SBC_DR(7), L_RI8(7), L_D8(7));   -- Signed
+315	                Q_FLAGS(5) <= cy(L_SBC_DR(3), L_RI8(3), L_D8(3));   -- Halfcarry
+316	
+317	            when ALU_SBIW =>
+318	                L_DOUT <= L_SBIW_D;
+319	                Q_FLAGS(0) <= L_SBIW_D(15) and not I_D(15);         -- Carry
+320	                Q_FLAGS(1) <= ze(L_SBIW_D(15 downto 8)) and
+321	                              ze(L_SBIW_D(7 downto 0));             -- Zero
+322	                Q_FLAGS(2) <= L_SBIW_D(15);                         -- Negative
+323	                Q_FLAGS(3) <= I_D(15) and not L_SBIW_D(15);         -- Overflow
+324	                Q_FLAGS(4) <=  (L_SBIW_D(15) and not I_D(15))
+325	                           xor (I_D(15) and not L_SBIW_D(15));      -- Signed
+326	                       
+327	            when ALU_SREG =>
+328	                case I_BIT(2 downto 0) is
+329	                    when "000"  => Q_FLAGS(0) <= I_BIT(3);
+330	                    when "001"  => Q_FLAGS(1) <= I_BIT(3);
+331	                    when "010"  => Q_FLAGS(2) <= I_BIT(3);
+332	                    when "011"  => Q_FLAGS(3) <= I_BIT(3);
+333	                    when "100"  => Q_FLAGS(4) <= I_BIT(3);
+334	                    when "101"  => Q_FLAGS(5) <= I_BIT(3);
+335	                    when "110"  => Q_FLAGS(6) <= I_BIT(3);
+336	                    when others => Q_FLAGS(7) <= I_BIT(3);
+337	                end case;
+338	                
+339	            when ALU_SUB =>
+340	                L_DOUT <= L_SUB_DR & L_SUB_DR;
+341	                Q_FLAGS(0) <= cy(L_SUB_DR(7), L_RI8(7), L_D8(7));   -- Carry
+342	                Q_FLAGS(1) <= ze(L_SUB_DR);                         -- Zero
+343	                Q_FLAGS(2) <= L_SUB_DR(7);                          -- Negative
+344	                Q_FLAGS(3) <= ov(L_SUB_DR(7), L_RI8(7), L_D8(7));   -- Overflow
+345	                Q_FLAGS(4) <= si(L_SUB_DR(7), L_RI8(7), L_D8(7));   -- Signed
+346	                Q_FLAGS(5) <= cy(L_SUB_DR(3), L_RI8(3), L_D8(3));   -- Halfcarry
+347	                Q_FLAGS(8) <= ze(L_SUB_DR);                         -- temp Zero
+348	
+349	            when ALU_SWAP =>
+350	                L_DOUT <= L_SWAP_D & L_SWAP_D;
+351	
+352	            when others =>
+353	        end case;
+354	    end Process;
+355	    
+356	    L_D8 <= I_D(15 downto 8) when (I_D0 = '1') else I_D(7 downto 0);
+357	    L_R8 <= I_R(15 downto 8) when (I_R0 = '1') else I_R(7 downto 0);
+358	    L_RI8 <= I_IMM           when (I_RSEL = RS_IMM) else L_R8;
+359	
+360	    L_ADIW_D  <= I_D + ("0000000000" & I_IMM(5 downto 0));
+361	    L_SBIW_D  <= I_D - ("0000000000" & I_IMM(5 downto 0));
+362	    L_ADD_DR  <= L_D8 + L_RI8;
+363	    L_ADC_DR  <= L_ADD_DR + ("0000000" & I_FLAGS(0));
+364	    L_ASR_D   <= L_D8(7) & L_D8(7 downto 1);
+365	    L_AND_DR  <= L_D8 and L_RI8;
+366	    L_DEC_D   <= L_D8 - X"01";
+367	    L_INC_D   <= L_D8 + X"01";
+368	    L_LSR_D   <= '0' & L_D8(7 downto 1);
+369	    L_NEG_D   <= X"00" - L_D8;
+370	    L_NOT_D   <= not L_D8;
+371	    L_OR_DR   <= L_D8 or L_RI8;
+372	    L_PROD    <= (L_SIGN_D & L_D8) * (L_SIGN_R & L_R8);
+373	    L_ROR_D   <= I_FLAGS(0) &  L_D8(7 downto 1);
+374	    L_SUB_DR  <= L_D8 - L_RI8;
+375	    L_SBC_DR  <= L_SUB_DR - ("0000000" & I_FLAGS(0));
+376	    L_SIGN_D  <= L_D8(7) and I_IMM(6);
+377	    L_SIGN_R  <= L_R8(7) and I_IMM(5);
+378	    L_SWAP_D  <= L_D8(3 downto 0) & L_D8(7 downto 4);
+379	    L_XOR_DR  <= L_D8 xor L_R8;
+380	
+381	    Q_DOUT <= (I_DIN & I_DIN) when (I_RSEL = RS_DIN) else L_DOUT;
+382	
+383	end Behavioral;
+384	
+<pre class="filename">
+src/alu.vhd
+</pre></pre>
+<P>
+
+<P><hr><BR>
+<table class="ttop"><th class="tpre"><a href="09_Toolchain_Setup.html">Previous Lesson</a></th><th class="ttop"><a href="toc.html">Table of Content</a></th><th class="tnxt"><a href="11_Listing_of_avr_fpga.vhd.html">Next Lesson</a></th></table>
+</BODY>
+</HTML>

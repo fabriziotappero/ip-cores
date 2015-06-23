@@ -1,0 +1,142 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN"
+"http://www.w3.org/TR/html4/strict.dtd">
+<HTML>
+<HEAD>
+<TITLE>html/Listing_of_uart_rx.vhd</TITLE>
+<META NAME="generator" CONTENT="HTML::TextToHTML v2.46">
+<LINK REL="stylesheet" TYPE="text/css" HREF="lecture.css">
+</HEAD>
+<BODY>
+<P><table class="ttop"><th class="tpre"><a href="25_Listing_of_status_reg.vhd.html">Previous Lesson</a></th><th class="ttop"><a href="toc.html">Table of Content</a></th><th class="tnxt"><a href="27_Listing_of_uart_tx.vhd.html">Next Lesson</a></th></table>
+<hr>
+
+<H1><A NAME="section_1">26 LISTING OF uart_rx.vhd</A></H1>
+
+<pre class="vhdl">
+
+  1	-------------------------------------------------------------------------------
+  2	-- 
+  3	-- Copyright (C) 2009, 2010 Dr. Juergen Sauermann
+  4	-- 
+  5	--  This code is free software: you can redistribute it and/or modify
+  6	--  it under the terms of the GNU General Public License as published by
+  7	--  the Free Software Foundation, either version 3 of the License, or
+  8	--  (at your option) any later version.
+  9	--
+ 10	--  This code is distributed in the hope that it will be useful,
+ 11	--  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ 12	--  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ 13	--  GNU General Public License for more details.
+ 14	--
+ 15	--  You should have received a copy of the GNU General Public License
+ 16	--  along with this code (see the file named COPYING).
+ 17	--  If not, see http://www.gnu.org/licenses/.
+ 18	--
+ 19	-------------------------------------------------------------------------------
+ 20	-------------------------------------------------------------------------------
+ 21	--
+ 22	-- Create Date:    14:22:28 11/07/2009 
+ 23	-- Design Name: 
+ 24	-- Module Name:    uart_rx - Behavioral 
+ 25	-- Description:    a UART receiver.
+ 26	--
+ 27	-------------------------------------------------------------------------------
+ 28	--
+ 29	library IEEE;
+ 30	use IEEE.STD_LOGIC_1164.ALL;
+ 31	use IEEE.STD_LOGIC_ARITH.ALL;
+ 32	use IEEE.STD_LOGIC_UNSIGNED.ALL;
+ 33	
+ 34	entity uart_rx is
+ 35	    PORT(   I_CLK       : in  std_logic;
+ 36	            I_CLR       : in  std_logic;
+ 37	            I_CE_16     : in  std_logic;            -- 16 times baud rate 
+ 38	            I_RX        : in  std_logic;            -- Serial input line
+ 39	 
+ 40	            Q_DATA      : out std_logic_vector(7 downto 0);
+ 41	            Q_FLAG      : out std_logic);       -- toggle on every byte received
+ 42	end uart_rx;
+ 43	 
+ 44	architecture Behavioral of uart_rx is
+ 45	 
+ 46	signal L_POSITION       : std_logic_vector(7 downto 0);     --  sample position
+ 47	signal L_BUF            : std_logic_vector(9 downto 0); 
+ 48	signal L_FLAG           : std_logic; 
+ 49	signal L_SERIN          : std_logic;                -- double clock the input
+ 50	signal L_SER_HOT        : std_logic;                -- double clock the input
+ 51	 
+ 52	begin
+ 53	 
+ 54	    -- double clock the input data...
+ 55	    --
+ 56	    process(I_CLK)
+ 57	    begin
+ 58	        if (rising_edge(I_CLK)) then  
+ 59	            if (I_CLR = '1') then
+ 60	                L_SERIN <= '1';
+ 61	                L_SER_HOT <= '1';
+ 62	            else
+ 63	                L_SERIN   <= I_RX;
+ 64	                L_SER_HOT <= L_SERIN;
+ 65	            end if;
+ 66	        end if;
+ 67	    end process;
+ 68	 
+ 69	    process(I_CLK, L_POSITION)
+ 70	        variable START_BIT : boolean;
+ 71	        variable STOP_BIT  : boolean;
+ 72	        variable STOP_POS  : boolean;
+ 73	 
+ 74	    begin
+ 75	    START_BIT := L_POSITION(7 downto 4) = X"0";
+ 76	    STOP_BIT  := L_POSITION(7 downto 4) = X"9";
+ 77	    STOP_POS  := STOP_BIT and L_POSITION(3 downto 2) = "11"; -- 3/4 of stop bit
+ 78	 
+ 79	        if (rising_edge(I_CLK)) then  
+ 80	            if (I_CLR = '1') then
+ 81	                L_FLAG <= '0';
+ 82	                L_POSITION <= X"00";    -- idle
+ 83	                L_BUF      <= "1111111111";
+ 84	                Q_DATA     <= "00000000";
+ 85	            elsif (I_CE_16 = '1') then    
+ 86	                if (L_POSITION = X"00") then            -- uart idle
+ 87	                    L_BUF  <= "1111111111";
+ 88	                    if (L_SER_HOT = '0')  then          -- start bit received
+ 89	                        L_POSITION <= X"01";
+ 90	                    end if;
+ 91	                else
+ 92	                    L_POSITION <= L_POSITION + X"01";
+ 93	                    if (L_POSITION(3 downto 0) = "0111") then       -- 1/2 bit
+ 94	                        L_BUF <= L_SER_HOT & L_BUF(9 downto 1);     -- sample data
+ 95	                        --
+ 96	                        -- validate start bit
+ 97	                        --
+ 98	                        if (START_BIT and L_SER_HOT = '1') then     -- 1/2 start bit
+ 99	                            L_POSITION <= X"00";
+100	                        end if;
+101	 
+102	                        if (STOP_BIT) then                          -- 1/2 stop bit
+103	                            Q_DATA <= L_BUF(9 downto 2);
+104	                        end if;
+105	                    elsif (STOP_POS) then                       -- 3/4 stop bit
+106	                        L_FLAG <= L_FLAG xor (L_BUF(9) and not L_BUF(0));
+107	                        L_POSITION <= X"00";
+108	                    end if;
+109	                end if;
+110	            end if;
+111	        end if;
+112	    end process;    
+113	 
+114	    Q_FLAG <= L_FLAG;
+115	 
+116	end Behavioral;
+117	 
+<pre class="filename">
+src/uart_rx.vhd
+</pre></pre>
+<P>
+
+<P><hr><BR>
+<table class="ttop"><th class="tpre"><a href="25_Listing_of_status_reg.vhd.html">Previous Lesson</a></th><th class="ttop"><a href="toc.html">Table of Content</a></th><th class="tnxt"><a href="27_Listing_of_uart_tx.vhd.html">Next Lesson</a></th></table>
+</BODY>
+</HTML>
