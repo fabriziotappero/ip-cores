@@ -1,0 +1,364 @@
+TWOFISH MANUAL
+
+(c) 2006 Spyros Ninos
+
+This document is under the GPL. See file COPYING for licence details.
+
+1. Introduction
+2. Crypto primitives usage
+3. Testbenches
+4. Misc + Tips
+
+1. INTRODUCTION
+===============
+
+	Twofish is a 128bit-block symmetric cipher, finalist candidate for the AES contest.
+It supports keys of 128, 192, 256 and all the sizes below 256 bits (with padding). This
+implementation accepts keys of 128, 192 and 256 bits. If you want a different size then
+you'll have to create the padder yourself. The implementation was written in a VHDL 87
+and 93 mixed versions. Just to be sure, use the 93 version in compilation. The naming
+convention for the components is kept as simple but self-explanatory as I could. I had
+in mind that it would be possible to use two or three ciphers in the same design, so
+names are such that there would be no name-conflict (I hope...). For every key-depended
+component the respective key size was used in the name to indicate the component's 
+target (i.e twofish_S128 is for 128 bit key). The cipher components are pure 
+combinational circuits. This decision was based upon the assumption of portability. 
+Since no memory is used, it can be implemented in any programmable device. Also, maximum 
+flexibility was intended by dividing the cipher in key-parts. By doing this, you 
+have the choice to implement the cipher as a rolled out, iterative, pipelined or any 
+other architecture you may like to build.
+
+2. CRYPTO PRIMITIVES USAGE
+==========================
+
+	The twofish.vhd file is divided in four parts. Firstly, there's the part where all
+the key-independent components are found. The next three parts concern the components 
+that depend on the key - 128, 192 and 256 bits respectively. 
+
+In the file you'll find the below main components:
+	
+	1) twofish_data_input
+	2) twofish_data_output
+	3) twofish_S128
+	4) twofish_keysched128
+	5) twofish_whit_keysched128
+	6) twofish_encryption_round128
+	7) twofish_decryption_round128
+	8) twofish_S192
+	9) twofish_keysched192
+	10) twofish_whit_keysched192
+	11) twofish_encryption_round192
+	12) twofish_decryption_round192
+	13) twofish_S256
+	14) twofish_keysched256
+	15) twofish_whit_keysched256
+	16) twofish_encryption_round256
+	17) twofish_decryption_round256
+
+
+You'll also find all the other components that the above depend on, but they are not
+important in building the cipher - except perhaps if you want to study the structure
+of this implementation and/or modify it. A short description of them follows:
+
+1) The first component is the TWOFISH_DATA_INPUT, which is a simple tranformation of the
+input data from the way we provide it (which is big endian) to little endian convention,
+as required by the twofish specification. It must be used as an interface between the
+input data provided to the circuit and the rest of the cipher. An alternative would be
+to extract the code from it and integrate it to another component. Note that since the 
+data block size of the cipher is always 128 bits, this component is supposed to be used
+with the components of all the key-sizes. The interface of the component is as follows:
+
+	entity twofish_data_input is
+	port	(
+			in_tdi	: in std_logic_vector(127 downto 0);
+			out_tdi	: out std_logic_vector(127 downto 0)
+			);
+	end twofish_data_input;
+
+It is quite simple; in_tdi is the data input as we provide it and out_tdi is the 
+transformed input data. (tdi comes from the Twofish Data Input)
+
+2) The component TWOFISH_DATA_OUTPUT makes the reverse procedure of the twofish_data_input.
+It takes the little endian convention cipher result and transforms it to the big endian 
+one, as the specification requires. This component too is supposed to be used with the 
+components of all the key-sizes. The interface is as follows:
+
+	entity twofish_data_output is
+	port	(
+			in_tdo	: in std_logic_vector(127 downto 0);
+			out_tdo	: out std_logic_vector(127 downto 0)
+			);
+	end twofish_data_output;
+
+in_tdo accepts the ciphertext as we take it from the last round and out_tdo is the 
+tranformed ciphertext. (tdo comes from the Twofish Data Output)
+
+3) The TWOFISH_S128 is a component that takes the key of 128 bits and produces the S0 
+and S1 for the f function. The interface is as follows:
+
+	entity twofish_S128 is
+	port	(
+			in_key_ts128		: in std_logic_vector(127 downto 0);
+			out_Sfirst_ts128,
+			out_Ssecond_ts128	: out std_logic_vector(31 downto 0)
+			);
+	end twofish_S128;
+
+Here, in_key_ts128 is the key that we provide. Note that there is no component that 
+transforms the key to the form that the twofish specification requires; rather the
+tranformation takes place within the twofish_S128 component. Here, there is the 
+assumption/association that Sfirst refers to S0 and Ssecond refers to S1. There is
+no need to remember the association, since throughout the design, the same rule
+is followed, so the only thing you have to do it to connect the pins with the
+same name. This component can be used only when you implement a 128 bit key size
+design. (ts128 comes from Twofish_S128)
+
+
+4) The TWOFISH_KEYSCHED128 component is the key scheduler of the twofish cipher, 
+for 128 bit keys. It's interface is as follows:
+
+	entity twofish_keysched128 is
+	port	(
+			odd_in_tk128,
+			even_in_tk128		: in std_logic_vector(7 downto 0);
+			in_key_tk128		: in std_logic_vector(127 downto 0);
+			out_key_up_tk128,
+			out_key_down_tk128			: out std_logic_vector(31 downto 0)
+			);
+	end twofish_keysched128;
+
+odd_in_tk128 and even_in_tk128 are the numbers of the round 2i and 2i+1, as described
+in the specification. Clearly, 2i relates to the even_in_tk128 and 2i+1 relates to
+the odd_in_tk128. in_key_tk128 is where the key goes. The key must be supplied to the
+components without any endian-transformation; the tranformation takes place in the
+component, as in twofish_S128. out_key_up_tk128 and out_key_down_tk128 are the two
+keys produced from the scheduler. The association is that as we look the twofish 
+diagram provided in the specification page 11 (figure 3), the upper key is what we 
+get from out_key_up_tk128 and the down key is what we get from out_key_down_tk128. 
+As before, you don't have to remember the association, names are used the same throughout 
+the whole design. This component too, can be used only when you implement a 128 bit key
+size design. (tk128 comes from Twofish_Keysched128).
+
+IMPORTANT NOTICE: This component can be used in two ways: in combination with
+twofish_whit_keysched128 (see below) or as a standalone component. In the first
+case, whitening keys are produced by twofish_whit_keysched128; so even_in_tk128 and
+odd_in_tk128 must start from 8,9 respectively and above. Or if you use it standalone
+then you can start from 0 and above.
+
+5) The TWOFISH_WHIT_KEYSCHED128 produces the whitening keys K0..K7. The interface
+is as follows:
+
+	entity twofish_whit_keysched128 is
+	port	(
+			in_key_twk128		: in std_logic_vector(127 downto 0);
+			out_K0_twk128,
+			out_K1_twk128,
+			out_K2_twk128,
+			out_K3_twk128,
+			out_K4_twk128,
+			out_K5_twk128,
+			out_K6_twk128,
+			out_K7_twk128			: out std_logic_vector(31 downto 0)
+			);
+	end twofish_whit_keysched128;
+
+in_key_twk128 is where the key is connected. As above, no big-little endian tranformation
+must take place. It is performed within the component. The eight outputs produce the 
+keys. This component too can be used only when you implement a 128 bit key size design.
+(twk128 comes from Twofish_Whit_Keysched128).
+
+IMPORTANT NOTICE: If this component is to be used as a combination with twofish_keysched128
+care should be taken when supplying numbers to the latter. Read the notice of the 
+twofish_keysched128.
+
+6) The TWOFISH_ENCRYPTION_ROUND128 is the component that implements one round of encryption.
+The interface is as follows:
+
+	entity twofish_encryption_round128 is
+	port	(
+			in1_ter128,
+			in2_ter128,
+			in3_ter128,
+			in4_ter128,
+			in_Sfirst_ter128,
+			in_Ssecond_ter128,
+			in_key_up_ter128,
+			in_key_down_ter128		: in std_logic_vector(31 downto 0);
+			out1_ter128,
+			out2_ter128,
+			out3_ter128,
+			out4_ter128			: out std_logic_vector(31 downto 0)
+			);
+	end twofish_encryption_round128;
+
+in1_ter128, in1_ter128, in1_ter128, in1_ter128 are the four 32 bit inputs to the cipher
+round. in_Sfirst_ter128, in_Ssecond_ter128 are the two S needed for the g functions, 
+in_key_up_ter128 and in_key_down_ter128 are the two round keys. Note that up and down
+names are given to keys according to the diagram given in Twofish spec. You don't need
+to worry about it, keys follow the same naming convention throughout the whole design.
+Finally, out1_ter128, out1_ter228, out3_ter128 and out4_ter128 are the 32 bit outputs
+of the encryption round (ter128 comes from Twofish_Encryption_Round128). 
+
+IMPORTANT NOTICE: the output swapping is taking place IN the component. YOU HAVE TO undo
+the last swap after the 16th round. 
+
+7) The TWOFISH_DECRYPTION_ROUND128 is the component tha implements one round of decryption.
+The interface is as follows:
+
+	entity twofish_decryption_round128 is
+	port	(
+			in1_tdr128,
+			in2_tdr128,
+			in3_tdr128,
+			in4_tdr128,
+			in_Sfirst_tdr128,
+			in_Ssecond_tdr128,
+			in_key_up_tdr128,
+			in_key_down_tdr128	: in std_logic_vector(31 downto 0);
+			out1_tdr128,
+			out2_tdr128,
+			out3_tdr128,
+			out4_tdr128			: out std_logic_vector(31 downto 0)
+			);
+	end twofish_decryption_round128;
+
+As in twofish_encryption_round128 component, the ports are quite self-explanatory. 
+(tdr128 comes from Twofish_Decryption_Round128).
+
+IMPORTANT NOTICE: as in twofish_encryption_round128, inside the component the output
+swapping is taking place. YOU HAVE TO undo the last swap after the 16th round.
+
+
+Components 	
+
+	8) twofish_S192
+	9) twofish_keysched192
+	10) twofish_whit_keysched192
+	11) twofish_encryption_round192
+	12) twofish_decryption_round192
+	13) twofish_S256
+	14) twofish_keysched256
+	15) twofish_whit_keysched256
+	16) twofish_encryption_round256
+	17) twofish_decryption_round256
+
+work exactly as their 128 bit counterparts. The only difference is the third S that
+is provided by twofish_S192 and needed by some of the rest of them, and the fourth
+S that is provided by twofish_S256. I.e:
+
+	entity twofish_S192 is
+	port	(
+			in_key_ts192		: in std_logic_vector(191 downto 0);
+			out_Sfirst_ts192,
+			out_Ssecond_ts192,
+			out_Sthird_ts192			: out std_logic_vector(31 downto 0)
+			);
+	end twofish_S192;
+
+which provide a third S that is used in twofish encryption and decryption rounds for
+192 bits and the fourth S that is provided from the twofish_S256 is used by the
+twofish encryption and decryption rounds for 256 bits.
+Every IMPORTANT NOTICE that exist for the 128 bit components, are valid for
+these components too.
+
+
+3. TESTBENCHES
+==============
+
+Testbenches for the cipher are provided for Tables, Variable key, Variable text,
+ECB/CBC Monte Carlo encryption and decryption tests. Every testbench comes with 
+it's respective testvector file. The testvector file is transformed into a form 
+that it's easier to be manipulated, than in the original form supplied by the 
+cipher designer(s). 
+
+Every testbench produces a file with the results, that can be cross-checked
+with the testvector file of input - just to be certain that results are as 
+expected (usually with "diff"). 
+
+Along with the transformed testvector files, the orignal testvector files - which
+are provided by the cipher designer(s) - are given. That way, you can check the 
+originality of the transformed testvector files if you want to. 
+
+Finally, some secondary circuits are provided for the testbenches to work. These
+are a 128 bit register, a mux and demux for 128 bit input(s)/output(s).
+
+4. MISC + TIPS
+==============
+
+You must pay attention in the whitening steps. None of the components actually
+implements the input or output whitening steps. You only have the component
+that produces the whitening keys.
+
+Each cipher implementation was designed so as to demand as few components as
+possible. That way, there would be no difficulty in using them and designing
+the algo in its total. The problem is that the Reed Solomon used to produce
+the S keys is in a rolled-out form, because I chose not to use any form of
+memory. So, if you want to implement more that one key size cipher in the 
+same circuit/FPGA, the design size grows very much, and I doubt if it will 
+fit in a signle FPGA. If you decide that you need more that one cipher 
+instantiation, then you'll have to tweak the design of the Reed Solomon. 
+One example follows:
+
+Current implementaion is that the reed solomon components are specifically 
+designed for the key size of the cipher, i.e for 128 bits key:
+
+	entity reed_solomon128 is
+	port	(
+			in_rs128			: in std_logic_vector(127 downto 0);
+			out_Sfirst_rs128,
+			out_Ssecond_rs128		: out std_logic_vector(31 downto 0)	
+			);
+	end reed_solomon128;
+
+and for 192 bits key:
+
+	entity reed_solomon192 is
+	port	(
+			in_rs192			: in std_logic_vector(191 downto 0);
+			out_Sfirst_rs192,
+			out_Ssecond_rs192,
+			out_Sthird_rs192		: out std_logic_vector(31 downto 0)	
+			);
+	end reed_solomon192;
+
+What is happening, is that each component takes the input key, and performs the
+multiplications in rolled-out form of every 64 bit input. In other terms, in_rs128
+is split up in two 64 bit chunks, and each one is driven in it's respective 
+multipliers. The result of the first multipliers is driven to out_Sfirst, the result
+of the second to out_Ssecond. Respectively for reed_solomon192 the result of the
+third multiplier is driven to out_Sthird and for reed_solomon256 the result of the
+fourth multiplier is driven to out_Sfourth. Every multiplication needs it's 
+multipliers (note that it is not a single mul, but a group of them because its
+a matrix multiplication) so in the first component we need two groups of muls,
+in the second component three groups of them and in the third we need four. 
+
+If you had to implement cipher with 128 and 192 sizes for example, you'd have to 
+implement both reed solomon components which total in 5 groups of multipliers. 
+One solution would be to create a reed solomon that would take a single 64 bit 
+input and procude a single 32 bit output. For example:
+
+	entity reed_solomon is
+	port	(
+			in_rs			: in std_logic_vector(63 downto 0);
+			out_S_rs		: out std_logic_vector(31 downto 0)	
+			);
+	end reed_solomon;
+
+
+Then you would divide the key into 64 bit chunks (128 bit in 2 chunks, 192 bit 
+in 3 chunks and 256 bits in 4 chunks) and provide them to the component 
+sequentially. The results of the reed_solomon could be stored in a sort of RAM. 
+That way you may slow down the process but you get to implement only one group 
+of multipliers and you gain a lot in space. 
+
+The same goes for the whitening keys components. In the whitening components 
+the function h is impemented 8 times (2 h functions for each pair of keys,
+for the first 8 keys - K0..7). You could follow the above example and implement
+a component that accepts a 64 bit input (key chunk, every M is 32 bit, you need
+2 Ms for every h function) and produce a single 32 bit key. Thus,  you can 
+produce every key sequentially and store it in a RAM for example. 
+
+If you want some implementation examples, you'll have to read the testbenches. 
+The cipher is implemented in iterated mode, but you'll get a clear picture of how
+to connect the components.
+
