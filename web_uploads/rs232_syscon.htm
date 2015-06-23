@@ -1,0 +1,453 @@
+<HTML>
+<HEAD>
+<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=windows-1252">
+<META NAME="Generator" CONTENT="Microsoft Word 97">
+<TITLE>nnARM Architecture Specification</TITLE>
+</HEAD>
+<BODY>
+
+<B><FONT SIZE=7><P ALIGN="JUSTIFY"></P>
+</FONT><FONT FACE="??,Arial" SIZE=7><P ALIGN="RIGHT">Rs232_syscon</P>
+<P ALIGN="RIGHT">User’s Guide</P>
+</FONT><FONT FACE="??,Arial" SIZE=6><P ALIGN="RIGHT">version 1.00</P>
+</FONT><P ALIGN="RIGHT"></P>
+<P ALIGN="RIGHT">&nbsp;</P>
+<P ALIGN="RIGHT">&nbsp;</P>
+<P ALIGN="RIGHT">&nbsp;</P>
+<P ALIGN="RIGHT">&nbsp;</P>
+<P ALIGN="RIGHT">&nbsp;</P>
+<FONT SIZE=5><P ALIGN="RIGHT">&#9;&#9;&#9;&#9;&#9;&#9;&#9;&#9;&#9;&#9;&#9;</FONT><FONT FACE="??,Arial" SIZE=5> Writen By John Clayton</P>
+<P ALIGN="RIGHT">Scottsdale, AZ</P>
+<P ALIGN="RIGHT">2001.8.13</P>
+</FONT><FONT SIZE=5><P ALIGN="RIGHT"></P>
+<P ALIGN="RIGHT">&nbsp;</P>
+<P ALIGN="RIGHT">&nbsp;</P>
+<P>&nbsp;</P>
+</FONT><FONT FACE="??,Arial" SIZE=4><P>Purpose:</P>
+</FONT><FONT FACE="??,Arial"><P>This document describes some of the design features of </FONT>&quot;<FONT FACE="??,Arial">rs232_syscon.v&quot; (a softcore written in Verilog.)  It is intended to facilitate new users in understanding what is available in the core, and how to use it.  Also, the Verilog code itself is replete with comments, so that additional insights into the operation of this core can be gained by reviewing the code.</P>
+
+<P>Release Log</P>
+<P>V1.00&#9;&#9;Aug. 13, 2001</P>
+</FONT><FONT SIZE=5>
+<P>&nbsp;</P>
+</FONT><FONT FACE="Arial" SIZE=5><P>1.Introduction</P>
+</FONT>
+<FONT FACE="Arial"><P>The name &quot;rs232_syscon&quot; comes from rs232 (serial communication standard) and an abbreviated contraction of &quot;system controller.&quot;  The core actually uses LVTTL levels for the serial connection, and the user is responsible for providing level shifting translators to achieve rs232 standard voltage levels.</P>
+
+<P>The rs232_syscon project  was conceived on May 30, 2001.  It’s purpose was to develop a &quot;serial-port-to-bus-interface&quot; core suitable for debugging some other ps2_mouse and ps2_keyboard interface cores which were under development at the time…  Those other cores were quickly completed, but the actual development of rs232_syscon was more complicated than originally thought, and it ended up taking longer to complete.  Luckily, as its development progressed, rs232_syscon became simpler instead of more complicated.</P>
+
+<P>After many hours of debugging and coding, the rs232_syscon core is now functional, and it has been successfully used to test out memory blocks and register blocks as part of a &quot;system on a chip&quot; (SOC) design effort.</P>
+</FONT>
+<FONT FACE="Arial"><P>This document describes the following:</P>
+
+
+<UL>
+<LI>The connection diagram of rs232_syscon.</LI>
+<LI>The command syntax of rs232_syscon.</LI>
+<LI>The serial interface BAUD rate generators.</LI></UL>
+
+</FONT>
+<FONT FACE="Arial"><P>In reality, rs232_syscon is a simple core to use – once it is connected to the data and address buses and the BAUD rate is adjusted, it can be used immediately.  It does not contain any architecture specific blocks, so it easily ports to different FPGA and even ASIC platforms.</P>
+</FONT>
+<FONT FACE="Arial" SIZE=5><P>2. rs232_syscon connections</P>
+</FONT><FONT SIZE=5><P ALIGN="CENTER"></P>
+</FONT><FONT FACE="Arial" SIZE=4><P>2.1 Block diagram</P>
+</FONT>
+<FONT FACE="Arial"><P>A top-level block diagram of rs232_syscon being used in  a system is shown in figure2.1 below.</P>
+
+<P>Since the address bus is not bidirectional, it is an output from the host processor, and also an output from rs232_syscon.  In order to select which device gets to drive the address bus, a multiplexer is implemented inside of rs232_syscon.  This introduces some additional delay in the address bus, which is considered an acceptable tradeoff in exchange for the enhanced debugging capability of rs232_syscon.  Besides, when debugging is completed, the mux can be removed (or &quot;hard wired&quot; by a parameter at compile time, which will also result in the eventual removal of the mux because of optimization in the synthesis and routing tools…)</P>
+
+</FONT><P ALIGN="CENTER"><IMG SRC="Image4.gif" WIDTH=533 HEIGHT=338></P>
+<FONT FACE="Arial"><P ALIGN="CENTER">figure 2.1</P>
+</FONT><P ALIGN="JUSTIFY"></P>
+<P ALIGN="JUSTIFY">&nbsp;</P>
+<FONT FACE="Arial"><P ALIGN="JUSTIFY">The data bus is implemented as a tri-state bus, so that it can be bi-directional without requiring the use of multiplexers.  The designers of rs232_syscon were aware that the Wishbone standard seems to encourage a split data bus (dat_i for input data and dat_o for output data) but found that the Wishbone standard also allows for tri-state connections (See Wishbone spec. page 66).  The tri-state data bus was chosen in order to reduce the number of internal interconnects needed to implement the bus.  If a tri-state bus is unacceptable for your application, the rs232_syscon block can be easily modified to add &quot;dat_i&quot; and &quot;dat_o&quot; ports in place of the existing &quot;dat_io&quot; port, and the tri-state buffering can be removed.  This is not difficult for a Verilog programmer to accomplish, and it does not require any major functional modifications to the rs232_syscon block.  The same handshaking structure that is used for address bus multiplexing (&quot;master_br_o&quot; and &quot;master_bg_i&quot;) could also be used to control the data bus multiplexers.</P>
+<P ALIGN="JUSTIFY"></P>
+<P ALIGN="JUSTIFY">The handshaking scheme in rs232_syscon allows the rs232_syscon to request access to the bus from the normal bus master.  This is accomplished through the &quot;master_br_o&quot; and &quot;master_bg_i&quot; pins.  Once the bus request (br) is detected at the normal bus master, it should finish the current operation, and then assert and keep asserting &quot;master_bg&quot; to rs232_syscon.  As long as the bus grant (bg) line is asserted into rs232_syscon, then rs232_syscon will know that it has control of the bus.  Also, when rs232_syscon finishes generating its bus cycles, it does not check or wait for the bus grant line to be deasserted.  Therefore, those who wish to test peripherals, memory or registers without another master on the bus, can simply tie &quot;master_bg_i&quot; high, or just connect it to the rs232_syscon’s &quot;master_br_o&quot; and forget about that handshaking interface.</P>
+<P ALIGN="JUSTIFY"></P>
+<P ALIGN="JUSTIFY">The bus cycles generated by rs232_syscon are one clock long.  The clock which is used with rs232_syscon can vary up to the maximum speed allowed by the architecture in which it is being used.  In a Xilinx SpartanII device (XC2S200) it synthesized with a maximum clock speed of around 45 MHz, although most of the testing was done at around 25 MHz.  The length of each bus cycle is extended until the &quot;ack_i&quot; signal is received by rs232_syscon.  If the watchdog timer expires before &quot;ack_i&quot; is received, then a bus error message is generated for the user.  Similarly, if the &quot;err_i&quot; signal is received, then a bus error message is generated for the user.</P>
+</FONT><P ALIGN="JUSTIFY"></P>
+<FONT FACE="Arial"><P ALIGN="JUSTIFY"> </P>
+</FONT><FONT FACE="Arial" SIZE=5><P ALIGN="JUSTIFY">2.2 Parameter listing</P>
+<P ALIGN="JUSTIFY"></P></B></FONT>
+<TABLE BORDER CELLSPACING=1 CELLPADDING=7 WIDTH=582>
+<TR><TD WIDTH="39%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=5><P ALIGN="JUSTIFY">Parameter Name</B></FONT></TD>
+<TD WIDTH="14%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=5><P ALIGN="JUSTIFY">Range</B></FONT></TD>
+<TD WIDTH="46%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=5><P ALIGN="JUSTIFY">Function</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="39%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=2><P ALIGN="JUSTIFY">ADR_DIGITS_PP</B></FONT></TD>
+<TD WIDTH="14%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=2><P ALIGN="JUSTIFY">1..?</B></FONT></TD>
+<TD WIDTH="46%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=2><P ALIGN="JUSTIFY">Width of address bus in nibbles   (4 =&gt; 16bits, 8 =&gt; 32 bits)</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="39%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=2><P ALIGN="JUSTIFY">DAT_DIGITS_PP</B></FONT></TD>
+<TD WIDTH="14%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=2><P ALIGN="JUSTIFY">1..?</B></FONT></TD>
+<TD WIDTH="46%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=2><P ALIGN="JUSTIFY">Width of data bus in nibbles</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="39%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=2><P ALIGN="JUSTIFY">QTY_DIGITS_PP</B></FONT></TD>
+<TD WIDTH="14%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=2><P ALIGN="JUSTIFY">1..?</B></FONT></TD>
+<TD WIDTH="46%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=2><P ALIGN="JUSTIFY">Width of qty counter in nibbles</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="39%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=2><P ALIGN="JUSTIFY">CMD_BUFFER_SIZE_PP</B></FONT></TD>
+<TD WIDTH="14%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=2><P ALIGN="JUSTIFY">16/32/64</B></FONT></TD>
+<TD WIDTH="46%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=2><P ALIGN="JUSTIFY">Characters in command buffer (drives logic size significantly)</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="39%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=2><P ALIGN="JUSTIFY">CMD_PTR_BITS_PP</B></FONT></TD>
+<TD WIDTH="14%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=2><P ALIGN="JUSTIFY">4/5/6</B></FONT></TD>
+<TD WIDTH="46%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=2><P ALIGN="JUSTIFY">Width of pointer to command buff.</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="39%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=2><P ALIGN="JUSTIFY">WATCHDOG_TIMER_VALUE_PP</B></FONT></TD>
+<TD WIDTH="14%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=2><P ALIGN="JUSTIFY">1..?</B></FONT></TD>
+<TD WIDTH="46%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=2><P ALIGN="JUSTIFY">Number of clocks before timer expires</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="39%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=2><P ALIGN="JUSTIFY">WATCHDOG_TIMER_BITS_PP</B></FONT></TD>
+<TD WIDTH="14%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=2><P ALIGN="JUSTIFY">1..?</B></FONT></TD>
+<TD WIDTH="46%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=2><P ALIGN="JUSTIFY">Number of bits in watchdog timer</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="39%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=2><P ALIGN="JUSTIFY">RD_FIELDS_PP</B></FONT></TD>
+<TD WIDTH="14%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=2><P ALIGN="JUSTIFY">1..?</B></FONT></TD>
+<TD WIDTH="46%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=2><P ALIGN="JUSTIFY">Number of columns shown for read</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="39%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=2><P ALIGN="JUSTIFY">RD_FIELD_COUNT_BITS_PP</B></FONT></TD>
+<TD WIDTH="14%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=2><P ALIGN="JUSTIFY">1..?</B></FONT></TD>
+<TD WIDTH="46%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=2><P ALIGN="JUSTIFY">Number of bits in rd_field_count</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="39%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=2><P ALIGN="JUSTIFY">RD_DIGIT_COUNT_BITS_PP</B></FONT></TD>
+<TD WIDTH="14%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=2><P ALIGN="JUSTIFY">1..?</B></FONT></TD>
+<TD WIDTH="46%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=2><P ALIGN="JUSTIFY">Number of bits in rd_digit_count</B></FONT></TD>
+</TR>
+</TABLE>
+
+<B><P ALIGN="JUSTIFY"></P>
+<P ALIGN="JUSTIFY">&nbsp;</P>
+<FONT FACE="Arial"><P ALIGN="JUSTIFY">The defaults for these parameters are given in the Verilog code.  The settings are related to each other, as explained in the code also.  For instance, if the watchdog_timer is set to expire after 32000 clocks, then there must be 15 bits in the watchdog timer, so that parameter must be set accordingly.</P>
+<P ALIGN="JUSTIFY"></P>
+</FONT><FONT FACE="Arial" SIZE=5><P ALIGN="JUSTIFY">2.3 Pinout description (port listing)</P>
+</FONT><P ALIGN="JUSTIFY"></P></B>
+<TABLE BORDER CELLSPACING=1 CELLPADDING=7 WIDTH=568>
+<TR><TD WIDTH="28%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=4><P ALIGN="JUSTIFY">Name</B></FONT></TD>
+<TD WIDTH="19%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=4><P ALIGN="JUSTIFY">Size</B></FONT></TD>
+<TD WIDTH="53%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=4><P ALIGN="JUSTIFY">Function</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="28%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">clk_i</B></FONT></TD>
+<TD WIDTH="19%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">1</B></FONT></TD>
+<TD WIDTH="53%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">Clock input</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="28%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">reset_i</B></FONT></TD>
+<TD WIDTH="19%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">1</B></FONT></TD>
+<TD WIDTH="53%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">Resets rs232_syscon unit</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="28%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">master_bg_i</B></FONT></TD>
+<TD WIDTH="19%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">1</B></FONT></TD>
+<TD WIDTH="53%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">Grants bus to rs232_syscon</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="28%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">ack_i</B></FONT></TD>
+<TD WIDTH="19%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">1</B></FONT></TD>
+<TD WIDTH="53%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">Wishbone bus cycle acknowledge</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="28%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">err_i</B></FONT></TD>
+<TD WIDTH="19%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">1</B></FONT></TD>
+<TD WIDTH="53%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">Wishbone bus cycle error</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="28%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">rs232_rxd_i</B></FONT></TD>
+<TD WIDTH="19%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">1</B></FONT></TD>
+<TD WIDTH="53%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">rs232 serial port data input</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="28%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">dat_io</B></FONT></TD>
+<TD WIDTH="19%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">parameter</B></FONT></TD>
+<TD WIDTH="53%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">data bus (tri-state)</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="28%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">rst_o</B></FONT></TD>
+<TD WIDTH="19%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">1</B></FONT></TD>
+<TD WIDTH="53%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">Wishbone reset output</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="28%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">master_br_o</B></FONT></TD>
+<TD WIDTH="19%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">1</B></FONT></TD>
+<TD WIDTH="53%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">Requests bus for rs232_syscon</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="28%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">stb_o</B></FONT></TD>
+<TD WIDTH="19%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">1</B></FONT></TD>
+<TD WIDTH="53%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">Wishbone strobe output</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="28%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">cyc_o</B></FONT></TD>
+<TD WIDTH="19%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">1</B></FONT></TD>
+<TD WIDTH="53%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">Wishbone cycle output (wired to stb_o in this version)</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="28%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">adr_o</B></FONT></TD>
+<TD WIDTH="19%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">parameter</B></FONT></TD>
+<TD WIDTH="53%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">address bus</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="28%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">we_o</B></FONT></TD>
+<TD WIDTH="19%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">1</B></FONT></TD>
+<TD WIDTH="53%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">Wishbone write enable output</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="28%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">rs232_txd_o</B></FONT></TD>
+<TD WIDTH="19%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">1</B></FONT></TD>
+<TD WIDTH="53%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">rs232 serial port data output</B></FONT></TD>
+</TR>
+</TABLE>
+
+<B><P ALIGN="JUSTIFY"></P>
+<P ALIGN="JUSTIFY">&nbsp;</P>
+<FONT FACE="Arial" SIZE=5><P ALIGN="JUSTIFY">3.0 Command syntax</P>
+</FONT><P ALIGN="JUSTIFY"></P>
+<FONT FACE="Arial"><P ALIGN="JUSTIFY">The commands for rs232_syscon are very simple.  There are three of them – read, write and initialize (reset).  The spacing of the characters in the command does not matter – spaces and tabs are considered &quot;whitespace.&quot;  The enter key terminates the command, and begins the process of parsing and executing the command.  All numbers are given in hexadecimal.  Hexadecimal numbers are printed using capitalized letters, but case does not matter when entering commands.</P>
+<P ALIGN="JUSTIFY"></P>
+<P ALIGN="JUSTIFY">The command syntax is as follows, where &quot;aaaa&quot; refers to address, &quot;dddd&quot; refers to data, and &quot;qq&quot; refers to quantity.</P>
+<P ALIGN="JUSTIFY"></P>
+<P ALIGN="JUSTIFY">Write command:&#9;&#9;w aaaa dddd qq</P>
+<P ALIGN="JUSTIFY">Read command:&#9;&#9;r aaaa qq</P>
+<P ALIGN="JUSTIFY">Initialize command:&#9;i</P>
+<P ALIGN="JUSTIFY"></P>
+<P ALIGN="JUSTIFY">The command character (w,r,i) is the only required part of the command.  If the data field is left out, then the previous value is assumed.  If the address field is left out, then the previous value is assumed.  Default values for address and data are both zero.  An exception to this rule is the quantity field (qq), which does NOT assume the previous value.  Instead, if quantity is not specified, it assumes the value &quot;1,&quot; which is generally what the user intends for a command that does not specify quantity.</P>
+<P ALIGN="JUSTIFY"></P>
+<P ALIGN="JUSTIFY">When entering quantity explicitly, the value zero is allowed.  In that case, the command will do nothing.  No bus cycles will be generated.  For quantity values greater than one, the address field is automatically incremented during the subsequent iterations of the command loop.  However, the data remains the same.</P>
+<P ALIGN="JUSTIFY"></P>
+<P ALIGN="JUSTIFY">Extra fields can be entered after the &quot;i&quot; command, but they will not have any effect.</P>
+<P ALIGN="JUSTIFY"></P>
+<P ALIGN="JUSTIFY">&nbsp;</P>
+</FONT><FONT FACE="Arial" SIZE=4><P ALIGN="JUSTIFY">3.1 Numerical Field length</P>
+</FONT><P ALIGN="JUSTIFY"></P>
+<FONT FACE="Arial"><P ALIGN="JUSTIFY">Using too few characters for a given numerical field will not produce an error – for instance, if the address/data buses are 16-bits wide, and you wish to enter the value 0005 into address 0017, it is sufficient to say:</P>
+<P ALIGN="JUSTIFY"></P>
+<P ALIGN="JUSTIFY">w 17 5 [enter]</P>
+<P ALIGN="JUSTIFY"></P>
+<P ALIGN="JUSTIFY">The leading zeros are assumed by the command parser.  Similarly, if too many digits are used, only the appropriate number of digits (the right hand ones) are used.  For instance, consider the command:</P>
+<P ALIGN="JUSTIFY"></P>
+<P ALIGN="JUSTIFY">w 5434540017 66677560005 [enter]</P>
+<P ALIGN="JUSTIFY"></P>
+<P ALIGN="JUSTIFY">This would have the same effect as the first example, because only the four digits on the right side are used (0017 and 0005 respectively).</P>
+<P ALIGN="JUSTIFY"></P>
+<P ALIGN="JUSTIFY">backspace is allowed, and the cursor will move inside the rs232 terminal to indicate that a character has been &quot;deleted&quot; from the command line, even if the character itself still shows up on the terminal screen.</P>
+<P ALIGN="JUSTIFY"></P>
+<P ALIGN="JUSTIFY">The maximum number of characters that can be entered on the command line is determined by the size of the command buffer (a parameter setting.)  When that length is reached, if the [enter] key has not yet been pressed, a ‘?’ message will be returned, indicating a parsing error.</P>
+<P ALIGN="JUSTIFY"></P>
+<P ALIGN="JUSTIFY">&nbsp;</P>
+</FONT><FONT FACE="Arial" SIZE=4><P ALIGN="JUSTIFY">3.1 Parsing errors</P>
+</FONT><P ALIGN="JUSTIFY"></P>
+<FONT FACE="Arial"><P ALIGN="JUSTIFY">The different responses which can be generated from rs232_syscon are listed here:</P>
+<P ALIGN="JUSTIFY"></P></B></FONT>
+<TABLE BORDER CELLSPACING=1 CELLPADDING=7 WIDTH=568>
+<TR><TD WIDTH="22%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=5><P ALIGN="JUSTIFY">Response</B></FONT></TD>
+<TD WIDTH="78%" VALIGN="TOP">
+<B><FONT FACE="Arial" SIZE=5><P ALIGN="JUSTIFY">Meaning</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="22%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="CENTER">OK</B></FONT></TD>
+<TD WIDTH="78%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">The command was parsed and executed without error</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="22%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="CENTER">?</B></FONT></TD>
+<TD WIDTH="78%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">Line length exceeded</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="22%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="CENTER">A?</B></FONT></TD>
+<TD WIDTH="78%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">Address field parsing error</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="22%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="CENTER">D?</B></FONT></TD>
+<TD WIDTH="78%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">Data field parsing error</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="22%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="CENTER">Q?</B></FONT></TD>
+<TD WIDTH="78%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">Quantity field parsing error</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="22%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="CENTER">!</B></FONT></TD>
+<TD WIDTH="78%" VALIGN="TOP">
+<B><P ALIGN="JUSTIFY">&quot;<FONT FACE="Arial">err_i&quot; or else watchdog timeout before &quot;ack_i&quot;</B></FONT></TD>
+</TR>
+<TR><TD WIDTH="22%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="CENTER">B!</B></FONT></TD>
+<TD WIDTH="78%" VALIGN="TOP">
+<B><FONT FACE="Arial"><P ALIGN="JUSTIFY">Watchdog timeout before bus grant</B></FONT></TD>
+</TR>
+</TABLE>
+
+<B><P ALIGN="JUSTIFY"></P>
+<FONT FACE="Arial"><P ALIGN="JUSTIFY">The watchdog timer is used twice during the execution of a command.  The first time it is used to determine if there was a timeout for obtaining the bus, and the second time it is used to determine if the bus cycle timed out, with no &quot;ack_i&quot; response.  Therefore, a slow master together with a slow peripheral could conceivably use almost twice the time period of the watchdog timer, in order to complete the execution of the command.</P>
+<P ALIGN="JUSTIFY"></P>
+<P ALIGN="JUSTIFY">&nbsp;</P>
+</FONT><FONT FACE="Arial" SIZE=4><P ALIGN="JUSTIFY">3.2 Initial power up</P>
+</FONT><P ALIGN="JUSTIFY"></P>
+<FONT FACE="Arial"><P ALIGN="JUSTIFY">The initial power up of rs232_syscon produces the following stream of characters which are sent to the terminal:</P>
+<P ALIGN="JUSTIFY"></P>
+<P ALIGN="JUSTIFY">0123456789ABCDEF</P>
+<P ALIGN="JUSTIFY">-&gt; [cursor]</P>
+<P ALIGN="JUSTIFY"></P>
+<P ALIGN="JUSTIFY">This initial stream of characters can be used to verify that your terminal is set to the correct BAUD rate.</P>
+<P ALIGN="JUSTIFY"></P>
+<P ALIGN="JUSTIFY">Also, no activity is generated to reset the peripherals on the bus upon initial power up.  Therefore, in order to reset the peripherals on the bus, an explicit &quot;i&quot; command must be issued.  Resetting the rs232_syscon unit will return all quantities to zero, but it will not generate the &quot;rst_o&quot; signal which is generated by the &quot;i&quot; command.</P>
+<P ALIGN="JUSTIFY"></P>
+<P ALIGN="JUSTIFY">&nbsp;</P>
+</FONT><FONT FACE="Arial" SIZE=4><P ALIGN="JUSTIFY">3.3 Actual session logfile</P>
+</FONT><P ALIGN="JUSTIFY"></P>
+<FONT FACE="Arial"><P ALIGN="JUSTIFY">Here is the text from part of a debugging session using the rs232_syscon module (none of the bus error responses are shown here):</P>
+<P ALIGN="JUSTIFY"></P>
+<P ALIGN="JUSTIFY">&lt;Session begins&gt;</P>
+</B></FONT><FONT FACE="Arial" SIZE=3><P ALIGN="JUSTIFY">0123456789ABCDEF</P>
+<P ALIGN="JUSTIFY">-&gt; w 1 55 1</P>
+<P ALIGN="JUSTIFY">OK</P>
+<P ALIGN="JUSTIFY">-&gt; w 1 5a</P>
+<P ALIGN="JUSTIFY">OK</P>
+<P ALIGN="JUSTIFY">-&gt; w 4 4c</P>
+<P ALIGN="JUSTIFY">OK</P>
+<P ALIGN="JUSTIFY">-&gt; w 2 140</P>
+<P ALIGN="JUSTIFY">OK</P>
+<P ALIGN="JUSTIFY">-&gt; w 3 100</P>
+<P ALIGN="JUSTIFY">OK</P>
+<P ALIGN="JUSTIFY">-&gt; w 4 5c</P>
+<P ALIGN="JUSTIFY">OK</P>
+<P ALIGN="JUSTIFY">-&gt; w 4 6c</P>
+<P ALIGN="JUSTIFY">OK</P>
+<P ALIGN="JUSTIFY">-&gt; w 2 150</P>
+<P ALIGN="JUSTIFY">OK</P>
+<P ALIGN="JUSTIFY">-&gt; w 3 f8</P>
+<P ALIGN="JUSTIFY">OK</P>
+<P ALIGN="JUSTIFY">-&gt; w 3 f0</P>
+<P ALIGN="JUSTIFY">OK</P>
+<P ALIGN="JUSTIFY">-&gt; w 3 f8</P>
+<P ALIGN="JUSTIFY">OK</P>
+<P ALIGN="JUSTIFY">-&gt; w 3 f7</P>
+<P ALIGN="JUSTIFY">OK</P>
+<P ALIGN="JUSTIFY">-&gt; w 3 48</P>
+<P ALIGN="JUSTIFY">OK</P>
+<P ALIGN="JUSTIFY">-&gt; r 3</P>
+<P ALIGN="JUSTIFY">0003 : 0048 OK</P>
+<P ALIGN="JUSTIFY">-&gt; r 0 8</P>
+<P ALIGN="JUSTIFY">0000 : 0000 005A 0150 0048 006C 0000 0000 0000</P>
+<P ALIGN="JUSTIFY">OK</P>
+<P ALIGN="JUSTIFY">-&gt; r 0 10</P>
+<P ALIGN="JUSTIFY">0000 : 0000 005A 0150 0048 006C 0000 0000 0000</P>
+<P ALIGN="JUSTIFY">0008 : 0000 005A 0150 0048 006C 0000 0000 0000</P>
+<P ALIGN="JUSTIFY">OK</P>
+<P ALIGN="JUSTIFY">-&gt; r 0 20</P>
+<P ALIGN="JUSTIFY">0000 : 0000 005A 0150 0048 006C 0000 0000 0000</P>
+<P ALIGN="JUSTIFY">0008 : 0000 005A 0150 0048 006C 0000 0000 0000</P>
+<P ALIGN="JUSTIFY">0010 : FFFF FFFF FFFF FFFF FFFF FFFF FFFF FFFF</P>
+<P ALIGN="JUSTIFY">0018 : FFFF FFFF FFFF FFFF FFFF FFFF FFFF FFFF</P>
+<P ALIGN="JUSTIFY">OK</P>
+<P ALIGN="JUSTIFY">-&gt; w 3 58</P>
+<P ALIGN="JUSTIFY">OK</P>
+<P ALIGN="JUSTIFY">-&gt; w 3 68</P>
+<P ALIGN="JUSTIFY">OK</P>
+<P ALIGN="JUSTIFY">-&gt; r 0 10</P>
+<P ALIGN="JUSTIFY">0000 : 0000 0068 0068 0068 0068 0068 0068 0068</P>
+<P ALIGN="JUSTIFY">0008 : 0000 0068 0068 0068 0068 0068 0068 0068</P>
+<P ALIGN="JUSTIFY">OK</P>
+<P ALIGN="JUSTIFY">-&gt; w 3 58 1</P>
+<P ALIGN="JUSTIFY">OK</P>
+<P ALIGN="JUSTIFY">-&gt; w 4 68 1</P>
+<P ALIGN="JUSTIFY">OK</P>
+<P ALIGN="JUSTIFY">-&gt; r 0 10</P>
+<P ALIGN="JUSTIFY">0000 : 0000 0068 0068 0058 0068 0068 0068 0068</P>
+<P ALIGN="JUSTIFY">0008 : 0000 0068 0068 0058 0068 0068 0068 0068</P>
+<P ALIGN="JUSTIFY">OK</P>
+<P ALIGN="JUSTIFY">-&gt; w 4 6c 1</P>
+<P ALIGN="JUSTIFY">OK</P>
+<P ALIGN="JUSTIFY">-&gt; w 4 7c 1</P>
+<P ALIGN="JUSTIFY">OK</P>
+<P ALIGN="JUSTIFY">-&gt; w 1 f4 1</P>
+<P ALIGN="JUSTIFY">OK</P>
+<P ALIGN="JUSTIFY">-&gt; r 0 8</P>
+<P ALIGN="JUSTIFY">0000 : 0000 00F4 0068 0058 007C 0068 0068 0068</P>
+<P ALIGN="JUSTIFY">OK</P>
+</FONT><B><FONT FACE="Arial"><P ALIGN="JUSTIFY">&lt;session ends&gt;</P>
+<P ALIGN="JUSTIFY"></P>
+</FONT><FONT FACE="Arial" SIZE=5><P ALIGN="JUSTIFY">4.0 BAUD rate generators</P>
+</FONT><P ALIGN="JUSTIFY"></P>
+<FONT FACE="Arial"><P ALIGN="JUSTIFY">The BAUD rate used in rs232_syscon is determined by a in internal signal called &quot;serial_clk_16x.&quot;  This signal is not actually implemented on a clock net.  Instead, it is a clock enable.  Using a clock enable for this slow signal is perfectly acceptable in most cases, and it has the advantage that it does not use an additional dedicated clock resource on the target FPGA.</P>
+<P ALIGN="JUSTIFY"></P>
+<P ALIGN="JUSTIFY">As indicated by the name, the signal occurs at 16 times the desired BAUD clock rate.  For 115,200 BAUD it is a high pulse which occurs for one single &quot;clk_i&quot; clock period, at a rate of 16*115200 = 1.8432 MHz.</P>
+<P ALIGN="JUSTIFY"></P>
+<P ALIGN="JUSTIFY">This clock enable pulse is derived from a higher frequency clock on your board, by a small DDS (Direct Digital Synthesizer.)  It sounds more complicated than it is.  This DDS does not produce a sine-wave output, it merely produces a single pulse at the desired rate.  You can use different modules from &quot;serial.v&quot; in order to do this.  The &quot;clock_gen_select&quot; allows you to use a lookup table of DDS phase increment values (which are directly related to the output frequency) so that the BAUD rate can be changed easily between common values.</P>
+<P ALIGN="JUSTIFY"></P>
+<P ALIGN="JUSTIFY">On the other hand, you could choose to use the &quot;clk_gen&quot; module from serial.v in order to generate a single, fixed BAUD clock.</P>
+<P ALIGN="JUSTIFY"></P>
+<P ALIGN="JUSTIFY">You will almost certainly need to re-calculate the DDS &quot;frequency&quot; inputs for use with your board, since you will undoubtedly be using some clock other than the 49.152 MHz which I chose to use.</P>
+<P ALIGN="JUSTIFY"></P>
+<P ALIGN="JUSTIFY">However, the nature of the DDS circuit is such that you can most likely find a way to make it work without having to change your system clock frequency.  Almost anything can be made to work.  Some frequency error is tolerable in the BAUD clocks, and by making the DDS bigger then more and more resolution is obtained until it works for your frequency...  Detailed instructions are given in &quot;serial.v&quot; on how to recalculate new values for use in your application.  Or you can simply get a different clock!</P></B></FONT></BODY>
+</HTML>
