@@ -1,0 +1,1 @@
+-intstyle "ise" -incremental -o "/home/omar/LineFPGA/Bresenhammer_Sim_isim_beh.exe" -prj "/home/omar/LineFPGA/Bresenhammer_Sim_beh.prj" "work.Bresenhammer_Sim" 
