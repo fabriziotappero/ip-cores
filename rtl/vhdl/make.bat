@@ -1,0 +1,1 @@
+perl ..\..\generator\wishbone.pl wishbone.defines
