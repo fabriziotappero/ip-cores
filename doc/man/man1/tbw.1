@@ -1,0 +1,204 @@
+.\"  -*- nroff -*-
+.\"  $Id: tbw.1 620 2014-12-25 10:48:35Z mueller $
+.\"
+.\" Copyright 2013-2014 by Walter F.J. Mueller <W.F.J.Mueller@gsi.de>
+.\" 
+.\" ------------------------------------------------------------------
+.
+.TH TBW 1 2011-11-06 "Retro Project" "Retro Project Manual"
+.\" ------------------------------------------------------------------
+.SH NAME
+tbw \- wrapper script to start ghdl based VHDL test benches
+.\" ------------------------------------------------------------------
+.SH SYNOPSIS
+.
+.SY tbw
+.I TBPROG
+.RI [ OPTIONS ]
+.RI [ FILEDEF ]...
+.RI [ GHDL-OPTIONS ]...
+.
+.SY tbw
+.B \-\-help
+.YS
+.
+.\" ------------------------------------------------------------------
+.SH DESCRIPTION
+Executes the \fBghdl\fP based test bench \fITBPROG\fP in an environment
+defined by the descriptor file \fItbw.dat\fP and the \fIFILEDEF\fP
+arguments. Any additional options \fIGHDL-OPTIONS\fP are passed on to the test
+bench executable.
+
+.SS Backgroud
+The VHDL implementation in \fBghdl\fP has no direct support for passing 
+command line arguments to the VHDL code. All test benches in the Retro
+project use therefore fixed build-in generic file names. By convention
+they refer to symlinks (see \fBsymlink\fP(7)) which are setup by 
+\fBtbw\fP to point to a specific file prior to the execution of the
+test bench.
+
+.SS Default behaviour
+In the simplest case \fBtbw\fP assumes a test bench with a single stimulus
+file which is opened by convention as \'<TBPROG>_stim\'. The default
+stimulus file is named \'<TBPROG>_stim.dat\'. \fBtbw\fP will simply 
+define \'<TBPROG>_stim\' as a symlink refering to \'<TBPROG>_stim.dat\', 
+or if defined to \fIFILEDEF\fP, and execute \fITBPROG\fP. In essence
+
+.EX
+    ln -s -f <TBPROG>_stim.dat <TBPROG>_stim
+    <TBPROG> <GHDL-OPTIONS>
+.EE
+.
+.SS Using a \fItbw.dat\fP configuration file
+When the generic file name or the stimulus file name does not follow the 
+simple default pattern or more than one input file is required a 
+configuration file can be used to define the setup. It has the fixed
+name \fItbw.dat\fP and is searched the current working directory. The
+format is described in section FILES.
+
+In this case the \fIFILEDEF\fP argument can be specified as 'tag=value'
+pairs where tag refers to a generic name and value gives the concrete
+file name. Useful when several input files are to be specified.
+.
+.SS Test benches controlled with \fBti_rri\fP
+In this case the communication between test bench and the controlling
+\fBti_rri\fP is done via two named pipes (see \fBfifo\fP(7)). The test
+bench might open in addition a configuration file. This setup is also
+defined via the \fItbw.dat\fP file, for details see section FILES.
+.
+.\" ------------------------------------------------------------------
+.SH OPTIONS
+The options \fB\-run\fP, \fB\-fifo\fP and \fB\-verbose\fP are processed
+by tbw itself. If more than one is given they must be in this order.
+.IP \fB\-run\fR
+Used for _ISim tb's, runs the tb with a 'run all' command.
+.IP \fB\-fifo\fR
+Forces usage of rlink_cext fifo, will ignore tbw.dat
+.IP \fB\-verbose\fR
+show the used tag,value settings before execution
+
+.\" ------------------------------------------------------------------
+.SH GHDL OPTIONS
+All options are passed on to the test bench executable. The list of
+available options for a \fBghdl\fP generated executable can be inquired
+with the "\fB\-\-help\fR" option. Some especially useful options are:
+.
+.\" ----------------------------------------------
+.IP "\fB\-\-wave=\fIfile\fR"
+dump signal values into a wave file (use file type .ghw). Far superior
+to the VCD format and allows to inspect all VHDL records and all data types
+with \fBgtkwave\fP(1).
+.
+.\" ----------------------------------------------
+.IP "\fB\-\-stack-max-size\fP=\fIn\fR"
+set maximum stack size. Very helpful in case of very large models. A value
+of \fIn\fP=16384 is in general enough for all generated models, which usually 
+have a large number of very simple processes.
+.
+.\" ----------------------------------------------
+.IP "\fB\-\-stop-time\fI=t\fR"
+stop the simulation at time \fIt\fP (in VHDL notation, e.g. 100ns).
+.
+.\" ----------------------------------------------
+.IP "\fB\-\-disp-time\fR"
+display time as simulation advances.
+.
+.\" ----------------------------------------------
+.IP "\fB\-\-trace-processes\fR"
+display process name before each cycle.
+.
+.\" ------------------------------------------------------------------
+.SH FILES
+.IP "\fI./tbw.dat\fR" 4
+This configuration file is searched for in the current working directory
+and holds associations between generic file names and concrete file names
+for one or more test bench executables. It contains sections of the format
+
+.EX
+    [\fITBPROG\fP]
+    <generic name 1> = <concrete file name 1>
+    <generic name 2> = <concrete file name 2>
+...
+.EE
+
+.RS
+.IP "\fBUsage with Stimulus file based test benches\fR" 4
+\fBtbw\fP will create a \fBsymlink\fP(7) with the generic name which
+refers to the given concrete file name. A typical example is
+
+.EX
+    [tb_nx_cram_memctl_as]
+    tb_nx_cram_memctl_stim = tb_nx_cram_memctl_stim.dat
+.EE
+
+.IP "\fBUsage with test benches controlled with ti_rri\fR"
+The special token \fI<fifo>\fP indicates that a named pipe is used
+rather than a normal file. In this case \fBtbw\fP will create a
+\fBfifo\fP(7) rather than a symlink. Another special token is
+ \fI<null>\fP, it simply translates to \fI/dev/null\fP and can be
+used as default value for configuration files. Currently all
+\fBrlink\fP based test benches use the same generic names and have
+a setup like
+
+.EX
+    [tb_w11a_n3]
+    rlink_cext_fifo_rx = <fifo>
+    rlink_cext_fifo_tx = <fifo>
+    rlink_cext_conf = <null>
+.EE
+
+.RE
+.
+.\" ------------------------------------------------------------------
+.SH EXAMPLES
+.SS Stimulus file based test benches
+Test benches are usually self-checking and produce a comprehensive log file.
+For each checked response the line contains the word \fICHECK\fP and either 
+an \fIOK\fP or a \fIFAIL\fP, in the later case in general with an indication
+of whats wrong. 
+Other unexpected behaviour, like timeouts, will also result in a line 
+containing the word \fIFAIL\fP. 
+When the simulation stops a line with the word \fIDONE\fP is printed.
+These test benches are usually run like
+
+.EX
+  tbw <testbenchname> [stimfile] | tee <logfile> | egrep "(FAIL|DONE)"
+.EE
+
+where
+.RS 2
+.PD 0
+.IP "\-" 2
+\fBtbw\fP sets up the stimulus file and runs the test bench executable
+.IP "\-"
+\fBtee\fP ensures that the full log is saved
+.IP "\-"
+\fBegrep\fP filters \fIFAIL\fP and \fIDONE\fP lines, a successful run will 
+produce a single \fIDONE\fP line
+.PD
+.RE
+
+.SS Test benches controlled with \fBti_rri\fP
+In these cases the test bench is started via \fBti_rri\fP using the
+\fB\-\-run\fP and \fB\-\-fifo\fP options. Also here usually a pipe with 
+\fBtee\fP and \fBegrep\fP is used, a typical example is
+
+.EX
+  ti_rri \-\-run="tbw tb_tst_rlink_n3" \-\-fifo \-\-logl=3 \-\- \\
+        "package require tst_rlink" \\
+        "tst_rlink::setup" "tst_rlink::test_all" |\\
+     tee tb_tst_rlink_n3_dsim.log |\\
+     egrep "(\-[EFW]:|FAIL|PEND|DONE)"
+.EE
+
+.
+.\" ------------------------------------------------------------------
+.SH "SEE ALSO"
+.BR ti_rri (1),
+.BR gtkwave (1),
+.BR symlink (7),
+.BR fifo (7)
+
+.\" ------------------------------------------------------------------
+.SH AUTHOR
+Walter F.J. Mueller <W.F.J.Mueller@gsi.de>

@@ -1,0 +1,283 @@
+#!/usr/bin/perl -w
+# $Id: create_disk 686 2015-06-04 21:08:08Z mueller $
+#
+# Copyright 2013-2014 by Walter F.J. Mueller <W.F.J.Mueller@gsi.de>
+#
+# This program is free software; you may redistribute and/or modify it under
+# the terms of the GNU General Public License as published by the Free
+# Software Foundation, either version 2, or at your option any later version.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY, without even the implied warranty of MERCHANTABILITY
+# or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+# for complete details.
+#
+#  Revision History:
+# Date         Rev Version  Comment
+# 2015-06-04   686   1.1.2  use sysseek rather seek; add RM80
+# 2015-04-06   665   1.1.1  add alias RM03 (for RM02) and RP05 (for RP04)
+# 2014-06-14   562   1.1    BUGFIX: repair --boot; add RM02,RM05,RP04,RP07
+# 2013-05-20   521   1.0    First draft
+#
+
+use 5.10.0;                                 # require Perl 5.10 or higher
+use strict;                                 # require strict checking
+
+use Getopt::Long;
+use FileHandle;
+use Fcntl qw(:seek);
+
+my %opts = ();
+
+GetOptions(\%opts, "help", "typ=s", "ini=s", "bad", "boot"
+          )
+  or exit 1;
+
+sub do_inipatt;
+sub do_badtable;
+sub do_boot;
+sub print_help;
+
+# disk type table
+my %disktype = (
+  RK05 => {cyl=> 203, hd=>   2, sec=>  12, bps=> 512, bad=>0},
+  RL01 => {cyl=> 256, hd=>   2, sec=>  40, bps=> 256, bad=>1},
+  RL02 => {cyl=> 512, hd=>   2, sec=>  40, bps=> 256, bad=>1},
+  RM02 => {cyl=> 823, hd=>   5, sec=>  32, bps=> 512, bad=>1},
+  RM05 => {cyl=> 823, hd=>  19, sec=>  32, bps=> 512, bad=>1},
+  RM80 => {cyl=> 559, hd=>  14, sec=>  31, bps=> 512, bad=>1},
+  RP04 => {cyl=> 411, hd=>  19, sec=>  22, bps=> 512, bad=>1},
+  RP06 => {cyl=> 815, hd=>  19, sec=>  22, bps=> 512, bad=>1},
+  RP07 => {cyl=> 630, hd=>  32, sec=>  50, bps=> 512, bad=>1}
+);
+
+autoflush STDOUT 1 if (-p STDOUT);          # autoflush if output into pipe
+
+if (exists $opts{help}) {
+  print_help(1);
+  exit 0;
+}
+
+if (scalar(@ARGV) != 1) {
+  print STDERR "create_disk-E: specify one and only one output file\n";
+  print_help(0);
+  exit 1;
+}
+
+my $fnam = shift @ARGV;
+
+if (-e $fnam) {
+  print STDERR "create_disk-E: file '$fnam' exists already\n";
+  exit 1;
+}
+
+my $typ = uc($opts{typ});
+
+$typ = "RM02" if defined $typ && $typ eq "RM03"; # RM03 is equivalent to RM02
+$typ = "RP04" if defined $typ && $typ eq "RP05"; # RM05 is equivalent to RP04
+
+unless (defined $typ && exists $disktype{$typ}) {
+  print STDERR "create_disk-E: no or invalid --typ specification, use --help\n";
+  exit 1;
+}
+
+my $cyl = $disktype{$typ}{cyl};
+my $hd  = $disktype{$typ}{hd};
+my $sec = $disktype{$typ}{sec};
+my $bps = $disktype{$typ}{bps};
+my $bad = $disktype{$typ}{bad};
+
+if ($opts{bad} && !$bad) {
+  print STDERR "create_disk-E: --bad not supported for type '$typ', abort\n";
+  exit 1;
+}
+
+my $nblk = $cyl*$hd*$sec;
+my $cap  = $nblk * $bps;
+
+my $fh = new FileHandle;
+sysopen($fh, $fnam, O_RDWR|O_CREAT)
+  or die "failed to create '$fnam': $!";
+
+# seek to end, write 1 byte at end
+my $rc = sysseek($fh, $cap-1, SEEK_SET);
+if (not $rc) {die "seek failed: $!";}
+my $buf = pack('C1',0);
+$rc = syswrite($fh, $buf, length($buf));
+if ($rc<=0) {die "write failed: $!";}
+
+# handle init patterns
+do_inipatt if $opts{ini};
+
+# handle factory bad block table
+do_badtable if $opts{bad};
+
+# write dummy boot block
+do_boot if $opts{boot};
+
+#-------------------------------------------------------------------------------
+
+sub do_inipatt {
+  my $ini = $opts{ini};
+
+  if ($ini eq 'zero' || $ini eq 'ones' || $ini eq 'dead') {
+    my @dat;
+    for (my $i=0; $i<$bps/4; $i++) {
+      push @dat, 0,0            if $ini eq 'zero';
+      push @dat, -1,-1          if $ini eq 'ones';
+      push @dat, 0xdead,0xbeaf  if $ini eq 'dead';
+    }
+    my $buf = pack('v*',@dat);
+    my $rc = $fh->seek(0, SEEK_SET);
+    if (not $rc) {die "seek failed: $!";}
+    for (my $i=0; $i<$nblk; $i++) {
+      $rc = syswrite($fh, $buf, length($buf));
+      if ($rc<=0) {die "write failed: $!";}
+    }
+
+  } elsif ($ini eq 'test') {
+    my $addr = 0;
+    my $cur_sec = 0;
+    my $cur_trk = 0;
+    my $cur_cyl = 0;
+    my $rc = $fh->seek(0, SEEK_SET);
+    if (not $rc) {die "seek failed: $!";}
+    for (my $i=0; $i<$nblk; $i++) {
+      my @dat;
+      for (my $i=0; $i<$bps/16; $i++) {
+        push @dat, ($addr & 0xffff);
+        push @dat, (($addr>>16) & 0xffff);
+        push @dat, $cur_cyl, $cur_trk, $cur_sec;
+        push @dat, $cyl, $hd, $sec;
+        $addr += 16;
+      }
+      my $buf = pack('v*',@dat);
+      $rc = syswrite($fh, $buf, length($buf));
+      if ($rc<=0) {die "write failed: $!";}
+      $cur_sec += 1;
+      if ($cur_sec >= $sec) {
+        $cur_sec = 0;
+        $cur_trk += 1;
+        if ($cur_trk >= $hd) {
+          $cur_trk = 0;
+          $cur_cyl += 1;
+        }
+      }
+    }
+
+  } else {
+    print STDERR "create_disk-W: unknown --ini mode '$ini', --ini ignored\n";
+  }
+  return;
+}
+
+#-------------------------------------------------------------------------------
+
+sub do_badtable {
+  my @dat;
+  push @dat, 012345, 012345;                # pack number
+  push @dat, 0,0;                           # dummy c/s/h spec
+  for (my $i=4; $i<$bps/2; $i++) {
+    push @dat, -1;                          # end of table
+  }
+  my $buf = pack('v*',@dat);
+
+  my $pos = $cap - $sec*$bps;               # position of last track
+  my $rc = $fh->seek($pos, SEEK_SET);
+  if (not $rc) {die "seek failed: $!";}
+  my $nsec = ($sec > 10) ? 10 : $sec;       # write last track, at most 10 sec
+  for (my $i=0; $i<$nsec; $i++) {
+    $rc = syswrite($fh, $buf, length($buf));
+    if ($rc<=0) {die "write failed: $!";}
+  }
+  return;
+}
+
+#-------------------------------------------------------------------------------
+
+sub do_boot {
+  my @dat;
+
+  push @dat, 0012700, 0000100;    #         start:  mov     #text, r0
+  push @dat, 0105710;             #         1$:     tstb    (r0)
+  push @dat, 0001406;             #                 beq     3$
+  push @dat, 0105737, 0177564;    #         2$:     tstb    @#XCSR
+  push @dat, 0100375;             #                 bpl     2$
+  push @dat, 0112037, 0177566;    #                 movb    (r0)+,@#XBUF
+  push @dat, 0000770;             #                 br      1$
+  push @dat, 0000000;             #         3$:     halt
+
+  my $buf = pack('v*',@dat);
+  my $rc = $fh->seek(0, SEEK_SET);
+  if (not $rc) {die "seek failed: $!";}
+  $rc = syswrite($fh, $buf, length($buf));
+  if ($rc<=0) {die "write failed: $!";}
+
+  $buf  = "\r\n";
+  $buf .= "\r\n";
+  $buf .= "++======================================++\r\n";
+  $buf .= "|| This is not a hardware bootable disk ||\r\n";
+  $buf .= "++======================================++\r\n";
+  $buf .= "\r\n";
+  $buf .= "Disk image created with 'create_disk --typ=$typ':\r\n";
+  $buf .= sprintf "  number of cylinders:    %7d\r\n", $cyl;
+  $buf .= sprintf "  tracks per cylinder:    %7d\r\n", $hd;
+  $buf .= sprintf "  sectors per track:      %7d\r\n", $sec;
+  $buf .= sprintf "  block size:             %7d\r\n", $bps;
+  $buf .= sprintf "  total number of sectors:%7d\r\n", $nblk;
+  $buf .= sprintf "  capacity in kByte:      %7d\r\n", $cap/1024;
+  $buf .= "\r\n";
+  $buf .= "CPU WILL HALT\r\n";
+  $buf .= "\r\n";
+
+  # NOTE: the text above almost fills the first 512 bytes !!
+  #       don't add more text, all has been said anyway   !!
+
+  $rc = $fh->seek(0100, SEEK_SET);
+  if (not $rc) {die "seek failed: $!";}
+  $rc = syswrite($fh, $buf, length($buf));
+  if ($rc<=0) {die "write failed: $!";}
+
+  return;
+}
+
+#-------------------------------------------------------------------------------
+
+sub print_help {
+  my ($ptyp) = @_;
+  print "usage: create_disk [options] <file>\n";
+  print "  --typ=<type>  specified disk type, must be specified\n";
+  print "  --ini=<pat>   initialization pattern, can be\n";
+  print "  --bad         create factory bad block table on last track\n";
+  print "  --boot        write dummy boot block, print volume info and HALT\n";
+  print "  --help        print full help, with list --typ and --ini options\n";
+  return unless $ptyp;
+
+  print "\n";
+  print "currently supported disk types:\n";
+  print "  type #cyl #trk #sec  bps tot_sec  blocks  -bad\n";
+  foreach my $typ (sort keys %disktype) {
+    my $cyl = $disktype{$typ}{cyl};
+    my $hd  = $disktype{$typ}{hd};
+    my $sec = $disktype{$typ}{sec};
+    my $bps = $disktype{$typ}{bps};
+    printf "  %4s %4d %4d %4d %4d %7d %7d   %3s\n",
+      $typ, $cyl, $hd, $sec, $bps,
+      ($cyl*$hd*$sec), ($cyl*$hd*$sec*$bps)/1024,
+      ($disktype{$typ}{bad} ? 'yes' : ' no');
+  }
+
+  print "\n";
+  print "  RM03 is accepted as an alias for RM02 (same capacity)\n";
+  print "  RP05 is accepted as an alias for RP04 (same capacity)\n";
+
+  print "\n";
+  print "currently supported initialization patterns:\n";
+  print "  zero  all zero (will cause explicit disk space allocation)\n";
+  print "  ones  all ones\n";
+  print "  dead  alternating 0xdead 0xbeaf pattern\n";
+  print "  test  writes unique groups of 8 16bit words\n";
+  print "\n";
+  print "For further details consults the create_disk man page.\n";
+  return;
+}

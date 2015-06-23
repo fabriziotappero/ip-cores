@@ -1,0 +1,920 @@
+#!/usr/bin/perl -w
+# $Id: tmuconv 676 2015-05-09 16:31:54Z mueller $
+#
+# Copyright 2008-2015 by Walter F.J. Mueller <W.F.J.Mueller@gsi.de>
+#
+# This program is free software; you may redistribute and/or modify it under
+# the terms of the GNU General Public License as published by the Free
+# Software Foundation, either version 2, or at your option any later version.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY, without even the implied warranty of MERCHANTABILITY
+# or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+# for complete details.
+#
+#  Revision History:
+# Date         Rev Version  Comment
+# 2010-10-22   334   1.0.9  adapt to ibus V2 signals: req,we,dip->aval,re,we,rmw
+# 2010-06-26   309   1.0.8  add ibimres.cacc/racc handling
+# 2010-04-26   284   1.0.7  add error check for GetOptions
+# 2009-09-19   240   1.0.6  add more VFETCH addr defs; add 2nd DL11 defs
+# 2009-06-04   223   1.0.5  add IIST and PC11 defs
+# 2009-05-03   212   1.0.4  add defs for mmu par/pdr's and some unibus dev's
+# 2008-12-14   177   1.0.3  add -t_ru; use dp_ireg_we_last; add ibus names
+# 2008-11-30   174   1.0.2  SPUSH and VFETCH tags for em cycles; psw in id lines
+# 2008-04-25   138   1.0.1  show ccc/scc for code 000257/000277 in disassembler
+# 2008-04-19   137   1.0    Initial version
+#
+# Current fields in tmu_ofile:
+#   clkcycle:d
+#   cpu:o
+#   dp.pc:o
+#   dp.psw:o
+#   dp.ireg:o
+#   dp.ireg_we:b
+#   dp.ireg_we_last:b
+#   dp.dsrc:o
+#   dp.ddst:o
+#   dp.dtmp:o
+#   dp.dres:o
+#   dp.gpr_adst:o
+#   dp.gpr_mode:o
+#   dp.gpr_bytop:b
+#   dp.gpr_we:b
+#   vm.ibmreq.aval:b
+#   vm.ibmreq.re:b
+#   vm.ibmreq.we:b
+#   vm.ibmreq.rmw:b
+#   vm.ibmreq.be0:b
+#   vm.ibmreq.be1:b
+#   vm.ibmreq.cacc:b
+#   vm.ibmreq.racc:b
+#   vm.ibmreq.addr:o
+#   vm.ibmreq.din:o
+#   vm.ibsres.ack:b
+#   vm.ibsres.busy:b
+#   vm.ibsres.dout:o
+#   co.cpugo:b
+#   co.cpususp:b
+#   co.suspint:b
+#   co.suspext:b
+#   sy.emmreq.req:b
+#   sy.emmreq.we:b
+#   sy.emmreq.be:b
+#   sy.emmreq.cancel:b
+#   sy.emmreq.addr:o
+#   sy.emmreq.din:o
+#   sy.emsres.ack_r:b
+#   sy.emsres.ack_w:b
+#   sy.emsres.dout:o
+#   sy.chit:b
+#
+
+use 5.005;                                  # require Perl 5.005 or higher
+use strict;                                 # require strict checking
+use FileHandle;
+
+use Getopt::Long;
+
+my %opts = ();
+
+GetOptions(\%opts, "help", "dump", "cdump",
+	   "t_id", "t_ru", "t_em", "t_ib")
+  or die "bad options";
+
+sub print_help;
+sub do_file;
+sub code2mnemo;
+sub regmod;
+
+my @var_name;
+my @var_type;
+my @var_dec;
+my @var_oct;
+my %name;
+
+my @val_curr_text;
+my @val_curr;
+my @val_last;
+
+my @reg_05 = ("------","------","------","------","------","------",   # set 0
+              "------","------","------","------","------","------",); # set 1
+my @reg_sp = ("------","------","------","------");	   # ksp,ssp,???,usp
+
+my $ind_dp_pc;
+my $ind_dp_psw;
+my $ind_dp_ireg;
+my $ind_dp_ireg_we;
+my $ind_dp_ireg_we_last;
+my $ind_dp_dres;
+my $ind_dp_gpr_adst;
+my $ind_dp_gpr_mode;
+my $ind_dp_gpr_bytop;
+my $ind_dp_gpr_we;
+
+my $ind_vm_ibmreq_aval;
+my $ind_vm_ibmreq_re;
+my $ind_vm_ibmreq_we;
+my $ind_vm_ibmreq_rmw;
+my $ind_vm_ibmreq_be0;
+my $ind_vm_ibmreq_be1;
+my $ind_vm_ibmreq_cacc;
+my $ind_vm_ibmreq_racc;
+my $ind_vm_ibmreq_addr;
+my $ind_vm_ibmreq_din;
+my $ind_vm_ibsres_ack;
+my $ind_vm_ibsres_busy;
+my $ind_vm_ibsres_dout;
+
+my $ind_sy_emmreq_req;
+my $ind_sy_emmreq_we;
+my $ind_sy_emmreq_be;
+my $ind_sy_emmreq_cancel;
+my $ind_sy_emmreq_addr;
+my $ind_sy_emmreq_din;
+my $ind_sy_emsres_ack_r;
+my $ind_sy_emsres_ack_w;
+my $ind_sy_emsres_dout;
+my $ind_sy_chit;
+
+my @pdp11_opcode_tbl = (
+    {code=>0000000, mask=>0000000, name=>"halt", type=>"0arg"},
+    {code=>0000001, mask=>0000000, name=>"wait", type=>"0arg"},
+    {code=>0000002, mask=>0000000, name=>"rti ", type=>"0arg"},
+    {code=>0000003, mask=>0000000, name=>"bpt ", type=>"0arg"},
+    {code=>0000004, mask=>0000000, name=>"iot ", type=>"0arg"},
+    {code=>0000005, mask=>0000000, name=>"reset",type=>"0arg"},
+    {code=>0000006, mask=>0000000, name=>"rtt ", type=>"0arg"},
+    {code=>0000007, mask=>0000000, name=>"!!mfpt", type=>"0arg"},
+    {code=>0000100, mask=>0000077, name=>"jmp ", type=>"1arg"},
+    {code=>0000200, mask=>0000007, name=>"rts ", type=>"1reg"},
+    {code=>0000230, mask=>0000007, name=>"spl ", type=>"spl"},
+    {code=>0000240, mask=>0000017, name=>"cl",   type=>"ccop"},
+    {code=>0000260, mask=>0000017, name=>"se",   type=>"ccop"},
+    {code=>0000300, mask=>0000077, name=>"swap", type=>"1arg"},
+    {code=>0000400, mask=>0000377, name=>"br  ", type=>"br"},
+    {code=>0001000, mask=>0000377, name=>"bne ", type=>"br"},
+    {code=>0001400, mask=>0000377, name=>"beq ", type=>"br"},
+    {code=>0002000, mask=>0000377, name=>"bge ", type=>"br"},
+    {code=>0002400, mask=>0000377, name=>"blt ", type=>"br"},
+    {code=>0003000, mask=>0000377, name=>"bgt ", type=>"br"},
+    {code=>0003400, mask=>0000377, name=>"ble ", type=>"br"},
+    {code=>0004000, mask=>0000777, name=>"jsr ", type=>"jsr"},
+    {code=>0005000, mask=>0000077, name=>"clr ", type=>"1arg"},
+    {code=>0005100, mask=>0000077, name=>"com ", type=>"1arg"},
+    {code=>0005200, mask=>0000077, name=>"inc ", type=>"1arg"},
+    {code=>0005300, mask=>0000077, name=>"dec ", type=>"1arg"},
+    {code=>0005400, mask=>0000077, name=>"neg ", type=>"1arg"},
+    {code=>0005500, mask=>0000077, name=>"adc ", type=>"1arg"},
+    {code=>0005600, mask=>0000077, name=>"sbc ", type=>"1arg"},
+    {code=>0005700, mask=>0000077, name=>"tst ", type=>"1arg"},
+    {code=>0006000, mask=>0000077, name=>"ror ", type=>"1arg"},
+    {code=>0006100, mask=>0000077, name=>"rol ", type=>"1arg"},
+    {code=>0006200, mask=>0000077, name=>"asr ", type=>"1arg"},
+    {code=>0006300, mask=>0000077, name=>"asl ", type=>"1arg"},
+    {code=>0006400, mask=>0000077, name=>"mark", type=>"mark"},
+    {code=>0006500, mask=>0000077, name=>"mfpi", type=>"1arg"},
+    {code=>0006600, mask=>0000077, name=>"mtpi", type=>"1arg"},
+    {code=>0006700, mask=>0000077, name=>"sxt ", type=>"1arg"},
+    {code=>0007000, mask=>0000077, name=>"!!csm",  type=>"1arg"},
+    {code=>0007200, mask=>0000077, name=>"!!tstset",type=>"1arg"},
+    {code=>0007300, mask=>0000077, name=>"!!wrtlck",type=>"1arg"},
+    {code=>0010000, mask=>0007777, name=>"mov ", type=>"2arg"},
+    {code=>0020000, mask=>0007777, name=>"cmp ", type=>"2arg"},
+    {code=>0030000, mask=>0007777, name=>"bit ", type=>"2arg"},
+    {code=>0040000, mask=>0007777, name=>"bic ", type=>"2arg"},
+    {code=>0050000, mask=>0007777, name=>"bis ", type=>"2arg"},
+    {code=>0060000, mask=>0007777, name=>"add ", type=>"2arg"},
+    {code=>0070000, mask=>0000777, name=>"mul ", type=>"rdst"},
+    {code=>0071000, mask=>0000777, name=>"div ", type=>"rdst"},
+    {code=>0072000, mask=>0000777, name=>"ash ", type=>"rdst"},
+    {code=>0073000, mask=>0000777, name=>"ashc", type=>"rdst"},
+    {code=>0074000, mask=>0000777, name=>"xor ", type=>"rdst"},
+    {code=>0077000, mask=>0000777, name=>"sob ", type=>"sob"},
+    {code=>0100000, mask=>0000377, name=>"bpl ", type=>"br"},
+    {code=>0100400, mask=>0000377, name=>"bmi ", type=>"br"},
+    {code=>0101000, mask=>0000377, name=>"bhi ", type=>"br"},
+    {code=>0101400, mask=>0000377, name=>"blos", type=>"br"},
+    {code=>0102000, mask=>0000377, name=>"bvc ", type=>"br"},
+    {code=>0102400, mask=>0000377, name=>"bvs ", type=>"br"},
+    {code=>0103000, mask=>0000377, name=>"bcc ", type=>"br"},
+    {code=>0103400, mask=>0000377, name=>"bcs ", type=>"br"},
+    {code=>0104000, mask=>0000377, name=>"emt ", type=>"trap"},
+    {code=>0104400, mask=>0000377, name=>"trap", type=>"trap"},
+    {code=>0105000, mask=>0000077, name=>"clrb", type=>"1arg"},
+    {code=>0105100, mask=>0000077, name=>"comb", type=>"1arg"},
+    {code=>0105200, mask=>0000077, name=>"incb", type=>"1arg"},
+    {code=>0105300, mask=>0000077, name=>"decb", type=>"1arg"},
+    {code=>0105400, mask=>0000077, name=>"negb", type=>"1arg"},
+    {code=>0105500, mask=>0000077, name=>"adcb", type=>"1arg"},
+    {code=>0105600, mask=>0000077, name=>"sbcb", type=>"1arg"},
+    {code=>0105700, mask=>0000077, name=>"tstb", type=>"1arg"},
+    {code=>0106000, mask=>0000077, name=>"rorb", type=>"1arg"},
+    {code=>0106100, mask=>0000077, name=>"rolb", type=>"1arg"},
+    {code=>0106200, mask=>0000077, name=>"asrb", type=>"1arg"},
+    {code=>0106300, mask=>0000077, name=>"aslb", type=>"1arg"},
+    {code=>0106400, mask=>0000077, name=>"!!mtps", type=>"1arg"},
+    {code=>0106500, mask=>0000077, name=>"mfpd", type=>"1arg"},
+    {code=>0106600, mask=>0000077, name=>"mtpd", type=>"1arg"},
+    {code=>0106700, mask=>0000077, name=>"!!mfps", type=>"1arg"},
+    {code=>0110000, mask=>0007777, name=>"movb", type=>"2arg"},
+    {code=>0120000, mask=>0007777, name=>"cmpb", type=>"2arg"},
+    {code=>0130000, mask=>0007777, name=>"bitb", type=>"2arg"},
+    {code=>0140000, mask=>0007777, name=>"bicb", type=>"2arg"},
+    {code=>0150000, mask=>0007777, name=>"bisb", type=>"2arg"},
+    {code=>0160000, mask=>0007777, name=>"sub ", type=>"2arg"},
+    {code=>0170000, mask=>0000000, name=>"!!cfcc", type=>"0arg"},
+    {code=>0170001, mask=>0000000, name=>"!!setf", type=>"0arg"},
+    {code=>0170011, mask=>0000000, name=>"!!setd", type=>"0arg"},
+    {code=>0170002, mask=>0000000, name=>"!!seti", type=>"0arg"},
+    {code=>0170012, mask=>0000000, name=>"!!setl", type=>"0arg"},
+    {code=>0170100, mask=>0000077, name=>"!!ldfps",type=>"1fpp"},
+    {code=>0170200, mask=>0000077, name=>"!!stfps",type=>"1fpp"},
+    {code=>0170300, mask=>0000077, name=>"!!stst", type=>"1fpp"},
+    {code=>0170400, mask=>0000077, name=>"!!clrf", type=>"1fpp"},
+    {code=>0170500, mask=>0000077, name=>"!!tstf", type=>"1fpp"},
+    {code=>0170600, mask=>0000077, name=>"!!absf", type=>"1fpp"},
+    {code=>0170700, mask=>0000077, name=>"!!negf", type=>"1fpp"},
+    {code=>0171000, mask=>0000377, name=>"!!mulf", type=>"rfpp"},
+    {code=>0171400, mask=>0000377, name=>"!!modf", type=>"rfpp"},
+    {code=>0172000, mask=>0000377, name=>"!!addf", type=>"rfpp"},
+    {code=>0172400, mask=>0000377, name=>"!!ldf",  type=>"rfpp"},
+    {code=>0173000, mask=>0000377, name=>"!!subf", type=>"rfpp"},
+    {code=>0173400, mask=>0000377, name=>"!!cmpf", type=>"rfpp"},
+    {code=>0174000, mask=>0000377, name=>"!!stf",  type=>"rfpp"},
+    {code=>0174400, mask=>0000377, name=>"!!divf", type=>"rfpp"},
+    {code=>0175000, mask=>0000377, name=>"!!stexp",type=>"rfpp"},
+    {code=>0175400, mask=>0000377, name=>"!!stcif",type=>"rfpp"},
+    {code=>0176000, mask=>0000377, name=>"!!stcfd",type=>"rfpp"},
+    {code=>0176400, mask=>0000377, name=>"!!ldexp",type=>"rfpp"},
+    {code=>0177000, mask=>0000377, name=>"!!ldcif",type=>"rfpp"},
+    {code=>0177400, mask=>0000377, name=>"!!ldcdf",type=>"rfpp"}
+  );
+
+my %pdp11_regs = (			    # use simh naming convention
+     177776=> "psw",
+     177774=> "stklim",
+     177772=> "pirq",
+     177770=> "mbrk",
+     177766=> "cpuerr",
+     177764=> "sysid",
+     177600=> "uipdr0",
+     177602=> "uipdr1",
+     177604=> "uipdr2",
+     177606=> "uipdr3",
+     177610=> "uipdr4",
+     177612=> "uipdr5",
+     177614=> "uipdr6",
+     177616=> "uipdr7",
+     177620=> "udpdr0",
+     177622=> "udpdr1",
+     177624=> "udpdr2",
+     177626=> "udpdr3",
+     177630=> "udpdr4",
+     177632=> "udpdr5",
+     177634=> "udpdr6",
+     177636=> "udpdr7",
+     177640=> "uipar0",
+     177642=> "uipar1",
+     177644=> "uipar2",
+     177646=> "uipar3",
+     177650=> "uipar4",
+     177652=> "uipar5",
+     177654=> "uipar6",
+     177656=> "uipar7",
+     177660=> "udpar0",
+     177662=> "udpar1",
+     177664=> "udpar2",
+     177666=> "udpar3",
+     177670=> "udpar4",
+     177672=> "udpar5",
+     177674=> "udpar6",
+     177676=> "udpar7",
+     177576=> "mmr2",
+     177574=> "mmr1",
+     177572=> "mmr0",
+     177570=> "sdreg",			    # not a simh name !!
+     177560=> "ti.csr",
+     177562=> "ti.buf",
+     177564=> "to.csr",
+     177566=> "to.buf",
+     177550=> "pr.csr",
+     177552=> "pr.buf",
+     177554=> "pp.csr",
+     177556=> "pp.buf",
+     177546=> "kl.csr",
+     177514=> "lp.csr",
+     177516=> "lp.buf",
+     177500=> "ii.acr",
+     177502=> "ii.adr",
+     177400=> "rk.ds ",
+     177402=> "rk.er ",
+     177404=> "rk.cs ",
+     177406=> "rk.wc ",
+     177410=> "rk.ba ",
+     177412=> "rk.da ",
+     177414=> "rk.mr ",
+     177416=> "rk.db ",
+     177060=> "xor.cs",                     # XOR Tester
+     176700=> "rpa.cs1",
+     176702=> "rpa.wc ",
+     176704=> "rpa.ba ",
+     176706=> "rpa.da ",
+     176710=> "rpa.cs2",
+     176712=> "rpa.ds ",
+     176714=> "rpa.er1",
+     176716=> "rpa.as ",
+     176720=> "rpa.la ",
+     176722=> "rpa.db ",
+     176724=> "rpa.mr1",
+     176726=> "rpa.dt ",
+     176730=> "rpa.sn ",
+     176732=> "rpa.of ",
+     176734=> "rpa.dc ",
+     176736=> "rpa.m13",
+     176740=> "rpa.m14",
+     176742=> "rpa.m15",
+     176744=> "rpa.ec1",
+     176746=> "rpa.ec2",
+     176750=> "rpa.bae",
+     176752=> "rpa.cs3",
+     176500=> "ti2.cs",
+     176502=> "ti2.bu",
+     176504=> "to2.cs",
+     176506=> "to2.bu",
+     174400=> "rl.cs ",
+     174402=> "rl.ba ",
+     174404=> "rl.da ",
+     174406=> "rl.mp ",
+     172540=> "kp.csr",
+     172542=> "kp.buf",
+     172544=> "kp.cnt",
+     172520=> "tm.mts",
+     172522=> "tm.mtc",
+     172524=> "tm.brc",
+     172526=> "tm.cma",
+     172530=> "tm.mtd",
+     172532=> "tm.rda",
+     172516=> "mmr3",
+     172200=> "sipdr0",
+     172202=> "sipdr1",
+     172204=> "sipdr2",
+     172206=> "sipdr3",
+     172210=> "sipdr4",
+     172212=> "sipdr5",
+     172214=> "sipdr6",
+     172216=> "sipdr7",
+     172220=> "sdpdr0",
+     172222=> "sdpdr1",
+     172224=> "sdpdr2",
+     172226=> "sdpdr3",
+     172230=> "sdpdr4",
+     172232=> "sdpdr5",
+     172234=> "sdpdr6",
+     172236=> "sdpdr7",
+     172240=> "sipar0",
+     172242=> "sipar1",
+     172244=> "sipar2",
+     172246=> "sipar3",
+     172250=> "sipar4",
+     172252=> "sipar5",
+     172254=> "sipar6",
+     172256=> "sipar7",
+     172260=> "sdpar0",
+     172262=> "sdpar1",
+     172264=> "sdpar2",
+     172266=> "sdpar3",
+     172270=> "sdpar4",
+     172272=> "sdpar5",
+     172274=> "sdpar6",
+     172276=> "sdpar7",
+     172300=> "kipdr0",
+     172302=> "kipdr1",
+     172304=> "kipdr2",
+     172306=> "kipdr3",
+     172310=> "kipdr4",
+     172312=> "kipdr5",
+     172314=> "kipdr6",
+     172316=> "kipdr7",
+     172320=> "kdpdr0",
+     172322=> "kdpdr1",
+     172324=> "kdpdr2",
+     172326=> "kdpdr3",
+     172330=> "kdpdr4",
+     172332=> "kdpdr5",
+     172334=> "kdpdr6",
+     172336=> "kdpdr7",
+     172340=> "kipar0",
+     172342=> "kipar1",
+     172344=> "kipar2",
+     172346=> "kipar3",
+     172350=> "kipar4",
+     172352=> "kipar5",
+     172354=> "kipar6",
+     172356=> "kipar7",
+     172360=> "kdpar0",
+     172362=> "kdpar1",
+     172364=> "kdpar2",
+     172366=> "kdpar3",
+     172370=> "kdpar4",
+     172372=> "kdpar5",
+     172374=> "kdpar6",
+     172376=> "kdpar7",
+     160100=> "dz.csr",
+     160102=> "dz.mp2",
+     160104=> "dz.tcr",
+     160106=> "dz.mp6"
+);
+
+autoflush STDOUT 1 if (-p STDOUT);          # autoflush if output into pipe
+
+if (exists $opts{help}) {
+  print_help;
+  exit 0;
+}
+
+foreach my $file (@ARGV) {
+  do_file($file);
+}
+
+
+#-------------------------------------------------------------------------------
+
+sub do_file {
+  my ($file) = @_;
+
+  open IFILE,"<$file" or die "failed to open $file";
+
+  my $idec_cyc = 0;
+  my $change_cyc = 0;
+  my $emreq_cyc = 0;
+  my $emreq_str = "";
+  my $ibreq_cyc = 0;
+  my $ibreq_typ = "";
+  my $ibreq_str = "";
+  my $ibreq_nam = "";
+
+  my $emcurr_we   = 0;			    # curr em write enable (or undef)
+  my $emcurr_addr = undef;		    # curr em address
+  my $emlast_we   = 0;			    # prev em write enable (or undef)
+  my $emlast_addr = undef;		    # prev em address
+
+  while (<IFILE>) {
+    chomp;
+    if (/^#\s+/) {
+      @var_name = ();
+      @var_type = ();
+      my $dsc_str  = $';
+      my @dsc_list = split /\s+/,$dsc_str;
+      foreach my $dsc (@dsc_list) {
+	if ($dsc =~ /^(.*):([bdo])$/) {
+	  my $ind = scalar(@var_name);
+	  $name{$1} = {ind=>$ind,
+		       typ=>$2};
+	  push @var_name, $1;
+	  push @var_type, $2;
+	  push @var_dec, $ind if $2 eq "d";
+	  push @var_oct, $ind if $2 eq "o";
+	} else {
+	  print "tmuconv-E: bad descriptor $dsc\n";
+	}
+      }
+
+      $ind_dp_pc            = $name{'dp.pc'}->{ind};
+      $ind_dp_psw           = $name{'dp.psw'}->{ind};
+      $ind_dp_ireg          = $name{'dp.ireg'}->{ind};
+      $ind_dp_ireg_we       = $name{'dp.ireg_we'}->{ind};
+      $ind_dp_ireg_we_last  = $name{'dp.ireg_we_last'}->{ind};
+      $ind_dp_dres          = $name{'dp.dres'}->{ind};
+      $ind_dp_gpr_adst      = $name{'dp.gpr_adst'}->{ind};
+      $ind_dp_gpr_mode      = $name{'dp.gpr_mode'}->{ind};
+      $ind_dp_gpr_bytop     = $name{'dp.gpr_bytop'}->{ind};
+      $ind_dp_gpr_we        = $name{'dp.gpr_we'}->{ind};
+
+      $ind_vm_ibmreq_aval   = $name{'vm.ibmreq.aval'}->{ind};
+      $ind_vm_ibmreq_re     = $name{'vm.ibmreq.re'}->{ind};
+      $ind_vm_ibmreq_we     = $name{'vm.ibmreq.we'}->{ind};
+      $ind_vm_ibmreq_rmw    = $name{'vm.ibmreq.rmw'}->{ind};
+      $ind_vm_ibmreq_be0    = $name{'vm.ibmreq.be0'}->{ind};
+      $ind_vm_ibmreq_be1    = $name{'vm.ibmreq.be1'}->{ind};
+      $ind_vm_ibmreq_cacc   = $name{'vm.ibmreq.cacc'}->{ind};
+      $ind_vm_ibmreq_racc   = $name{'vm.ibmreq.racc'}->{ind};
+      $ind_vm_ibmreq_addr   = $name{'vm.ibmreq.addr'}->{ind};
+      $ind_vm_ibmreq_din    = $name{'vm.ibmreq.din'}->{ind};
+      $ind_vm_ibsres_ack    = $name{'vm.ibsres.ack'}->{ind};
+      $ind_vm_ibsres_busy   = $name{'vm.ibsres.busy'}->{ind};
+      $ind_vm_ibsres_dout   = $name{'vm.ibsres.dout'}->{ind};
+
+      $ind_sy_emmreq_req    = $name{'sy.emmreq.req'}->{ind};
+      $ind_sy_emmreq_we     = $name{'sy.emmreq.we'}->{ind};
+      $ind_sy_emmreq_be     = $name{'sy.emmreq.be'}->{ind};
+      $ind_sy_emmreq_cancel = $name{'sy.emmreq.cancel'}->{ind};
+      $ind_sy_emmreq_addr   = $name{'sy.emmreq.addr'}->{ind};
+      $ind_sy_emmreq_din    = $name{'sy.emmreq.din'}->{ind};
+      $ind_sy_emsres_ack_r  = $name{'sy.emsres.ack_r'}->{ind};
+      $ind_sy_emsres_ack_w  = $name{'sy.emsres.ack_w'}->{ind};
+      $ind_sy_emsres_dout   = $name{'sy.emsres.dout'}->{ind};
+      $ind_sy_chit          = $name{'sy.chit'}->{ind};
+
+    } else {
+      @val_last = @val_curr;
+      my $notfirst = scalar(@val_last) > 0;
+
+      $_ =~ s/^\s*//;
+      $_ =~ s/\s*$//;
+      @val_curr = split /\s+/,$_;
+      if (scalar(@val_curr) != scalar(@var_name)) {
+	printf "tmuconv-E: value list length mismatch, seen %d, expected %d\n",
+	  scalar(@val_curr), scalar(@var_name);
+	for (my $i=0; $i<scalar(@val_curr); $i++) {
+	  printf "%3d: %s\n", $i,$val_curr[$i];
+	}
+	next;
+      }
+
+      @val_curr_text = @val_curr  if exists $opts{dump} || exists $opts{cdump};
+
+      my $cyc_curr = int $val_curr[0];
+      my $cyc_str  = sprintf "%8d", $cyc_curr;
+
+      foreach my $ind (@var_dec) {
+	$val_curr[$ind] = int ($val_curr[$ind]);
+      }
+      foreach my $ind (@var_oct) {
+	$val_curr[$ind] = oct ($val_curr[$ind]);
+      }
+
+      my $id_str = "";
+      my $ru_str = "";
+      my $emres_str = "";
+      my $emtyp_str = "";
+      my $ibres_str = "";
+      my $ibreq_we  = 0;
+      my $ibreq_act = 0;
+
+      if (exists $opts{dump} || exists $opts{cdump}) {
+	my @val_change;
+	my $any_change;
+
+	for (my $i=1; $i<scalar(@val_curr); $i++) {
+	  my $change = (not $notfirst) || ($val_curr[$i] != $val_last[$i]);
+	  $val_change[$i] = $change;
+	  $any_change |= $change;
+	}
+
+	if (exists $opts{dump} || $any_change) {
+	  printf "cycle $cyc_str %s", "-" x 32;
+	  if ($notfirst && exists $opts{cdump}) {
+	    printf " (%d)",$cyc_curr-$change_cyc;
+	  }
+	  print "\n";
+
+	  for (my $i=1; $i<scalar(@val_curr); $i++) {
+	    my $oper = $val_change[$i] ? "<=" : " =";
+	    if (exists $opts{dump} || $val_change[$i]) {
+	      printf "   %-16s:%s %s %s\n", $var_name[$i], $var_type[$i],
+		                            $oper, $val_curr_text[$i];
+	    }
+	  }
+	  $change_cyc = $cyc_curr;
+	}
+      }
+#
+# handle t_id
+#   uses cycles with dp_ireg_we = '1'
+#
+      if (exists $opts{t_id} and $notfirst) {
+	if ($val_curr[$ind_dp_ireg_we_last]) {
+	  my $pc   = $val_curr[$ind_dp_pc] - 2;
+	  my $psw  = $val_curr[$ind_dp_psw];
+	  my $ireg = $val_curr[$ind_dp_ireg];
+	  my $code = code2mnemo($ireg);
+	  $id_str = sprintf "       %6.6o %6.6o %6.6o  %s",
+	                    $pc, $psw, $ireg, $code;
+	  $id_str .= " " x (20-length($code));
+	  $id_str .= sprintf " (%d)",$cyc_curr-$idec_cyc;
+	  $idec_cyc = $cyc_curr;
+	}
+      }
+#
+
+#    1706 ru  0 06   000002 000002 000002 000002 000002 000002 000002  ksp
+#    1694 id         002012 000340 010036  mov  r0,@(sp)+       (8)
+
+
+# handle t_ru
+#   uses cycles with dp_gpr_we = '1'
+#
+      if (exists $opts{t_ru}) {
+	if ($val_curr[$ind_dp_gpr_we]) {
+	  my $adst  = $val_curr[$ind_dp_gpr_adst];
+	  my $mode  = $val_curr[$ind_dp_gpr_mode];
+	  my $bytop = $val_curr[$ind_dp_gpr_bytop];
+	  my $psw   = $val_curr[$ind_dp_psw];
+	  my $dres  = $val_curr[$ind_dp_dres];
+	  my $rset  = $psw>>11 & 01;
+	  $ru_str  = sprintf "%o %o%o   %6.6o", $bytop, $rset, $adst, $dres;
+          $ru_str .= " ";
+	  if ($adst eq "7") {
+	    $ru_str .= "pc";
+	  } elsif ($adst eq "6") {
+	    $reg_sp[$mode] = sprintf "%6.6o",$dres;
+	    $ru_str .= $reg_sp[0];
+	    $ru_str .= ($mode == 0) ? "*" : " ";
+	    $ru_str .= $reg_sp[1];
+	    $ru_str .= ($mode == 1) ? "*" : " ";
+	    $ru_str .= $reg_sp[3];
+	    $ru_str .= ($mode == 3) ? "*" : " ";
+	    $ru_str .= " ksp" if $mode eq "0";
+	    $ru_str .= " ssp" if $mode eq "1";
+	    $ru_str .= " usp" if $mode eq "3";
+	  } else {
+	    my $rbase = ($rset==0) ? 0 : 6;
+	    $reg_05[$rbase+$adst] = sprintf "%6.6o",$dres;
+	    for (my $i=0; $i<6; $i++) {
+	      $ru_str .= $reg_05[$rbase+$i];
+	      $ru_str .= ($adst==$i) ? "*" : " ";
+	    }
+	    $ru_str .= sprintf " r%o%o", $rset, $adst;
+	  }
+	}
+      }
+#
+# handle t_em
+#   uses cycles with sy_emmreq_req = '1'
+#                    sy_emsres_ack_r = '1'
+#                    sy_emsres_ack_w = '1'
+#                    sy_emsreq_cancel = '1'
+#
+      if (exists $opts{t_em}) {
+	if ($val_curr[$ind_sy_emmreq_req]) {
+	  $emreq_cyc = $cyc_curr;
+	  $emreq_str = sprintf "%s %s %8.8o",
+	                 ($val_curr[$ind_sy_emmreq_we] ? "w" : "r"),
+	                 $val_curr[$ind_sy_emmreq_be],
+	                 $val_curr[$ind_sy_emmreq_addr];
+	  $emcurr_we   = $val_curr[$ind_sy_emmreq_we];
+	  $emcurr_addr = $val_curr[$ind_sy_emmreq_addr];
+	  if ($emcurr_we) {
+	    $emreq_str .= sprintf " %6.6o", $val_curr[$ind_sy_emmreq_din];
+	  } else {
+	    $emreq_str .= " " x 7;
+	  }
+	}
+	if ($val_curr[$ind_sy_emsres_ack_r] ||
+	    $val_curr[$ind_sy_emsres_ack_w] ||
+	    $val_curr[$ind_sy_emmreq_cancel]) {
+	  $emres_str = sprintf "%s%s%s%s",
+	    $val_curr[$ind_sy_emmreq_cancel],
+	    $val_curr[$ind_sy_emsres_ack_r],
+	    $val_curr[$ind_sy_emsres_ack_w],
+	    $val_curr[$ind_sy_chit];
+	  if ($val_curr[$ind_sy_emmreq_cancel]) {
+	    $emreq_str .= " cancel";
+	    $emcurr_we = undef;
+	  } else {
+	    if ($val_curr[$ind_sy_emsres_ack_r]) {
+	      $emreq_str .= sprintf " %6.6o", $val_curr[$ind_sy_emsres_dout];
+	    } else {
+	      $emreq_str .= " " x 7;
+	    }
+	    if (defined $emlast_we && $emcurr_we == $emlast_we) {
+	      if ($emcurr_we && $emcurr_addr == $emlast_addr-2) {
+		$emtyp_str = "SPUSH";
+	      } elsif ((not $emcurr_we) && $emcurr_addr == $emlast_addr+2 &&
+		      $emcurr_addr < 0400 && ($emcurr_addr % 04) == 02) {
+		$emtyp_str = "VFETCH";
+		$emtyp_str .= " 004 ill.inst"   if ($emlast_addr == 0004);
+		$emtyp_str .= " 010 res.inst"   if ($emlast_addr == 0010);
+		$emtyp_str .= " 014 BPT"        if ($emlast_addr == 0014);
+		$emtyp_str .= " 020 IOT"        if ($emlast_addr == 0020);
+		$emtyp_str .= " 030 EMT"        if ($emlast_addr == 0030);
+		$emtyp_str .= " 034 TRAP"       if ($emlast_addr == 0034);
+		$emtyp_str .= " 060 DL11-TTI"   if ($emlast_addr == 0060);
+		$emtyp_str .= " 064 DL11-TTO"   if ($emlast_addr == 0064);
+		$emtyp_str .= " 070 PC11-PTR"   if ($emlast_addr == 0070);
+		$emtyp_str .= " 074 PC11-PTP"   if ($emlast_addr == 0074);
+		$emtyp_str .= " 100 KW11-L"     if ($emlast_addr == 0100);
+		$emtyp_str .= " 104 KW11-P"     if ($emlast_addr == 0104);
+		$emtyp_str .= " 160 RL11"       if ($emlast_addr == 0160);
+		$emtyp_str .= " 200 LP11"       if ($emlast_addr == 0200);
+		$emtyp_str .= " 220 RK11"       if ($emlast_addr == 0220);
+		$emtyp_str .= " 224 TM11"       if ($emlast_addr == 0224);
+		$emtyp_str .= " 240 PIRQ"       if ($emlast_addr == 0240);
+		$emtyp_str .= " 244 FPP exp"    if ($emlast_addr == 0244);
+		$emtyp_str .= " 250 MMU trap"   if ($emlast_addr == 0250);
+		$emtyp_str .= " 260 IIST"       if ($emlast_addr == 0260);
+		$emtyp_str .= " 300 DL11-2-TTI" if ($emlast_addr == 0300);
+		$emtyp_str .= " 304 DL11-2-TTO" if ($emlast_addr == 0304);
+	      }
+	    }
+	  }
+	  $emlast_we   = $emcurr_we;
+	  $emlast_addr = $emcurr_addr;
+	}
+      }
+#
+# handle t_ib
+#   uses cycles with sy_ibmreq_re = '1' or sy_ibmreq_we = '1'
+#                    sy_ibsres_ack = '1'
+#                    vm_ibsres_busy '1' -> '0' transition
+#
+      if (exists $opts{t_ib}) {
+	if ($val_curr[$ind_vm_ibmreq_re] || $val_curr[$ind_vm_ibmreq_we]) {
+	  my $addr_str = sprintf "%6.6o", $val_curr[$ind_vm_ibmreq_addr];
+	  $ibreq_cyc = $cyc_curr;
+	  $ibreq_typ = sprintf "%s%s",
+	                 ($val_curr[$ind_vm_ibmreq_cacc] ? "c" : "-"),
+	                 ($val_curr[$ind_vm_ibmreq_racc] ? "r" : "-");
+	  $ibreq_str = sprintf "%s%s%s%s   %s",
+	                 ($val_curr[$ind_vm_ibmreq_we]  ? "w" : "r"),
+                         ($val_curr[$ind_vm_ibmreq_rmw] ? "m" : " "),
+	                 $val_curr[$ind_vm_ibmreq_be1],
+	                 $val_curr[$ind_vm_ibmreq_be0],
+	                 $addr_str;
+	  $ibreq_we  = $val_curr[$ind_vm_ibmreq_we];
+	  $ibreq_act = 1;
+	  if ($ibreq_we) {
+	    $ibreq_str .= sprintf " %6.6o", $val_curr[$ind_vm_ibmreq_din];
+	  } else {
+	    $ibreq_str .= " " x 7;
+	  }
+	  $ibreq_nam = $pdp11_regs{$addr_str};
+	  $ibreq_nam = "" if not defined $ibreq_nam;
+	}
+
+	if ($val_curr[$ind_vm_ibsres_ack]) {
+	  $ibreq_act = 0;
+	  $ibres_str .= sprintf "   %s", $val_curr[$ind_vm_ibsres_ack];
+	  if (not $ibreq_we) {
+	    $ibreq_str .= sprintf " %6.6o", $val_curr[$ind_vm_ibsres_dout];
+	  } else {
+	    $ibreq_str .= " " x 7;
+	  }
+	}
+
+	if ($ibreq_act && $val_curr[$ind_vm_ibsres_busy]==0) {
+	  $ibres_str .= "no ACK, no BUSY";
+	  $ibreq_act = 0;
+	}
+      }
+
+      print "$cyc_str id    $id_str\n"     if $id_str;
+      print "$cyc_str ru    $ru_str\n"     if $ru_str;
+      if ($emres_str) {
+	printf "$cyc_str em    $emreq_str  $emres_str (%d) $emtyp_str\n",
+	  $cyc_curr-$emreq_cyc;
+      }
+      if ($ibres_str) {
+	printf "$cyc_str ib %s $ibreq_str  $ibres_str (%d) $ibreq_nam\n",
+	  $ibreq_typ, $cyc_curr-$ibreq_cyc;
+      }
+    }
+  }
+
+  close IFILE;
+}
+
+#-------------------------------------------------------------------------------
+
+sub code2mnemo {
+  my ($code) = @_;
+
+  foreach my $ele (@pdp11_opcode_tbl) {
+    if (($code & (~($ele->{mask})) ) == $ele->{code}) {
+      my $name = $ele->{name};
+      my $type = $ele->{type};
+      my $str  = $name;
+      if ($type eq "0arg") {
+	return $name;
+
+      } elsif ($type eq "1arg" or $type eq "1fpp") {
+	my $dst = $code & 077;
+	my $dst_str = regmod($dst);
+	return "$name $dst_str";
+
+      } elsif ($type eq "2arg") {
+	my $src = ($code>>6) & 077;
+	my $dst = $code & 077;
+	my $src_str = regmod($src);
+	my $dst_str = regmod($dst);
+	return "$name $src_str,$dst_str";
+
+      } elsif ($type eq "rdst") {
+	my $reg = ($code>>6) & 07;
+	my $src = $code & 077;
+	my $src_str = regmod($src);
+	return "$name $src_str,r$reg";
+
+      } elsif ($type eq "1reg") {
+	my $reg = $code & 07;
+	my $reg_str = "r$reg";
+	$reg_str = "sp" if $reg == 6;
+	$reg_str = "pc" if $reg == 7;
+	return "$name $reg_str";
+
+      } elsif ($type eq "br")   {
+	my $off  = $code & 0177;
+	my $sign = "+";
+	if ($code & 0200) {
+	  $off  = -(((~$off) & 0177)+1);
+	  $sign = "-";
+	}
+	return sprintf "$name .%s%d.", $sign, abs(2*$off);
+
+      } elsif ($type eq "sob")  {
+	my $reg = ($code>>6) & 07;
+	my $off = $code & 077;
+	return sprintf "$name r%d,.-%d.", $reg, 2*$off;
+
+      } elsif ($type eq "trap") {
+	my $off = $code & 0377;
+	return sprintf "$name %3.3o", $off;
+
+      } elsif ($type eq "spl")  {
+	my $off = $code & 07;
+	return sprintf "$name %d", $off;
+
+      } elsif ($type eq "ccop")  {
+	my $cc = $code & 017;
+	return "nop" if ($cc == 0);
+	return "ccc" if ($code == 0257);
+	return "scc" if ($code == 0277);
+	my $str = "";
+	my $del = "";
+	if ($code & 010) { $str .= $del . $name . "n", $del = "+" }
+	if ($code & 004) { $str .= $del . $name . "z", $del = "+" }
+	if ($code & 002) { $str .= $del . $name . "v", $del = "+" }
+	if ($code & 001) { $str .= $del . $name . "c", $del = "+" }
+	return $str;
+
+      } elsif ($type eq "jsr")  {
+	my $reg = ($code>>6) & 07;
+	my $dst = $code & 077;
+	my $dst_str = regmod($dst);
+	return "$name r$reg,$dst_str";
+
+      } elsif ($type eq "mark") {
+	my $off = $code & 077;
+	return sprintf "$name %3.3o", $off;
+
+      } elsif ($type eq "rfpp") {
+	my $reg = ($code>>6) & 03;
+	my $dst = $code & 077;
+	my $dst_str = regmod($dst,"f");
+	return "$name f$reg,$dst_str";
+
+      } else {
+	return "?type?";
+      }
+    }
+  }
+  return "=inval=";
+}
+
+#-------------------------------------------------------------------------------
+sub regmod {
+  my ($regmod,$pref) = @_;
+  my $mod = ($regmod>>3) & 07;
+  my $reg = $regmod & 07;
+
+  $pref = "r" if not defined $pref or $reg>5;
+
+  my $reg_str = "r$reg";
+  $reg_str = "sp" if $reg == 6;
+  $reg_str = "pc" if $reg == 7;
+
+  if ($mod == 0) {		        # mode 0:    Rx  { Fx for float }
+    $reg_str = "f$reg" if defined $pref && $pref eq "f" && $reg<=5;
+    return $reg_str;
+  } elsif ($mod == 1) {	  	        # mode 1:    (Rx)
+    return "($reg_str)";
+  } elsif ($mod == 2 || $mod == 3) {    # mode 2/3:  (Rx)+   @(Rx)+
+    my $ind = ($mod == 3) ? "@" : "";
+    if ($reg != 7) {		          # if reg != pc
+      return "$ind($reg_str)+";
+    } else {			          # if reg == pc
+      my $str = sprintf "$ind#nnn";     # 27 -> #nnn;  37 -> @#nnn
+      return $str;
+    }
+  } elsif ($mod == 4 || $mod == 5) {    # mode 4/5:  -(Rx)   @-(Rx)
+    my $ind = ($mod == 5) ? "@" : "";
+    return "$ind-($reg_str)";
+  } elsif ($mod == 6 || $mod == 7) {    # mode 6/7:  nn(Rx)  @nn(Rx)
+    my $ind = ($mod == 7) ? "@" : "";
+    return "${ind}nnn($reg_str)";
+  }
+}
+
+#-------------------------------------------------------------------------------
+
+sub print_help {
+  print "usage: tmuconf <command> file\n";
+  print "  --help           this message\n";
+  print "  --dump           dump all information\n";
+  print "  --cdump          dump only changes relative to prev cycle\n";
+  print "  --t_id           trace instruction decodes\n";
+  print "  --t_ru           trace register updates\n";
+  print "  --t_em           trace em transactions\n";
+  print "  --t_ib           trace ib transactions\n";
+}

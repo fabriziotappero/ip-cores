@@ -1,0 +1,100 @@
+# $Id: w11a_known_issues.txt 589 2014-08-30 12:43:16Z mueller $
+
+Summary of known issues for w11a CPU and systems
+
+  Table of content:
+  1. Known differences between w11a and KB11-C (11/70)
+  2. Known limitations
+  3. Known bugs
+
+
+1. Known differences between w11a and KB11-C (11/70) ----------------------
+
+   - the SPL instruction in the 11/70 always fetched the next instruction
+     regardless of pending device or even console interrupts. This is known
+     as the 'spl bug', see
+       http://minnie.tuhs.org/pipermail/pups/2006-September/001082.html
+       http://minnie.tuhs.org/pipermail/pups/2006-October/001083.html
+     In the w11a the SPL has 11/70 semantics in kernel mode, thus next no 
+     traps or interrupts, but in supervisor and user mode SPL really acts as 
+     nop, so traps and interrupts are taken as for all other instructions. 
+     --> The w11a isn't bug compatible with the 11/70.
+
+   - A 'red stack violation' looses PSW, a 0 is pushed in stack.
+
+   - The 'instruction complete flag' in SSR0 is not implemented, it is 
+     permanently '0', SSR2 will not record vector addresses in case of a
+     vector fetch fault. Recovery of vector fetch faults is therefore not
+     possible, but only 11/45 and 11/70 supported this, no OS used that, and
+     it's even unclear whether it can be practically used.
+
+   - the 11/70 maps the 18 bit UNIBUS address space into the upper part of
+     the 22bit extended mode address space. With UNIBUS mapping enabled, this
+     allowed to access via 17000000:17757777 the memory exactly as a UNIBUS
+     device would see it. The w11a doesn't implement this remapping, an access
+     in the range 17000000:17757777 causes a NXM fault.
+
+   All four points relate to very 11/70 specific behaviour, no operating system
+   depends on them, therefore they are considered acceptable implementation
+   differences
+
+2. Known limitations ------------------------------------------------------
+
+   - some programs use timing loops based on the execution speed of the
+     original processors. This can lead to spurious timeouts, especially
+     in old test programs.
+     --> a 'CPU throttle mechanism' will be added in a future version to 
+         circumvent this for some old test codes.
+
+   - the emulated I/O can lead to apparently slow device reaction times,
+     especially when the server runs as normal user process. This can lead
+     to timeout, again mostly in test programs.
+     --> a 'watch dog' mechanism will be added in a future version which
+         suspends the CPU when the server doesn't respond fast enough.
+
+3. Known bugs -------------------------------------------------------------
+
+   - TCK-036 pri=L: RK11: hardware poll not working
+     The RK11/RK05 hardware poll logic is probably no reflecting the
+     behaviour of the real drive.
+
+   - TCK-035 pri=L: RK11: no proper NXM check in 18bit systems
+     No NXM error is generated when a RK11 read or write reaches the top 
+     of memory in 18 bit addressing. Crash dump routines use this to detect
+     end-of-memory.
+
+   - TCK-032 pri=M: RK11: polling on DRY in RKDS doesn't work
+     DRY in RKDS goes 1->0 immediately with RDY in RKCS when a function is
+     started. In a real RK05 drive DRY went to 0 after a short delay. Some
+     basic hardware tests are sensitive to this.
+
+   - TCK-030 pri=L: CPU: SSR0 trap bit set when access aborted
+     The 'trap bit' (bit 12: 10000) is set even when the access is aborted.
+
+   - TCK-029 pri=L: CPU: AIB A bit set for all accesses
+     The MMU trap condition isn't properly decoded
+   
+   - TCK-028 pri=H: CPU: interrupt and trap precedence
+     In case of multiple trap, fault, or interrupt conditions the precedence
+     isn't implemented correctly.
+
+   - TCK-026 pri=L: CPU: src+dst delta added in ssr1 when same register
+     The ssr1 content after a fault is logically correct in w11a, but
+     different from 11/70.
+
+   - TCK-025 pri=L: CPU: no mmu trap when bit9 clearing instruction traps
+     In the 11/70 the instruction which affects mmu trap can cause a trap
+     already, in w11a only the next instruction will trap.
+
+   - TCK-014 pri=M: RK11: write protect action too slow
+     Some simple RK11 drivers, especially in tests, don't poll for completion
+     of a write protect command. Due to the emulated I/O this can cause errors.
+
+   - TCK-007 pri=H: CPU: no trap-4 after emt on odd stack
+   - TCK-006 pri=H: CPU: no yel-stack trap after jsr pc,nnn(pc)
+   - TCK-004 pri=H: CPU: yel-stack by interrupt causes loop-up
+   - TCK-003 pri=H: CPU: yel-stack by iot pushes two stack frames
+     All four issues are caused by an incorrect implementation of the trap
+     logic, which leads to a different precendence when multiple trap, fault,
+     or interrupt occur.
+

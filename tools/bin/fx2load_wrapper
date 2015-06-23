@@ -1,0 +1,262 @@
+#!/usr/bin/perl -w
+# $Id: fx2load_wrapper 604 2014-11-16 22:33:09Z mueller $
+#
+# Copyright 2011-2014 by Walter F.J. Mueller <W.F.J.Mueller@gsi.de>
+#
+# This program is free software; you may redistribute and/or modify it under
+# the terms of the GNU General Public License as published by the Free
+# Software Foundation, either version 2, or at your option any later version.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY, without even the implied warranty of MERCHANTABILITY
+# or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+# for complete details.
+#
+#  Revision History:
+# Date         Rev Version  Comment
+# 2014-08-10   581   1.1    use _ic instead of _as as default firmware
+# 2012-02-11   457   1.0.1  use RETRO_FX2_VID/PID; check iProduct string
+# 2011-12-29   446   1.0    Initial version
+#
+
+use 5.005;                                  # require Perl 5.005 or higher
+use strict;                                 # require strict checking
+use FileHandle;
+use Time::HiRes qw(usleep);
+
+use Getopt::Long;
+
+my %opts = ();
+
+GetOptions(\%opts, "help", "dry_run", "force", "cycfx2prog",
+           "board=s", "file=s", "ihx_path=s")
+  or exit 1;
+
+#
+# setup defaults for board and file
+#
+if (not defined $opts{board}) {
+  $opts{board} = "nexys2";
+}
+if (not defined $opts{file}) {
+  $opts{file} = "nexys2_jtag_2fifo_ic.ihx" if $opts{board} eq "nexys2";
+  $opts{file} = "nexys3_jtag_2fifo_ic.ihx" if $opts{board} eq "nexys3";
+  $opts{file} = "nexys3_jtag_2fifo_ic.ihx" if $opts{board} eq "atlys";
+}
+if (not defined $opts{ihx_path}) {
+  unless (exists $ENV{RETROBASE}) {
+    print STDERR "fx2load_wrapper-F: RETROBASE not set\n";
+    exit 1;
+  }
+  $opts{ihx_path} = $ENV{RETROBASE} . "/tools/fx2/bin";
+}
+
+sub print_help;
+sub run_command;
+sub get_usb_id;
+sub get_usb_prodinfo;
+
+autoflush STDOUT 1 if (-p STDOUT);          # autoflush if output into pipe
+
+if (exists $opts{help}) {
+  print_help;
+  exit 0;
+}
+
+my $board = $opts{board};
+my $ifile = $opts{file};
+
+# setup digilent default usb id's
+
+my $usbid_digi;
+
+if    ($board eq "nexys2") { $usbid_digi = "1443:0005";}
+elsif ($board eq "nexys3") { $usbid_digi = "1443:0007";}
+elsif ($board eq "atlys")  { $usbid_digi = "1443:0007";}
+else {
+  print STDERR
+    "fx2load_wrapper-E: only nexys2,3/atlys supported\n";
+  exit 1;
+}
+
+# handle USB VID/PID of board
+#  taken from RETRO_FX2_VID and RETRO_FX2_PID environment variables
+#  in the retro11 project the default is:
+#    VID: 16c0  (VOTI)
+#    PID: 03ef  (VOTI free for internal lab use 1007)
+#
+#   !! Important Note on Usage of this USB VID/PID !!
+#   This VID/PID is owned by VOTI, a small dutch company. Usage is granted
+#   for 'internal lab use only' by VOTI under the conditions:
+#     - the gadgets in which you use those PIDs do not leave your desk
+#     - you won't complain to VOTI if you get in trouble with duplicate PIDs
+#       (for instance because someone else did not follow the previous rule).
+#   See also http://www.voti.nl/pids/pidfaq.html
+#
+
+my $fx2_vid = $ENV{RETRO_FX2_VID};
+my $fx2_pid = $ENV{RETRO_FX2_PID};
+$fx2_vid = "16c0" unless defined $fx2_vid;
+$fx2_pid = "03ef" unless defined $fx2_pid;
+
+my $usbid_retro = "$fx2_vid:$fx2_pid";
+my $n_digi  = 0;
+my $n_retro = 0;
+
+my $fx2_bus;
+my $fx2_dev;
+my $fx2_id;
+my $fx2_prodinfo;
+
+($n_digi, $n_retro, $fx2_bus, $fx2_dev, $fx2_id) = get_usb_id();
+
+if ($n_digi+$n_retro == 0) {
+  print STDERR "fx2load_wrapper-E no board detected\n";
+  exit 1;
+}
+if ($n_digi+$n_retro > 1) {
+  print STDERR "fx2load_wrapper-E more than one board detected\n";
+  exit 1;
+}
+
+if ($n_retro > 0) {
+  $fx2_prodinfo = get_usb_prodinfo($fx2_id);
+}
+
+if ($n_retro == 1 &&
+    $opts{file} eq $fx2_prodinfo . ".ihx" &&
+    (not defined $opts{force}) ) {
+  print "fx2load_wrapper-I board already configured with $fx2_prodinfo.ihx\n";
+  exit 0;
+}
+
+my $full_file = $opts{ihx_path} . "/" . $opts{file};
+unless (-r $full_file) {
+  print STDERR "fx2load_wrapper-E: ihx file \'$full_file\' not found\n";
+  exit 1;
+}
+
+my $fx2_path = "/dev/bus/usb/$fx2_bus/$fx2_dev";
+
+unless ( -r $fx2_path && -w $fx2_path)  {
+  print STDERR 
+    "fx2load_wrapper-E: usb device \'$fx2_path\' not user accessible\n";
+  exit 1;
+}
+
+my $cmd;
+
+if ($opts{cycfx2prog}) {
+  my $proc = `which cycfx2prog`;
+  chomp $proc;
+  unless (-x $proc) {
+    print STDERR "fx2load_wrapper-E: cycfx2prog not found or executable\n";
+    exit 1;
+  }
+  $cmd = "cycfx2prog -id=$fx2_id prg:$full_file run";
+
+} else {
+  my $proc = `which fxload`;
+  chomp $proc;
+  $proc = "/sbin/fxload" if ($proc eq "");
+  unless (-x $proc) {
+    print STDERR "fx2load_wrapper-E: fxload not found or executable\n";
+    exit 1;
+  }
+  $cmd = "$proc -t fx2 -I $full_file -D $fx2_path";
+}
+
+my $rc = 0;
+if (defined $opts{dry_run}) {
+  print "$cmd\n";
+} else {
+  print "fx2load_wrapper-I: loading $opts{file}\n";
+  $rc = run_command($cmd);
+  print "fx2load_wrapper-I: loaded $opts{file}\n";
+  usleep(1500000);
+}
+
+exit $rc;
+
+#-------------------------------------------------------------------------------
+
+sub run_command {
+
+  my ($cmd) = @_;
+
+  my $wrc = system "/bin/sh", "-c", "$cmd";
+
+  my $rc  = 0;
+  if ($wrc != 0) {
+    my $rc = int($wrc/256);
+    if ($rc == 0) {
+      my $sig = $wrc % 256;
+      print STDERR "fx2load_wrapper-E \'$cmd\' aborted by signal $sig\n";
+      $rc = 1;
+    } else {
+      print STDERR "fx2load_wrapper-E \'$cmd\' failed (rc=$rc) $?\n";
+    }
+  }
+
+  return $rc;
+}
+
+#-------------------------------------------------------------------------------
+
+sub print_help {
+  print "usage: fx2load_wrapper [--board=b] [--file=f] [OPTIONS]\n";
+  print "  --help           this message\n";
+  print "  --dry_run        print command only\n";
+  print "  --force          reload even when proper firmware detected\n";
+  print "  --cycfx2prog     use cycfx2prog instead of fxload\n";
+  print "  --board=b        type of board (default nexys2)\n";
+  print "  --file=f         ihx file to load (default 2fifo_as)\n";
+  print "  --ihx_path=p     path to ihx files\n";
+}
+
+#-------------------------------------------------------------------------------
+
+sub get_usb_id {
+  my @lsusb = `lsusb`;
+
+  my $n_digi  = 0;
+  my $n_retro = 0;
+  my $fx2_bus;
+  my $fx2_dev;
+  my $fx2_id;
+
+  foreach (@lsusb) {
+    if (/^Bus\s+(\d+)\s+Device\s+(\d+):\s+ID\s+([:0-9a-f]+)\s+(.*)$/) {
+      my ($bus,$dev,$id,$text) = ($1,$2,$3,$4);
+      my $match = 0;
+      if ($id eq $usbid_digi) {
+        $n_digi += 1;
+        $match = 1;
+      } elsif ($id eq $usbid_retro) {
+        $n_retro += 1;
+        $match = 1;
+      }
+      if ($match) {
+        $fx2_bus = $bus;
+        $fx2_dev = $dev;
+        $fx2_id  = $id;
+      }
+    }
+  }
+
+  return ($n_digi, $n_retro, $fx2_bus, $fx2_dev, $fx2_id);
+
+}
+
+#-------------------------------------------------------------------------------
+
+sub get_usb_prodinfo {
+  my ($fx2_id) = @_;
+  my @lsusb = `lsusb -d $fx2_id -v`;
+  foreach (@lsusb) {
+    if (/^\s*iProduct\s*\d*\s*(.*)$/) {
+      return $1;
+    }
+  }
+  return "";
+}

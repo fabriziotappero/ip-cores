@@ -1,0 +1,298 @@
+#!/usr/bin/perl -w
+# $Id: asm-11_expect 501 2013-03-30 13:53:39Z mueller $
+#
+# Copyright 2013- by Walter F.J. Mueller <W.F.J.Mueller@gsi.de>
+#
+# This program is free software; you may redistribute and/or modify it under
+# the terms of the GNU General Public License as published by the Free
+# Software Foundation, either version 2, or at your option any later version.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY, without even the implied warranty of MERCHANTABILITY
+# or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+# for complete details.
+#
+#  Revision History:
+# Date         Rev Version  Comment
+# 2013-03-29   500   1.0    Initial version
+# 2013-03-24   499   0.1    First draft
+#
+
+use 5.10.0;                                 # require Perl 5.10 or higher
+use strict;                                 # require strict checking
+use FileHandle;
+
+use Getopt::Long;
+
+my %opts = ();
+
+GetOptions(\%opts, "help",
+                   "tline", "tcheck"
+          )
+  or exit 1;
+
+sub do_help;
+sub print_help;
+
+my $errcnt;                                 # total error count
+
+autoflush STDOUT 1 if (-p STDOUT);          # autoflush if output into pipe
+
+if (exists $opts{help}) {
+  print_help;
+  exit 0;
+}
+
+if (scalar(@ARGV) == 0) {
+  print STDERR "asm-11_expect-F: no input files specified, quiting..\n";
+  print_help;
+  exit 1;
+}
+
+foreach my $fname (@ARGV) {
+  do_file($fname);
+}
+
+exit 1 if $errcnt > 0;
+exit 0;
+
+#-------------------------------------------------------------------------------
+#
+#; Input file list:
+#    1    6                              ; comment
+#    1   17 000000                       zero:
+#    1   23 002000 000101                w0:     .word   101
+#    1   17 001011 377                           .byte   ^c0
+#    1   70 001206 046374 001234 001234          bic     1234(r3),@1234(r4)
+#    1   24 001036 067527 066162 020544          .word   "Wo,"rl,"d!,0
+#                  000000
+#EEfnolinno dot... word1. word2. word2.
+#
+#          1         2         3
+#0123456789012345678901234567890123456789
+#
+
+sub do_file {
+  my ($fname) = @_;
+  my $fh;
+  if ($fname eq "-") {
+    $fh = *STDIN;
+  } else {
+    if (not -r $fname) {
+      print STDERR "asm-11_expect-F: '$fname' not found or readable. EXIT\n";
+      exit 1;
+    }
+    $fh = new FileHandle;
+    $fh->open($fname) or die "failed to open '$fname'";
+  }
+
+  my @errmsg;                               # error message list
+  my $echeck = 0;
+  my $c_string;
+  my $c_pend;
+
+  while (<$fh>) {
+    chomp;
+    next if m/^;/;
+
+    print "$_\n" if $opts{tline};
+
+    my $line = $_;
+    my $rest = $_;
+    my $err;
+    if (substr($rest,2,1) =~ m/^[A-Z]$/) {
+      $rest =~ m/^([A-Z]+)$/;
+      $err  = $1;
+      $rest = $';
+    } else {
+      $err  = substr($rest,0,2);
+      $err  =~ s/\s//g;
+      $rest = substr($rest,2);
+    }
+
+    my $fileno;
+    my $lineno;
+
+    if (substr($rest,0,8) =~ m/^\s+(\d+)\s+(\d+)$/) {
+      $fileno = int($1);
+      $lineno = int($2);
+      $rest = substr($rest,8);
+    } else {
+      next;
+    }
+
+    my $dot;
+    if (substr($rest,0,7) eq '       ') {
+      $rest = substr($rest,7);
+    } elsif (substr($rest,0,7) =~ m/^\s([0-7]{6})/) {
+      $dot = oct($1);
+      $rest = substr($rest,7);
+    } else {
+      next;
+    }
+
+    my @dat;
+    my $isbyte;
+
+    # words ?
+    if ($rest =~ m/^(\s([0-7]{6})){1,3}/) {
+      for (my $i=0; $i<3; $i++) {
+        last unless substr($rest,1,6) =~ m/[0-7]{6}/;
+        push @dat, oct(substr($rest,1,6));
+        $rest = substr($rest,7);
+      }
+    # bytes ?
+    } elsif ($rest =~ m/^(\s([0-7]{3})){1,5}/) {
+      for (my $i=0; $i<5; $i++) {
+        last unless substr($rest,1,3) =~ m/[0-7]{3}/;
+        $isbyte = 1;
+        push @dat, oct(substr($rest,1,3));
+        $rest = substr($rest,4);
+      }
+      $rest = substr($rest,1);
+    }
+
+    # look for expect condition (unless one is pending)
+    if ($c_pend) {
+      $c_pend = undef;
+    } else {
+      if ($rest =~ m/;;!!(.*)$/) {
+        $c_string = $1;
+        if ($rest =~ m/^\s*;;!!/) {
+          $c_pend = 1;
+          next;
+        }
+      }
+    }
+
+    # no expect condition defined: look for unexpected etags
+    unless (defined $c_string) {
+      if ($err ne '') {
+        push @errmsg,
+          {msg  => sprintf("unexpected error '%s'", $err),
+           line => $line};
+      }
+      next;
+    }
+
+    # expect condition defined: parse it
+    my $c_err;
+    my $c_dot;
+    my @c_dat;
+
+    my $c_rest = $c_string;
+    if ($c_rest =~ m/^\s*([A-Z]+)/) {
+      $c_err  = $1;
+      $c_rest = $';
+    }
+    if ($c_rest =~ m/^\s*([0-7]{6}:)/) {
+      $c_dot  = oct($1);
+      $c_rest = $';
+    }
+    while (length($c_rest)) {
+      last unless $c_rest =~ m/^\s*([0-7]+)/;
+      push @c_dat, oct($1);
+      $c_rest = $';
+    }
+
+    unless ($c_rest =~ m/^\s*$/) {
+      push @errmsg,
+        {msg  => sprintf("can't parse expect, rest='%s'", $c_rest),
+         line => ';;!! ' . $c_string};
+      $c_string = undef;
+      next;
+    }
+
+    if ($opts{tcheck}) {
+      print  "exp: ";
+      printf " err=%s",    $c_err if defined $c_err;
+      printf " dot=%6.6o", $c_dot if defined $c_dot;
+      if (scalar(@c_dat)) {
+        print " dat=";
+        foreach (@c_dat) {
+          printf "%6.6o ", $_;
+        }
+      }
+      print "\n";
+    }
+
+    if (defined $c_err) {
+      if ($c_err ne $err) {
+        push @errmsg,
+          {msg  => sprintf("error mismatch: found='%s', expect='%s'",
+                           $err, $c_err),
+           line => $line};
+      }
+    }
+
+    if (defined $c_dot) {
+      if (defined $dot) {
+        if ($c_dot != $dot) {
+          push @errmsg,
+            {msg  => sprintf(". mismatch: found=%6.6o, expect=%6.6o",
+                             $dot, $c_dot),
+             line => $line};
+        }
+      } else {
+        push @errmsg,
+          {msg  => sprintf(". check miss: nothing found, expect=%6.6o",
+                           $c_dot),
+           line => $line};
+      }
+    }
+
+    if (scalar(@c_dat)) {
+      my $nc = scalar(@c_dat);
+      $nc = scalar(@dat) if $nc < scalar(@dat);
+      for (my $i=0; $i<$nc; $i++) {
+        if (defined $c_dat[$i] && defined $dat[$i]) {
+          if ($c_dat[$i] != $dat[$i]) {
+            push @errmsg,
+              {msg  => sprintf("data %d mismatch: found=%6.6o, expect=%6.6o",
+                               $i, $dat[$i], $c_dat[$i]),
+               line => $line};
+          }
+        } elsif (defined $c_dat[$i] && ! defined $dat[$i]) {
+          push @errmsg,
+            {msg  => sprintf("data %d mismatch: nothing found, expected=%6.6o",
+                             $i, $c_dat[$i]),
+             line => $line};
+        } elsif (! defined $c_dat[$i] && defined $dat[$i]) {
+          push @errmsg,
+            {msg  => sprintf("data %d mismatch: found=%6.6o, nothing expected",
+                             $i, $dat[$i]),
+             line => $line};
+        }
+      }
+    }
+
+    # trace expects
+    if ($opts{tcheck} && $echeck != scalar(@errmsg)) {
+      $echeck = scalar(@errmsg);
+      printf "FAIL: %s\n", $errmsg[-1]{msg};
+   }
+
+    # invalidate expect condition
+    $c_string = undef;
+  }
+
+  # done with file
+  my $verdict = scalar(@errmsg) ? 'FAILED' : 'OK';
+  printf "asm-11_expect: %s %s\n", $fname, $verdict;
+  foreach (@errmsg) {
+    printf "  FAIL: %s\n    in: %s\n", $$_{msg}, $$_{line};
+  }
+
+  $errcnt += scalar(@errmsg);
+
+  return;
+}
+
+#-------------------------------------------------------------------------------
+
+sub print_help {
+  print "usage: asm-11_expect <file>\n";
+  print "  --tline       trace input lines\n";
+  print "  --tcheck      trace expect checks\n";
+  return;
+}

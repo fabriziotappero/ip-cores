@@ -1,0 +1,106 @@
+#!/usr/bin/perl -w
+# $Id: xst_count_bels 314 2010-07-09 17:38:41Z mueller $
+#
+# Copyright 2007-2010 by Walter F.J. Mueller <W.F.J.Mueller@gsi.de>
+#
+# This program is free software; you may redistribute and/or modify it under
+# the terms of the GNU General Public License as published by the Free
+# Software Foundation, either version 2, or at your option any later version.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY, without even the implied warranty of MERCHANTABILITY
+# or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+# for complete details.
+#
+#  Revision History: 
+# Date         Rev Version  Comment
+# 2010-04-26   284   1.2.1  add error check for GetOptions
+# 2007-10-28    93   1.2    added -xsts (_ssim based device summary)
+# 2007-06-30    62   1.1    fixed parser, now all bels counted
+# 2007-06-16    57   1.0    Initial version
+
+use 5.005;                                  # require Perl 5.005 or higher
+use strict;                                 # require strict checking
+
+use Getopt::Long;
+
+sub do_file;
+
+my %opts = ();
+
+GetOptions(\%opts, "xstl", "xsts")
+  or die "bad options";
+
+my $do_xstl  = defined $opts{xstl};
+my $do_xsts  = defined $opts{xsts};
+my $do_plain = not ($do_xstl or $do_xsts);
+
+foreach (@ARGV) { do_file($_); }
+
+#-------------------------------------------------------------------------------
+
+sub do_file {
+  my ($filename) = @_;
+  my %bels;
+  my $cur_bel;
+
+  open (IFILE, $filename)    or die "can't open for read $filename";
+  while(<IFILE>) {
+    chomp;
+    if (m{^\s*[a-zA-Z0-9_]+\s*:\s*([a-zA-Z0-9_]+)\s*$}) {
+      $cur_bel = $1;
+    } elsif (m{\s*(generic|port)\s+map\s*\(\s*}) {
+      $bels{$cur_bel} += 1 if $cur_bel;
+    } else {
+      $cur_bel = "";
+    }
+  }
+  close (IFILE);
+
+  if ($do_plain) {
+    foreach (sort keys %bels) {
+      printf "%16s : %5d\n", $_, $bels{$_};
+    }
+  }
+
+  if ($do_xsts) {
+    my $n_flop = 0;
+    my $n_luts = 0;
+    my $n_luts_log = 0;
+    my $n_luts_ram = 0;
+    my $n_bram = 0;
+    my $n_mult = 0;
+    my $n_iob  = 0;
+
+    foreach (sort keys %bels) {
+      if (/^FD/) {
+	$n_flop += $bels{$_};
+      } elsif (/^LUT/) {
+	$n_luts += $bels{$_};
+	$n_luts_log += $bels{$_};
+      } elsif (/^RAMB/) {
+	$n_bram += $bels{$_};
+      } elsif (/^RAM\d*X.*D$/) {
+	$n_luts += 2 * $bels{$_};
+	$n_luts_ram += 2 * $bels{$_};
+      } elsif (/^RAM\d*X.*S$/) {
+	$n_luts += $bels{$_};
+	$n_luts_ram += $bels{$_};
+      } elsif (/^[IO]BUF$/) {
+        $n_iob += $bels{$_};
+      } elsif (/^MULT/) {
+        $n_mult += $bels{$_};
+      }
+    }
+    
+    print  "Device utilization summary (_ssim BELS scan):\n";
+    print  "---------------------------------------------\n";
+    printf " Number of Flip Flops:      %5d\n", $n_flop;
+    printf " Number of LUTs:            %5d\n", $n_luts;
+    printf "    Number used as logic:   %5d\n", $n_luts_log;
+    printf "    Number used as RAMs:    %5d\n", $n_luts_ram;
+    printf " Number of bonded IOBs:     %5d\n", $n_iob;
+    printf " Number of BRAMs:           %5d\n", $n_bram;
+    printf " Number of MULT18X18s:      %5d\n", $n_mult;
+  }
+}

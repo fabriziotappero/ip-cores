@@ -1,0 +1,163 @@
+.\"  -*- nroff -*-
+.\"  $Id: create_disk.1 686 2015-06-04 21:08:08Z mueller $
+.\"
+.\" Copyright 2013-2015 by Walter F.J. Mueller <W.F.J.Mueller@gsi.de>
+.\" 
+.\" ------------------------------------------------------------------
+.
+.TH CREATE_DISK 1 2015-06-04 "Retro Project" "Retro Project Manual"
+.\" ------------------------------------------------------------------
+.SH NAME
+create_disk \- create disk container file for ti_w11
+.\" ------------------------------------------------------------------
+.SH SYNOPSIS
+.
+.SY create_disk
+.BI \-\-typ "\fR=\fPtyp"
+.OP \-\-ini=\fIpat\fP
+.OP \-\-bad
+.OP \-\-boot
+.I FILE
+.
+.SY create_disk
+.B \-\-help
+.YS
+.
+.\" ------------------------------------------------------------------
+.SH DESCRIPTION
+Creates a disk container file \fIFILE\fP with the proper size for a disk of 
+type \fItyp\fP. 
+.
+.\" ------------------------------------------------------------------
+.SH OPTIONS
+.
+.\" ----------------------------------------------
+.IP \fB\-\-typ=\fItyp\fR
+determines disk type, must be specified.
+The list of supported disk types can be obtained with the
+.B \-\-help
+option.
+.
+.\" ----------------------------------------------
+.IP \fB\-\-ini=\fIpat\fR
+determines whether the container file will be initialized with specific
+data pattern. Note that the \fB\-\-bad\fP and \fB\-\-boot\fP options will 
+overwrite the last track or the first sector(s) respectively.
+The default without \fB\-\-ini\fR is to create a container with all zero data.
+It is implemented by writing a single zero byte after positioning with 
+\fBlseek\fR(2) to the desired end. This creates a file with 'holes' and defers 
+the actual allocation of disk space to the point when sectors are written. 
+Allowed values for \fIpat\fP are
+.RS
+.IP \fBzero\fP
+creates a disk with all sectors zero'ed. In this case zero's are explicitely
+written. The explicit allocation of disk space is the main effect of this
+option.
+.IP \fBones\fP
+creates a disk with all data bytes set to 0xff.
+.IP \fBdead\fP
+creates a disk with an alternating 0xdead 0xbeaf pattern. Can be helpful
+to diagnose whether an operating system accesses uninitialized parts of a disk.
+.IP \fBtest\fP
+creates a disk with a unique test pattern in each sector. The whole disk
+is initialized with groups of 8 16bit words (in PDP-11 little endian) with
+
+.RS
+.RS 3
+.PD 0
+.IP 0: 4
+absolute disk byte address, lower word
+.IP 1: 4
+absolute disk byte address, upper word
+.IP 2: 4
+current cyclinder number (0 based)
+.IP 3: 4
+current track/head number (0 based)
+.IP 4: 4
+current sector number (0 based)
+.IP 5: 4
+number of cyclinders for disk type
+.IP 6: 4
+number of tracks/heads for disk type
+.IP 7: 4
+number of sectors for disk type
+.RE
+.PD
+.PP
+A \fBhexdump\fP(1) of a RP06 disk image initialized with 
+\fB\-\-ini\fP=\fItest\fP
+will look like
+
+.EX
+   0000000 0000 0000 0000 0000 0000 032f 0013 0016
+   0000010 0010 0000 0000 0000 0000 032f 0013 0016
+   ...
+   00001f0 01f0 0000 0000 0000 0000 032f 0013 0016
+   0000200 0200 0000 0000 0000 0001 032f 0013 0016
+   ...
+   a657be0 7be0 0a65 032e 0012 0015 032f 0013 0016
+   a657bf0 7bf0 0a65 032e 0012 0015 032f 0013 0016
+.EE
+.
+.RE
+.RE
+.
+.\" ----------------------------------------------
+.IP \fB\-\-bad\fP
+creates a DEC standard 044 compliant bad block table on the last track 
+of the disk container file.
+.
+.\" ----------------------------------------------
+.IP \fB\-\-boot\fP
+creates a PDP-11 dummy boot block. When such a disk is attached and booted
+with \fBti_w11\fP(1) or a simh pdp11 a message like
+
+.EX
+  ++======================================++
+  || This is not a hardware bootable disk ||
+  ++======================================++
+
+  Disk image created with 'create_disk --typ=RK05':
+    number of cylinders:        203
+    tracks per cylinder:          2
+    sectors per track:           12
+    block size:                 512
+    total number of sectors:   4872
+    capacity in kByte:         2436
+
+  CPU WILL HALT
+.EE
+
+will be printed on the system console and the CPU HALTed.
+.
+.\" ----------------------------------------------
+.IP \fB\-\-help\fP
+print full help, with list \fB\-\-typ\fP and \fB\-\-ini\fP options.
+.
+.\" ------------------------------------------------------------------
+.SH EXIT STATUS
+If the file
+.I FILE
+can not be created an exit status 1 is returned.
+
+.\" ------------------------------------------------------------------
+.SH EXAMPLES
+.IP "\fBcreate_disk -typ=rk05 rk05.dsk\fR" 4
+This will create a zero'ed disk contained sized for a RK05 disk. In most 
+cases it is sufficient to create such plain zero'ed disk images.
+.
+.IP "\fBcreate_disk -typ=rl02 -bad rl02.dsk\fR"
+Creates a RL02 sized disk with a 'factory bad block table'. When using 
+RLxx, RPxx, or RMxx type disks, especially in conjunction with DEC 
+operating systems, it is advisable to create disks with \fB\-\-bad\fP.
+.
+.IP "\fBcreate_disk -typ=rk05 -ini=test rk05_test.dsk\fR"
+Creates a RK05 sized disk with test pattern.
+.
+.\" ------------------------------------------------------------------
+.SH "SEE ALSO"
+.BR ti_w11 (1)
+
+.\" ------------------------------------------------------------------
+.SH AUTHOR
+Walter F.J. Mueller <W.F.J.Mueller@gsi.de>

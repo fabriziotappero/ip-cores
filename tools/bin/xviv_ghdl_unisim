@@ -1,0 +1,127 @@
+#!/bin/bash
+# $Id: xviv_ghdl_unisim 642 2015-02-06 18:53:12Z mueller $
+#
+# Copyright 2015- by Walter F.J. Mueller <W.F.J.Mueller@gsi.de>
+# License disclaimer see LICENSE_gpl_v2.txt in $RETROBASE directory
+#
+#  Revision History:
+# Date         Rev  Vers    Comment
+# 2015-02-02   642   1.0    Initial version
+#
+
+if [ -z "$XTWV_PATH" ]
+then
+  echo "XTWV_PATH not defined"
+  exit 1
+fi
+if [ ! -d "$XTWV_PATH" ]
+then
+  echo "$XTWV_PATH not existing"
+  exit 1
+fi
+#
+cd $XTWV_PATH
+echo "============================================================"
+echo "* Build ghdl UNISIM lib for $XTWV_PATH"
+echo "============================================================"
+#
+if [ ! -d ghdl ]
+then
+  mkdir ghdl
+fi
+cd ghdl
+#
+if [ ! -d unisim  ]
+then
+  mkdir unisim
+fi
+cd unisim
+#
+# copy VCOMP and VPKG ----------------------------
+#
+cp $XTWV_PATH/data/vhdl/src/unisims/unisim_retarget_VCOMP.vhd .
+cp $XTWV_PATH/data/vhdl/src/unisims/unisim_VPKG.vhd .
+#
+# copy 'primitive' models ------------------------
+#
+if [ ! -d primitive ]
+then
+  mkdir primitive
+fi
+pushd primitive
+#
+cp -p $XTWV_PATH/data/vhdl/src/unisims/primitive/*.vhd .
+cp -p $XTWV_PATH/data/vhdl/src/unisims/primitive/vhdl_analyze_order .
+# in Vivado 2014.4 the vhdl_analyze_order and contains two extraneous entries
+# simply drop them to avoid errors later on
+sed -i.bak -e '\|OBUFTDSE3| d' \
+           -e '\|OBUFTE3| d' \
+    vhdl_analyze_order
+#
+xilinx_vhdl_memcolltype_fix
+popd
+#
+# copy 'retarget' models -------------------------
+#
+if [ ! -d retarget ]
+then
+  mkdir retarget
+fi
+pushd retarget
+#
+cp -p $XTWV_PATH/data/vhdl/src/unisims/retarget/*.vhd .
+ls -1 *.vhd > vhdl_analyze_order
+#
+xilinx_vhdl_memcolltype_fix
+popd
+#
+# now compile all --------------------------------
+#
+echo "# ghdl ... unisim_retarget_VCOMP.vhd"
+ghdl -a --ieee=synopsys --work=unisim unisim_retarget_VCOMP.vhd
+echo "# ghdl ... unisim_VPKG.vhd"
+ghdl -a --ieee=synopsys --work=unisim unisim_VPKG.vhd
+
+for file in `cat primitive/vhdl_analyze_order`
+do
+  echo "# ghdl ... primitive/$file"
+  ghdl -a -fexplicit --ieee=synopsys --work=unisim \
+      --no-vital-checks primitive/$file 2>&1 |\
+      tee primitive/$file.ghdl.log
+done
+#
+for file in `cat retarget/vhdl_analyze_order`
+do
+  echo "# ghdl ... retarget/$file"
+  ghdl -a -fexplicit --ieee=synopsys --work=unisim \
+      --no-vital-checks retarget/$file 2>&1 |\
+      tee retarget/$file.ghdl.log
+done
+#
+echo "--- scan for compilation errors:"
+find primitive retarget -name "*.ghdl.log" | xargs grep error
+#
+#
+echo "============================================================"
+echo "* Build ghdl UNIMACRO lib for $XTWV_PATH"
+echo "============================================================"
+#
+cd $XTWV_PATH/ghdl
+if [ ! -d unimacro  ]
+then
+  mkdir unimacro
+fi
+cd unimacro
+#
+cp $XTWV_PATH/data/vhdl/src/unimacro/*.vhd .
+#
+for file in *.vhd
+do
+  echo "# ghdl ... $file"
+  ghdl -a -P../unisim -fexplicit --ieee=synopsys --work=unimacro \
+      --no-vital-checks $file 2>&1 | tee $file.ghdl.log
+done
+#
+echo "--- scan for compilation errors:"
+find . -name "*.ghdl.log" | xargs grep error
+#

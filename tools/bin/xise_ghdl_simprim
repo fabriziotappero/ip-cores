@@ -1,0 +1,74 @@
+#!/bin/bash
+# $Id: xise_ghdl_simprim 642 2015-02-06 18:53:12Z mueller $
+#
+# Copyright 2007-2015 by Walter F.J. Mueller <W.F.J.Mueller@gsi.de>
+# License disclaimer see LICENSE_gpl_v2.txt in $RETROBASE directory
+#
+#  Revision History:
+# Date         Rev  Vers    Comment
+# 2015-02-03   642   1.3    remove ISE 10 legacy support
+# 2015-01-29   639   1.2    rename from xilinx_*; use XTWI_PATH rather XILINX
+# 2009-11-08   248   1.1    adopt to ISE 11.1, use VITAL models from ./primitive
+# 2007-10-26    92   1.0    Initial version
+#
+
+if [ -z "$XTWI_PATH" ]
+then
+  echo "XTWI_PATH not defined"
+  exit 1
+fi
+if [ ! -d "$XTWI_PATH/ISE_DS/ISE" ]
+then
+  echo "$XTWI_PATHISE_DS/ISE not existing"
+  exit 1
+fi
+#
+ise_path=$XTWI_PATH/ISE_DS/ISE
+#
+cd $ise_path
+echo "============================================================"
+echo "* Build ghdl SIMPRIM lib for $ise_path"
+echo "============================================================"
+#
+if [ ! -d ghdl ]
+then
+  mkdir ghdl
+fi
+#
+cd $ise_path/ghdl
+if [ ! -d simprim  ]
+then
+  mkdir simprim
+fi
+cd simprim
+#
+cp $ise_path/vhdl/src/simprims/simprim_Vcomponents.vhd .
+cp $ise_path/vhdl/src/simprims/simprim_Vpackage.vhd .
+#
+if [ ! -d primitive ]
+then
+  mkdir primitive
+fi
+#
+pushd  primitive
+cp -p $ise_path/vhdl/src/simprims/primitive/other/*.vhd .
+cp -p $ise_path/vhdl/src/simprims/primitive/other/vhdl_analyze_order .
+xilinx_vhdl_memcolltype_fix
+popd
+#
+echo "# ghdl ... simprim_Vcomponents.vhd"
+ghdl -a --ieee=synopsys --work=simprim --no-vital-checks simprim_Vcomponents.vhd
+echo "# ghdl ... simprim_Vpackage.vhd"
+ghdl -a --ieee=synopsys --work=simprim --no-vital-checks simprim_Vpackage.vhd
+
+for file in `cat primitive/vhdl_analyze_order`
+do
+  echo "# ghdl ... primitive/$file"
+  ghdl -a -fexplicit --ieee=synopsys --work=simprim \
+      --no-vital-checks primitive/$file 2>&1 |\
+      tee primitive/$file.ghdl.log
+done
+#
+echo "--- scan for compilation errors:"
+find primitive -name "*.ghdl.log" | xargs grep error
+#

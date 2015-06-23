@@ -1,0 +1,177 @@
+#!/bin/bash
+# $Id: tbrun_tbwrri 666 2015-04-12 21:17:54Z mueller $
+#
+# Copyright 2014-2015 by Walter F.J. Mueller <W.F.J.Mueller@gsi.de>
+# License disclaimer see LICENSE_gpl_v2.txt in $RETROBASE directory
+#
+#  Revision History:
+# Date         Rev Version  Comment
+# 2015-04-11   666   1.1    add --fusp,--xon
+# 2014-12-27   622   1.0    Initial version
+#
+
+chkval ()
+{
+  if [[ $1 =~ --.* || $1 =~ -[a-z]* ]]; then
+    echo "tbrun_tbwrri-E: value forgotten prior to '$1'"
+    exit 1
+  fi
+}
+
+docmd ()
+{
+  echo "$1"
+  if [[ -z "$optdry" ]] ; then
+    eval "$1"
+  fi
+}
+
+optdry=""
+optlsuf=""
+optstack=""
+optghw=""
+opttbw=""
+optpack=""
+optrri=""
+optpcom=""
+optcuff=""
+optfusp=""
+optxon=""
+
+# handle options
+while (( $# > 0 )) ; do
+  case $1 in
+    -dry|--dry)     optdry=$1    ;             shift 1 ;;
+    -lsuf|--lsuf)   optlsuf=$2   ; chkval $2 ; shift 2 ;;
+    -stack|--stack) optstack=$2  ; chkval $2 ; shift 2 ;;
+    -ghw|--ghw)     optghw=$2    ; chkval $2 ; shift 2 ;;
+    -tbw|--tbw)     opttbw=$2    ; chkval $2 ; shift 2 ;;
+    -pack|--pack)   optpack=$2   ; chkval $2 ; shift 2 ;;
+    -rri|--rri)     optrri=$2    ; chkval $2 ; shift 2 ;;
+    -cuff|--cuff)   optcuff=$1   ;             shift 1 ;;
+    -fusp|--fusp)   optfusp=$1   ;             shift 1 ;;
+    -xon|--xon)     optxon=$1    ;             shift 1 ;;
+    -pcom|--pcom)   optpcom=$1   ;             shift 1 ;;
+    -\?|-h*|--h*)   opthelp=$1   ;             shift 1 ;;
+    -*)             echo "tbrun_tbwrri-E: invalid option '$1'"; exit 1 ;;
+    *)     break;;
+  esac
+done
+
+# complain if no tbench defined
+if [[ -n "$opthelp" || $# -eq 0 ]] ; then
+  echo "Usage: tbrun_tbwrri [opts] testbench rricmds..."
+  echo "  Options:"
+  echo "  --dry             dry run, print commands, don't execute"
+  echo "  --lsuf  suff      use '_<suff>.log' as suffix for log file"
+  echo "  --stack nnn       use <nnn> as ghdl stack size"
+  echo "  --ghw   fname     write ghw file with name '<fname>.ghw'"
+  echo "  --tbw   opts      append <opts> to tbw command"
+  echo "  --pack  plist     add '--pack=<=plist>' option to ti_rri"
+  echo "  --rri   opts      append <opts> to ti_rri command"
+  echo "  --cuff            use cuff and not serport"
+  echo "  --fusp            use 2nd serport"
+  echo "  --xon             use xon with 1st serport"
+  echo "  --pcom            print test comments"
+  exit 1
+fi
+
+# check that only one of --cuff --fusp or --xon given
+ncfxcount=0
+if [[ -n "$optcuff" ]] ; then ncfxcount=$(($ncfxcount+1)); fi
+if [[ -n "$optfusp" ]] ; then ncfxcount=$(($ncfxcount+1)); fi
+if [[ -n "$optxon" ]]  ; then ncfxcount=$(($ncfxcount+1)); fi
+
+if (( $ncfxcount > 1 )) ; then
+  echo "tbrun_tbwrri-E: only one of --cuff,-fusp,--xon allowed"
+  exit 1 
+fi
+
+tbench=$1
+shift 1
+
+tbenchname=$(basename $tbench)
+tbenchpath=$(dirname  $tbench)
+
+# check for ghdl with _ssim, _fsim, _tsim
+isghdlxsim=""
+if [[ $tbench =~ _[sft]sim$ ]] ; then
+  isghdlxsim=true
+  logsuff=""
+fi
+
+# issue makes
+if [[ -n "$isghdlxsim" ]] ; then docmd "make -C $tbenchpath ghdl_tmp_clean"; fi
+docmd "make -C $tbenchpath $tbenchname"
+exitstat=$?
+if [[ -n "$isghdlxsim" ]] ; then docmd "make -C $tbenchpath ghdl_tmp_clean"; fi
+
+if (( $exitstat > 0 )) ; then exit $exitstat; fi
+
+# determine logfile name
+logsuff="_dsim"
+if [[ $tbenchname =~ _[sft]sim$ ]] ; then logsuff=""; fi
+if [[ -n "$optlsuf" ]] ;             then logsuff="_$optlsuf"; fi
+
+logfile="${tbenchname}${logsuff}.log"
+
+# now build actual test command
+cmd="time ti_rri --run=\"tbw $tbench -fifo"
+if [[ -n "$opttbw" ]] ; then    cmd+=" $opttbw"; fi
+if [[ -n "$optstack" ]] ; then  cmd+=" --stack-max-size=$optstack"; fi
+if [[ -n "$optghw" ]] ; then 
+  if [[ "$optghw" != *.ghw ]]; then optghw="$optghw.ghw"; fi
+  cmd+=" --wave=$optghw"; 
+fi
+cmd+=" 2>&1 | ghdl_assert_filter\""
+
+# Note: the following ensurs that we always have 'fifo=,<options' with an
+#       empty first field (the default fifo name)
+fifoopts=""
+if [[ -n "$optxon" ]] ; then    fifoopts+=",xon"; fi
+if (( $ncfxcount > 0 )) ; then  fifoopts+=",noinit"; fi
+
+if [[ -n "$fifoopts" ]] ; then
+  cmd+=" --fifo=$fifoopts"
+else
+  cmd+=" --fifo"
+fi
+
+cmd+=" --logl=3"
+
+if [[ -n "$optpack" ]] ; then   cmd+=" --pack=$optpack"; fi
+if [[ -n "$optrri" ]] ; then    cmd+=" $optrri"; fi
+
+cmd+=" --"
+
+if [[ -n "$optcuff" ]] ; then
+  cmd+=" \"rlc oob -sbdata  8 0x4\""    # portsel = 0100 -> fx2
+  cmd+=" \"rlc oob -sbdata 16 0x4\""    # swi     = 0100 -> fx2
+fi
+
+if [[ -n "$optfusp" ]] ; then
+  cmd+=" \"rlc oob -sbdata  8 0x1\""    # portsel = 0001 -> 2nd ser
+  cmd+=" \"rlc oob -sbdata 16 0x1\""    # swi     = 0001 -> 2nd ser
+fi
+
+if [[ -n "$optxon" ]] ; then
+  cmd+=" \"rlc oob -sbdata  8 0x2\""    # portsel = 0010 -> 1st ser XON
+  cmd+=" \"rlc oob -sbdata 16 0x2\""    # swi     = 0010 -> 1st ser XON
+fi
+
+if (( $ncfxcount > 0 )) ; then  cmd+=" \"rlc init\""; fi
+
+while (( $# > 0 )) ; do
+  cmd+=" "
+  if [[ $1 =~ " " ]] ; then cmd+="\""; fi
+  cmd+="$1"
+  if [[ $1 =~ " " ]] ; then cmd+="\""; fi
+  shift 1
+done
+cmd+=" | tee $logfile"
+
+pcomtag=""
+if [[ -n "$optpcom" ]] ; then pcomtag="^\#|"; fi
+# FAIL, PASS, DONE come from tbs
+cmd+=" | egrep \"(${pcomtag}-[EFW]:|FAIL|PASS|DONE)\""
+docmd "$cmd"

@@ -1,0 +1,338 @@
+#! /usr/bin/env tclshcpp
+# -*- tcl -*-
+# $Id: ti_rri 631 2015-01-09 21:36:51Z mueller $
+#
+# Copyright 2011-2015 by Walter F.J. Mueller <W.F.J.Mueller@gsi.de>
+#
+# This program is free software; you may redistribute and/or modify it under
+# the terms of the GNU General Public License as published by the Free
+# Software Foundation, either version 2, or at your option any later version.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY, without even the implied warranty of MERCHANTABILITY
+# or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+# for complete details.
+#
+#  Revision History:
+# Date         Rev Version  Comment
+# 2015-01-09   631   1.2.1  use rlc get/set rather config
+# 2014-11-07   601   1.2    use tclshcpp (C++ based) rather tclsh
+# 2013-05-19   521   1.1.6  setup proper interactive handling; add --run reap
+# 2013-04-26   510   1.1.5  reorganize readline startup
+# 2013-04-12   504   1.1.4  add --pack; trailing '-' argv implies --int
+# 2013-02-05   482   1.1.3  stop server is rls found
+# 2013-01-27   478   1.1.2  use 'exec sh -c $cmd &' for --run implementation
+# 2013-01-02   467   1.1.1  call rlc close only when really open
+# 2012-12-27   465   1.1    add --cuff support
+# 2012-02-09   457   1.0.4  disable autoexec
+# 2011-12-19   440   1.0.3  re-organize option handling for --term and --fifo
+# 2011-12-04   435   1.0.2  add flow attribute to --term
+# 2011-04-22   379   1.0.1  check for RETROBASE; proper exit handling; help text
+# 2011-04-17   376   1.0    Initial version
+# 2011-03-19   371   0.1    First draft
+#
+#
+# --pack=pname,...
+# --fifo[=name,opts,...]
+# --term[=name,baud,opts,...]
+# --cuff[=name,...]
+# --run=command
+# --log=filename      ; default "-"
+# --logl=n            ; default 2
+# --dmpl=n            ; default 0
+# --tiol=n            ; default 0
+# --int
+# --help
+# --
+#   tcl cmds 
+#   @...tcl
+#
+
+set tirri_interactive 0
+
+array set opts { 
+    pack_  ""
+    fifo   0
+    fifo_  ""
+    term   0
+    term_  ""
+    cuff   0
+    cuff_  ""
+    run_   ""
+    log_   "-"
+    logl_  2
+    dmpl_  0
+    tiol_  0
+    int    0
+    help   0
+}
+
+set clist {}
+set optsendseen 0
+set runpid {}
+
+# disable autoexec
+set auto_noexec 1
+
+#
+# cleanup handler
+#   must be in a proc so that it can be called from tclreadline
+#   must be defined before ::tclreadline::Loop called (all after ignored...)
+#
+proc tirri_exit {{doexit 1}} {
+  global opts
+  global runpid
+
+  # check for rlink server, stop it
+  if { [info commands rls] eq "rls" } { rls server -stop }
+
+  # now close rlink connection
+  if { $opts(fifo) || $opts(term) || $opts(cuff) } {
+    if { [rlc open] ne "" } { rlc close }
+  }
+
+  # FIXME_code: should sync here with -run process run-down
+  #             but no wait available in tcl (grr...)
+  if { "$runpid" ne "" } {
+    after 100;                          # currently just wait 100ms
+    rutil::waitpid $runpid
+  }
+  if { $doexit } {
+    puts {};                            # \n to ensure shell prompt on new line
+    exit
+  }
+  return
+}
+
+foreach arg $argv {
+  if { $optsendseen } {
+    lappend clist $arg
+    continue
+  }
+  switch -regexp -- $arg {
+    ^--?pack=.+$  { regexp -- {=(.*)} $arg dummy opts(pack_) }
+    ^--?fifo=?.*$ { set opts(fifo) 1; regexp -- {=(.*)} $arg dummy opts(fifo_) }
+    ^--?term=?.*$ { set opts(term) 1; regexp -- {=(.*)} $arg dummy opts(term_) }
+    ^--?cuff=?.*$ { set opts(cuff) 1; regexp -- {=(.*)} $arg dummy opts(cuff_) }
+    ^--?run=.+$   { regexp -- {=(.*)} $arg dummy opts(run_) }
+    ^--?log=.+$   { regexp -- {=(.*)} $arg dummy opts(log_) }
+    ^--?logl=.+$  { regexp -- {=(.*)} $arg dummy opts(logl_) }
+    ^--?dmpl=.+$  { regexp -- {=(.*)} $arg dummy opts(dmpl_) }
+    ^--?tiol=.+$  { regexp -- {=(.*)} $arg dummy opts(tiol_) }
+    ^--?int$      { set opts(int) 1 }
+    ^--?help$     { set opts(help) 1 }
+    ^--$          { set optsendseen 1 }
+    ^--.+$        { puts "-E: bad option $arg, see --help for proper usage"
+                    return 1
+                  }
+    default       { lappend clist $arg }
+  }
+}
+
+# check whether last element in clist is plain '-'
+if { [llength clist] } {
+  if { [lindex $clist end] eq "-" } {
+    set opts(int) 1
+    set clist [lrange $clist 0 end-1]
+  }
+}
+
+if { $opts(help) } {
+  # use {} as defimiter here to avoid that escaping of all [] 
+  puts {usage: ti_rri [OPTION]... [COMMAND]...}
+  puts {}
+  puts {Options:}
+  puts {  --pack=PLIST   load, with package require, additional packages}
+  puts {                   PLIST is comma separated list of package names}
+  puts {  --run=CMD      exec's CMD as subprocess before the rlink port opened}
+  puts {                 useful to start test benches, usually via 'tbw'}
+  puts {  --fifo[=ARGS]  open fifo type rlink port. Optional arguments are:}
+  puts {                   --fifo=[NAME[,OPTS]]}
+  puts {  --term[=ARGS]  open term type rlink port. Optional arguments are:}
+  puts {                   --term=[NAME[,BAUD[,OPTS]]]}
+  puts {  --cuff[=ARGS]  open cuff type rlink port. Optional arguments are:}
+  puts {                   --cuff=[NAME[,OPTS]]}
+  puts {  --log=FILE     set log file name. Default is to write to stdout.}
+  puts {  --logl=LVL     set log level, default is '2' allowed values 0-3.}
+  puts {  --dmpl=LVL     set dump level, default is '0', values like logl}
+  puts {  --tiol=LVL     set i/o trace level, default is '0', allowed 0-2.}
+  puts {  --int          enter interactive mode even when commands given}
+  puts {  --help         display this help and exit}
+  puts {  --             all following arguments are treated as tcl commands}
+  puts {}
+  puts {Command handling:}
+  puts {  For arguments of the form '@<name>.tcl' the respective file is}
+  puts {  sourced. All other arguments are treated as Tcl commands and executed}
+  puts {  with eval.}
+  puts {}
+  puts {For further details consults the ti_rri man page.}
+  return 0
+}
+
+if {![info exists env(RETROBASE)]} {
+  puts "-E: RETROBASE environment variable not defined"
+  return 1
+}
+
+# check consistency of connection open options
+set nopen 0;
+if { $opts(fifo) } { incr nopen }
+if { $opts(term) } { incr nopen }
+if { $opts(cuff) } { incr nopen }
+
+if { $nopen > 1 } {
+  puts "-E: more than one of --fifo,--term,--cuff given, only one allowed"
+  return 1
+}
+
+# setup auto path
+lappend auto_path [file join $env(RETROBASE) tools tcl]
+lappend auto_path [file join $env(RETROBASE) tools lib]
+
+# setup default packages
+package require rutiltpp
+package require rlinktpp
+package require rlink
+
+# setup signal handling
+rutil::sigaction -init
+
+# setup connect and server objects
+rlinkconnect rlc
+rlinkserver rls rlc
+
+# load additional packages (if -pack given)
+if { $opts(pack_) ne "" } {
+  foreach pack [split $opts(pack_) ","] {
+    package require $pack
+  }
+}
+
+
+# setup logging
+if { $opts(log_) ne "-" } {
+  rlc set logfile       $opts(log_)
+}
+rlc set printlevel $opts(logl_)
+rlc set dumplevel  $opts(dmpl_)
+rlc set tracelevel $opts(tiol_)
+
+# first start, if specified with --run, the test bench
+# exec sh -c $cmd is used to execute a shell command including [], '',""
+# in a direct exec the tcl expansion logic will interfere...
+#
+if { $opts(run_) ne "" } {
+  if { [catch {exec sh -c $opts(run_) &} runpid] } {
+    puts "-E: failed to execute \"$opts(run_)\" with error message\n  $runpid"
+    puts "aborting..."
+    return 1
+  }
+}
+
+# than open the rlink connection
+# handle --fifo
+if { $opts(fifo) } {
+  set nlist [split $opts(fifo_) ","]
+  set path [lindex $nlist 0]
+  if {$path eq ""} {set path "rlink_cext_fifo"}
+  set url "fifo:$path"
+  set delim "?"
+  foreach opt [lrange $nlist 1 end] {
+    if {$opt  ne ""} {append url "$delim$opt"}
+    set delim ";"
+  }
+  # puts "-I: $url"
+  rlc open $url
+}
+
+# handle --term
+if { $opts(term) } {
+  set nlist [split $opts(term_) ","]
+  set dev  [lindex $nlist 0]
+  set baud [lindex $nlist 1]
+  if {$dev  eq ""} {set dev  "USB0"}
+  if {$baud eq ""} {set baud "115k"}
+  set url "term:$dev?baud=$baud"
+  foreach opt [lrange $nlist 2 end] {
+    if {$opt  ne ""} {append url ";$opt"}
+  }
+  # puts "-I: $url"
+  rlc open $url
+}
+
+# handle --cuff
+if { $opts(cuff) } {
+  set nlist [split $opts(cuff_) ","]
+  set path [lindex $nlist 0]
+  set url "cuff:$path"
+  set delim "?"
+  foreach opt [lrange $nlist 1 end] {
+    if {$opt  ne ""} {append url "$delim$opt"}
+    set delim ";"
+  }
+  # puts "-I: $url"
+  rlc open $url
+}
+
+# setup simulation mode default
+set rlink::sim_mode [rlink::isfifo]
+
+# if tclsh runs a script given on the command line or is invoked
+# like here via a shebang the tcl_interactive is always set to 0
+# so we have to check whether stdin/stdout is a terminal and set
+# tcl_interactive accordingly
+
+set tcl_interactive [rutil::isatty STDIN]
+
+# determine whether interactive mode, if yes, initialize readline
+if {$tcl_interactive && ($opts(int) || [llength $clist] == 0) } {
+  set tirri_interactive 1
+
+  package require tclreadline
+  namespace eval tclreadline {
+    proc prompt1 {} {
+      set version [info tclversion]
+      return "ti_rri > "
+    }
+  }
+  ::tclreadline::readline eofchar {::tirri_exit; puts {}; exit}
+}
+
+# now execute all commands and scripts given as start-up arguments
+foreach cmd $clist {
+  # puts "executing: $cmd"
+  # handle @filename commands
+  if { [regexp {^@(.+)} $cmd dummy filename] } {
+    # handle @file.tcl --> source tcl file
+    if { [regexp {\.tcl$} $filename] } {
+      if { [catch {source $filename} errmsg] } {
+        puts "-E: failed to source file \"$filename\" with error message:"
+        if {[info exists errorInfo]} {puts $errorInfo} else {puts $errmsg}
+        puts "aborting..."
+        break
+      }
+    # handle @file.dat ect --> not yet supported
+    } else {
+      puts "-E: only tcl supported but $filename found"
+      puts "aborting..."
+      break
+    }
+
+  # handle normal tcl commands --> eval them
+  } else {
+    if { [catch {eval $cmd} errmsg] } {
+      puts "-E: eval of \"$cmd\" failed with error message:"
+      if {[info exists errorInfo]} {puts $errorInfo} else {puts $errmsg}
+      puts "aborting..."
+      break
+    }
+  }
+}
+
+if { $tcl_interactive && $tirri_interactive } {
+  ::tclreadline::Loop
+} else {
+  tirri_exit 0
+}
+
+return 0

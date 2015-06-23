@@ -1,0 +1,258 @@
+# $Id: w11a_os_guide.txt 680 2015-05-14 13:29:46Z mueller $
+
+Guide to run operating system images on w11a systems
+
+  Table of content:
+
+    1.  I/O emulation setup
+    2.  FPGA Board setup
+    3.  Rlink and Backend Server setup
+    4.  simh simulator setup
+    5.  oskits
+        a. Unix systems
+        b. DEC operating systems
+
+1. I/O emulation setup ----------------------------------------------------
+
+   All UNIBUS peripherals which exchange data (currently DL11, LP11, PC11, RK11,
+   and RL11) are currently emulated via a backend process. The communication 
+   between FPGA board and backend server can be via
+
+   - Serial port
+     - via an integrated USB-UART bridge
+       - on basys3 and nexys4 with a FT2232HQ, allows up to 12M Baud
+       - on nexys3 with a FT232R, allows up to 2M Baud
+     - via RS232 port, as on s3board and nexys2
+       - using a serial port (/dev/ttySx) is limited to 115 kBaud on most PCs.
+       - using a USB-RS232 adapter was tested up to 460k Baud. 
+   
+   - Direct USB connection using a Cypress FX2 USB controller
+     - is supported on the nexys2 and nexys3 FPGA boards
+     - much faster than serial port connections (see below)
+     - also allows to configure the FPGA over the same USB connection
+
+   Notes: 
+   - A 10M Baud connection, like on a nexys4, gives disk access rates and 
+     throughputs much better than the real hardware of the 70's and is well 
+     suitable for practical usage.
+   - In an OS with good disk caching like 2.11BSD the impact of disk speed
+     is actually smaller than the bare numbers suggest.
+   - A 460k Baud connection gives in practice a disk throughput of ~20 kB/s. 
+     This allows to test the system but is a bit slow for real usage.
+   - USB-RS232 cables with a FTDI FT232R chip work fine, tests with Prolific 
+     Technology PL2303 based cable never gave reliable connections for higher 
+     Baud rates.
+
+   Recommended setup for best performance (boards ordered by vintage):
+
+       Board   Channel/Interface      nom. speed      peak transfer rate
+
+      basys3   USB-UART bridge        10M Baud              910 kB/sec
+      nexys4   USB-UART bridge        10M Baud              910 kb/sec
+      nexys3   Cypress FX2 USB        USB2.0 speed        30000 kB/sec
+      nexys2   Cypress FX2 USB        USB2.0 speed        30000 kB/sec
+     s3board   RS232+USB-RS232 cable  460k Baud              41 kB/sec
+    
+2. FPGA Board setup -------------------------------------------------------
+
+   Recommended setups
+
+   - Basys3
+     - connect USB cable to micro-USB connector labeled 'PROG'
+     - to configure via vivado hardware server
+         make <sys>.vconfig
+
+   - Nexys4
+     - connect USB cable to micro-USB connector labeled 'PROG'
+     - to configure via vivado hardware server
+         make <sys>.vconfig
+
+   - Nexys3
+     - use Cypress FX for configure and and rlink communication
+     - connect USB cable to micro-USB connector labeled 'USB PROG'
+     - to configure via FX2 and jtag tool
+         make <sys>.jconfig
+
+   - Nexys2
+     - connect USB cable to mini-USB connector (between RS232 and PS/2 port)
+     - to configure via FX2 and jtag tool
+         make <sys>.jconfig
+
+   - S3board
+     - connect the USB-RS232 cable to the RS232 port
+     - connect a JTAG programmer (e.g. Xilinx USB Cable II) to JTAG pins
+     - to configure via ISE Impact
+         make <sys>.iconfig
+
+3. Rlink and Backend Server setup -----------------------------------------
+
+   All examples below use the same basic setup
+
+   - setup vt100 emulator windows
+
+       cd $RETROBASE/tools/oskit/<oskit-name>
+       console_starter -d DL0 &
+       console_starter -d DL1 &
+
+   - setup rlink connection using ti_rri backend server via the ti_w11 
+     quick start wrapper script. Ensure that all 8 switches on the board
+     are in the indicated positions (SWI=...). The concrete boot script
+     name <boot-script> is given in the following sections
+
+     - for b3 over serial
+         SWI = 00000000 00101010
+         ti_w11 -tu<dn>,10M,break,xon  @<oskit-name>_boot.tcl
+
+         NOTE: the basys3 w11a has only 176 kB memory (all from BRAMS!)
+               unix-v5 works fine. XXDP, RT11 and RSX-11M should work.
+               211bsd will not boot, either most RSX-11M+ systems.
+
+     - for n4 over serial
+         SWI = 00000000 00101000
+         ti_w11 -tu<dn>,10M,break,cts  @<oskit-name>_boot.tcl
+
+     - for n2,n3 over fx2
+         SWI = 00101100
+         ti_w11 -u @<oskit-name>_boot.tcl
+
+     - for s3 serial
+         SWI = 00101010
+         ti_w11 -tu<dn>,460k,break,xon @<oskit-name>_boot.tcl
+   
+     Notes: 
+     - on <dn>, the serial device number
+       - check with 'ls /dev/ttyUSB*' to see what is available
+       - <dn> is typically '1' if only a single basys3 or nexys4 is connected
+         Initially two ttyUSB devices show up, the lower is for FPGA config
+         and will disappear when Vivado hardware server is used once. The
+         upper provides the data connection.
+       - <dn> is typically '0' if only a single USB-RS232 cable is connected
+
+     - on LED display
+       - is controlled by SWI(3)
+           0 -> system status
+           1 -> DR emulation --> OS specific light patterns
+
+     - on Hex display
+       - is controlled by SWI(5:4)
+       - boards with a 4 digit display
+           00 -> serial link rate divider
+           01 -> PC
+           10 -> DISPREG
+           11 -> DR emulation
+       - boards with 8 digit display
+         - SWI(5) select for DSP(7:4) display
+             0 -> serial link rate divider
+             1 -> PC
+         - SWI(4) select for DSP(3:0) display
+             0 -> DISPREG
+             1 -> DR emulation
+
+4. simh simulator setup ---------------------------------------------------
+
+   Sometimes it is good to compare the w11a behaviour with the PDP-11 software
+   emulator from the simh project (see http://simh.trailing-edge.com/).
+
+   Under $RETROBASE/tools/simh two setup files are provided with configure
+   simh to reflect the w11a setup as close as possible:
+   - setup_w11a_min.scmd
+     Very close the current w11a state when it runs on an s3board
+     - processor: 11/70, no FPP, 1 Mbyte
+     - periphery:   2 DL11, LP11, RK11, PC11
+   - setup_w11a_max.scmd
+     Planned configuration for the w11a, in addition
+     - processor: 4 Mbyte memory (as on Nexys2, Nexys3,...)
+     - periphery: DZ11, RL11/RL02, RK70/RP06, TM11/TU10
+
+   Startup scripts are provided with each oskit. They call the w11a_max
+   configuration, so will show in the emulator what w11a can do when
+   finished.
+
+   All examples below use the same basic setup
+
+   - setup vt100 emulator window for 2nd DL11
+
+       cd $RETROBASE/tools/oskit/<oskit-name>
+       console_starter -s -d DL1 &
+
+       {Note: the -s ensures that the port numbers used by simh are taken!}
+
+   - start the simulator
+
+     pdp11 <oskit-name>_boot.scmd
+
+5. oskits -----------------------------------------------------------------
+
+   Ready to be used 'oskits' are provided under
+     $RETROBASE/tools/oskit/<oskit-name>
+
+   The tarballs with the disk images are provided from a web server
+   and have to be installed separately.
+
+5a. Unix systems -----------------------------------------------------
+
+   Legal and license issues:
+
+     Ancient UNIX systems for the PDP-11 can now be freely used under the
+     'Caldera license'. 2.11BSD was released 1992 under the 4 clause BSD 
+     license. Taken together
+
+       - Unix V1 to V7
+       - all BSD Unix versions for PDP-11
+
+     can be freely distributed and used for non-commercial purposes.   
+
+   Several oskits are provided:
+
+     - unix-v5_rk: Unix V5 System on RK05
+
+     - 211bsd_rk:  2.11BSD system on RK05  (very elementary subset)
+     - 211bsd_rl:  2.11BSD system on RL02  (small subset)
+     - 211bsd_rp:  2.11BSD system on RP06  (full system)
+
+   For further details consult the README_<oskit-name>set.txt file in the
+   oskit directory.
+
+5b. DEC operating systems --------------------------------------------
+   
+   Legal and license issues:
+
+     Unfortunately there is no general hobbyist license for DEC operating 
+     systems for PDP-11 computers. The 'Mentec license' is commonly understood 
+     to cover the some older versions of DEC operating systems, for example
+       - RT-11 V5.3 or prior
+       - RSX-11M V4.3 or prior
+       - RSX-11M PLUS V3.0 or prior
+     on a simulator. It is commonly assumed that the license terms cover the
+     usage of the PDP11 simulator from the 'simh' suite. Usage of the e11
+     simulator is not covered according to the author of e11.
+
+     HOWEVER: THIS LICENSE DOES NOT COVER THE USAGE OF THESE HISTORIC DEC 
+              OPERATING SYSTEMS ON ANY 'REAL HARDWARE' IMPLEMENTATION OF A 
+              PDP-11. SO USAGE ON THE W11 IS *NOT* COVERED BY THE 
+              'Mentec-license'. 
+
+   Some oskits are provided with systems sysgen'ed to run on a configuration 
+   like the w11a.
+
+   - Feel free to explore them with the simh simulator.
+     The boot scripts for simh are included ( <kit>.simh )
+   
+   - In case you happen to have a valid license feel free to try them
+     out the W11A and let the author know whether is works as it should.
+     For convenience the boot scripts are also included ( <kit>.tcl ).
+
+   Several oskits are provided:
+
+     - rsx11m-31_rk:   RSX-11M V3.1    on RK05
+     - rsx11m-40_rk:   RSX-11M V4.0    on RK05
+
+     - rsx11mp-30_rp:  RSX-11M+ V3.0   on RP06
+
+     - rt11-40_rk:     RT-11 V4.0      on RK05
+     - rt11-53_rl:     RT-11 V5.3      on RL02
+
+     - xxdp_rl:        XXDP 22 and 25  on RL02
+
+   For further details consult the README_<oskit-name>set.txt file in the
+   oskit directory.

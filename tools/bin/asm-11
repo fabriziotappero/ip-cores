@@ -1,0 +1,2471 @@
+#!/usr/bin/perl -w
+# $Id: asm-11 659 2015-03-22 23:15:51Z mueller $
+#
+# Copyright 2013-2014 by Walter F.J. Mueller <W.F.J.Mueller@gsi.de>
+#
+# This program is free software; you may redistribute and/or modify it under
+# the terms of the GNU General Public License as published by the Free
+# Software Foundation, either version 2, or at your option any later version.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY, without even the implied warranty of MERCHANTABILITY
+# or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+# for complete details.
+#
+#  Revision History:
+# Date         Rev Version  Comment
+# 2014-07-26   575   1.0.3  add 'call' and 'return' to pst (as in macro-11)
+# 2013-04-07   503   1.0.2  list dot for .even,.dot,.blkb,.blkw
+# 2013-04-01   502   1.0.1  BUGFIX: -2(r0),@-2(r0) was broken, parser fixed
+#                           add -lsm (lsmem format) output; add implicit .word
+# 2013-03-29   501   1.0    Initial version
+# 2013-03-22   498   0.5    Second draft (functional, but limited...)
+# 2013-03-07   496   0.1    First draft
+#
+
+use 5.10.0;                                 # require Perl 5.10 or higher
+use strict;                                 # require strict checking
+use FileHandle;
+
+use Getopt::Long;
+
+use constant TMASK_STRING     => 0x0001;
+use constant TMASK_STRINGEXP  => 0x0002;
+
+my %opts = ();
+
+GetOptions(\%opts, "help",
+                   "tpass1", "tpass2",
+                   "dsym1",  "dsym2",
+                   "ttoken", "tparse", "temit", "tout",
+                   "I=s@",
+                   "lst", "olst=s",
+                   "lda", "olda=s",
+                   "cof", "ocof=s",
+                   "lsm", "olsm=s"
+          )
+  or exit 1;
+
+unshift @{$opts{I}}, ".";                  # ./ is first in include path
+push @{$opts{I}}, "$ENV{RETROBASE}/tools/asm-11" if defined $ENV{RETROBASE};
+
+sub create_fname;
+sub read_file;
+sub parse_line;
+sub walign;
+sub add_err;
+sub prt_err;
+sub setdot;
+sub incdot;
+sub getdot;
+sub setsym;
+sub getsym;
+sub lst_checkmdef;
+sub eval_exp;
+sub check_llbl;
+sub check_reg;
+sub check_token;
+sub pushback_token;
+sub get_token;
+sub get_token1;
+sub to_rad50;
+sub pass2;
+sub pass2_out;
+sub pass2_lst_beg;
+sub pass2_lst_end;
+sub pass2_lst_line;
+sub out_w;
+sub out_b;
+sub out_opcode;
+sub out_opcode_n;
+sub out_opcode_o;
+sub out_opdata;
+sub emitw;
+sub emitb;
+sub write_lda;
+sub write_cof;
+sub write_lsm;
+sub dump_rl;
+sub dump_sym;
+sub prt76o;
+sub prt43o;
+sub save66o;
+sub savestr;
+sub savestr1;
+sub print_help;
+
+# Permanant symbol table
+my %pst = (
+# directives
+ '.include' => {typ=>'dir'},                #
+ '.word'    => {typ=>'dir'},                #
+ '.byte'    => {typ=>'dir'},                #
+ '.blkw'    => {typ=>'dir'},                #
+ '.blkb'    => {typ=>'dir'},                #
+ '.ascii'   => {typ=>'dir'},                #
+ '.asciz'   => {typ=>'dir'},                #
+ '.even'    => {typ=>'dir'},                #
+ '.odd'     => {typ=>'dir'},                #
+ '.asect'   => {typ=>'dir'},                #
+ '.end'     => {typ=>'dir'},                #
+#register defs
+ 'r0'     => {typ=>'reg', val=>0},
+ 'r1'     => {typ=>'reg', val=>1},
+ 'r2'     => {typ=>'reg', val=>2},
+ 'r3'     => {typ=>'reg', val=>3},
+ 'r4'     => {typ=>'reg', val=>4},
+ 'r5'     => {typ=>'reg', val=>5},
+ 'sp'     => {typ=>'reg', val=>6},
+ 'pc'     => {typ=>'reg', val=>7},
+#opcodes
+ 'halt'   => {typ=>'op', val=>0000000, fmt=>'-'  },
+ 'wait'   => {typ=>'op', val=>0000001, fmt=>'-'  },
+ 'rti'    => {typ=>'op', val=>0000002, fmt=>'-'  },
+ 'bpt'    => {typ=>'op', val=>0000003, fmt=>'-'  },
+ 'iot'    => {typ=>'op', val=>0000004, fmt=>'-'  },
+ 'reset'  => {typ=>'op', val=>0000005, fmt=>'-'  },
+ 'rtt'    => {typ=>'op', val=>0000006, fmt=>'-'  },
+ 'mfpt'   => {typ=>'op', val=>0000007, fmt=>'-'  },
+ 'jmp'    => {typ=>'op', val=>0000100, fmt=>'g'  },
+ 'rts'    => {typ=>'op', val=>0000200, fmt=>'r'  },
+ 'return' => {typ=>'op', val=>0000207, fmt=>'-'  }, # alias for rts pc
+ 'spl'    => {typ=>'op', val=>0000230, fmt=>'n3' },
+ 'nop'    => {typ=>'op', val=>0000240, fmt=>'-'  },
+ 'clc'    => {typ=>'op', val=>0000241, fmt=>'-'  },
+ 'clv'    => {typ=>'op', val=>0000242, fmt=>'-'  },
+ 'clz'    => {typ=>'op', val=>0000244, fmt=>'-'  },
+ 'cln'    => {typ=>'op', val=>0000250, fmt=>'-'  },
+ 'ccc'    => {typ=>'op', val=>0000257, fmt=>'-'  },
+ 'sec'    => {typ=>'op', val=>0000261, fmt=>'-'  },
+ 'sev'    => {typ=>'op', val=>0000262, fmt=>'-'  },
+ 'sez'    => {typ=>'op', val=>0000264, fmt=>'-'  },
+ 'sen'    => {typ=>'op', val=>0000270, fmt=>'-'  },
+ 'scc'    => {typ=>'op', val=>0000277, fmt=>'-'  },
+ 'swab'   => {typ=>'op', val=>0000300, fmt=>'g'  },
+ 'br'     => {typ=>'op', val=>0000400, fmt=>'s8' },
+ 'bne'    => {typ=>'op', val=>0001000, fmt=>'s8' },
+ 'beq'    => {typ=>'op', val=>0001400, fmt=>'s8' },
+ 'bge'    => {typ=>'op', val=>0002000, fmt=>'s8' },
+ 'blt'    => {typ=>'op', val=>0002400, fmt=>'s8' },
+ 'bgt'    => {typ=>'op', val=>0003000, fmt=>'s8' },
+ 'ble'    => {typ=>'op', val=>0003400, fmt=>'s8' },
+ 'jsr'    => {typ=>'op', val=>0004000, fmt=>'rg' },
+ 'call'   => {typ=>'op', val=>0004700, fmt=>'g'  }, # alias for jsr pc,<dst>
+ 'clr'    => {typ=>'op', val=>0005000, fmt=>'g'  },
+ 'com'    => {typ=>'op', val=>0005100, fmt=>'g'  },
+ 'inc'    => {typ=>'op', val=>0005200, fmt=>'g'  },
+ 'dec'    => {typ=>'op', val=>0005300, fmt=>'g'  },
+ 'neg'    => {typ=>'op', val=>0005400, fmt=>'g'  },
+ 'adc'    => {typ=>'op', val=>0005500, fmt=>'g'  },
+ 'sbc'    => {typ=>'op', val=>0005600, fmt=>'g'  },
+ 'tst'    => {typ=>'op', val=>0005700, fmt=>'g'  },
+ 'ror'    => {typ=>'op', val=>0006000, fmt=>'g'  },
+ 'rol'    => {typ=>'op', val=>0006100, fmt=>'g'  },
+ 'asr'    => {typ=>'op', val=>0006200, fmt=>'g'  },
+ 'asl'    => {typ=>'op', val=>0006300, fmt=>'g'  },
+ 'mark'   => {typ=>'op', val=>0006400, fmt=>'n6' },
+ 'mfpi'   => {typ=>'op', val=>0006500, fmt=>'g'  },
+ 'mtpi'   => {typ=>'op', val=>0006600, fmt=>'g'  },
+ 'sxt'    => {typ=>'op', val=>0006700, fmt=>'g'  },
+ 'csm'    => {typ=>'op', val=>0007000, fmt=>'g'  },
+ 'tstset' => {typ=>'op', val=>0007200, fmt=>'g'  },
+ 'wrtlck' => {typ=>'op', val=>0007300, fmt=>'g'  },
+ 'mov'    => {typ=>'op', val=>0010000, fmt=>'gg' },
+ 'cmp'    => {typ=>'op', val=>0020000, fmt=>'gg' },
+ 'bit'    => {typ=>'op', val=>0030000, fmt=>'gg' },
+ 'bic'    => {typ=>'op', val=>0040000, fmt=>'gg' },
+ 'bis'    => {typ=>'op', val=>0050000, fmt=>'gg' },
+ 'add'    => {typ=>'op', val=>0060000, fmt=>'gg' },
+ 'mul'    => {typ=>'op', val=>0070000, fmt=>'gr' },
+ 'div'    => {typ=>'op', val=>0071000, fmt=>'gr' },
+ 'ash'    => {typ=>'op', val=>0072000, fmt=>'gr' },
+ 'ashc'   => {typ=>'op', val=>0073000, fmt=>'gr' },
+ 'xor'    => {typ=>'op', val=>0074000, fmt=>'rg' },
+ 'sob'    => {typ=>'op', val=>0077000, fmt=>'ru6'},
+ 'bpl'    => {typ=>'op', val=>0100000, fmt=>'s8' },
+ 'bmi'    => {typ=>'op', val=>0100400, fmt=>'s8' },
+ 'bhi'    => {typ=>'op', val=>0101000, fmt=>'s8' },
+ 'blos'   => {typ=>'op', val=>0101400, fmt=>'s8' },
+ 'bvc'    => {typ=>'op', val=>0102000, fmt=>'s8' },
+ 'bvs'    => {typ=>'op', val=>0102400, fmt=>'s8' },
+ 'bcc'    => {typ=>'op', val=>0103000, fmt=>'s8' },
+ 'bhis'   => {typ=>'op', val=>0103000, fmt=>'s8' }, #alias
+ 'bcs'    => {typ=>'op', val=>0103400, fmt=>'s8' },
+ 'blo'    => {typ=>'op', val=>0103400, fmt=>'s8' }, #alias
+ 'emt'    => {typ=>'op', val=>0104000, fmt=>'n8' },
+ 'trap'   => {typ=>'op', val=>0104400, fmt=>'n8' },
+ 'clrb'   => {typ=>'op', val=>0105000, fmt=>'g'  },
+ 'comb'   => {typ=>'op', val=>0105100, fmt=>'g'  },
+ 'incb'   => {typ=>'op', val=>0105200, fmt=>'g'  },
+ 'decb'   => {typ=>'op', val=>0105300, fmt=>'g'  },
+ 'negb'   => {typ=>'op', val=>0105400, fmt=>'g'  },
+ 'adcb'   => {typ=>'op', val=>0105500, fmt=>'g'  },
+ 'sbcb'   => {typ=>'op', val=>0105600, fmt=>'g'  },
+ 'tstb'   => {typ=>'op', val=>0105700, fmt=>'g'  },
+ 'rorb'   => {typ=>'op', val=>0106000, fmt=>'g'  },
+ 'rolb'   => {typ=>'op', val=>0106100, fmt=>'g'  },
+ 'asrb'   => {typ=>'op', val=>0106200, fmt=>'g'  },
+ 'aslb'   => {typ=>'op', val=>0106300, fmt=>'g'  },
+ 'mtps'   => {typ=>'op', val=>0106400, fmt=>'g'  },
+ 'mfpd'   => {typ=>'op', val=>0106500, fmt=>'g'  },
+ 'mtpd'   => {typ=>'op', val=>0106600, fmt=>'g'  },
+ 'mfps'   => {typ=>'op', val=>0106700, fmt=>'g'  },
+ 'movb'   => {typ=>'op', val=>0110000, fmt=>'gg' },
+ 'cmpb'   => {typ=>'op', val=>0120000, fmt=>'gg' },
+ 'bitb'   => {typ=>'op', val=>0130000, fmt=>'gg' },
+ 'bicb'   => {typ=>'op', val=>0140000, fmt=>'gg' },
+ 'bisb'   => {typ=>'op', val=>0150000, fmt=>'gg' },
+ 'sub'    => {typ=>'op', val=>0160000, fmt=>'gg' },
+ 'cfcc'   => {typ=>'op', val=>0170000, fmt=>'-'  ,fpp=>1 },
+ 'setf'   => {typ=>'op', val=>0170001, fmt=>'-'  ,fpp=>1 },
+ 'setd'   => {typ=>'op', val=>0170011, fmt=>'-'  ,fpp=>1 },
+ 'seti'   => {typ=>'op', val=>0170002, fmt=>'-'  ,fpp=>1 },
+ 'setl'   => {typ=>'op', val=>0170012, fmt=>'-'  ,fpp=>1 },
+ 'ldfps'  => {typ=>'op', val=>0170100, fmt=>'g'  ,fpp=>1 },
+ 'stfps'  => {typ=>'op', val=>0170200, fmt=>'g'  ,fpp=>1 },
+ 'stst'   => {typ=>'op', val=>0170300, fmt=>'g'  ,fpp=>1 },
+ 'clrf'   => {typ=>'op', val=>0170400, fmt=>'g'  ,fpp=>1 },
+ 'clrd'   => {typ=>'op', val=>0170400, fmt=>'g'  ,fpp=>1 }, # alias
+ 'tstf'   => {typ=>'op', val=>0170500, fmt=>'g'  ,fpp=>1 },
+ 'tstd'   => {typ=>'op', val=>0170500, fmt=>'g'  ,fpp=>1 }, # alias
+ 'absf'   => {typ=>'op', val=>0170600, fmt=>'g'  ,fpp=>1 },
+ 'absd'   => {typ=>'op', val=>0170600, fmt=>'g'  ,fpp=>1 }, # alias
+ 'negf'   => {typ=>'op', val=>0170700, fmt=>'g'  ,fpp=>1 },
+ 'negd'   => {typ=>'op', val=>0170700, fmt=>'g'  ,fpp=>1 }, # alias
+ 'mulf'   => {typ=>'op', val=>0171000, fmt=>'gr' ,fpp=>1 },
+ 'muld'   => {typ=>'op', val=>0171000, fmt=>'gr' ,fpp=>1 }, # alias
+ 'modf'   => {typ=>'op', val=>0171400, fmt=>'gr' ,fpp=>1 },
+ 'modd'   => {typ=>'op', val=>0171400, fmt=>'gr' ,fpp=>1 }, # alias
+ 'addf'   => {typ=>'op', val=>0172000, fmt=>'gr' ,fpp=>1 },
+ 'addd'   => {typ=>'op', val=>0172000, fmt=>'gr' ,fpp=>1 }, # alias
+ 'ldf'    => {typ=>'op', val=>0172400, fmt=>'gr' ,fpp=>1 },
+ 'ldd'    => {typ=>'op', val=>0172400, fmt=>'gr' ,fpp=>1 }, # alias
+ 'subf'   => {typ=>'op', val=>0173000, fmt=>'gr' ,fpp=>1 },
+ 'subd'   => {typ=>'op', val=>0173000, fmt=>'gr' ,fpp=>1 }, # alias
+ 'cmpf'   => {typ=>'op', val=>0173400, fmt=>'gr' ,fpp=>1 },
+ 'cmpd'   => {typ=>'op', val=>0173400, fmt=>'gr' ,fpp=>1 }, # alias
+ 'stf'    => {typ=>'op', val=>0174000, fmt=>'rg' ,fpp=>1 },
+ 'std'    => {typ=>'op', val=>0174000, fmt=>'rg' ,fpp=>1 }, # alias
+ 'divf'   => {typ=>'op', val=>0174400, fmt=>'gr' ,fpp=>1 },
+ 'divd'   => {typ=>'op', val=>0174400, fmt=>'gr' ,fpp=>1 }, # alias
+ 'stexp'  => {typ=>'op', val=>0175000, fmt=>'rg' ,fpp=>1 },
+ 'stcfi'  => {typ=>'op', val=>0175400, fmt=>'rg' ,fpp=>1 },
+ 'stcfl'  => {typ=>'op', val=>0175400, fmt=>'rg' ,fpp=>1 }, # alias
+ 'stcdi'  => {typ=>'op', val=>0175400, fmt=>'rg' ,fpp=>1 }, # alias
+ 'stcdl'  => {typ=>'op', val=>0175400, fmt=>'rg' ,fpp=>1 }, # alias
+ 'stcfd'  => {typ=>'op', val=>0176000, fmt=>'rg' ,fpp=>1 },
+ 'stcdf'  => {typ=>'op', val=>0176000, fmt=>'rg' ,fpp=>1 }, # alias
+ 'ldexp'  => {typ=>'op', val=>0176400, fmt=>'gr' ,fpp=>1 },
+ 'ldcif'  => {typ=>'op', val=>0177000, fmt=>'gr' ,fpp=>1 },
+ 'ldcid'  => {typ=>'op', val=>0177000, fmt=>'gr' ,fpp=>1 }, # alias
+ 'ldclf'  => {typ=>'op', val=>0177000, fmt=>'gr' ,fpp=>1 }, # alias
+ 'ldcld'  => {typ=>'op', val=>0177000, fmt=>'gr' ,fpp=>1 }, # alias
+ 'ldcdf'  => {typ=>'op', val=>0177400, fmt=>'gr' ,fpp=>1 },
+ 'ldcfd'  => {typ=>'op', val=>0177400, fmt=>'gr' ,fpp=>1 }  # alias
+);
+
+# operand formats
+my %opfmt = (
+ '-'   => [],                                                  # halt,...
+ 'n3'  => [{typ=>'e', pref=>''}],                              # spl
+ 'n6'  => [{typ=>'e', pref=>''}],                              # mark
+ 'n8'  => [{typ=>'e', pref=>''}],                              # trap,emt
+ 'r'   => [{typ=>'r', pref=>'o1'}],                            # rts
+ 'g'   => [{typ=>'g', pref=>'o1'}],                            # inc,...
+ 'rg'  => [{typ=>'r', pref=>'o1'}, {typ=>'g', pref=>'o2'}],    # xor,jsr
+ 'gr'  => [{typ=>'g', pref=>'o2'}, {typ=>'r', pref=>'o1'}],    # ash,...
+ 'gg'  => [{typ=>'g', pref=>'o1'}, {typ=>'g', pref=>'o2'}],    # add,...
+ 's8'  => [{typ=>'e', pref=>''}],                              # br,...
+ 'ru6' => [{typ=>'r', pref=>'o1'}, {typ=>'e', pref=>''}]       # sob
+);
+
+# psect table
+my %psect =
+('.abs.'  => {dot=>0, dotmax=>0}
+);
+my $cur_psect = '.abs.';                    # current psect
+
+# local symbol table
+my %lst =
+('.'       => {name=>'.', typ=>'dot', val=>0,  psect=>'.abs.'}
+);
+my $llbl_scope = '0';                       # current local label scope
+my $llbl_ascope = 0;                        # annonymous local label scope count
+
+# macro table
+my %mst;
+
+my @flist;                                  # list of filenames
+my $fstem;                                  # stem or last file name
+my $lst_do;                                 # generate listing
+my $lst_fname;                              # listing file name
+my $lda_do;                                 # generate lda output
+my $lda_fname;                              # lda file name
+my $cof_do;                                 # generate cof output
+my $cof_fname;                              # cof file name
+my $lsm_do;                                 # generate lsm output
+my $lsm_fname;                              # lsm file name
+
+my @src;
+my %errcnt;                                 # error tag counter
+my $errcnt_tot=0;                           # total error count
+my $pass;
+
+my @t_pushback;
+
+my $out_dot;                                # current . for output
+my @out_data;                               # output data
+my $out_start = 1;                          # absolute start address
+
+autoflush STDOUT 1 if (-p STDOUT);          # autoflush if output into pipe
+
+if (exists $opts{help}) {
+  print_help;
+  exit 0;
+}
+
+if (scalar(@ARGV) == 0) {
+  print STDERR "asm-11-F: no input files specified, quiting..\n";
+  print_help;
+  exit 1;
+}
+
+# find stem of last file name
+$fstem = $ARGV[-1];
+$fstem =~ s|^.*/||;                         # drop leading dirs
+$fstem =~ s|\.mac$||;                       # drop trailing '.mac'
+
+if ($opts{lst} || $opts{olst}) {
+  $lst_do = 1;
+  $lst_fname = create_fname($opts{olst},'.lst');
+}
+
+if ($opts{lda} || $opts{olda}) {
+  $lda_do = 1;
+  $lda_fname = create_fname($opts{olda},'.lda');
+}
+
+if ($opts{cof} || $opts{ocof}) {
+  $cof_do = 1;
+  $cof_fname = create_fname($opts{ocof},'.cof');
+}
+
+if ($opts{lsm} || $opts{olsm}) {
+  $lsm_do = 1;
+  $lsm_fname = create_fname($opts{olsm},'.lsm');
+}
+
+# do pass 1
+$pass = 1;
+foreach my $fname (@ARGV) {
+  read_file($fname);
+}
+dump_sym() if $opts{dsym1};
+
+# prepare pass 2
+
+foreach (keys %psect) {
+  $psect{$_}{dot} = 0;
+}
+
+$lst{'.'}->{val} = 0;
+$lst{'.'}->{psect} = '.abs.';
+
+$cur_psect  = '.abs.';
+$llbl_scope = '0';
+
+# do pass 2
+$pass = 2;
+pass2();
+dump_sym() if $opts{dsym2};
+
+# create object output files
+write_lda($lda_fname) if $lda_do;
+write_cof($cof_fname) if $cof_do;
+write_lsm($lsm_fname) if $lsm_do;
+
+# and exit
+if ($errcnt_tot > 0) {
+  print "asm-11-E: compilation errors:";
+  foreach my $err (sort keys %errcnt) {
+    printf "  %s: %d", $err, $errcnt{$err};
+  }
+  print "\n";
+  exit 1;
+}
+exit 0;
+
+#-------------------------------------------------------------------------------
+
+sub create_fname {
+  my ($fname,$suff) = @_;
+  if (defined $fname) {
+    $fname =~ s|\%|$fstem|;
+    return $fname;
+  }
+  $fname = $fstem;
+  $fname .= $suff unless $fname eq '-';
+  return $fname;
+}
+
+#-------------------------------------------------------------------------------
+
+sub read_file {
+  my ($fname) = @_;
+  my $fh;
+  if ($fname eq "-") {
+    $fh = *STDIN;
+  } else {
+    if (not -r $fname) {
+      print STDERR "asm-11-F: '$fname' not found or readable, quiting..\n";
+      exit 1;
+    }
+    $fh = new FileHandle;
+    $fh->open($fname) or die "failed to open '$fname'";
+  }
+
+  push @flist, $fname;
+
+  my $lineno = 0;
+  my $fileno = scalar(@flist);
+  while (<$fh>) {
+    chomp;
+    my $line = $_;
+    $lineno += 1;
+    my $rl = parse_line($fileno, $lineno, $line);
+    dump_rl($rl) if $opts{tpass1};
+    push @src, $rl;
+
+    # handle .include
+    if (defined $$rl{oper} && $$rl{oper} eq '.include' && defined $$rl{ifile}) {
+      my $fnam = $$rl{ifile};
+      unless ($fnam =~ m|^/|) {
+        foreach (@{$opts{I}}) {
+          if (-r "$_/$fnam") {
+            $fnam = "$_/$fnam";
+            last;
+          }
+        }
+      }
+      read_file($fnam);
+    }
+
+  }
+
+  return;
+}
+
+#-------------------------------------------------------------------------------
+
+sub parse_line {
+  my ($fileno,$lineno,$line) = @_;
+
+  my %l = ( fileno => $fileno,              # file number
+            lineno => $lineno,              # line number
+            line   => $line,                # line
+            cl     => [split '',$line],     # char list
+            tl     => [],                   # token list
+            err    => '',                   # error tags
+            psect  => $cur_psect,           # current psect
+            dot    => getdot(),             # current dot
+            outw   => [],                   # output: words
+            outb   => []                    # output: bytes
+          );
+
+  my $state = 'start';                      # parser state
+
+  my $op_code;                              # op code
+  my $op_fmt;                               # op format
+  my $op_fpp;                               # true if floating opcode
+  my @op_ops;                               # list of operands
+  my $op_rop;                               # ref of current operand dsc
+
+  my $s_incok;
+  my $op_ibeg;
+  my $op_creg;
+  my $op_cmod;
+  my $op_cmod_def;
+
+  my @e_pbeg;
+  my $e_ibeg;
+  my $e_iend;
+
+  my $a_sym;
+  my $a_typ;
+
+  my $d_dire;
+  my @d_elist;
+
+  my $c;
+  my $rt;
+  my $tmask = 0;
+
+  my @stack;
+
+  @t_pushback = ();
+
+  printf "-- parse: '$line'\n" if $opts{tparse} || $opts{ttoken};
+
+  # quit if invalid character found (non 7 bit ascii in asm-11)
+  foreach my $c (@{$l{cl}}) {
+    if (ord($c) > 127) {
+      add_err(\%l, 'I');
+      return \%l;
+    }
+  }
+
+  while (1) {
+    if ($opts{tparse}) {
+      printf "-- state = $state";
+      printf ", nest = %d", scalar(@e_pbeg) if $state =~ m/^e_/;
+      print  "\n";
+    }
+
+    if ($state eq 'start') {                # state: start -------------------
+      $rt = get_token(\%l, $tmask);
+
+      # end of line seen ?
+      if      ($$rt{tag} eq 'EOL') {
+        last;
+
+      # name seen
+      } elsif ($$rt{tag} eq 'SYM') {
+        # directive name seen ?
+        if (exists $pst{$$rt{val}} && $pst{$$rt{val}}{typ} eq 'dir') {
+          $state = 'oper';
+
+        # otherwise check for label or assignment
+        } else {
+          my $isllbl = check_llbl($$rt{val});
+          $rt = get_token(\%l, $tmask);
+          # handle local labels
+          if      ($isllbl) {
+            if ($$rt{tag} eq 'LBL') {
+              setsym(\%l, 'lbl' ,$l{tl}[-2]{val}, getdot());
+              $l{lscope} = $llbl_scope;
+              $l{label} = $l{tl}[-2]{val};
+              $state = 'start1';
+            } else {
+              $state = 'q';
+            }
+          # handle assignments
+          } elsif ($$rt{tag} eq 'ASS') {
+            $a_sym = $l{tl}[-2]{val};
+            $a_typ = $l{tl}[-1]{val};
+            push @stack, 'a_end';
+            $state = 'e_beg';
+          # handle normal labels
+          } elsif ($$rt{tag} eq 'LBL') {
+            setsym(\%l, 'lbl' ,$l{tl}[-2]{val}, getdot());
+            $llbl_scope = $l{tl}[-2]{val};
+            $l{lscope} = $l{tl}[-2]{val};
+            $l{label} = $l{tl}[-2]{val};
+            $state = 'start1';
+          # if neither label or assigmnent, handle as operation or directive
+          } else {
+            pushback_token(\%l);
+            $state = 'oper';
+          }
+        }
+
+      # anything else seen, treat a implicit .word
+      } else {
+        pushback_token(\%l);
+        $state = 'iword';
+      }
+
+    } elsif ($state eq 'start1') {          # state: start1 ------------------
+      $rt = get_token(\%l, $tmask);
+      if      ($$rt{tag} eq 'EOL') {
+        last;
+      } elsif ($$rt{tag} eq 'SYM') {
+        $state = 'oper';
+      } else {                              # not symbol -> implicit .word
+        pushback_token(\%l);
+        $state = 'iword';
+      }
+
+    } elsif ($state eq 'oper') {            # state: oper --------------------
+      # Note: state oper is entered with token already on tl list !!
+      my $rt0 = $l{tl}[-1];
+      my $op = $$rt0{val};
+      $l{oper} = $op;
+      if (exists $pst{$op}) {
+        my $rs = $pst{$op};
+        if ($$rs{typ} eq 'dir') {           # directives ------------------
+          $d_dire = $op;
+          if      ($op eq '.word' ||          # .word
+                   $op eq '.byte') {          # .byte
+            $state = 'dl_beg';
+
+          } elsif ($op eq '.blkw' ||          # .blkw
+                   $op eq '.blkb') {          # .blkb
+            $state = 'dl_beg';
+
+          } elsif ($op eq '.ascii' ||         # .ascii
+                   $op eq '.asciz') {         # .asciz
+            $tmask = TMASK_STRING;
+            $state = 'al_next';
+
+          } elsif ($op eq '.even' ||          # .even
+                   $op eq '.odd') {           # .odd
+            my $dot = getdot();
+            my $inc = 0;
+            $inc = 1 if $op eq '.even' && ($dot&01)==1;
+            $inc = 1 if $op eq '.odd'  && ($dot&01)==0;
+            incdot(1) if $inc;
+            $l{typ}    = 'data';
+            $l{incdot} = $inc;
+            $l{lstdot} = 1;
+            $state = 'end';
+
+          } elsif ($op eq '.asect') {         # .asect
+            # .asect is currently a noop because asect is start default
+            $l{lstdot} = 1;
+            $state = 'end';
+
+          } elsif ($op eq '.include') {       # .include
+            $rt = get_token(\%l, TMASK_STRING);
+            if ($$rt{tag} eq 'STR') {
+              my $ifile = $$rt{val};
+              my $rt = get_token(\%l, TMASK_STRING);
+              if ($$rt{tag} eq 'EOL') {
+                $l{ifile} = substr($ifile,1,-1) unless $l{err} ne '';
+                $state = 'end';
+              } else {
+                $state = 'q';
+              }
+            } else {
+              $state = 'q';
+            }
+
+          } elsif ($op eq '.end') {           # .end
+            $state = 'dl_beg';
+
+          } else {
+            die "BUGCHECK: op = '$op' in pst but no handler";
+          }
+
+        } elsif ($$rs{typ} eq 'op') {       # or opcodes ------------------
+          walign(\%l);
+          $l{typ}  = 'code';
+          $op_code = $$rs{val};
+          $op_fmt  = $$rs{fmt};
+          $op_fpp  = $$rs{fpp};
+          die "BUGCHECK: op_fmt = '$op_fmt' unknown in opfmt"
+            unless defined $opfmt{$op_fmt};
+
+          $l{opcode} = $op_code;
+          $l{opfmt}  = $op_fmt;
+
+          @op_ops  = @{$opfmt{$op_fmt}};
+
+          if (scalar(@op_ops) == 0) {
+            incdot(2);
+            $state = 'end';
+          } else {
+            $op_rop = shift @op_ops;
+            $state = 'op_beg';
+          }
+
+        }
+      } else {                              # oper noy in pst --> implicit .word
+        pushback_token(\%l);
+        $state = 'iword';
+      }
+
+    } elsif ($state eq 'op_beg') {          # state: op_beg ------------------
+      $op_ibeg = scalar(@{$l{tl}});
+      $op_creg = undef;
+      $op_cmod = undef;
+      $op_cmod_def = undef;
+      $e_ibeg = undef;
+      $e_iend = undef;
+      if      ($$op_rop{typ} eq 'r') {      # operand: register
+        $rt = get_token(\%l, $tmask);
+        $op_creg = check_reg($rt);
+        if (defined $op_creg) {
+          if ($op_fpp && $op_creg > 3) {      # fpp ac must be r0:r3
+            $op_creg &= 03;
+            add_err(\%l, 'T');
+          }
+          $op_cmod = 0;
+          $state = 'op_end';
+        } else {
+          $state = 'q';
+        }
+      } elsif ($$op_rop{typ} eq 'e') {      # operand: expression
+        push @stack, 'op_end';
+        $state = 'e_beg';
+      } elsif ($$op_rop{typ} eq 'g') {     # operand: general
+        push @stack, 'op_end';
+        $state = 'g_beg';
+      } else {
+        die "BUGCHECK: unexpected op typ '$$op_rop{typ}'";
+      }
+
+    } elsif ($state eq 'op_end') {          # state: op_end ------------------
+      my $op_iend = scalar(@{$l{tl}})-1;
+      $l{tl}[$op_ibeg]->{om} = '<';
+      $l{tl}[$op_iend]->{om} = ($l{tl}[$op_iend]->{om}) ? '<>' : '>';
+
+      my $pref = $$op_rop{pref};
+      if      ($$op_rop{typ} =~  m/^[gr]$/) {
+        $l{$pref.'reg'} = $op_creg;
+        $l{$pref.'mod'} = $op_cmod;
+        if (defined $e_ibeg) {
+          $l{$pref.'ebeg'} = $e_ibeg;
+          $l{$pref.'eend'} = $e_iend;
+        }
+      } elsif ($$op_rop{typ} eq  'e') {
+        if (defined $e_ibeg) {
+          $l{ebeg} = $e_ibeg;
+          $l{eend} = $e_iend;
+        }
+      }
+
+      if (scalar(@op_ops)) {                # second operand
+        $rt = get_token(\%l, $tmask);
+        if (check_token($rt, 'DEL', ',')) {
+          $op_rop = shift @op_ops;
+          $state = 'op_beg';
+        } else {
+          $state = 'q';
+        }
+
+      } else {                              # all operands seen
+        my $nword = 1;
+        $nword += 1 if defined $l{o1ebeg};
+        $nword += 1 if defined $l{o2ebeg};
+        incdot(2*$nword);
+        $state = 'end';
+      }
+
+    } elsif ($state eq 'g_beg') {           # state: g_beg -------------------
+      $rt = get_token(\%l, $tmask);
+      if      (defined check_reg($rt)) {           # R !
+        $op_creg = check_reg($rt);
+        $op_cmod = 0;
+        $state = 'g_end';
+      } elsif (check_token($rt, 'DEL', '(')) {     # (  R),R)+
+        $state = 'g_inc1';
+      } elsif (check_token($rt, 'OP',  '@')) {     # @  R,(R)+,-(R),E(R),#E,E
+        $op_cmod_def = 1;
+        $state = 'g_def1';
+      } elsif (check_token($rt, 'OP',  '-')) {     # -  (R)
+        $rt = get_token(\%l, $tmask);
+        if (check_token($rt, 'DEL', '(')) {          # next (
+          pushback_token(\%l);
+          $state = 'g_dec1';                         # go for -(R)
+        } else {
+          pushback_token(\%l);
+          pushback_token(\%l);
+          push @stack, 'g_ind1';                     # otherwise -E..
+          $state = 'e_beg';
+        }
+      } elsif (check_token($rt, 'OP',  '#')) {     # #  E
+        push @stack, 'g_imm1';
+        $state = 'e_beg';
+      } else {
+        pushback_token(\%l);
+        push @stack, 'g_ind1';                     # E ! (R)
+        $state = 'e_beg';
+      }
+
+    } elsif ($state eq 'g_inc1') {          # state: g_inc1 ------------------
+      $rt = get_token(\%l, $tmask);
+      $op_creg = check_reg($rt);
+      if (defined $op_creg) {
+        $rt = get_token(\%l, $tmask);
+        if (check_token($rt, 'DEL', ')')) {
+          $rt = get_token(\%l, $tmask);
+          if (check_token($rt, 'OP', '+')) {
+            $op_cmod = $op_cmod_def ? 3 : 2;
+            $state = 'g_end';
+          } else {
+            if ($op_cmod_def) {
+              $state = 'q';
+            } else {
+              pushback_token(\%l);
+              $op_cmod = 1;
+              $state = 'g_end';
+            }
+          }
+        } else {
+          $state = 'q';
+        }
+      } else {
+        $state = 'q';
+      }
+
+    } elsif ($state eq 'g_def1') {          # state: g_def1 ------------------
+      $rt = get_token(\%l, $tmask);
+      if (defined check_reg($rt)) {               # R
+        $op_creg = check_reg($rt);
+        $op_cmod = 1;
+        $state = 'g_end';
+      } elsif (check_token($rt, 'DEL', '(')) {    # ( -> R+
+        $state = 'g_inc1';
+      } elsif (check_token($rt, 'OP',  '-')) {    # - -> (R)
+        $rt = get_token(\%l, $tmask);
+        if (check_token($rt, 'DEL', '(')) {          # next (
+          pushback_token(\%l);
+          $state = 'g_dec1';                         # go for -(R)
+        } else {
+          pushback_token(\%l);
+          pushback_token(\%l);
+          push @stack, 'g_ind1';                     # otherwise -E..
+          $state = 'e_beg';
+        }
+      } elsif (check_token($rt, 'OP',  '#')) {    # # -> #
+        push @stack, 'g_imm1';
+        $state = 'e_beg';
+      } else {                                    # E -> !, (R)
+        pushback_token(\%l);
+        push @stack, 'g_ind1';
+        $state = 'e_beg';
+      }
+
+    } elsif ($state eq 'g_ind1') {          # state: g_ind1 ------------------
+      $rt = get_token(\%l, $tmask);
+      if (check_token($rt, 'DEL', '(')) {
+        $rt = get_token(\%l, $tmask);
+        $op_creg = check_reg($rt);
+        if (defined $op_creg) {
+          $rt = get_token(\%l, $tmask);
+          $op_cmod = $op_cmod_def ? 7 : 6;
+          $state = check_token($rt, 'DEL', ')') ? 'g_end' : 'q';
+        } else {
+          $state = 'q';
+        }
+      } else {
+        pushback_token(\%l);
+        $op_creg = 7;
+        $op_cmod = $op_cmod_def ? 7 : 6;
+        $state = 'g_end';
+      }
+
+    } elsif ($state eq 'g_dec1') {          # state: g_dec1 ------------------
+      $rt = get_token(\%l, $tmask);
+      if (check_token($rt, 'DEL', '(')) {
+        $rt = get_token(\%l, $tmask);
+        $op_creg = check_reg($rt);
+        if (defined $op_creg) {
+          $rt = get_token(\%l, $tmask);
+          $op_cmod = $op_cmod_def ? 5 : 4;
+          $state = check_token($rt, 'DEL', ')') ? 'g_end' : 'q';
+        } else {
+          $state = 'q';
+        }
+      } else {
+        $state = 'q';
+      }
+
+    } elsif ($state eq 'g_imm1') {          # state: g_imm1 ------------------
+      $op_creg = 7;
+      $op_cmod = $op_cmod_def ? 3 : 2;
+      $state = 'g_end';
+
+    } elsif ($state eq 'g_end') {           # state: g_end -------------------
+        $state = pop @stack;
+
+    } elsif ($state eq 'e_beg') {           # state: e_beg -------------------
+      $e_ibeg = scalar(@{$l{tl}});
+      @e_pbeg = ();
+      $state = 'e_uop';
+
+    } elsif ($state eq 'e_uop') {           # state: e_uop -------------------
+      $rt = get_token(\%l, $tmask);
+      if      ($$rt{tag} eq 'OP' && $$rt{typ}=~'u') { # OP(u)
+        $$rt{typ}='u';
+        $state = 'e_uop';
+      } elsif ($$rt{tag} eq 'NUM' || $$rt{tag} eq 'SYM') {
+        $state = 'e_bop';
+      } elsif (check_token($rt, 'DEL', '<')) {
+        push @e_pbeg, scalar(@{$l{tl}})-1;
+        $state = 'e_uop';
+      } else {
+        $state = 'q';
+      }
+
+    } elsif ($state eq 'e_bop') {           # state: e_bop -------------------
+      $rt = get_token(\%l, $tmask);
+      if      ($$rt{tag} eq 'OP' && $$rt{typ}=~'b') { # OP(b)
+        $$rt{typ}='b';
+        $state = 'e_bop1';
+      } elsif (check_token($rt, 'DEL', '>')) {
+        if (scalar(@e_pbeg) == 0) {
+          $state = 'q';
+        } else {
+          my $pbeg = pop @e_pbeg;
+          $l{tl}[$pbeg]->{pend} = scalar(@{$l{tl}})-1;
+          if ($tmask & TMASK_STRINGEXP) {
+            $state = 'e_end';
+          } else {
+            $state = 'e_bop';
+          }
+        }
+      } else {
+        pushback_token(\%l);
+        $state = 'e_end';
+      }
+
+    } elsif ($state eq 'e_bop1') {          # state: e_bop1 ------------------
+      $rt = get_token(\%l, $tmask);
+      if      ($$rt{tag} eq 'NUM' || $$rt{tag} eq 'SYM') {
+        $state = 'e_bop';
+      } elsif (check_token($rt, 'DEL', '<')) {
+        push @e_pbeg, scalar(@{$l{tl}})-1;
+        $state = 'e_uop';
+      } else {
+        $state = 'q';
+      }
+
+    } elsif ($state eq 'e_end') {           # state: e_end -------------------
+      $e_iend = scalar(@{$l{tl}})-1;
+      $l{tl}[$e_ibeg]->{em} = '<>';
+      if ($e_iend != $e_ibeg) {
+        $l{tl}[$e_ibeg]->{em} = '<';
+        $l{tl}[$e_iend]->{em} = '>';
+      }
+      $state = (scalar(@e_pbeg)==0) ? pop @stack : 'q';
+
+    } elsif ($state eq 'a_end') {           # state: a_end -------------------
+      my $val = eval_exp(\%l, $e_ibeg, $e_iend);
+      my $typ = ($a_typ =~ m/:/) ? 'pass' : 'ass';
+      setsym(\%l, $typ, $a_sym, $val);
+      $l{typ}   = 'ass';
+      $l{atyp}  = $typ;
+      $l{asym}  = $a_sym;
+      $l{ebeg} = $e_ibeg;
+      $l{eend} = $e_iend;
+      $state = 'end';
+
+    } elsif ($state eq 'dl_beg') {          # state: dl_beg ------------------
+      $rt = get_token(\%l, $tmask);
+      if      ($$rt{tag} eq 'EOL') {
+        $state = 'dl_end';
+      } elsif (check_token($rt, 'DEL', ',')) {
+        pushback_token(\%l);
+        $e_ibeg = undef;
+        $e_iend = undef;
+        $state = 'dl_next';
+      } else {
+        pushback_token(\%l);
+        $e_ibeg = undef;
+        $e_iend = undef;
+        push @stack, 'dl_next';
+        $state = 'e_beg';
+      }
+
+    } elsif ($state eq 'dl_next') {         # state: dl_next -----------------
+      push @d_elist, {ibeg=>$e_ibeg, iend=>$e_iend};
+      $rt = get_token(\%l, $tmask);
+      if      ($$rt{tag} eq 'EOL') {
+        $state = 'dl_end';
+      } elsif (check_token($rt, 'DEL', ',')) {
+        $rt = get_token(\%l, $tmask);
+        if ($$rt{tag} eq 'EOL' || check_token($rt, 'DEL', ',')) {
+          pushback_token(\%l);
+          $e_ibeg = undef;
+          $e_iend = undef;
+          $state = 'dl_next';
+        } else {
+          pushback_token(\%l);
+          $e_ibeg = undef;
+          $e_iend = undef;
+          push @stack, 'dl_next';
+          $state = 'e_beg';
+        }
+      } else {
+        $state = 'q';
+      }
+
+    } elsif ($state eq 'dl_end') {          # state: dl_end ------------------
+      $state = 'end';
+      if      ($d_dire eq '.word') {
+        walign(\%l);
+        if (scalar(@d_elist)) {
+          $l{typ} = 'data';
+          $l{delist} = \@d_elist;
+          incdot(2*scalar(@d_elist));
+        } else {
+          $state = 'q';
+        }
+      } elsif ($d_dire eq '.byte') {
+        if (scalar(@d_elist)) {
+          $l{typ} = 'data';
+          $l{delist} = \@d_elist;
+          incdot(1*scalar(@d_elist));
+        } else {
+          $state = 'q';
+        }
+      } elsif ($d_dire eq '.blkw' || $d_dire eq '.blkb') {
+        $l{lstdot} = 1;
+        walign(\%l) if $d_dire eq '.blkw';
+        my $val;
+        if (scalar(@d_elist) == 0) {
+          $val = 1;
+        } elsif (scalar(@d_elist) == 1) {
+          $val = eval_exp(\%l, $d_elist[0]{ibeg}, $d_elist[0]{iend});
+        } else {
+          $state = 'q';
+        }
+
+        if (defined $val) {
+          my $size = ($d_dire eq '.blkw') ? 2 : 1;
+          incdot($size * $val);
+          $l{typ}    = 'data';
+          $l{incdot} = $size * $val;
+        } else {
+          add_err(\%l, 'A');
+        }
+
+      } elsif ($d_dire eq '.end') {
+        my $val;
+        if (scalar(@d_elist) == 0) {
+          $val = 1;
+        } elsif (scalar(@d_elist) == 1) {
+          $val = eval_exp(\%l, $d_elist[0]{ibeg}, $d_elist[0]{iend});
+        } else {
+          $state = 'q';
+        }
+        if (defined $val) {
+          $l{lstval} = $val;                # set aval to get it in listing
+          $out_start = $val;
+        } else {
+          $l{lstval} = 0;
+          add_err(\%l, 'U');
+        }
+
+      } else {
+        die "BUGCHECK: unexpected d_dire = '$d_dire'";
+      }
+
+    } elsif ($state eq 'al_next') {         # state: al_next -----------------
+      $rt = get_token(\%l, $tmask);
+      if      ($$rt{tag} eq 'STR') {
+        push @d_elist, {str=>$$rt{val}};
+      } elsif ($$rt{tag} eq 'EOL') {
+        $state = 'al_end';
+      } elsif (check_token($rt, 'DEL', '<')) {
+        pushback_token(\%l);
+        $tmask = TMASK_STRINGEXP;
+        push @stack, 'al_exp';
+        $e_ibeg = undef;
+        $e_iend = undef;
+        $state = 'e_beg';
+      } else {
+        $state = 'q';
+      }
+
+    } elsif ($state eq 'al_exp') {          # state: al_exp ------------------
+      push @d_elist, {ibeg=>$e_ibeg, iend=>$e_iend};
+      $tmask = TMASK_STRING;
+      $state = 'al_next';
+
+    } elsif ($state eq 'al_end') {          # state: al_end ------------------
+      my $size = 0;
+      foreach (@d_elist) {
+        if (defined $$_{str}) {
+          $size += length($$_{str}) - 2;
+        } else {
+          $size += 1;
+        }
+      }
+      $size += 1 if $d_dire eq '.asciz';
+      incdot($size);
+      $l{typ} = 'data';
+      $l{delist} = \@d_elist;
+      $state = 'end';
+
+    } elsif ($state eq 'iword') {           # state: iword -------------------
+      $l{oper} = $d_dire = '.word';           # setup implicit .word directive
+      $state = 'dl_beg';
+
+    } elsif ($state eq 'end') {             # state: end ---------------------
+      # unless EOL already seen fetch next token
+      if (scalar(@{$l{tl}}) && $l{tl}[-1]{tag} eq 'EOL') {
+        $rt = $l{tl}[-1];
+      } else {
+        $rt = get_token(\%l, $tmask);
+      }
+      # if at EOL fine, otherwise mark syntax error
+      if ($$rt{tag} eq 'EOL') {
+        last;
+      } else {
+        $state = 'q';
+      }
+
+    } elsif ($state eq 'q') {               # state: q -----------------------
+      add_err(\%l, 'Q');                    # set Q error flag
+      last;                                 # and quit this line
+
+    } else {
+      die "BUGCHECK: unexpected state '$state'\n";
+    }
+  }
+
+  return \%l;
+}
+
+#-------------------------------------------------------------------------------
+
+sub walign {
+  my ($rl) = @_;
+  my $dot = getdot();
+  if ($dot & 0x1) {                         # odd address ?
+    incdot(1);
+    add_err($rl, 'B');
+    $$rl{dot} = getdot() if ($pass == 2);   # fixup . in rl context in pass 2
+  }
+  return;
+}
+
+#-------------------------------------------------------------------------------
+
+sub add_err {
+  my ($rl,$err) = @_;
+  return if index($$rl{err}, $err) >= 0;    # prevent multiple error tags
+  $$rl{err} .= $err;                        # set error tag
+  $errcnt{$err} += 1;                       # and count them
+  $errcnt_tot += 1;
+  return;
+}
+
+#-------------------------------------------------------------------------------
+
+sub prt_err {
+  my ($rl) = @_;
+  return join '', sort split '', $$rl{err};
+}
+
+#-------------------------------------------------------------------------------
+
+sub setdot {
+  my ($val) = @_;
+  return unless defined $val;
+  $lst{'.'}->{val} = $val;
+  $psect{$cur_psect}{dot} = $val;
+  $psect{$cur_psect}{dotmax} = $val if $psect{$cur_psect}{dotmax} < $val;
+  return;
+}
+
+#-------------------------------------------------------------------------------
+
+sub incdot {
+  my ($inc) = @_;
+  return unless defined $inc;
+  setdot(getdot() + $inc);
+  return;
+}
+
+#-------------------------------------------------------------------------------
+
+sub getdot {
+  return $lst{'.'}{val};
+}
+
+#-------------------------------------------------------------------------------
+
+sub setsym {
+  my ($rl,$typ,$name,$val) = @_;
+  ##print "+++set: pass=$pass; $llbl_scope : $name; typ=$typ\n";
+  if ($name eq '.') {
+    if ($typ eq 'ass') {
+      setdot($val);
+    } else {
+      add_err($rl, 'A');
+    }
+    return;
+  }
+
+  my $isllbl = check_llbl($name);
+  if (check_llbl($name)) {
+    if ($typ eq 'lbl') {
+      $name = $llbl_scope . ':' . $name if $isllbl;
+      $typ  = 'llbl';
+    } else {
+      die "BUGCHECK: name looks like local label, but typ=$typ";
+    }
+  }
+
+  my $namelc = lc($name);
+
+  if ($typ ne 'ass' && exists $lst{$namelc} &&
+      $lst{$namelc}{typ} ne 'udef' && $pass==1) {
+    # Note: 'M' etaging done in pass 2!
+    $lst{$namelc}{mdef} = 1;
+    return;
+  }
+
+  $lst{$namelc}{name}  = $name;
+  $lst{$namelc}{val}   = $val;
+  $lst{$namelc}{typ}   = $typ;
+  $lst{$namelc}{psect} = $cur_psect;
+
+  return;
+}
+
+#-------------------------------------------------------------------------------
+
+sub getsym {
+  my ($rl, $name, $noxref) = @_;
+  ##print "+++get: pass=$pass; $llbl_scope : $name\n";
+  $name = $llbl_scope . ':' . $name if check_llbl($name);
+  my $namelc = lc($name);
+
+  # if not yet defined, add it in lst with typ='udef'
+  if (not exists $lst{$namelc}) {           # not yet in lst
+    if (exists $pst{$namelc} &&               # but known as opcode
+        $pst{$namelc}{typ} eq 'op') {
+      return $pst{$namelc}{val};              # return that value
+    } else {
+      $lst{$namelc} = { name  => $name,
+                        val   => undef,
+                        typ   => 'udef',
+                        psect => '<udef>'
+                      };
+      return undef;
+    }
+  }
+
+  unless ($noxref) {
+    if ($lst{$namelc}{mdef}) {
+      add_err($rl, 'D');
+    }
+  }
+
+  return $lst{$namelc}{val};
+}
+
+#-------------------------------------------------------------------------------
+
+sub lst_checkmdef {
+  my ($name) = @_;
+  $name = $llbl_scope . ':' . $name if check_llbl($name);
+  my $namelc = lc($name);
+  return $lst{$namelc}{mdef};
+}
+
+#-------------------------------------------------------------------------------
+
+sub eval_exp {
+  my ($rl,$ibeg,$iend,$nest) = @_;
+  my $rtl = $$rl{tl};
+  my @uop;
+  my $bop;
+  my @val;
+
+  return undef unless defined $ibeg && defined $iend;
+  return undef unless defined $$rtl[$ibeg] || $nest; # FIXME_code: test em !!
+
+  for (my $i=$ibeg; $i<=$iend; $i++) {
+    my $rt = $$rtl[$i];
+    my $do_uop = 0;
+    if      ($$rt{tag} eq 'NUM') {
+      push @val, $$rt{nval};
+
+    } elsif ($$rt{tag} eq 'SYM') {
+      push @val, getsym($rl, $$rt{val});
+
+    } elsif ($$rt{tag} eq 'OP' && $$rt{typ} eq 'u') {
+      push @uop, $$rt{val};
+
+    } elsif ($$rt{tag} eq 'OP' && $$rt{typ} eq 'b') {
+      $bop = $$rt{val};
+
+    } elsif ($$rt{val} eq '<') {
+      my $pend = $$rt{pend};
+      die "BUGCHECK: pend not found for rtl[$i]" unless defined $pend;
+      push @val, eval_exp($rl,$i+1,$pend-1,1);
+      $i = $pend;
+
+    } else {
+      die "BUGCHECK: tag='$$rt{tag}', val='$$rt{val}'\n";
+    }
+
+    # if stack non-empty: return undef on undef, apply unary operators
+    if (scalar(@val) > 0) {
+      return undef unless defined $val[-1];
+      my $o;
+      while($o = pop @uop) {
+        my $v = pop @val;
+        if      ($o eq '+') {
+        } elsif ($o eq '-') {
+          $v = -$v;
+        } elsif ($o eq '^c') {
+          $v = ~$v;
+        } else {
+          die "BUGCHECK: tag='OP(u)', val='$o'\n";
+        }
+        push @val, (0177777 & $v);
+      }
+    }
+
+    # if stack has 2 operands: apply binary operator
+    if (scalar(@val) == 2) {
+      die "BUGCHECK: bop not defined" unless defined $bop;
+      my $v2 = pop @val;
+      my $v1 = pop @val;
+      return undef unless defined $v1 && defined $v2;
+      if      ($bop eq '+') {
+        push @val, int($v1) + int($v2);
+      } elsif ($bop eq '-') {
+        push @val, int($v1) - int($v2);
+      } elsif ($bop eq '*') {
+        push @val, int($v1) * int($v2);
+      } elsif ($bop eq '/') {
+        push @val, int(int($v1) / int($v2));
+      } elsif ($bop eq '&') {
+        push @val, int($v1) & int($v2);
+      } elsif ($bop eq '!') {
+        push @val, int($v1) | int($v2);
+      } else {
+        die "BUGCHECK: tag='OP(b)', val='$bop'\n";
+      }
+      $bop = undef;
+    }
+
+  }
+  return pop @val;
+}
+
+#-------------------------------------------------------------------------------
+# returns true if symbol looks like a local label (1234$)
+
+sub check_llbl {
+  my ($name) = @_;
+  return ($name =~ m/^\d+\$/) ? 1 : 0;
+}
+
+#-------------------------------------------------------------------------------
+# returns register number if register symbol, or undef
+
+sub check_reg {
+  my ($rt) = @_;
+  return undef unless $$rt{tag} eq 'SYM';
+  my $pse = $pst{$$rt{val}};
+  return undef unless defined $pse;
+  return undef unless $$pse{typ} eq 'reg';
+  return $$pse{val};
+}
+
+#-------------------------------------------------------------------------------
+# returns true if token has specific tag/val
+
+sub check_token {
+  my ($rt, $tag, $val) = @_;
+  return undef unless $$rt{tag} eq $tag;
+  return $$rt{val} eq $val;
+}
+
+#-------------------------------------------------------------------------------
+
+sub pushback_token {
+  my ($rl) = @_;
+
+  my $rt = pop @{$$rl{tl}};
+  push @t_pushback, $rt;
+
+  if ($opts{ttoken}) {
+    printf "-- token-back:  tag=%-3s val='%s'\n",
+      $$rt{tag}, savestr($$rt{val});
+  }
+
+  return;
+}
+
+#-------------------------------------------------------------------------------
+
+sub get_token {
+  my ($rl, $tmask) = @_;
+  my $rt;
+
+  if (scalar(@t_pushback)) {
+    $rt = pop @t_pushback;
+    if ($opts{ttoken}) {
+      printf "-- token-reget: tag=%-3s val='%s'\n",
+        $$rt{tag}, savestr($$rt{val});
+    }
+
+  } else {
+    $rt = get_token1($rl, $tmask);
+    if ($opts{ttoken}) {
+      printf "-- token-get:   tag=%-3s val='%s'\n",
+        $$rt{tag}, savestr($$rt{val});
+    }
+  }
+
+  push @{$$rl{tl}}, $rt;
+
+  return $rt;
+}
+
+#-------------------------------------------------------------------------------
+
+sub finish_token {
+  my $rt = shift @_;
+  while (scalar(@_)) {
+    my $tag = shift @_;
+    my $val = shift @_;
+    $$rt{$tag} = $val;
+  }
+  return $rt;
+}
+
+#-------------------------------------------------------------------------------
+
+sub get_token1 {
+  my ($rl, $tmask) = @_;
+  my $rcl = $$rl{cl};
+
+  my $val;
+  my $ws = '';
+
+  # drop any leading whitespace
+  while (scalar(@$rcl)) {
+    last if ($$rcl[0] !~ m/\s/);
+    $ws .= shift @$rcl;
+  }
+
+  my %t = (mask => $tmask,
+           ws   => $ws
+          );
+
+  # end of line ?
+  unless (scalar(@$rcl)) {
+    return finish_token(\%t, tag=>'EOL', val=>$val);
+  }
+
+  # get leading char
+  my $c = $$rcl[0];
+
+  # comment ? treated similar to end of line, comment saved in val
+  if($c eq ';') {
+    $val = join('',@$rcl);
+    @$rcl = ();
+    return finish_token(\%t, tag=>'EOL', val=>$val);
+  }
+
+  # here context dependent tokens
+  if ($tmask & TMASK_STRING) {
+    my $del = shift @$rcl;
+    if ($del eq '<') {
+      return finish_token(\%t, tag=> 'DEL', val=> $del);
+    } else {
+      my $str = $del;
+      while (scalar(@$rcl)) {
+        my $c = shift @$rcl;
+        $str .= $c;
+        return finish_token(\%t, tag=> 'STR', val=> $str) if $c eq $del;
+      }
+      add_err($rl, 'A');
+      return finish_token(\%t, tag=> 'STR', val=> $str);
+    }
+  }
+
+  # looks like symbol ?
+  if ($c =~ m/[a-zA-Z\$\.]/) {
+    while (scalar(@$rcl)) {
+      last if ($$rcl[0] !~ m/[a-zA-Z0-9\$\.]/);
+      $val .= shift @$rcl;
+    }
+    return finish_token(\%t, tag=> 'SYM', val=> $val);
+  }
+
+  # looks like number or local label ?
+  if ($c =~ m/[0-9]/) {
+    while (scalar(@$rcl)) {
+      last if ($$rcl[0] !~ m/[0-9]/);
+      $val .= shift @$rcl;
+    }
+    # check for local label
+    if (scalar(@$rcl) && $$rcl[0] eq '$') {
+      # FIXME_code: reject labels with numbers >64k-1
+      $val .= shift @$rcl;
+      return finish_token(\%t, tag=> 'SYM', val=> $val);
+    }
+    # looks like numerical constant
+    my $nval = undef;
+    # if trailing '.' seen, add and handle as decimal, otherwise as octal
+    if (scalar(@$rcl) && $$rcl[0] eq '.') {
+      $nval =int($val);
+      $val .= shift @$rcl;
+      if ($nval > 65535) {
+        add_err($rl, 'T');
+        $nval &= 0177777;
+      }
+    } else {
+      $nval = 0;
+      foreach my $cc (split '',$val) {
+        $nval = ($nval<<3) + int($cc);
+        add_err($rl, 'N') unless $cc =~ m/[0-7]/;
+        add_err($rl, 'T') unless $nval <= 0177777;
+        $nval &= 0177777;
+      }
+    }
+    return finish_token(\%t, tag=> 'NUM', val=> $val, nval=>$nval);
+  }
+
+  # looks like label delimiter (':' or '::') ?
+  if ($c eq ':') {
+    $val .= shift @$rcl;
+    $val .= shift @$rcl if (scalar(@$rcl) && $$rcl[0] eq ':');
+    return finish_token(\%t, tag=> 'LBL', val=> $val);
+  }
+
+  # looks assignment delimiter ('=','=:','==','==:') ?
+  if ($c eq '=') {
+    $val .= shift @$rcl;
+    $val .= shift @$rcl if (scalar(@$rcl) && $$rcl[0] eq '=');
+    $val .= shift @$rcl if (scalar(@$rcl) && $$rcl[0] eq ':');
+    return finish_token(\%t, tag=> 'ASS', val=> $val);
+  }
+
+  # operators
+  if ($c =~ m/^(\+|\-)$/ ) {                # unary/binary operators
+    return finish_token(\%t, tag=> 'OP', typ=> 'ub', val=> shift @$rcl);
+  }
+  if ($c =~ m/^(\*|\/|\&|\!)$/ ) {          # binary operators
+    return finish_token(\%t, tag=> 'OP', typ=> 'b',  val=> shift @$rcl);
+  }
+  if ($c =~ m/^(\#|\@)$/ ) {                # unary operators
+    return finish_token(\%t, tag=> 'OP', typ=> 'u',  val=> shift @$rcl);
+  }
+
+  # ' and " operator
+  if ($c eq "'") {
+    $val .= shift @$rcl;
+    $c = shift @$rcl;
+    if (not defined $c) {
+      return finish_token(\%t, tag=> 'BAD', val=> $val);
+    }
+    $val .= $c;
+    return finish_token(\%t, tag => 'NUM', val=> $val, nval=>ord($c));
+  }
+
+  if ($c eq '"') {
+    $val .= shift @$rcl;
+    my $c1 = shift @$rcl;
+    my $c2 = shift @$rcl;
+    if (! defined $c1 || ! defined $c2) {
+      return finish_token(\%t, tag=> 'BAD', val=> $val);
+    }
+    $val .= $c1;
+    $val .= $c2;
+    return finish_token(\%t, tag => 'NUM', val=> $val,
+                                           nval=>ord($c2)<<8|ord($c1));
+  }
+
+  # universal ^ operator
+  if ($c eq '^') {
+    $val .= shift @$rcl;
+    $c = shift @$rcl;
+    if (not defined $c) {
+      return finish_token(\%t, tag=> 'BAD', val=> $val);
+    }
+    $val .= $c;
+    $c = lc($c);
+    if      ($c eq 'c') {
+      return finish_token(\%t, tag=> 'OP', typ=> 'u',  val=> $val);
+
+    } elsif ($c eq 'b') {
+      my $nval = 0;
+      while (scalar(@$rcl)) {
+        last if ($$rcl[0] !~ m/[0-9]/);
+        my $cc = shift @$rcl;
+        $nval = ($nval<<1) + int($cc);
+        add_err($rl, 'N') unless $cc =~ m/[0-1]/;
+        add_err($rl, 'T') unless $nval <= 0177777;
+        $nval &= 0177777;
+        $val .= $cc;
+      }
+      return finish_token(\%t, tag=> 'NUM', val=> $val, nval=> $nval);
+
+    } elsif ($c eq 'o') {
+      my $nval = 0;
+      while (scalar(@$rcl)) {
+        last if ($$rcl[0] !~ m/[0-9]/);
+        my $cc = shift @$rcl;
+        $nval = ($nval<<3) + int($cc);
+        add_err($rl, 'N') unless $cc =~ m/[0-7]/;
+        add_err($rl, 'T') unless $nval <= 0177777;
+        $nval &= 0177777;
+        $val .= $cc;
+      }
+      return finish_token(\%t, tag=> 'NUM', val=> $val, nval=> $nval);
+
+    } elsif ($c eq 'd') {
+      my $nval = 0;
+      while (scalar(@$rcl)) {
+        last if ($$rcl[0] !~ m/[0-9]/);
+        my $cc = shift @$rcl;
+        $nval = 10*$nval + int($cc);
+        add_err($rl, 'T') unless $nval <= 0177777;
+        $nval &= 0177777;
+        $val .= $cc;
+      }
+      return finish_token(\%t, tag=> 'NUM', val=> $val, nval=> $nval);
+
+    } elsif ($c eq 'x') {
+      my $nval = 0;
+      while (scalar(@$rcl)) {
+        last if ($$rcl[0] !~ m/[0-9a-fA-F]/);
+        my $cc = shift @$rcl;
+        $nval = ($nval<<4) + hex($cc);
+        add_err($rl, 'T') unless $nval <= 0177777;
+        $nval &= 0177777;
+        $val .= $cc;
+      }
+      return finish_token(\%t, tag=> 'NUM', val=> $val, nval=> $nval);
+
+    } elsif ($c eq 'r') {
+      my $nval = 0;
+      for (my $i=0; $i<3; $i++) {
+        last unless defined $$rcl[0];
+        last unless $$rcl[0] =~ m/^[0-9a-zA-Z\.\$\ ]$/;
+        $nval = 050 * $nval + to_rad50($$rcl[0]);
+        $val .= shift @$rcl;
+      }
+      return finish_token(\%t, tag=> 'NUM', val=> $val, nval=>$nval);
+
+    } else {
+      return finish_token(\%t, tag=> 'BAD', val=> $val);
+    }
+  }
+
+  # delimiters
+  if ($c =~ m|^[\(\)\,\<\>]$|) {
+    return finish_token(\%t, tag=> 'DEL', val=> shift @$rcl);
+  }
+
+  # can't handle stuff
+  $val = join('',@$rcl);
+  @$rcl = ();
+  return finish_token(\%t, tag=> 'BAD', val=> $val);
+}
+
+#-------------------------------------------------------------------------------
+
+sub to_rad50 {
+  my ($c) = @_;
+  return undef unless defined $c;
+  $c = lc($c);
+  return 0 if $c eq ' ';
+  return 001 + ord($c)-ord('a') if $c =~ m/^[a-z]$/;
+  return 033 if $c eq '$';
+  return 034 if $c eq '.';
+  return 036 + ord($c)-ord('0') if $c =~ m/^[0-9]$/;
+  return undef;
+}
+
+#-------------------------------------------------------------------------------
+
+sub pass2 {
+
+  my $fh;
+  if ($lst_do) {
+    if ($lst_fname eq "-") {
+      $fh = *STDOUT;
+    } else {
+      $fh = new FileHandle;
+      unless (open($fh, ">", $lst_fname)) {
+        print STDERR "asm-11-F: '$lst_fname' not writable, quiting..\n";
+        exit 1;
+      }
+    }
+  }
+
+  pass2_lst_beg($fh) if $lst_do;
+
+  foreach my $rl (@src) {
+
+    $$rl{dot} = getdot();
+    $llbl_scope = $$rl{lscope} if defined $$rl{lscope};
+
+    # handle label definitions
+    if (defined $$rl{label}) {
+      if (lst_checkmdef($$rl{label})) {
+        add_err($rl, 'M');
+      } else {
+        my $val = getsym($rl, $$rl{label}, 1);
+        if (! defined $val || $val != getdot()) {
+          add_err($rl, 'P');
+        }
+      }
+    }
+
+    # generate output data
+    pass2_out($rl);
+    # listing requested
+    pass2_lst_line($rl, $fh) if $lst_do;
+    # pass 2 dump requested
+    dump_rl($rl) if $opts{tpass2};
+
+  }
+
+  pass2_lst_end($fh) if $lst_do;
+
+  return;
+}
+
+#-------------------------------------------------------------------------------
+
+sub pass2_out {
+  my ($rl) = @_;
+
+  # quit without code generation for 'questionable syntax' lines
+  return if $$rl{err} =~ m/[IQ]/;
+
+  # return if no pass2 action (typ not defined)
+  return unless defined $$rl{typ};
+
+  # generate code
+  if      ($$rl{typ} eq 'code') {
+    walign($rl);
+    my $opcode = $$rl{opcode};
+    my $opfmt  = $$rl{opfmt};
+
+    # printf "+++1 $$rl{typ},$$rl{oper},%s,%s\n",
+    #   savestr($opcode), savestr($opfmt);
+
+    if      ($opfmt eq '-') {
+      out_opcode($rl, $opcode);
+
+    } elsif ($opfmt eq 'g') {
+      out_opcode($rl, $opcode | $$rl{o1mod}<<3 | $$rl{o1reg});
+      out_opdata($rl, $$rl{o1mod}, $$rl{o1reg},
+                      $$rl{o1ebeg}, $$rl{o1eend});
+
+    } elsif ($opfmt eq 'gg') {
+      out_opcode($rl, $opcode | $$rl{o1mod}<<9 | $$rl{o1reg}<<6 |
+                                $$rl{o2mod}<<3 | $$rl{o2reg});
+      out_opdata($rl, $$rl{o1mod}, $$rl{o1reg},
+                      $$rl{o1ebeg}, $$rl{o1eend});
+      out_opdata($rl, $$rl{o2mod}, $$rl{o2reg},
+                      $$rl{o2ebeg}, $$rl{o2eend});
+    } elsif ($opfmt eq 'r') {
+      out_opcode($rl, $opcode | $$rl{o1reg});
+    } elsif ($opfmt eq 'rg' || $opfmt eq 'gr') {
+      out_opcode($rl, $opcode | $$rl{o1reg}<<6 |
+                                $$rl{o2mod}<<3 | $$rl{o2reg});
+      out_opdata($rl, $$rl{o2mod}, $$rl{o2reg},
+                      $$rl{o2ebeg}, $$rl{o2eend});
+    } elsif ($opfmt eq 'n3') {
+      out_opcode_n($rl, $opcode, 07, $$rl{ebeg}, $$rl{eend});
+    } elsif ($opfmt eq 'n6') {
+      out_opcode_n($rl, $opcode, 077, $$rl{ebeg}, $$rl{eend});
+    } elsif ($opfmt eq 'n8') {
+      out_opcode_n($rl, $opcode, 0377, $$rl{ebeg}, $$rl{eend});
+    } elsif ($opfmt eq 's8') {
+      out_opcode_o($rl, $opcode, 's8', $$rl{ebeg}, $$rl{eend});
+    } elsif ($opfmt eq 'ru6') {
+      out_opcode_o($rl, $opcode|($$rl{o1reg}<<6), 'u6',
+                                 $$rl{ebeg}, $$rl{eend});
+    } else {
+      die "BUGCHECK: unknown opfmt '$opfmt'";
+    }
+
+  # generate data
+  } elsif ($$rl{typ} eq 'data') {
+    if ($$rl{oper} eq '.word' || $$rl{oper} eq '.byte' ) {
+      walign($rl) if $$rl{oper} eq '.word';
+      my $size = ($$rl{oper} eq '.word') ? 2 : 1;
+      my $mask = ($size == 2) ? 0177777 : 0377;
+      foreach (@{$$rl{delist}}) {
+        my $ibeg = $$_{ibeg};
+        my $iend = $$_{iend};
+        my $val = 0;
+        if (defined $ibeg) {
+          $val = eval_exp($rl, $ibeg, $iend);
+          if (not defined $val) {
+            $val = 0;
+            add_err($rl, 'U');
+          }
+        }
+        # FIXME_code: handle T error here !!
+        $val &= $mask;
+        if ($$rl{oper} eq '.word') {
+          out_w($rl, $val);
+        } else {
+          out_b($rl, $val);
+        }
+      }
+
+    } elsif ($$rl{oper} eq '.blkw' || $$rl{oper} eq '.blkb' ) {
+      walign($rl) if $$rl{oper} eq '.blkw';
+      incdot($$rl{incdot});
+
+    } elsif ($$rl{oper} eq '.ascii' || $$rl{oper} eq '.asciz' ) {
+      foreach my $rd (@{$$rl{delist}}) {
+        if (defined $$rd{str}) {
+          my @chr = split '',$$rd{str};
+          shift @chr;
+          pop @chr;
+          foreach (@chr) {
+            push @{$$rl{outb}}, ord($_);
+          }
+        } else {
+          my $val = eval_exp($rl, $$rd{ibeg}, $$rd{iend});
+          if (not defined $val) {
+            $val = 0;
+            add_err($rl, 'U');
+          }
+          if ($val < 0 || $val > 0377) {
+            $val &= 0377;
+            add_err($rl, 'T');
+          }
+          push @{$$rl{outb}}, $val;
+        }
+      }
+      push @{$$rl{outb}}, 0 if $$rl{oper} eq '.asciz';
+      incdot(scalar(@{$$rl{outb}}));
+
+    } elsif ($$rl{oper} eq '.even' || $$rl{oper} eq '.odd' ) {
+      if ($$rl{incdot}) {
+        push @{$$rl{outb}}, 0;
+        incdot(1);
+      }
+
+    } else {
+      die "BUGCHECK: unknown data oper '$$rl{oper}'";
+    }
+
+  # handle assignments
+  } elsif ($$rl{typ} eq 'ass') {
+    my $val = eval_exp($rl, $$rl{ebeg}, $$rl{eend});
+    if (defined $val) {
+      $$rl{lstval} = $val;
+      setsym($rl, $$rl{atyp}, $$rl{asym}, $val);
+    } else {
+      $$rl{lstval} = 0;
+      add_err($rl, 'U');
+    }
+
+  } else {
+    die "BUGCHECK: unknown line typ '$$rl{typ}'";
+  }
+
+  if      (scalar(@{$$rl{outw}})) {
+    emitw($$rl{dot}, $$rl{outw});
+  } elsif (scalar(@{$$rl{outb}})) {
+    emitb($$rl{dot}, $$rl{outb});
+  }
+
+  return;
+}
+
+#-------------------------------------------------------------------------------
+
+sub pass2_lst_beg {
+  my ($fh) = @_;
+  printf $fh "; Input file list:\n";
+  my $fileno = 1;
+  foreach my $fname (@flist) {
+    $fname =~ s/^$ENV{RETROBASE}/\$RETROBASE/;
+    printf $fh ";  %2d: %s\n", $fileno, $fname;
+    $fileno += 1;
+  }
+  print $fh ";\n";
+  return;
+}
+
+#-------------------------------------------------------------------------------
+
+sub pass2_lst_end {
+  my ($fh) = @_;
+  if ($errcnt_tot) {
+    print $fh ";\n";
+    print $fh "; Error summary:\n";
+    foreach my $err (sort keys %errcnt) {
+      printf $fh ";  %s: %3d\n", $err, $errcnt{$err};
+    }
+  }
+  return;
+}
+
+#-------------------------------------------------------------------------------
+# line format is
+# er fn lnum    dot <upto 3w or 5b>      source
+# .. dd dddd oooooo oooooo oooooo oooooo <source>
+# ..                ooo ooo ooo ooo ooo  <source>
+
+sub pass2_lst_line {
+  my ($rl,$fh) = @_;
+
+  my @ow = @{$$rl{outw}};
+  my @ob = @{$$rl{outb}};
+  my $str = '';
+  $str .= sprintf("%-2s", prt_err($rl));
+  $str .= sprintf(" %2d", $$rl{fileno});
+  $str .= sprintf(" %4d", $$rl{lineno});
+
+  # print dot if data is generated for this line, or label
+  my $prtdot = defined $$rl{lstdot} ||
+               scalar(@{$$rl{outw}}) ||
+               scalar(@{$$rl{outb}}) ||
+               $$rl{label};
+  if ($prtdot) {
+    $str .= prt76o($$rl{dot});
+  } else {
+    $str .= '       ';
+  }
+
+  if (defined $$rl{lstval}) {
+    $str .= prt76o($$rl{lstval});
+    $str .= ' ' x 14;
+  } elsif (scalar(@ow)) {
+    for (my $i=0; $i<3; $i++) { $str .= prt76o(shift @ow); }
+  } elsif (scalar(@ob)) {
+    for (my $i=0; $i<5; $i++) { $str .= prt43o(shift @ob); }
+    $str .= ' ';
+  } else {
+    $str .= ' ' x 21;
+  }
+
+  $str .= '  ' . $$rl{line} . "\n";
+  print $fh $str;
+  if (1) {
+    while (scalar(@ow)) {
+      $str = '                 ';
+      for (my $i=0; $i<3; $i++) { $str .= prt76o(shift @ow); }
+      print $fh $str . "\n";
+    }
+    while (scalar(@ob)) {
+      $str = '                 ';
+      for (my $i=0; $i<5; $i++) { $str .= prt43o(shift @ob); }
+      print $fh $str . "\n";
+    }
+  }
+  return;
+}
+
+#-------------------------------------------------------------------------------
+
+sub out_w {
+  my ($rl,$word) = @_;
+  push @{$$rl{outw}}, $word;
+  incdot(2);
+  return;
+}
+
+#-------------------------------------------------------------------------------
+
+sub out_b {
+  my ($rl,$byte) = @_;
+  push @{$$rl{outb}}, $byte;
+  incdot(1);
+  return;
+}
+
+#-------------------------------------------------------------------------------
+
+sub out_opcode {
+  my ($rl,$code) = @_;
+  out_w($rl, $code);
+  return;
+}
+
+#-------------------------------------------------------------------------------
+
+sub out_opcode_n {
+  my ($rl,$code,$mask,$ebeg,$eend) = @_;
+  # FIXME_code: shouldn't we die here ?
+  return unless defined $ebeg;
+
+  my $val = eval_exp($rl,$ebeg,$eend);
+  unless (defined $val) {
+    $val = 0;
+    add_err($rl, 'A');
+  }
+  if ($val & ~$mask) {
+    $val &= $mask;
+    add_err($rl, 'T');
+  }
+  out_w($rl, $code|$val);
+  return;
+}
+
+#-------------------------------------------------------------------------------
+
+sub out_opcode_o {
+  my ($rl,$code,$typ,$ebeg,$eend) = @_;
+  # FIXME_code: shouldn't we die here ?
+  return unless defined $ebeg;
+
+  my $val = eval_exp($rl,$ebeg,$eend);
+  my $off;
+  if (defined $val) {
+    $off = ($val - (getdot()+2)) / 2;
+  } else {
+    $off = -1;
+    add_err($rl, 'U');
+  }
+
+  if ($typ eq 's8') {
+    if ($off > 127 || $off < -128) {
+      add_err($rl, 'A');
+    }
+    $off &= 0377;
+  } else {
+    $off = -$off;
+    if ($off > 63 || $off < 0) {
+      add_err($rl, 'A');
+    }
+    $off &= 0077;
+  }
+  out_w($rl, $code|$off);
+  return;
+}
+
+#-------------------------------------------------------------------------------
+
+sub out_opdata {
+  my ($rl,$mod,$reg,$ebeg,$eend) = @_;
+  # FIXME_code: shouldn't we die here ?
+  return unless defined $ebeg;
+
+  my $val = eval_exp($rl,$ebeg,$eend);
+  unless (defined $val) {
+    out_w($rl, 0);
+    add_err($rl, 'U');
+    return;
+  }
+  if ($mod>=6 && $reg==7) {
+    $val = ($val - (getdot()+2)) & 0177777;
+  }
+  out_w($rl, $val);
+  return;
+}
+
+#-------------------------------------------------------------------------------
+
+sub emitw {
+  my ($baddr,$rwl) = @_;
+  if ($opts{temit}) {
+    printf "-- emit: w %6.6o:", $baddr;
+    foreach my $w (@$rwl) { printf " %6.6o", $w; }
+    print "\n";
+  }
+  return unless scalar(@$rwl);
+
+  if ((! defined $out_dot) || $out_dot!=$baddr || $out_data[-1]->{typ} ne 'w') {
+    push @out_data, {typ=> 'w', addr=>$baddr, data=>[@$rwl]};
+  } else {
+    my $rdata = $out_data[-1]->{data};
+    push @$rdata, @$rwl;
+  }
+  $out_dot = $baddr+2;
+  return;
+}
+
+#-------------------------------------------------------------------------------
+
+sub emitb {
+  my ($baddr,$rbl) = @_;
+  if ($opts{temit}) {
+    printf "-- emit: b %6.6o:", $baddr;
+    foreach my $b (@$rbl) { printf " %3.3o", $b; }
+    print "\n";
+  }
+  return unless scalar(@$rbl);
+
+  if ((! defined $out_dot) || $out_dot!=$baddr || $out_data[-1]->{typ} ne 'b') {
+    push @out_data, {typ=> 'b', addr=>$baddr, data=>[@$rbl]};
+  } else {
+    my $rdata = $out_data[-1]->{data};
+    push @$rdata, @$rbl;
+  }
+  $out_dot = $baddr+1;
+  return;
+}
+
+#-------------------------------------------------------------------------------
+
+sub write_lda_frame {
+  my ($fh,$addr,$rblist) = @_;
+  my $len = 6 + scalar(@$rblist);
+  my @f;
+  push @f, 0x01;
+  push @f, 0x00;
+  push @f, $len & 0xff;
+  push @f, ($len>>8) & 0xff;
+  push @f, $addr & 0xff;
+  push @f, ($addr>>8) & 0xff;
+  push @f, @$rblist if $len;
+  my $csum = 0;
+  foreach (@f) { $csum = ($csum + $_) & 0xff; }
+  push @f, (-$csum) & 0xff;
+
+  if ($opts{tout}) {
+    my $nval = 0;
+    printf "-- out: %6.6o:", $addr;
+    foreach (@f) {
+      if ($nval == 16) {
+        printf "\n               ";
+        $nval = 0;
+      }
+      printf " %3.3o", $_;
+      $nval += 1;
+    }
+    printf "\n";
+  }
+
+  my $buf = pack("C*", @f);
+  my $rc = syswrite($fh, $buf, length($buf));
+  return;
+}
+
+#-------------------------------------------------------------------------------
+
+sub write_lda {
+  my ($fname) = @_;
+  my $fh;
+  if ($fname eq "-") {
+    $fh = *STDOUT;
+  } else {
+    $fh = new FileHandle;
+    unless (open($fh, ">:raw", $fname)) {
+      print STDERR "asm-11-F: '$fname' not writable, quiting..\n";
+      exit 1;
+    }
+  }
+
+  my @blist;
+  my $base;
+  my $dot;
+  foreach my $rl (@src) {
+    die "BUGCHECK: both outb and outw contain data"
+      if scalar(@{$$rl{outb}}) && scalar(@{$$rl{outw}});
+
+    my @byt = @{$$rl{outb}};
+    foreach (@{$$rl{outw}}) {
+      push @byt,  $_     & 0xff;
+      push @byt, ($_>>8) & 0xff;
+    }
+
+    next unless scalar(@byt);
+
+    # flush frame if new data not adjacent to old
+    if (scalar(@blist) && $dot!=$$rl{dot}) {
+      write_lda_frame($fh, $base, \@blist);
+      @blist = ();
+      $base = undef;
+      $dot  = undef;
+    }
+
+    $dot = $base = $$rl{dot} unless defined $base;
+
+    foreach (@byt) {
+      if (scalar(@blist) >= 2*168) {
+        write_lda_frame($fh, $base, \@blist);
+        @blist = ();
+        $base = $dot;
+      }
+      push @blist, $_ & 0xff;
+      $dot += 1;
+    }
+
+  }
+
+  # flush buffer
+  write_lda_frame($fh, $base, \@blist) if scalar(@blist);
+  @blist = ();
+
+  # write terminating frame
+  write_lda_frame($fh, $out_start, \@blist);
+
+  return;
+}
+
+#-------------------------------------------------------------------------------
+
+sub write_cof_frame {
+  my ($fh,$typ,$addr,$rlist) = @_;
+  my $fmt = ($typ eq 'w') ? '%6.6o' : '%3.3o';
+  my $max = ($typ eq 'w') ? 10 : 20 ;
+
+  printf $fh "$typ %6.6o {\n", $addr;
+  my $i = 0;
+  foreach (@$rlist) {
+    $i += 1;
+    printf $fh "$fmt ", $_;
+    print $fh "\n" if $i%$max == 0;
+  }
+  print $fh "\n" unless $i%$max == 0;
+  print  $fh "}\n";
+  return;
+}
+
+#-------------------------------------------------------------------------------
+
+sub write_cof {
+  my ($fname) = @_;
+  my $fh;
+  if ($fname eq "-") {
+    $fh = *STDOUT;
+  } else {
+    $fh = new FileHandle;
+    unless (open($fh, ">:raw", $fname)) {
+      print STDERR "asm-11-F: '$fname' not writable, quiting..\n";
+      exit 1;
+    }
+  }
+
+  print $fh "sym {\n";
+  foreach my $key (sort keys %lst) {
+    next unless $lst{$key}{typ} =~ m/^(lbl|llbl)$/;
+    printf $fh "%s => %s\n", $lst{$key}{name}, save66o($lst{$key}{val});
+  }
+  print $fh "}\n";
+  print $fh "dat {\n";
+
+  my @list;
+  my $typ;
+  my $base;
+  my $dot;
+
+  foreach my $rl (@src) {
+
+    if (scalar(@{$$rl{outb}})) {
+      if (scalar(@list) && ($typ ne 'b' || $dot != $$rl{dot})) {
+        write_cof_frame($fh, $typ, $base, \@list);
+        @list = ();
+      }
+      unless (scalar(@list)) {
+        $typ = 'b';
+        $base = $dot = $$rl{dot};
+      }
+      push @list, @{$$rl{outb}};
+      $dot += scalar(@{$$rl{outb}});
+    }
+
+    if (scalar(@{$$rl{outw}})) {
+      if (scalar(@list) && ($typ ne 'w' || $dot != $$rl{dot})) {
+        write_cof_frame($fh, $typ, $base, \@list);
+        @list = ();
+      }
+      unless (scalar(@list)) {
+        $typ = 'w';
+        $base = $dot = $$rl{dot};
+      }
+      push @list, @{$$rl{outw}};
+      $dot += 2 * scalar(@{$$rl{outw}});
+    }
+  }
+
+  write_cof_frame($fh, $typ, $base, \@list)
+    if scalar(@list);
+
+  print $fh "}\n";
+
+  return;
+}
+
+#-------------------------------------------------------------------------------
+
+sub write_lsm {
+  my ($fname) = @_;
+  my $fh;
+  if ($fname eq "-") {
+    $fh = *STDOUT;
+  } else {
+    $fh = new FileHandle;
+    unless (open($fh, ">:raw", $fname)) {
+      print STDERR "asm-11-F: '$fname' not writable, quiting..\n";
+      exit 1;
+    }
+  }
+
+  my %mem;
+
+  foreach my $rl (@src) {
+
+    my $dot = $$rl{dot};
+    if (scalar(@{$$rl{outb}})) {
+      foreach my $byte (@{$$rl{outb}}) {
+        my $addr = sprintf "%6.6o", $dot & 0xfffe;
+        $mem{$addr} = 0 unless exists $mem{$addr};
+        if ($dot & 0x1) {                   # odd byte
+          $mem{$addr} = (($byte&0xff)<<8) | ($mem{$addr} & 0xff);
+        } else {                            # even byte
+          $mem{$addr} = ($mem{$addr} & 0xff00) | ($byte&0xff);
+        }
+        $dot += 1;
+      }
+    }
+
+    if (scalar(@{$$rl{outw}})) {
+      foreach my $word (@{$$rl{outw}}) {
+        my $addr = sprintf "%6.6o", $dot;
+        $mem{$addr} = $word;
+        $dot += 2;
+      }
+    }
+  }
+
+  foreach my $addr (sort keys %mem) {
+    printf $fh "%s : %6.6o\n", $addr, $mem{$addr};
+  }
+
+  return;
+}
+
+#-------------------------------------------------------------------------------
+
+sub dump_rl {
+  my ($rl) = @_;
+
+  printf "-- line:   '%s'\n", $$rl{line};
+  printf "   err=%-3s, typ=%-4s, oper=%-6s, lineno=%3d, psect=%-6s, .=%6.6o\n",
+    prt_err($rl), savestr($$rl{typ}), savestr($$rl{oper}), $$rl{lineno},
+      $$rl{psect}, $$rl{dot};
+  my $i = 0;
+  foreach my $rt (@{$$rl{tl}}) {
+    printf "   tl[%2d]: tag=%-4s, om=%-2s, em=%-2s, val='%s'",
+      $i, $$rt{tag}, savestr1($$rt{om}), savestr1($$rt{em}),
+        savestr($$rt{val});
+    printf ", nval=%6.6o",$$rt{nval} if defined $$rt{nval};
+    printf ", pend=%d",$$rt{pend} if defined $$rt{pend};
+    printf "\n";
+    $i += 1;
+  }
+  if (defined $$rl{delist}) {
+    $i = 0;
+    my $rdl = $$rl{delist};
+    foreach my $rd (@$rdl) {
+      printf "   dl[%2d]:", $i;
+      printf " str='%s'",$$rd{str} if defined $$rd{str};
+      printf " ibeg=%s, iend=%s", savestr($$rd{ibeg}), savestr($$rd{iend})
+        if exists $$rd{ibeg};
+      printf "\n";
+      $i += 1;
+    }
+  }
+  if (defined $$rl{opcode}) {
+    printf "   code: %6.6o,fmt=%-2s", $$rl{opcode}, $$rl{opfmt};
+    if (defined $$rl{o1mod}) {
+      printf ", o1=%s%s", $$rl{o1mod},$$rl{o1reg};
+      printf ",ei=%d:%d,val=%s", $$rl{o1ebeg}, $$rl{o1eend},
+        save66o(eval_exp($rl, $$rl{o1ebeg}, $$rl{o1eend}))
+          if defined $$rl{o1ebeg};
+    }
+    if (defined $$rl{o2mod}) {
+      printf ", o2=%s%s", $$rl{o2mod},$$rl{o2reg};
+      printf ",ei=%d:%d,val=%s", $$rl{o2ebeg}, $$rl{o2eend},
+        save66o(eval_exp($rl, $$rl{o2ebeg}, $$rl{o2eend}))
+          if defined $$rl{o2ebeg};
+    }
+    printf " ex=%d:%d,val=%s", $$rl{ebeg}, $$rl{eend},
+      save66o(eval_exp($rl, $$rl{ebeg}, $$rl{eend}))
+        if defined $$rl{ebeg};
+    print "\n";
+  }
+  if (scalar(@{$$rl{outw}})) {
+    print "   outw:";
+    foreach (@{$$rl{outw}}) { printf " %6.6o", $_; }
+    print "\n";
+  }
+  if (scalar(@{$$rl{outb}})) {
+    print "   outb:";
+    foreach (@{$$rl{outb}}) { printf " %3.3o", $_; }
+    print "\n";
+  }
+  foreach my $key (sort keys %{$rl}) {
+    next if $key =~ m/^(line|err|typ|oper|lineno|psect|dot|opcode|opfmt|o[12](mod|reg|ebeg|eend)|ebeg|eend|tl|delist|outw|outb)$/;
+    printf "   %-6s: %s\n", $key, savestr($$rl{$key});
+  }
+  return;
+}
+
+#-------------------------------------------------------------------------------
+
+sub dump_sym {
+  print "\n";
+  print " psect    dot dotmax\n";
+  print "------ ------ ------\n";
+  foreach my $ps (sort keys %psect) {
+    printf "%-6s %6.6o %6.6o\n", $ps, $psect{$ps}{dot}, $psect{$ps}{dotmax};
+  }
+
+  print "\n";
+  print "scope  symbol  typ  psect     val\n";
+  print "------ ------ ---- ------  ------\n";
+  foreach my $key (sort keys %lst) {
+    my $sym = $lst{$key}{name};
+    my $scope = '';
+    my $name = $sym;
+    if ($sym =~ m/^(.+):(.+)$/) {
+      $scope = $1;
+      $name  = $2;
+    }
+    printf "%-6s %-6s %-4s %-6s  %s\n", $scope, $name, $lst{$key}{typ},
+      $lst{$key}{psect}, save66o($lst{$key}{val});
+  }
+
+  return;
+}
+
+#-------------------------------------------------------------------------------
+
+sub prt76o {
+  my ($val) = @_;
+  return '       ' unless defined $val;
+  return sprintf " %6.6o", $val;
+}
+
+#-------------------------------------------------------------------------------
+
+sub prt43o {
+  my ($val) = @_;
+  return '    ' unless defined $val;
+  return sprintf " %3.3o", $val;
+}
+
+#-------------------------------------------------------------------------------
+
+sub save66o {
+  my ($val) = @_;
+  return '<udef>' unless defined $val;
+  return sprintf "%6.6o", $val;
+}
+
+#-------------------------------------------------------------------------------
+
+sub savestr {
+  my ($str) = @_;
+  return '<udef>' unless defined $str;
+  return $str;
+}
+
+#-------------------------------------------------------------------------------
+
+sub savestr1 {
+  my ($str) = @_;
+  return '-' unless defined $str;
+  return $str;
+}
+
+#-------------------------------------------------------------------------------
+
+sub print_help {
+  print "usage: asm-11 [OPTIONS]... [FILE]...\n";
+  print "  --I=path      adds path to the .include search path\n";
+  print "  --lst         create listing (default file name)\n";
+  print "  --olst=fnam   create listing (concrete file name)\n";
+  print "  --lda         create absolute loader output (default file name)\n";
+  print "  --olda        create absolute loader output (concrete file name)\n";
+  print "  --cof         create compound output (default file name)\n";
+  print "  --ocof=fnam   create compound output (concrete file name)\n";
+  print "  --tpass1      trace line context in pass 1\n";
+  print "  --tpass2      trace line context in pass 2\n";
+  print "  --dsym1       dump psect and ust tables after pass 1\n";
+  print "  --dsym2       dump psect and ust tables after pass 2\n";
+  print "  --ttoken      trace tokenizer\n";
+  print "  --tparse      trace parser\n";
+  print "  --temit       trace code emit\n";
+  print "  --tout        trace output file write\n";
+  print "  --help        print this text and exit\n";
+  return;
+}

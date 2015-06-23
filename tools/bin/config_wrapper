@@ -1,0 +1,283 @@
+#!/usr/bin/perl -w
+# $Id: config_wrapper 534 2013-09-22 21:37:24Z mueller $
+#
+# Copyright 2010-2013 by Walter F.J. Mueller <W.F.J.Mueller@gsi.de>
+#
+# This program is free software; you may redistribute and/or modify it under
+# the terms of the GNU General Public License as published by the Free
+# Software Foundation, either version 2, or at your option any later version.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY, without even the implied warranty of MERCHANTABILITY
+# or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+# for complete details.
+#
+#  Revision History:
+# Date         Rev Version  Comment
+# 2013-09-21   534   1.1.8  add nexys4 support
+# 2013-01-02   467   1.1.7  jconfig: prepend '0x' to support 'jtag #2007'
+# 2012-02-11   457   1.1.6  jconfig: use RETRO_FX2_VID/PID for USB VID/PID
+# 2011-12-03   435   1.1.5  add nexys3 support;
+# 2011-08-04   402   1.1.4  add atlys support;
+# 2011-07-25   399   1.1.3  add nexys2-500 support; bsdl path for sp605
+# 2011-07-18   395   1.1.2  cleanup bsdl path creation for jtag
+# 2011-07-17   394   1.1.1  add bit->svf conversion and config with jtag
+# 2011-07-11   393   1.1    renamed from impact_wrapper; add function parameter,
+#                           old action with 'iconfig'
+# 2011-07-01   386   1.0.3  support sp605/xc6slx45t
+# 2010-05-24   294   1.0.2  support nexys2/xc3s1200e
+# 2010-04-24   282   1.0.1  proper error exit for GetOptions()
+# 2010-04-24   281   1.0    Initial version
+#
+
+use 5.005;                                  # require Perl 5.005 or higher
+use strict;                                 # require strict checking
+use FileHandle;
+
+use Getopt::Long;
+
+my %opts = ();
+
+GetOptions(\%opts, "help", "dry_run", "board=s", "path=s") or exit 1;
+
+# setup defaults for board and path
+if (not defined $opts{board}) {
+  $opts{board} = "s3board";
+}
+if (not defined $opts{path}) {
+  $opts{path}  = "xc3s1000"  if $opts{board} eq "s3board";
+  $opts{path}  = "xc3s1200e" if $opts{board} eq "nexys2";
+  $opts{path}  = "xc6slx16"  if $opts{board} eq "nexys3";
+  $opts{path}  = "xc7a100t"  if $opts{board} eq "nexys4";
+  $opts{path}  = "xc6slx45"  if $opts{board} eq "atlys";
+  $opts{path}  = "xc6slx45t" if $opts{board} eq "sp605";
+}
+
+sub print_help;
+sub run_command;
+
+
+autoflush STDOUT 1 if (-p STDOUT);          # autoflush if output into pipe
+
+if (exists $opts{help}) {
+  print_help;
+  exit 0;
+}
+
+my $board = $opts{board};
+my $ipath = $opts{path};
+
+$ipath =~ s/-.*$//;                         # trim all after first '-'
+
+# now setup JTAG chain config
+
+my @plist;
+my $pfpga;
+
+#
+# Note: when new targets are added update also the blist logic below
+#
+if ($board eq "s3board" && $ipath eq "xc3s200") {           # S3BOARD-200
+  @plist = ($ipath, "xcf02s");
+  $pfpga = 1;
+} elsif ($board eq "s3board" && $ipath eq "xc3s1000") {     # S3BOARD-1200
+  @plist = ($ipath, "xcf04s");
+  $pfpga = 1;
+
+} elsif ($board eq "nexys2" && $ipath eq "xc3s1200e") {     # nexys2-1200
+  @plist = ($ipath, "xcf04s");
+  $pfpga = 1;
+} elsif ($board eq "nexys2" && $ipath eq "xc3s500e") {      # nexys2-500
+  @plist = ($ipath, "xcf04s");
+  $pfpga = 1;
+
+} elsif ($board eq "nexys3" && $ipath eq "xc6slx16") {      # nexys3
+  @plist = ($ipath);
+  $pfpga = 1;
+
+} elsif ($board eq "nexys4" && $ipath eq "xc7a100t") {      # nexys4
+  @plist = ($ipath);
+  $pfpga = 1;
+
+} elsif ($board eq "atlys" && $ipath eq "xc6slx45") {       # atlys
+  @plist = ($ipath);
+  $pfpga = 1;
+
+} elsif ($board eq "sp605" && $ipath eq "xc6slx45t") {      # sp605
+  @plist = ("xccace", $ipath);
+  $pfpga = 2;
+} else {
+  print STDERR 
+    "config_wrapper-E: only s3board/nexys2,3/atlys/sp605 supported\n";
+  exit 1;
+}
+
+my @blist;
+foreach my $part (@plist) {
+  if    ($part =~ m/^xcf/)       { push @blist, "xcf/data" }        # proms
+  elsif ($part =~ m/^xc3s\d*$/)  { push @blist, "spartan3/data" }   # s-3
+  elsif ($part =~ m/^xc3s\d*e$/) { push @blist, "spartan3e/data" }  # s-3e
+  elsif ($part =~ m/^xc6slx\d*t?$/) { push @blist, "spartan6/data" }# s-6 lx
+  elsif ($part =~ m/^xc7a\d*t?$/) { push @blist, "artix7/data" }    # 7-a
+  elsif ($part =~ m/^xccace$/)   { push @blist, "acempm/data" }     # sys-ace
+  else {
+    print STDERR "config_wrapper-E: no bsdl path known for $part\n";
+    exit 1;
+  }
+}
+
+my $cmd  = shift @ARGV;
+my $file = shift @ARGV;
+
+if (! defined $cmd) {
+  print STDERR "config_wrapper-E: no command specified\n";
+  exit 1;
+}
+
+if (! defined $file) {
+  print STDERR "config_wrapper-E: no bit or svf file specified\n";
+  exit 1;
+}
+if (! -r $file) {
+  print STDERR "config_wrapper-E: input file not found or readable\n";
+  exit 1;
+}
+
+my $xilpath = $ENV{XILINX};
+if (! defined $xilpath) {
+  print STDERR "config_wrapper-E: XILINX environment variable not defined\n";
+  exit 1;
+}
+
+# ----- iconfig action --------------------------------------------------------
+if ($cmd eq "iconfig") {
+
+  my $tmpfile = "tmp_config_wrapper.cmd";
+  open (OFILE, ">$tmpfile") or die "Couldn't open tmp cmd file: $!";
+
+  print  OFILE "setMode -bs\n";
+  print  OFILE "setCable -p auto\n";
+  for (my $i = 0; $i<=$#plist; $i++) {
+    printf OFILE "addDevice -p %d -part %s\n", $i+1, $plist[$i];
+  }
+  printf OFILE "assignFile -p %d -file %s\n", $pfpga, $file;
+  printf OFILE "program -p %d -verify\n", $pfpga;
+  print  OFILE "quit\n";
+
+  close (OFILE) or die "Couldn't close tmp cmd file: $!";
+
+  my $rc  = run_command("impact -batch", $tmpfile);
+  exit $rc;
+
+# ----- jconfig action --------------------------------------------------------
+} elsif ($cmd eq "jconfig") {
+
+  my $bpath = join ";", map "$xilpath/$_",@blist;
+
+  my $tmpfile = "tmp_config_wrapper.cmd";
+  open (OFILE, ">$tmpfile") or die "Couldn't open tmp cmd file: $!";
+
+  # the UrJtag and Xilinx impact have different chain and part number schemes
+  #   impact: 1-based, 1 is first in chain;
+  #   UrJtag: 0-based, 0 is last in chain;
+  # e.g. on Digilent Nexys2:
+  #   impact: (1) FPGA  (2) PROM
+  #   UrJtag: (1) FPGA  (0) PROM
+
+  my $jtag_part = $#plist + 1 - $pfpga;
+
+  # handle USB VID/PID of board
+  #  taken from RETRO_FX2_VID and RETRO_FX2_PID environment variables
+  #  in the retro11 project the default is:
+  #    VID: 16c0  (VOTI)
+  #    PID: 03ef  (VOTI free for internal lab use 1007)
+  #
+  #   !! Important Note on Usage of this USB VID/PID !!
+  #   This VID/PID is owned by VOTI, a small dutch company. Usage is granted
+  #   for 'internal lab use only' by VOTI under the conditions:
+  #     - the gadgets in which you use those PIDs do not leave your desk
+  #     - you won't complain to VOTI if you get in trouble with duplicate PIDs
+  #       (for instance because someone else did not follow the previous rule).
+  #   See also http://www.voti.nl/pids/pidfaq.html
+  #
+
+  my $fx2_vid = $ENV{RETRO_FX2_VID};
+  my $fx2_pid = $ENV{RETRO_FX2_PID};
+  $fx2_vid = "16c0" unless defined $fx2_vid;
+  $fx2_pid = "03ef" unless defined $fx2_pid;
+
+  # give vid/pid with 0x prefix. jtag #2007 requires this, #1502 tolerates
+  print  OFILE "cable usbblaster vid=0x$fx2_vid pid=0x$fx2_pid\n";
+  printf OFILE "bsdl path %s\n", $bpath;
+  print  OFILE "detect\n";
+  printf OFILE "part %d\n", $jtag_part;
+  printf OFILE "svf %s\n", $file;
+
+  close (OFILE) or die "Couldn't close tmp cmd file: $!";
+
+  my $rc  = run_command("jtag", $tmpfile);
+  exit $rc;
+
+# ----- bit2svf action --------------------------------------------------------
+} elsif ($cmd eq "bit2svf") {
+  my $ofile = $file;
+  $ofile =~ s/\.bit/\.svf/;
+
+  my $tmpfile = "tmp_config_wrapper.cmd";
+  open (OFILE, ">$tmpfile") or die "Couldn't open tmp cmd file: $!";
+
+  print  OFILE "setMode -bs\n";
+  printf OFILE "setCable -port svf -file %s\n", $ofile;
+  printf OFILE "addDevice -p 1 -file %s\n", $file;
+  print  OFILE "program -p 1\n";
+  print  OFILE "quit\n";
+
+  close (OFILE) or die "Couldn't close tmp cmd file: $!";
+
+  my $rc  = run_command("impact -batch", $tmpfile);
+  exit $rc;
+}
+
+print STDERR "config_wrapper-E: command must be bit2svf, iconfig or jconfig\n";
+exit 1;
+
+#-------------------------------------------------------------------------------
+
+sub run_command {
+
+  my ($cmd, $tmpfile) = @_;
+
+  my $wrc;
+  if (defined $opts{dry_run}) {
+    print STDOUT "$cmd\n";
+    $wrc = system "/bin/sh", "-c", "cat $tmpfile";
+  } else {
+    $wrc = system "/bin/sh", "-c", "$cmd $tmpfile";
+  }
+
+  my $rc  = 0;
+  if ($wrc != 0) {
+    my $rc = int($wrc/256);
+    if ($rc == 0) {
+      my $sig = $wrc % 256;
+      print STDERR "config_wrapper-I $cmd aborted by signal $sig\n";
+      $rc = 1;
+    } else {
+      print STDERR "config_wrapper-I $cmd failed (rc=$rc) $?\n";
+    }
+  }
+
+  unlink $tmpfile or die "Couldn't delete tmp cmd file: $!";
+  return $rc;
+}
+
+#-------------------------------------------------------------------------------
+
+sub print_help {
+  print "usage: config_wrapper [--help] [--board=b] [--path=p] cmd file\n";
+  print "  cmd              bit2svf or iconfig or jconfig\n";
+  print "  --help           this message\n";
+  print "  --dry_run        print impact command list\n";
+  print "  --board=b        type of board\n";
+  print "  --path=p         type of fpga\n";
+}

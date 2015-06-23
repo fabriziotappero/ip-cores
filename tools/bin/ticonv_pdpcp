@@ -1,0 +1,275 @@
+#!/usr/bin/perl -w
+# $Id: ticonv_pdpcp 675 2015-05-08 21:05:08Z mueller $
+#
+# Copyright 2013-2015 by Walter F.J. Mueller <W.F.J.Mueller@gsi.de>
+#
+# This program is free software; you may redistribute and/or modify it under
+# the terms of the GNU General Public License as published by the Free
+# Software Foundation, either version 2, or at your option any later version.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY, without even the implied warranty of MERCHANTABILITY
+# or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+# for complete details.
+#
+#  Revision History:
+# Date         Rev Version  Comment
+# 2015-05-08   675   1.3.1  start/stop/suspend overhaul
+# 2015-04-03   661   1.3    adopt to new stat checking and mask polarity
+# 2014-12-27   622   1.2.1  use wmembe now
+# 2014-12-07   609   1.2    use rlink::anena (for rlink v4)
+# 2014-07-31   576   1.1    add --cmax option (default = 3); support .sdef
+# 2014-07-26   575   1.0.4  add --tout option (sets wtcpu timeout)
+# 2013-05-19   521   1.0.3  use -be subopt of -wibrb
+# 2013-04-12   504   1.0.2  renamed from pi2ti_pdpcp; fix [rm]wi handling
+#                           use wtcpu command; use wibrbbe command;
+# 2013-02-05   483   1.0.1  make cpucmd parametrizable
+# 2013-02-02   480   1.0    Initial version
+#
+
+use 5.005;                                  # require Perl 5.005 or higher
+use strict;                                 # require strict checking
+
+use Getopt::Long;
+
+my %opts = ();
+
+GetOptions(\%opts, "tout=f", "cmax=i"
+          )
+  or die "bad options";
+
+sub cmdlist_do;
+sub add_edata;
+
+my @cmdlist;
+
+if (scalar(@ARGV) != 2) {
+  print STDERR "ticonv_pdpcp-E: usage: ticonv_pdpcp <cpucmd> <filename>\n";
+  exit 1;
+}
+
+my $cpu  = $ARGV[0];
+my $fnam = $ARGV[1];
+my $tout = $opts{tout} || 10.;
+my $cmax = $opts{cmax} || 6;
+
+open IFILE, $fnam or die "failed to open '$fnam'";
+
+print "set old_statvalue [rlc get statvalue]\n";
+print "set old_statmask  [rlc get statmask]\n";
+print "\n";
+
+print "rlc set statvalue 0x00\n";
+print "rlc set statmask  \$rlink::STAT_DEFMASK\n";
+print "\n";
+
+while (<IFILE>) {
+  chomp;
+  s/--.*//;                                 # drop all -- style comments
+  s/\s*$//;                                 # drop traing blanks
+  next if m/^#/;
+
+  # print "$_\n";
+
+  my $cmd = $_;
+
+  $cmd =~ s/^rsp/rr6/;			    # rsp -> rr6
+  $cmd =~ s/^rpc/rr7/;			    # rpc -> rr7
+  $cmd =~ s/^wsp/wr6/;			    # wsp -> wr6
+  $cmd =~ s/^wpc/wr7/;			    # wpc -> wr7
+
+  # C... comments -> write to rlc log --------------------------------
+  if ($cmd =~ /^C(.*)/) {
+    cmdlist_do();
+    my $msg = $1;
+    $msg =~ s/"/'/g;
+    $msg =~ s/\[/\{/g;
+    $msg =~ s/\]/\}/g;
+    print "rlc log \"C $msg\"\n";
+
+  # .tocmd,.tostp,.togo,.cerr,.merr -> ignore, like pi_rri -----------
+  } elsif ($cmd =~ /^\.(tocmd|tostp|togo|[cm]err)\s+(\d*)$/) {
+    print "# $cmd currently ignored\n";
+
+  # .mode mode -> accept only 'pdpcp', quit otherwise ----------------
+  } elsif ($cmd =~ /^\.mode\s+(.*)$/) {
+    if ($1 ne "pdpcp") {
+      print "# FAIL: $cmd not supported\n";
+      exit 1;
+    }
+
+  # .sdef s=ref[,msk] ------------------------------------------------
+  } elsif ($cmd =~ /^\.sdef\s+s=([01]+),?([01]*)$/) {
+    cmdlist_do();
+    my $ref_sdef = oct("0b$1");
+    my $msk_sdef = oct("0b$2");
+    $msk_sdef = 0 unless defined $msk_sdef; # nothing ignored if not defined
+    printf "rlc log \".sdef 0x%2.2x,0x%2.2x\"\n", $ref_sdef, $msk_sdef;
+    printf "rlc set statvalue 0x%2.2x\n", $ref_sdef;
+    printf "rlc set statmask  0x%2.2x\n", (0xff & ~$msk_sdef);
+
+  # .rlmon,.rbmon ----------------------------------------------------
+  } elsif ($cmd =~ /^\.(r[lb]mon)\s+(\d)$/) {
+    cmdlist_do();
+    print "rlc oob -$1 $2\n";
+
+  # .scntl -----------------------------------------------------------
+  } elsif ($cmd =~ /^\.scntl\s+(\d+)\s+(\d)$/) {
+    cmdlist_do();
+    print "rlc oob -sbcntl $1 $2\n";
+
+  # .anena (0|1) -> rlink::anena n -----------------------------------
+  } elsif ($cmd =~ /^\.anena\s+(\d)$/) {
+    cmdlist_do();
+    print "rlink::anena $1\n";
+    print "rlc exec -attn\n";
+
+  # .reset -----------------------------------------------------------
+  } elsif ($cmd =~ /^\.reset$/) {
+    cmdlist_do();
+    print "rlc exec -init 0 1\n";
+
+  # (write) data type commands: wrx,wps,wal,wah,wm,wmi,stapc ---
+  # Note: 'stapc' must be decoded before 'sta' !!
+  # Note: 'wibrb' must be handled separately
+  # Note: 'wmi' must be matched before 'wm'
+  } elsif ($cmd =~ /^(wr[0-7]|wps|wal|wah|wmi|wm|stapc)\s+([0-7]+)$/) {
+    push @cmdlist, "-$1 0$2";
+
+  # (write) data type commands: wmembe ---
+  } elsif ($cmd =~ /^wmembe\s+([01]+)/) {
+    my $val   = oct("0b$1");
+    my $be    = $val & 0x3;
+    my $stick = $val & 0x4;
+    if ($stick == 0) {
+      push @cmdlist, "-wmembe $be";
+    } else {
+      push @cmdlist, "-wmembe $be -stick";
+    }
+
+  # (read) [d=data] type commands: rrx,rps,rm,rmi --------------------
+  # Note: 'rmi' must be matched before 'rm'
+  } elsif ($cmd =~ /^(rr[0-7]|rps|rmi|rm)/) {
+    push @cmdlist, "-$1 ";
+    add_edata($');
+
+  # bwm n ------------------------------------------------------------
+  } elsif ($cmd =~ /^bwm\s+(\d+)$/) {
+    my $nw = $1;
+    push @cmdlist, "-bwm {";
+    for (my $i=0; $i<$nw;) {
+      my $dat = <IFILE>;
+      $dat =~ s/--.*//;
+      $dat =~ s/\s*//g;
+      next if $dat =~ m/^#/;
+      $cmdlist[-1] .= " 0$dat";
+      $i++;
+    }
+    $cmdlist[-1] .= "}";
+    cmdlist_do();
+
+  # brm n ------------------------------------------------------------
+  } elsif ($cmd =~ /^brm\s+(\d+)$/) {
+    my $nw = $1;
+    push @cmdlist, "-brm $1";
+    my @data;
+    my @mask;
+    my $domask;
+    for (my $i=0; $i<$nw;) {
+      my $dat = <IFILE>;
+      $dat =~ s/--.*//;
+      $dat =~ s/\s*//g;
+      next if $dat =~ m/^#/;
+      if ($dat =~ m/d=([0-7]+)/ ) {
+        push @data, "0$1";
+        push @mask, "0177777";
+      } elsif ($dat =~ m/d=-/) {
+        push @data, "0";
+        push @mask, "0";
+        $domask = 1;
+      } else {
+        exit 1;
+      }
+      $i++;
+    }
+    $cmdlist[-1] .= " -edata {" . join(" ",@data) . "}";
+    $cmdlist[-1] .= " {" . join(" ",@mask) . "}" if $domask;
+    cmdlist_do();
+
+  # wibr off data ---------------------------------------------------
+  } elsif ($cmd =~ /^(wibr)\s+([0-7]+)\s+([0-7]+)$/) {
+    push @cmdlist, "-$1 0$2 0$3";
+
+  # ribr off [d=data] ------------------------------------------------
+  } elsif ($cmd =~ /^(ribr)\s+([0-7]+)/) {
+    push @cmdlist, "-$1 0$2";
+    add_edata($');
+
+  # simple action commands: sta,sto,step,cres,bres -------------------
+  } elsif ($cmd =~ /^(sta|sto|step|cres|bres)$/) {
+    my %cmdmap = (sta  => 'start',
+                  sto  => 'stop',
+                  step => 'step',
+                  cres => 'creset',
+                  bres => 'breset');
+    push @cmdlist, sprintf "-%s", $cmdmap{$1};
+
+  # wtgo -> wtcpu ----------------------------------------------------
+  } elsif ($cmd =~ /^(wtgo)$/) {
+    cmdlist_do();
+    print "$cpu wtcpu $tout";
+    print "\n";
+
+  # wtlam apat -------------------------------------------------------
+  # Note: apat currently ignored !!
+  } elsif ($cmd =~ /^(wtlam)/) {
+    cmdlist_do();
+    print "$cpu wtcpu $tout";
+    print "\n";
+
+  # currently unimplemented commands ... -----------------------------
+  } elsif ($cmd =~ /^(\.wait)/) {
+    print "## TODO... $cmd\n";
+
+  } else {
+    print "# FAIL: no match for '$cmd'\n";
+    exit 1;
+  }
+
+  cmdlist_do() if scalar(@cmdlist) >= $cmax;
+
+}
+
+cmdlist_do();
+
+print "\n";
+print "rlc set statvalue \$old_statvalue\n";
+print "rlc set statmask  \$old_statmask\n";
+
+exit 0;
+
+#-------------------------------------------------------------------------------
+sub add_edata {
+  my ($crest) = @_;
+  $crest =~ s/\s+//;
+  if ($crest =~ m/d=([0-7]+)/) {
+    $cmdlist[-1] .= " -edata 0$1";
+  }
+}
+
+#-------------------------------------------------------------------------------
+sub cmdlist_do {
+  return unless scalar(@cmdlist);
+
+#  printf "$cpu cp \\\n";
+  print "$cpu cp \\\n";
+  while (scalar(@cmdlist)) {
+    print "        ";
+    print shift @cmdlist;
+    print " \\\n" if scalar(@cmdlist);
+  }
+  print "\n";
+  @cmdlist = ();
+  return;
+}
+

@@ -1,0 +1,99 @@
+#!/usr/bin/perl -w
+# $Id: xilinx_tsim_xon 314 2010-07-09 17:38:41Z mueller $
+#
+# Copyright 2010- by Walter F.J. Mueller <W.F.J.Mueller@gsi.de>
+#
+# This program is free software; you may redistribute and/or modify it under
+# the terms of the GNU General Public License as published by the Free
+# Software Foundation, either version 2, or at your option any later version.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY, without even the implied warranty of MERCHANTABILITY
+# or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+# for complete details.
+#
+#  Revision History:
+# Date         Rev Version  Comment
+# 2010-05-06   289   1.0    Initial version
+#
+#
+# Add "XON => false," defs in X_FF and X_SFF instances when name of the
+# instance is matched by a regexp found in a descriptor file.
+#
+# Logic:
+#   looks for lines like
+#      <name> : X_FF
+#        generic map(
+#   and adds
+#      XON => false,   -- added by xilinx_tsim_xon tool --
+#   if <name> is matched by a regexp found in file stem..tsim_xon_dat
+#
+#   all old 'XON => false' lines in input file are removed first, so this
+#   tool can be rerun with changing desciptor files.
+#
+
+use strict;
+
+my $stem = shift;
+
+if (not defined $stem) {
+  print "xilinx_tsim_xon-E: call with file stem\n";
+  exit 1;
+}
+
+my $file_vhd = $stem . "_tsim.vhd";
+my $file_dsc = $stem . ".tsim_xon_dat";
+
+if (! -r $file_vhd) {
+  print "xilinx_tsim_xon-E: $file_vhd not found or readable\n";
+  exit 1;
+}
+if (! -r $file_dsc) {
+  print "xilinx_tsim_xon-E: $file_dsc not found or readable\n";
+  exit 1;
+}
+
+my @dsc_list;
+open(DFILE, "<$file_dsc") || die ("Can't open descriptor file $file_dsc: $!");
+while (<DFILE>) {
+  chomp;
+  s/^\s*//;
+  s/\s*$//;
+  next if m/^#/;
+  next if m/^$/;
+  push @dsc_list, $_;
+}
+close(DFILE);
+
+my $file_tmp = $stem . "_tsim_new.vhd";
+open(OFILE, ">$file_tmp")  || die ("Can't open output file $file_tmp: $!");
+open(IFILE, "<$file_vhd")  || die ("Can't open input file $file_vhd: $!");
+
+my $match_1 = 0;
+my $name_1;
+
+while (<IFILE>) {
+  my $line = $_;
+  next if m/-- added by xilinx_tsim_xon tool --$/;
+  print OFILE $line;
+  my $match = 0;
+  my $name;
+  if ($line =~ m/\s*([a-zA-Z0-9_]+)\s*:\s*(X_FF|X_SFF)/) {
+    $name = $1;
+    foreach my $pat (@dsc_list) {
+      $match = 1 if ($name =~ m/^$pat$/);
+    }
+  }
+  if ($match_1 && $line =~ m/generic map/) {
+    ## print "xilinx_tsim_xon-I: XON=>false for $name_1\n";
+    print OFILE 
+      "      XON => false,      -- added by xilinx_tsim_xon tool --\n";
+  }
+  $match_1 = $match;
+  $name_1 = $name;
+}
+
+close(IFILE);
+close(OFILE);
+
+rename $file_tmp, $file_vhd or die  ("Can't rename $file_tmp: $!");

@@ -1,0 +1,647 @@
+# $Id: tb_rlink_stim.dat 617 2014-12-21 14:18:53Z mueller $
+#
+#  Revision History: 
+# Date         Rev Version  Comment
+# 2014-12-21   617   4.0.1  rlink signals now tout and nak on separate stat bits
+# 2014-10-12   596   4.0    rewritten for rlink v4
+# ...                       all history v1->v3 droped
+# 2007-06-17    58   1.0    Initial version
+#
+#---------------------------------------
+# rbus address mapping
+#   ffe0   rbd_tester cntl
+#   ffe1   rbd_tester stat
+#   ffe2   rbd_tester attn
+#   ffe3   rbd_tester ncyc
+#   ffe4   rbd_tester data
+#   ffe5   rbd_tester dinc
+#   ffe6   rbd_tester fifo
+#   ffe7   rbd_tester lnak
+#
+.rlmon 0
+.rlbmo 0
+.rbmon 1
+#
+C =============================================================================
+C Section A1: Basic framing
+C -----------------------------------------------------------------------------
+C Test A1.1: empty frame
+C       tx: sop - eop
+C       rx: sop - eop
+rxsop
+rxeop
+#
+txsop
+txeop
+#
+.iowt 10
+#
+C -----------------------------------------------------------------------------
+C Test A1.2: discard extra eop's
+C       tx: eop - eop - sop - eop
+C       rx: sop - eop
+rxsop
+rxeop
+#
+txeop
+txeop
+txsop
+txeop
+#
+.iowt 10
+#
+C -----------------------------------------------------------------------------
+C Test A1.3: discard extra data
+C       tx: <4 byte data> - sop - eop
+C       rx: sop - eop
+rxsop
+rxeop
+#
+tx8 00000000
+tx8 00000001
+tx8 00000010
+tx8 00000011
+txsop
+txeop
+#
+.iowt 10
+#
+C -----------------------------------------------------------------------------
+C Test A1.4: frame error nak abort: sop in active frame
+C       tx: sop - sop - eop
+C       rx: sop - nak nakcode(010) - eop
+rxsop
+rxnak
+rx8    10101010   -- 10 101 010
+rxeop
+#
+txsop
+txsop
+txeop
+#
+.iowt 10
+#
+C =============================================================================
+C Section A2: Basic commands: attn, wreg, rreg
+C -----------------------------------------------------------------------------
+C Test A2.1: test attn (simplest cmd, no rbus access)
+C       .attn 1000000000000000
+C attn: tx: sop - cmd(attn,1) ccrc
+C attn: tx:     - cmd(attn,2) ccrc - eop
+C       rx: sop - cmd(attn,1) dl dh stat crc
+C       rx:     - cmd(attn,2) dl dh stat crc - eop
+#
+.attn  1000000000000000
+rxsop 
+rxcds  attn,1  1000000000000000  00000000
+rxcds  attn,2  0000000000000000  00000000
+rxeop 
+txsop 
+txc    attn,1  
+txc    attn,2  
+txeop 
+.iowt  10
+#
+C -----------------------------------------------------------------------------
+C Test A2.2: wreg(data) -> shows that rlink can write a register
+C   data := x"1111"
+C wreg: tx: sop - cmd(wreg,3) addr(00f1) dl dh ccrc - eop
+C       rx: sop - cmd(wreg,3) stat crc - eop
+#
+rxsop 
+rxcs   wreg,3  00000000
+rxeop 
+#
+txsop 
+txcad  wreg,3  x"ffe4"  x"1111"
+txeop 
+#
+.iowt 10
+#
+C -----------------------------------------------------------------------------
+C Test A2.3: rreg(data) -> shows that rlink can read back a register
+C   data -> x"1111"
+C rreg: tx: sop - cmd(rreg,4) addr(00f1) ccrc - eop
+C       rx: sop - cmd(rreg,4) dl dh stat crc - eop
+#
+rxsop 
+rxcds  rreg,4  x"1111"  00000000
+rxeop 
+#
+txsop 
+txca   rreg,4  x"ffe4"
+txeop 
+#
+.iowt 10
+#
+C =============================================================================
+C Section A3: Check-out rbd_tester basics with wreg,rreg
+C   from now use lists and high level commands
+C -----------------------------------------------------------------------------
+C Test A3.1: wreg(data) + rreg(data) list
+#
+sop
+wreg    0  x"ffe4"  x"f0f0"  00000000       -- data := f0f0
+rreg    1  x"ffe4"  x"f0f0"  00000000       -- data >? f0f0
+eop
+.iowt 10
+#
+C -----------------------------------------------------------------------------
+C Test A3.2: check cntl write/read
+#
+sop
+wreg    2  x"ffe0"  x"ffff"  00000000       -- cntl := ffff
+rreg    3  x"ffe0"  x"83ff"  00000000       -- cntl >? (wchk=1,nbusy=3ff)
+wreg    4  x"ffe0"  x"0000"  00000000       -- cntl := ffff
+rreg    5  x"ffe0"  x"0000"  00000000       -- cntl >? (wchk=0,nbusy=0)
+eop
+.iowt 10
+#
+C -----------------------------------------------------------------------------
+C Test A3.3: check stat write/read  (and that RB_STAT is retured)
+#
+sop
+wreg    2  x"ffe1"  x"ffff"  00000000       -- stat := ffff
+rreg    3  x"ffe1"  x"000f"  11110000       -- stat >? 000f  {stat=1111}
+wreg    4  x"ffe1"  x"0000"  11110000       -- stat := 0000  {stat=1111}
+rreg    5  x"ffe1"  x"0000"  00000000       -- stat >? 0000
+eop
+.iowt 10
+C -----------------------------------------------------------------------------
+C Test A3.4: check attn write/read  (also RB_LAM is driven; also rberr in rreg)
+# 
+sop
+wreg    6  x"ffe2"  x"beaf"  00001000       -- attn := 5555  {attn=1}
+rreg    7  x"ffe2"  x"5555"  00001001       -- attn >? 5555  {attn=1,err=1}
+attn    8  x"beaf"           00000000       --      >? beaf  (attn pattern)
+attn    8  x"0000"           00000000       --      >? 0000  (cleared on reread)
+eop
+.iowt 10
+#
+C -----------------------------------------------------------------------------
+C Test A3.5: check ncyc write/read  (also rberr in wreg)
+# 
+sop
+wreg    9  x"ffe4"  x"beaf"  00000000       -- data := beaf
+rreg   10  x"ffe3"  x"0001"  00000000       -- ncyc >? 0001  (nbusy is 0!)
+wreg   11  x"ffe3"  x"dead"  00000001       -- ncyc := dead  {err=1}
+eop
+.iowt 10
+#
+C -----------------------------------------------------------------------------
+C Test A3.6: check dinc read
+# 
+sop
+wreg   12  x"ffe4"  x"1100"  00000000       -- data := 1100
+rreg   13  x"ffe5"  x"1100"  00000000       -- dinc >? 1100
+rreg   14  x"ffe5"  x"1101"  00000000       -- dinc >? 1101
+rreg   15  x"ffe5"  x"1102"  00000000       -- dinc >? 1102
+rreg   16  x"ffe4"  x"1103"  00000000       -- data >? 1103
+eop
+.iowt 10
+#
+C -----------------------------------------------------------------------------
+C Test A3.7: check dinc write (and wchk)
+# 
+sop
+wreg   17  x"ffe4"  x"1200"  00000000       -- data := 1200
+wreg   18  x"ffe5"  x"1200"  00000000       -- dinc := 1200
+wreg   19  x"ffe5"  x"1201"  00000000       -- dinc := 1201
+wreg   20  x"ffe5"  x"1202"  00000000       -- dinc := 1202
+rreg   21  x"ffe4"  x"1203"  00000000       -- data >? 1203
+rreg   22  x"ffe0"  x"0000"  00000000       -- cntl >? (wchk=0)
+eop
+.iowt 10
+#
+sop
+wreg   23  x"ffe5"  x"f203"  00000000       -- dinc := f203  (should be 1203!)
+wreg   24  x"ffe5"  x"1204"  00000000       -- dinc := 1204  (ok again)
+rreg   25  x"ffe0"  x"8000"  00000000       -- cntl >? (wchk=1)
+rreg   26  x"ffe4"  x"1205"  00000000       -- data >? 1205
+wreg   27  x"ffe4"  x"1300"  00000000       -- data := 1300  (clears wchk)
+rreg   28  x"ffe0"  x"0000"  00000000       -- cntl >? (wchk=0)
+eop
+.iowt 10
+#
+C -----------------------------------------------------------------------------
+C Test A3.8: check fifo write/read (and rberr for rreg)
+# 
+sop
+rreg    0  x"ffe6"  x"5555"  00000001       -- fifo >? 5555  {err=1} (fifo empty)
+wreg    1  x"ffe6"  x"1400"  00000000       -- fifo := 1400
+wreg    2  x"ffe6"  x"1401"  00000000       -- fifo := 1401
+wreg    3  x"ffe6"  x"1402"  00000000       -- fifo := 1402
+rreg    4  x"ffe6"  x"1400"  00000000       -- fifo >? 1400
+rreg    5  x"ffe6"  x"1401"  00000000       -- fifo >? 1400
+rreg    6  x"ffe6"  x"1402"  00000000       -- fifo >? 1400
+rreg    7  x"ffe6"  x"5555"  00000001       -- fifo >? 5555  {err=1} (fifo empty)
+eop
+.iowt 10
+#
+C -----------------------------------------------------------------------------
+C Test A3.9: check lnak write/read (and rbnak for rreg and wreg)
+# 
+sop
+wreg    0  x"ffe7"  x"aaaa"  00000010       -- lnak >? aaaa  {nak=1}
+rreg    1  x"ffe7"  x"5555"  00000010       -- lnak >? 5555  {nak=1}
+eop
+.iowt 10
+#
+C -----------------------------------------------------------------------------
+C Test A3.10: check nbusy (use nbusy=4)
+# 
+C    with data
+sop
+wreg    0  x"ffe0"  x"0004"  00000000       -- cntl := (nbusy=4)
+wreg    1  x"ffe4"  x"1234"  00000000       -- data := 1234
+rreg    2  x"ffe3"  x"0005"  00000000       -- ncyc >? 0005  (ncyc=nbusy+1)
+rreg    3  x"ffe4"  x"1234"  00000000       -- data >? 1234
+rreg    4  x"ffe3"  x"0005"  00000000       -- ncyc >? 0005  (ncyc=nbusy+1)
+eop
+.iowt 10
+#
+C    with dinc
+sop
+wreg    0  x"ffe5"  x"1234"  00000000       -- dinc := 1234
+rreg    1  x"ffe3"  x"0005"  00000000       -- ncyc >? 0005  (ncyc=nbusy+1)
+rreg    2  x"ffe5"  x"1235"  00000000       -- dinc >? 1235
+rreg    3  x"ffe3"  x"0005"  00000000       -- ncyc >? 0005  (ncyc=nbusy+1)
+eop
+.iowt 10
+#
+C    with fifo
+sop
+wreg    0  x"ffe6"  x"3300"  00000000       -- fifo := 3300
+rreg    1  x"ffe3"  x"0005"  00000000       -- ncyc >? 0005  (ncyc=nbusy+1)
+rreg    2  x"ffe6"  x"3300"  00000000       -- fifo >? 3300
+rreg    3  x"ffe3"  x"0005"  00000000       -- ncyc >? 0005  (ncyc=nbusy+1)
+eop
+.iowt 10
+#
+C    with lnak
+sop
+wreg    0  x"ffe7"  x"aaaa"  00000010       -- lnak := aaaa  {nak=1}
+rreg    1  x"ffe3"  x"0005"  00000000       -- ncyc >? 0005  (ncyc=nbusy+1)
+rreg    2  x"ffe7"  x"5555"  00000010       -- lnak >? 5555  {nak=1}
+rreg    3  x"ffe3"  x"0005"  00000000       -- ncyc >? 0005  (ncyc=nbusy+1)
+eop
+.iowt 10
+#
+C    with stat (should not assert busy!)
+sop
+wreg    0  x"ffe1"  x"0000"  00000000       -- stat := 0000
+rreg    1  x"ffe3"  x"0001"  00000000       -- ncyc >? 0001  (after wreg stat)
+rreg    2  x"ffe1"  x"0000"  00000000       -- stat >? 0000
+rreg    3  x"ffe3"  x"0001"  00000000       -- ncyc >? 0001  (after rreg stat)
+eop
+.iowt 10
+#
+C    with ncyc  (should not assert busy!)
+sop
+rreg    0  x"ffe3"  x"0001"  00000000       -- ncyc >? 0001  (after rreg ncyc)
+eop
+.iowt 10
+#
+C    with cntl  (should not assert busy!)
+sop
+rreg    0  x"ffe0"  x"0004"  00000000       -- cntl >? 0004
+rreg    1  x"ffe3"  x"0001"  00000000       -- ncyc >? 0001  (after rreg cntl)
+wreg    2  x"ffe0"  x"0000"  00000000       -- cntl := 0000
+rreg    3  x"ffe3"  x"0001"  00000000       -- ncyc >? 0001  (after wreg cntl)
+eop
+.iowt 10
+#
+C -----------------------------------------------------------------------------
+C Test A3.11: check nbusy (use nbusy=3ff -> will cause time out)
+# 
+C    with data
+sop
+wreg    0  x"ffe0"  x"03ff"  00000000       -- cntl := (nbusy=1023)
+wreg    1  x"ffe4"  x"1234"  00000100       -- data := 1234
+rreg    2  x"ffe3"  x"0020"  00000000       -- ncyc >? 0020  (ncyc=TO(32))
+rreg    3  x"ffe4"  x"5555"  00000100       -- data >? 5555
+rreg    4  x"ffe3"  x"0020"  00000000       -- ncyc >? 0020  (ncyc=TO(32))
+eop
+.iowt 10
+#
+C    with dinc
+sop
+wreg    0  x"ffe5"  x"1234"  00000100       -- dinc := 1234
+rreg    1  x"ffe3"  x"0020"  00000000       -- ncyc >? 0020  (ncyc=TO(32))
+rreg    2  x"ffe5"  x"5555"  00000100       -- dinc >? 5555
+rreg    3  x"ffe3"  x"0020"  00000000       -- ncyc >? 0020  (ncyc=TO(32))
+eop
+.iowt 10
+#
+C    with fifo
+sop
+wreg    0  x"ffe6"  x"3300"  00000100       -- fifo := 3300
+rreg    1  x"ffe3"  x"0020"  00000000       -- ncyc >? 0020  (ncyc=TO(32))
+rreg    2  x"ffe6"  x"5555"  00000100       -- fifo >? 5555
+rreg    3  x"ffe3"  x"0020"  00000000       -- ncyc >? 0020  (ncyc=TO(32))
+eop
+.iowt 10
+#
+C    with lnak
+sop
+wreg    0  x"ffe7"  x"aaaa"  00000100       -- lnak := aaaa  {nak=1}
+rreg    1  x"ffe3"  x"0020"  00000000       -- ncyc >? 0020  (ncyc=TO(32))
+rreg    2  x"ffe7"  x"5555"  00000100       -- lnak >? 5555  {nak=1}
+rreg    3  x"ffe3"  x"0020"  00000000       -- ncyc >? 0020  (ncyc=TO(32))
+eop
+.iowt 10
+#
+C    reset to nbusy=0
+sop
+wreg    0  x"ffe0"  x"0000"  00000000       -- cntl := (nbusy=0)
+eop
+.iowt 10
+#
+C =============================================================================
+C Section A4: Basic commands: wblk, rblk
+C -----------------------------------------------------------------------------
+C Test A4.1: wblk, rblk (with fifo, no errors)
+#
+sop
+wblks   0  x"ffe6"  8  x"0100"  00000000    -- fifo := seq(8,0100)
+rblks   1  x"ffe6"  8  x"0100"  00000000    -- fifo >? seq(8,0100)
+eop
+.iowt 10
+#
+C -----------------------------------------------------------------------------
+C Test A4.2: wblk, rblk (with dinc, no errors)
+#
+sop
+wreg    0  x"ffe4"  x"2200"  00000000       -- data := 2200
+rblks   1  x"ffe5"  8  x"2200"  00000000    -- dinc >? seq(8,2200)
+wblks   2  x"ffe5"  8  x"2208"  00000000    -- dinc := seq(8,2208)
+rreg    3  x"ffe4"  x"2210"  00000000       -- data >? 2210
+rreg    4  x"ffe0"  x"0000"  00000000       -- cntl >? (wchk=0)
+eop
+.iowt 10
+#
+C -----------------------------------------------------------------------------
+C Test A4.3: wblk, rblk (with lnak, -> rbnak response)
+#
+sop
+.dclr
+.dseq   4  x"3300"  -- seq( 4,3300)
+wblkd   0  x"ffe7"  0  00000010             -- lnak := .... {nak=1,dc=0}
+.dclr
+.dwrd   x"0055"     -- 1st lsb from rbus
+.dwrd   x"0000"     -- rest will be 0 from abort states
+.dwrd   x"0000"
+.dwrd   x"0000"
+rblkd   1  x"ffe7"  0  00000010             -- lnak >? .... {nak=1,dc=0)
+eop
+.iowt 10
+#
+C -----------------------------------------------------------------------------
+C Test A4.4: wblk, rblk (with fifo, -> rberr response when fifo full)
+#
+sop
+.dclr
+.dseq  18  x"4400"  -- seq(18,4400)
+wblkd   0  x"ffe6" 16  00000001             -- fifo := .... {err=1,dc=16}
+.dclr
+.dseq  16  x"4400"  -- seq(16,4400)
+.dwrd      x"0055"  -- 1st lsb from rbus
+.dwrd      x"0000"  -- rest will be 0 from abort states
+rblkd   1  x"ffe6" 16  00000001             -- lnak >? .... {err=1,dc=16)
+eop
+.iowt 10
+#
+C -----------------------------------------------------------------------------
+C Test A4.5: wblk, rblk (with dinc, zero length request)
+#
+sop
+wreg    0  x"ffe4"  x"5500"  00000000       -- data := 5500
+rblks   1  x"ffe5"  0  x"5500"  00000000    -- dinc >? seq(0,5500)
+wblks   2  x"ffe5"  0  x"5500"  00000000    -- dinc := seq(0,5500)
+rreg    3  x"ffe4"  x"5500"  00000000       -- data >? 5500
+rreg    4  x"ffe0"  x"0000"  00000000       -- cntl >? (wchk=0)
+eop
+.iowt 10
+#
+C =============================================================================
+C Section A5: Basic commands: init
+C -----------------------------------------------------------------------------
+C Test A5.1: init (test with tester data reg)
+#
+C    setup cntl, data, fifo
+sop
+wreg    0  x"ffe0"  x"0002"  00000000       -- cntl := 0002
+wreg    1  x"ffe4"  x"3210"  00000000       -- data := 3210
+wreg    2  x"ffe6"  x"6600"  00000000       -- fifo := 6600
+wreg    3  x"ffe6"  x"6601"  00000000       -- fifo := 6601
+wreg    4  x"ffe6"  x"6602"  00000000       -- fifo := 6602
+wreg    5  x"ffe6"  x"6603"  00000000       -- fifo := 6603
+eop
+.iowt 10
+#
+C    init(0000) -> noop
+sop
+init    0  x"ffe0"  x"0000"  00000000
+rreg    1  x"ffe0"  x"0002"  00000000       -- cntl >? 0002
+rreg    2  x"ffe4"  x"3210"  00000000       -- data >? 3210
+rreg    3  x"ffe6"  x"6600"  00000000       -- fifo >? 6600
+eop
+.iowt 10
+#
+C    init(0001) -> clear cntl
+sop
+init    0  x"ffe0"  x"0001"  00000000
+rreg    1  x"ffe0"  x"0000"  00000000       -- cntl >? 0000
+rreg    2  x"ffe4"  x"3210"  00000000       -- data >? 3210
+rreg    3  x"ffe6"  x"6601"  00000000       -- fifo >? 6601
+eop
+.iowt 10
+#
+C    init(0002) -> clear data
+sop
+init    0  x"ffe0"  x"0002"  00000000
+rreg    1  x"ffe0"  x"0000"  00000000       -- cntl >? 0000
+rreg    2  x"ffe4"  x"0000"  00000000       -- data >? 0000
+rreg    3  x"ffe6"  x"6602"  00000000       -- fifo >? 6602
+eop
+.iowt 10
+#
+C    init(0004) -> clear fifo
+sop
+init    0  x"ffe0"  x"0004"  00000000
+rreg    1  x"ffe0"  x"0000"  00000000       -- cntl >? 0000
+rreg    2  x"ffe4"  x"0000"  00000000       -- data >? 0000
+rreg    3  x"ffe6"  x"5555"  00000001       -- fifo >? 5555  {err=1}
+eop
+.iowt 10
+#
+C =============================================================================
+C Section A6: rlink core rbus registers (needed for labo and attn tests)
+C -----------------------------------------------------------------------------
+C Test A6.1: read all regs
+# for stat expect:  lcmd = 00001 000 (seq=1,cmd=000) from previous rreg,1
+#                   babo = 0    (last wblk/rblk was ok)
+#                   size = 001  (size=RTAWIDTH-10, and tb has RTAWIDTH=11)
+#                   --> stat= 00001 000 0 0000 001 -> 0801
+# 
+sop
+rreg    1  x"ffff"  x"0000"  00000000       -- cntl >? 0000
+rreg    2  x"fffe"  x"0801"  00000000       -- stat >? 0801  (see above)
+rreg    3  x"fffd"  x"7654"  00000000       -- sysh >? 7654
+rreg    4  x"fffc"  x"3210"  00000000       -- sysl >? 3210
+eop
+.iowt 10
+#
+C =============================================================================
+C Section A7: Basic commands: labo
+C -----------------------------------------------------------------------------
+C Test A7.1: labo after successful rblk,wblk (essentially a noop)
+#
+sop
+init    0  x"ffe0"  x"0007"     00000000    -- clear all
+wblks   1  x"ffe6"  4  x"0200"  00000000    -- fifo := seq(4,0200)
+labo    2           x"00"       00000000
+rblks   3  x"ffe6"  4  x"0200"  00000000    -- fifo >? seq(4,0200)
+labo    4           x"00"       00000000
+eop
+.iowt 10
+#
+C -----------------------------------------------------------------------------
+C Test A7.2: labo after aborted wblk,rblk
+#
+# for stat expect:  lcmd = 00001 011 (seq=1,cmd=011) from previous wblk,1
+#                   lcmd = 00001 001 (seq=1,cmd=001) from previous rblk,1
+#                   babo = 1    (last wblk/rblk was aborted)
+#                   size = 001  (size=RTAWIDTH-10, and tb has RTAWIDTH=11)
+#                   --> stat= 00001 011 1 0000 001 -> 0b81
+#                   --> stat= 00001 001 1 0000 001 -> 0981
+#
+C    aborted wblk, labo, wreg(data),rreg(dinc)
+sop
+.dclr
+.dseq  18  x"4400"  -- seq(18,4400)
+init    0  x"ffe0"  x"0007"  00000000       -- clear all
+wblkd   1  x"ffe6"  16       00000001       -- fifo := .... {err=1,dc=16}
+rreg    2  x"fffe"  x"0b81"  00000000       -- stat >? 0b81  (see above)
+labo    3           x"01"    00000000
+wreg    4  x"ffe4"  x"0101"  00000000       -- data := 0101
+rreg    5  x"ffe5"  x"0102"  00000000       -- dinc := 0102
+eop
+.iowt 20                        -- 20 needed for sp1c
+#
+C    check that wreg(data) and rreg(dinc) wasn't done
+sop
+rreg    0  x"ffe4"  x"0000"  00000000       -- data >? 0000
+eop
+.iowt 10
+#
+C    aborted rblk, labo, wreg(data),rreg(dinc)
+sop
+.dclr
+.dseq  16  x"4400"  -- seq(16,4400)
+.dwrd      x"0055"  -- 1st lsb from rbus
+.dwrd      x"0000"  -- rest will be 0 from abort states
+rblkd   1  x"ffe6" 16  00000001             -- lnak >? .... {err=1,dc=16)
+rreg    2  x"fffe"  x"0981"  00000000       -- stat >? 0981  (see above)
+labo    3           x"01"    00000000
+wreg    4  x"ffe4"  x"0101"  00000000       -- data := 0101
+rreg    5  x"ffe5"  x"0102"  00000000       -- dinc := 0102
+eop
+.iowt 10
+#
+C    check that wreg(data) and rreg(dinc) wasn't done
+sop
+rreg    0  x"ffe4"  x"0000"  00000000       -- data >? 0000
+eop
+.iowt 10
+
+
+C =============================================================================
+C Section A8: attn notification
+C -----------------------------------------------------------------------------
+C Test A8.1: test response on attn polls
+#
+C    send attn, expect attn notify message (with all 0)
+anmsg  0000000000000000
+txattn
+.iowt 20
+#
+C    trigger LAM, send attn, expect attn notify message
+.attn  0000000000000001
+.iowt 10
+anmsg  0000000000000001
+txattn
+.iowt 20
+#
+C    harvest attn, send attn, expect attn notify message (all 0 again)
+sop
+attn    1           x"0001"  00000000       -- attn >? 0001
+attn    2           x"0000"  00000000       -- attn >? 0000
+eop
+.iowt 10
+anmsg  0000000000000000
+txattn
+.iowt 20
+#
+C -----------------------------------------------------------------------------
+C Test A8.2: test attn notification
+#
+C    enable attn notification
+sop
+wreg    1  x"ffff"  x"8000"  00000000       -- cntl := (anena=1)
+rreg    2  x"ffff"  x"8000"  00000000       -- cntl >? (anena=1)
+eop
+.iowt 10
+#
+C    trigger LAM, expect attn notify message
+anmsg  0000000000000010
+.attn  0000000000000010
+.iowt 10
+#
+C    send attn, expect attn notify message
+anmsg  0000000000000010
+txattn
+.iowt 20
+#
+C    harvest attn pattern
+sop
+rreg    1  x"ffff"  x"8000"  00001000       -- cntl >? (anena=1)  {attn=1}
+attn    2           x"0002"  00000000       -- attn >? 0002
+rreg    3  x"ffff"  x"8000"  00000000       -- cntl >? (anena=1)
+attn    4           x"0000"  00000000       -- attn >? 0000    (nothing !)
+eop
+.iowt 10
+#
+C    send attn, expect attn notify message (all 0)
+anmsg  0000000000000000
+txattn
+.iowt 20
+#
+C    disable attn notification
+sop
+wreg    1  x"ffff"  x"0000"  00000000       -- cntl := (anena=1)
+rreg    2  x"ffff"  x"0000"  00000000       -- cntl >? (anena=1)
+eop
+.iowt 10
+C    trigger LAM, no attn comma now
+.attn  0000000000000100
+.iowt 10
+#
+C    send attn, expect attn notify message
+anmsg  0000000000000100
+txattn
+.iowt 20
+#
+C    harvest attn pattern
+sop
+rreg    1  x"ffff"  x"0000"  00001000       -- cntl >? (anena=1)  {attn=1}
+attn    2           x"0004"  00000000       -- attn >? 0004
+eop
+.iowt 10
+#
+#==============================================================================
+#
+C -----------------------------------------------------------------------------
+C Run down and Finish
+.iowt 10
+.wait 10

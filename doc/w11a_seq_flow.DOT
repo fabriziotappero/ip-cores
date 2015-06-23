@@ -1,0 +1,945 @@
+// $Id: w11a_seq_flow.DOT 584 2014-08-22 19:38:12Z mueller $
+//
+// The create pdf use
+//
+//  cpp w11a_seq_flow.DOT w11a_seq_flow.dot
+//  dot -Tpdf w11a_seq_flow.dot > w11a_seq_flow.pdf
+//  xpdf w11a_seq_flow.pdf
+//  -> gives 30.54 x 43.92 in page size
+//
+//  pdflatex w11a_seq_flow_a4wrap.tex
+//  xpdf w11a_seq_flow_a4wrap.pdf
+//  --> gives 8.27 x 11.69 in page size (A4)
+//
+
+#define FORKSTATE
+#define CLUSTER
+
+#define COLssys   cyan
+#define COLscons  cyan4
+#define COLssrc   gold
+#define COLsdst   goldenrod
+#define COLsoper  greenyellow
+#define COLsint   limegreen
+#define COLserr   tomato
+
+#define COLtflow  forestgreen
+
+#define COLterr   red
+#define COLtfat   deeppink4
+#define COLtwait  blue
+
+#define FSZnode   12
+#define FSZbnode  24
+#define FSZgraph  18
+#define FSZlabel  64
+
+digraph G {
+
+	node [fontname="helvetica"];
+
+	fontsize=FSZlabel;
+	fontcolor=blue;
+	labelloc="t";
+	label="W11A Sequencer (Rev 569)";
+
+//	aspect="0.7,500";
+//	ratio="0.7";
+
+//	pad="10,10";
+	aspect="1.4,500";
+	ratio="1.4";
+	rankdir="LR";
+
+
+// for ps flow
+//	size="8,12"; 
+//	pad="3,3";		// needed, otherwise some stuff cut off
+
+
+#ifdef CLUSTER
+	ranksep=0.2;		// default is 0.5  in
+	nodesep=0.1;		// default is 0.25 in
+#else
+	ranksep=0.2;		// default is 0.5  in
+	nodesep=0.1;		// default is 0.25 in
+#endif
+
+// to use when CLUSTER on
+
+	node [fontsize=FSZnode];
+	node [style=filled];
+
+#define do_memread_i(s,w)	s -> w [color=COLtflow];
+#define do_memread_d(s,w)	s -> w [color=COLtflow];
+#define do_memread_srcinc(s,w)	s -> w [color=COLtflow];
+#define do_memwrite(s,w)	s -> w [color=COLtflow];
+#define do_memcheck(s)		s -> s [color=COLtwait, penwidth=2]; \
+				s -> vmerr [color=COLterr];\
+				s[color=blue];
+
+#ifdef FORKSTATE
+#define do_fork_dstr(s) s -> fork_dstr [fillcolor=gray20, penwidth=3];
+	fork_dstr [fontsize=FSZbnode, style=filled, 
+		   color=lightgrey, shape=doubleoctagon];
+	fork_dstr -> dstr_def;
+	fork_dstr -> dstr_inc;
+	fork_dstr -> dstr_dec;
+	fork_dstr -> dstr_ind;
+
+#define do_fork_opg(s) s -> fork_opg [fillcolor=gray20, penwidth=3];
+        fork_opg [fontsize=FSZbnode, style=filled, 
+		  color=lightgrey, shape=doubleoctagon];
+	fork_opg -> opg_gen;
+	fork_opg -> dstw_def;
+	fork_opg -> dstw_inc;
+	fork_opg -> dstw_dec;
+	fork_opg -> dstw_ind;
+	fork_opg -> opg_mul;
+	fork_opg -> opg_div;
+	fork_opg -> opg_ash;
+	fork_opg -> opg_ashc;
+	fork_opg -> cpufail [color=COLtfat];
+
+#define do_fork_opa(s) s -> fork_opa [fillcolor=gray20, penwidth=3];
+	fork_opa [fontsize=FSZbnode, style=filled, 
+                  color=lightgrey, shape=doubleoctagon];
+	fork_opa -> opa_jmp;
+	fork_opa -> opa_jsr;
+	fork_opa -> opa_mtp_mem;
+	fork_opa -> opa_mfp_reg;
+	fork_opa -> opa_mfp_mem;
+	fork_opa -> cpufail [color=COLtfat];
+
+#else
+
+#define do_fork_dstr(s) \
+	s -> dstr_def;\
+	s -> dstr_inc;\
+	s -> dstr_dec;\
+	s -> dstr_ind;
+
+#define do_fork_opg(s) \
+	s -> opg_gen;\
+	s -> dstw_def;\
+	s -> dstw_inc;\
+	s -> dstw_dec;\
+	s -> dstw_ind;\
+	s -> opg_mul;\
+	s -> opg_div;\
+	s -> opg_ash;\
+	s -> opg_ashc;\
+	s -> cpufail [color=COLtfat];
+
+#define do_fork_opa(s) \
+	s -> opa_jmp;\
+	s -> opa_jsr;\
+	s -> opa_mtp_mem;\
+	s -> opa_mfp_reg;\
+	s -> opa_mfp_mem;\
+	s -> cpufail [color=COLtfat];
+
+#endif
+
+#define do_fork_next(s) \
+	s -> idle;\
+	s -> trap_disp;\
+	s -> ifetch [color=COLtflow];
+
+#define do_fork_next_pref(s) \
+	s -> idle;\
+	s -> trap_disp;\
+	s -> ifetch_w [color=COLtflow];
+
+#define do_start_int(s)		s-> int_getpc [color=COLtflow];
+
+// state list --------------------------
+
+	idle          [fillcolor=COLssys, fontsize=FSZbnode];
+	cp_regread    [fillcolor=COLscons];
+	cp_rps        [fillcolor=COLscons];
+	cp_memr_w     [fillcolor=COLscons];
+	cp_memw_w     [fillcolor=COLscons];
+	ifetch        [fillcolor=COLssys, fontsize=FSZbnode];
+	ifetch_w      [fillcolor=COLssys, fontsize=FSZbnode];
+	idecode       [fillcolor=COLssys, fontsize=FSZbnode];
+
+	srcr_def      [fillcolor=COLssrc];
+	srcr_def_w    [fillcolor=COLssrc];
+	srcr_inc      [fillcolor=COLssrc];
+	srcr_inc_w    [fillcolor=COLssrc];
+	srcr_dec      [fillcolor=COLssrc];
+	srcr_dec1     [fillcolor=COLssrc];
+	srcr_ind      [fillcolor=COLssrc];
+	srcr_ind1_w   [fillcolor=COLssrc];
+	srcr_ind2     [fillcolor=COLssrc];
+	srcr_ind2_w   [fillcolor=COLssrc];
+
+	dstr_def      [fillcolor=COLsdst];
+	dstr_def_w    [fillcolor=COLsdst];
+	dstr_inc      [fillcolor=COLsdst];
+	dstr_inc_w    [fillcolor=COLsdst];
+	dstr_dec      [fillcolor=COLsdst];
+	dstr_dec1     [fillcolor=COLsdst];
+	dstr_ind      [fillcolor=COLsdst];
+	dstr_ind1_w   [fillcolor=COLsdst];
+	dstr_ind2     [fillcolor=COLsdst];
+	dstr_ind2_w   [fillcolor=COLsdst];
+
+	dstw_def      [fillcolor=COLsdst];
+	dstw_def_w    [fillcolor=COLsdst];
+	dstw_inc      [fillcolor=COLsdst];
+	dstw_inc_w    [fillcolor=COLsdst];
+	dstw_incdef_w [fillcolor=COLsdst];
+	dstw_dec      [fillcolor=COLsdst];
+	dstw_dec1     [fillcolor=COLsdst];
+	dstw_ind      [fillcolor=COLsdst];
+	dstw_ind_w    [fillcolor=COLsdst];
+	dstw_def246   [fillcolor=COLsdst];
+
+	dsta_inc      [fillcolor=COLsdst];
+	dsta_incdef_w [fillcolor=COLsdst];
+	dsta_dec      [fillcolor=COLsdst];
+	dsta_dec1     [fillcolor=COLsdst];
+	dsta_ind      [fillcolor=COLsdst];
+	dsta_ind_w    [fillcolor=COLsdst];
+
+	op_halt       [fillcolor=COLsoper];
+	op_wait       [fillcolor=COLsoper];
+	op_trap       [fillcolor=COLsoper];
+	op_reset      [fillcolor=COLsoper];
+	op_rts        [fillcolor=COLsoper];
+	op_rtpop      [fillcolor=COLsoper];
+	op_rtpop_w    [fillcolor=COLsoper];
+	op_spl        [fillcolor=COLsoper];
+	op_mcc        [fillcolor=COLsoper];
+	op_br         [fillcolor=COLsoper];
+	op_mark       [fillcolor=COLsoper];
+	op_mark1      [fillcolor=COLsoper];
+	op_mark_pop   [fillcolor=COLsoper];
+	op_mark_pop_w [fillcolor=COLsoper];
+	op_sob        [fillcolor=COLsoper];
+	op_sob1       [fillcolor=COLsoper];
+
+	opg_gen       [fillcolor=COLsoper, fontsize=FSZbnode];
+	opg_gen_rmw_w [fillcolor=COLsoper];
+	opg_mul       [fillcolor=COLsoper];
+	opg_mul1      [fillcolor=COLsoper];
+	opg_div       [fillcolor=COLsoper];
+	opg_div_cn    [fillcolor=COLsoper];
+	opg_div_cr    [fillcolor=COLsoper];
+	opg_div_sq    [fillcolor=COLsoper];
+	opg_div_sr    [fillcolor=COLsoper];
+	opg_div_quit  [fillcolor=COLsoper];
+	opg_ash       [fillcolor=COLsoper];
+	opg_ash_cn    [fillcolor=COLsoper];
+	opg_ashc      [fillcolor=COLsoper];
+	opg_ashc_cn   [fillcolor=COLsoper];
+	opg_ashc_wl   [fillcolor=COLsoper];
+
+	opa_jsr       [fillcolor=COLsoper];
+	opa_jsr1      [fillcolor=COLsoper];
+	opa_jsr_push  [fillcolor=COLsoper];
+	opa_jsr_push_w [fillcolor=COLsoper];
+	opa_jsr2      [fillcolor=COLsoper];
+	opa_jmp       [fillcolor=COLsoper];
+	opa_mtp       [fillcolor=COLsoper];
+	opa_mtp_pop_w [fillcolor=COLsoper];
+	opa_mtp_reg   [fillcolor=COLsoper];
+	opa_mtp_mem   [fillcolor=COLsoper];
+	opa_mtp_mem_w [fillcolor=COLsoper];
+	opa_mfp_reg   [fillcolor=COLsoper];
+	opa_mfp_mem   [fillcolor=COLsoper];
+	opa_mfp_mem_w [fillcolor=COLsoper];
+	opa_mfp_dec   [fillcolor=COLsoper];
+	opa_mfp_push  [fillcolor=COLsoper];
+	opa_mfp_push_w [fillcolor=COLsoper];
+    
+	trap_4        [fillcolor=COLserr];
+	trap_10       [fillcolor=COLserr];
+	trap_disp     [fillcolor=COLsint];
+
+	int_ext       [fillcolor=COLsint];
+	int_getpc     [fillcolor=COLsint];
+	int_getpc_w   [fillcolor=COLsint];
+	int_getps     [fillcolor=COLsint];
+	int_getps_w   [fillcolor=COLsint];
+	int_getsp     [fillcolor=COLsint];
+	int_decsp     [fillcolor=COLsint];
+	int_pushps    [fillcolor=COLsint];
+	int_pushps_w  [fillcolor=COLsint];
+	int_pushpc    [fillcolor=COLsint];
+	int_pushpc_w  [fillcolor=COLsint];
+
+	rti_getpc     [fillcolor=COLsoper];
+	rti_getpc_w   [fillcolor=COLsoper];
+	rti_getps     [fillcolor=COLsoper];
+	rti_getps_w   [fillcolor=COLsoper];
+	rti_newpc     [fillcolor=COLsoper];
+    
+	vmerr         [fillcolor=COLserr];
+	cpufail       [fillcolor=COLserr];
+
+// transition list ---------------------
+// idle
+	idle -> idle;
+	idle -> cp_regread;
+	idle -> cp_memr_w;
+	idle -> cp_memw_w;
+	idle -> cp_rps;
+	idle -> int_ext;
+	idle -> ifetch;
+	idle -> op_wait;
+
+// cp_regread
+	cp_regread -> idle;
+
+// cp_rps
+	cp_rps -> idle;
+
+// cp_memr_w
+	cp_memr_w -> cp_memr_w[color=COLtwait, penwidth=2];
+	cp_memr_w -> idle;
+
+// cp_memw_w
+	cp_memw_w -> cp_memw_w[color=COLtwait, penwidth=2];
+	cp_memw_w -> idle;
+
+// ifetch
+	do_memread_i(ifetch, ifetch_w)
+
+// ifetch_w
+	do_memcheck(ifetch_w)
+	ifetch_w -> idecode;
+
+// idecode
+	idecode -> op_halt;
+	idecode -> op_wait;
+	idecode -> rti_getpc;
+	idecode -> op_trap;
+	idecode -> op_reset;
+	idecode -> op_rts;
+	idecode -> op_spl;
+	idecode -> op_mcc;
+	idecode -> op_br;
+	idecode -> op_mark;
+	idecode -> op_sob;
+	idecode -> opa_mtp;
+	idecode -> cpufail [color=COLtfat];
+	idecode -> srcr_def;
+	idecode -> srcr_inc;
+	idecode -> srcr_dec;
+	idecode -> srcr_ind;
+        do_fork_dstr(idecode)
+        do_fork_opa(idecode)
+	idecode -> dsta_inc;
+	idecode -> dsta_dec;
+	idecode -> dsta_ind;
+	do_fork_opg(idecode)
+	idecode -> trap_10 [color=COLterr];
+
+// srcr_def
+	do_memread_d(srcr_def, srcr_def_w)
+
+// srcr_def_w
+	do_memcheck(srcr_def_w)
+	do_fork_dstr(srcr_def_w)
+	do_fork_opg(srcr_def_w)
+
+// srcr_inc
+	do_memread_d(srcr_inc, srcr_inc_w)
+
+// srcr_inc_w
+	do_memcheck(srcr_inc_w)
+	do_fork_dstr(srcr_inc_w)
+	do_fork_opg(srcr_inc_w)
+
+// srcr_dec
+	srcr_dec -> srcr_dec1 [color=COLtflow];
+
+// srcr_dec1
+	do_memread_d(srcr_dec1, srcr_ind1_w)
+
+// srcr_ind
+	do_memread_i(srcr_ind, srcr_ind1_w)
+
+// srcr_ind1_w
+	do_memcheck(srcr_ind1_w)
+	srcr_ind1_w -> srcr_ind2 [color=COLtflow];
+
+// srcr_ind2
+	do_memread_d(srcr_ind2, srcr_ind2_w)
+
+// srcr_ind2_w
+	do_memcheck(srcr_ind2_w)
+	do_fork_dstr(srcr_ind2_w)
+	do_fork_opg(srcr_ind2_w)
+
+// dstr_def
+	do_memread_d(dstr_def, dstr_def_w)
+
+// dstr_def_w
+	do_memcheck(dstr_def_w)
+	do_fork_opg(dstr_def_w)
+
+// dstr_inc
+	do_memread_d(dstr_inc, dstr_inc_w)
+
+// dstr_inc_w
+	do_memcheck(dstr_inc_w)
+	dstr_inc_w -> dstr_def [color=COLtflow];
+	do_fork_opg(dstr_inc_w)
+
+// dstr_dec
+	dstr_dec -> dstr_dec1 [color=COLtflow];
+
+// dstr_dec1
+	do_memread_d(dstr_dec1,dstr_inc_w)
+
+// dstr_ind
+	do_memread_i(dstr_ind, dstr_ind1_w)
+
+// dstr_ind1_w
+	do_memcheck(dstr_ind1_w)
+	dstr_ind1_w -> dstr_ind2 [color=COLtflow];
+
+// dstr_ind2
+	do_memread_d(dstr_ind2, dstr_ind2_w)
+
+// dstr_ind2_w
+	do_memcheck(dstr_ind2_w)
+	dstr_ind2_w -> dstr_def [color=COLtflow];
+	do_fork_opg(dstr_ind2_w)
+
+// dstw_def
+	do_memwrite(dstw_def, dstw_def_w)
+
+// dstw_def_w
+	do_memcheck(dstw_def_w)
+	do_fork_next(dstw_def_w)
+
+// dstw_inc
+	do_memwrite(dstw_inc, dstw_inc_w)
+	do_memread_d(dstw_inc, dstw_incdef_w)
+
+// dstw_inc_w
+	do_memcheck(dstw_inc_w)
+	do_fork_next(dstw_inc_w)
+
+// dstw_incdef_w
+	do_memcheck(dstw_incdef_w)
+	dstw_incdef_w -> dstw_def246 [color=COLtflow];
+
+// dstw_dec
+	dstw_dec -> dstw_dec1 [color=COLtflow];
+
+// dstw_dec1
+	do_memwrite(dstw_dec1, dstw_def_w)
+	do_memread_d(dstw_dec1, dstw_incdef_w)
+
+// dstw_ind
+	do_memread_i(dstw_ind, dstw_ind_w)
+
+// dstw_ind_w
+	do_memcheck(dstw_ind_w)
+	dstw_ind_w -> dstw_dec1 [color=COLtflow];
+
+// dstw_def246
+	do_memwrite(dstw_def246, dstw_def_w)
+
+// dsta_inc
+	do_fork_opa(dsta_inc)
+	do_memread_d(dsta_inc, dsta_incdef_w)
+
+// dsta_incdef_w
+	do_memcheck(dsta_incdef_w)
+	do_fork_opa(dsta_incdef_w)
+
+// dsta_dec
+	dsta_dec -> dsta_dec1 [color=COLtflow];
+
+// dsta_dec1
+	do_fork_opa(dsta_dec1)
+	do_memread_d(dsta_dec1, dsta_incdef_w)
+
+// dsta_ind
+	do_memread_i(dsta_ind, dsta_ind_w)
+
+// dsta_ind_w
+	do_memcheck(dsta_ind_w)
+	dsta_ind_w -> dsta_dec1 [color=COLtflow];
+
+// op_halt
+	op_halt -> idle [color=COLtflow];
+	op_halt -> trap_4 [color=COLterr];
+
+// op_wait
+	op_wait -> idle;
+	op_wait -> op_wait [color=COLtflow];
+
+// op_trap
+	do_start_int(op_trap)
+
+// op_reset
+	op_reset -> idle [color=COLtflow];
+
+// op_rts
+	op_rts -> op_rtpop [color=COLtflow];
+
+// op_rtpop
+	do_memread_srcinc(op_rtpop, op_rtpop_w)
+
+// op_rtpop_w
+	do_memcheck(op_rtpop_w)
+	do_fork_next(op_rtpop_w)
+
+// op_spl
+	op_spl -> ifetch;
+	do_fork_next(op_spl)
+
+// op_mcc
+	do_fork_next(op_mcc)
+
+// op_br
+	do_fork_next(op_br)
+	//do_fork_next_pref(op_br)
+	op_br -> ifetch_w;		// explicit to avoid doubling...
+
+// op_mark
+	op_mark -> op_mark1 [color=COLtflow];
+
+// op_mark1
+	op_mark1 -> op_mark_pop [color=COLtflow];
+
+// op_mark_pop
+	do_memread_srcinc(op_mark_pop, op_mark_pop_w)
+
+// op_mark_pop_w
+	do_memcheck(op_mark_pop_w)
+	do_fork_next(op_mark_pop_w)
+
+// op_sob
+	op_sob -> op_sob1 [color=COLtflow];
+	do_fork_next(op_sob)
+
+// op_sob1
+	do_fork_next(op_sob1)
+
+// opg_gen
+	do_memwrite(opg_gen, opg_gen_rmw_w)
+	do_memcheck(opg_gen)
+	opg_gen -> idecode;
+//	opg_gen -> idle;  (already in do_fork!!)
+	do_fork_next_pref(opg_gen)
+
+// opg_gen_rmw_w
+	do_memcheck(opg_gen_rmw_w)
+	do_fork_next(opg_gen_rmw_w)
+
+// opg_mul
+	opg_mul -> opg_mul1 [color=COLtflow];
+
+// opg_mul1
+	do_fork_next(opg_mul1)
+
+// opg_div
+	opg_div -> opg_div_cn;
+
+// opg_div_cn
+	opg_div_cn -> opg_div_quit;
+	opg_div_cn -> opg_div_cr [color=COLtflow];
+	opg_div_cn -> opg_div_cn;
+
+// opg_div_cr
+	opg_div_cr -> opg_div_sq [color=COLtflow];
+
+// opg_div_sq
+	opg_div_sq -> opg_div_sr [color=COLtflow];
+
+// opg_div_sr
+	opg_div_sr -> opg_div_quit;
+	do_fork_next(opg_div_sr)
+
+// opg_div_quit
+	do_fork_next(opg_div_quit)
+
+// opg_ash
+	opg_ash -> opg_ash_cn [color=COLtflow];
+
+// opg_ash_cn
+	opg_ash_cn -> opg_ash_cn;
+	do_fork_next_pref(opg_ash_cn)
+
+// opg_ashc
+	opg_ashc -> opg_ashc_cn [color=COLtflow];
+
+// opg_ashc_cn
+	opg_ashc_cn -> opg_ashc_cn;
+	opg_ashc_cn -> opg_ashc_wl [color=COLtflow];
+
+// opg_ashc_wl
+	do_fork_next(opg_ashc_wl)
+
+// opa_jsr
+	opa_jsr -> trap_10  [color=COLterr];
+	opa_jsr -> opa_jsr1 [color=COLtflow];
+
+// opa_jsr1
+	opa_jsr1 -> opa_jsr_push [color=COLtflow];
+
+// opa_jsr_push
+	opa_jsr_push -> opa_jsr_push_w [color=COLtflow];
+
+// opa_jsr_push_w
+	do_memcheck(opa_jsr_push_w)
+	opa_jsr_push_w -> opa_jsr2 [color=COLtflow];
+
+// opa_jsr2
+	do_fork_next(opa_jsr2)
+
+// opa_jmp
+	opa_jmp -> trap_10 [color=COLterr];
+	do_fork_next(opa_jmp)
+
+// opa_mtp
+	do_memread_srcinc(opa_mtp, opa_mtp_pop_w)
+
+// opa_mtp_pop_w
+	do_memcheck(opa_mtp_pop_w)
+	opa_mtp_pop_w -> opa_mtp_reg;
+	opa_mtp_pop_w -> opa_mtp_mem;
+	opa_mtp_pop_w -> dsta_inc;
+	opa_mtp_pop_w -> dsta_dec;
+	opa_mtp_pop_w -> dsta_ind;
+	opa_mtp_pop_w -> cpufail [color=COLtfat];
+
+// opa_mtp_reg
+	do_fork_next(opa_mtp_reg)
+
+// opa_mtp_mem
+	opa_mtp_mem -> opa_mtp_mem_w [color=COLtflow];
+
+// opa_mtp_mem_w
+	do_memcheck(opa_mtp_mem_w)
+	do_fork_next(opa_mtp_mem_w)
+
+// opa_mfp_reg
+	opa_mfp_reg -> opa_mfp_dec [color=COLtflow];
+
+// opa_mfp_mem
+	opa_mfp_mem -> opa_mfp_mem_w [color=COLtflow];
+
+// opa_mfp_mem_w
+	do_memcheck(opa_mfp_mem_w)
+	opa_mfp_mem_w -> opa_mfp_dec [color=COLtflow];
+
+// opa_mfp_dec
+	opa_mfp_dec -> opa_mfp_push [color=COLtflow];
+
+// opa_mfp_push
+	opa_mfp_push -> opa_mfp_push_w [color=COLtflow];
+
+// opa_mfp_push_w
+	do_memcheck(opa_mfp_push_w)
+	do_fork_next(opa_mfp_push_w)
+    
+// trap_4
+	do_start_int(trap_4)
+
+// trap_10
+	do_start_int(trap_10)
+
+// trap_disp
+	do_start_int(trap_disp)
+
+// int_ext
+	do_start_int(int_ext)
+
+// int_getpc
+	do_memread_srcinc(int_getpc, int_getpc_w)
+
+// int_getpc_w
+	do_memcheck(int_getpc_w)
+	int_getpc_w -> idle;
+	int_getpc_w -> int_getps [color=COLtflow];
+
+// int_getps
+	do_memread_srcinc(int_getps, int_getps_w)
+
+// int_getps_w
+	do_memcheck(int_getps_w)
+	int_getps_w -> idle;
+	int_getps_w -> int_getsp [color=COLtflow];
+
+// int_getsp
+	int_getsp -> int_decsp [color=COLtflow];
+
+// int_decsp
+	int_decsp -> int_pushps [color=COLtflow];
+
+// int_pushps
+	int_pushps -> int_pushps_w [color=COLtflow];
+
+// int_pushps_w
+	do_memcheck(int_pushps_w)
+	int_pushps_w -> int_pushpc [color=COLtflow];
+
+// int_pushpc
+	int_pushpc -> int_pushpc_w [color=COLtflow];
+
+// int_pushpc_w
+	do_memcheck(int_pushpc_w)
+	do_fork_next(int_pushpc_w)
+
+// rti_getpc
+	do_memread_srcinc(rti_getpc, rti_getpc_w)
+
+// rti_getpc_w
+	do_memcheck(rti_getpc_w)
+	rti_getpc_w -> rti_getps [color=COLtflow];
+
+// rti_getps
+	do_memread_srcinc(rti_getps, rti_getps_w)
+
+// rti_getps_w
+	do_memcheck(rti_getps_w)
+	rti_getps_w -> rti_newpc [color=COLtflow];
+
+// rti_newpc
+	rti_newpc -> ifetch;
+	do_fork_next(rti_newpc)
+    
+// vmerr
+	vmerr -> cpufail [color=COLtfat];
+	vmerr -> trap_4  [color=COLtflow];
+	do_start_int(vmerr)
+
+// cpufail
+	cpufail -> idle [color=COLtflow];
+
+// subgraph definitions ----------------
+#ifdef CLUSTER
+
+	subgraph cluster_srcr {
+		srcr_def;
+		srcr_def_w;
+		srcr_inc;
+		srcr_inc_w;
+		srcr_dec;
+		srcr_dec1;
+		srcr_ind;
+		srcr_ind1_w;
+		srcr_ind2;
+		srcr_ind2_w;
+		fontsize=FSZgraph;
+		fontcolor=blue;
+ 		label = "SRCR flow";
+		style=dashed;
+		color=blue;
+	}
+
+	subgraph cluster_dstr {
+		dstr_def;
+		dstr_def_w;
+		dstr_inc;
+		dstr_inc_w;
+		dstr_dec;
+		dstr_dec1;
+		dstr_ind;
+		dstr_ind1_w;
+		dstr_ind2;
+		dstr_ind2_w;
+		fontsize=FSZgraph;
+		fontcolor=blue;
+ 		label = "DSTR flow";
+		style=dashed;
+		color=blue;
+	}
+
+	subgraph cluster_dstw {
+		dstw_def;
+		dstw_def_w;
+		dstw_inc;
+		dstw_inc_w;
+		dstw_incdef_w;
+		dstw_dec;
+		dstw_dec1;
+		dstw_ind;
+		dstw_ind_w;
+		dstw_def246;
+		fontsize=FSZgraph;
+		fontcolor=blue;
+ 		label = "DSTW flow";
+		style=dashed;
+		color=blue;
+	}
+
+	subgraph cluster_dsta {
+		dsta_inc;
+		dsta_incdef_w;
+		dsta_dec;
+		dsta_dec1;
+		dsta_ind;
+		dsta_ind_w;
+		fontsize=FSZgraph;
+		fontcolor=blue;
+ 		label = "DSTA flow";
+		style=dashed;
+		color=blue;
+	}
+
+	subgraph cluster_rts {
+		op_rts;
+		op_rtpop;
+		op_rtpop_w;
+		fontsize=FSZgraph;
+		fontcolor=blue;
+ 		label = "RTS flow";
+		style=dashed;
+		color=blue;
+	}
+
+	subgraph cluster_mark {
+		op_mark;
+		op_mark1;
+		op_mark_pop;
+		op_mark_pop_w;
+		fontsize=FSZgraph;
+		fontcolor=blue;
+ 		label = "MARK flow";
+		style=dashed;
+		color=blue;
+	}
+
+//#ifdef never
+	subgraph cluster_sob {
+		op_sob;
+		op_sob1;
+		fontsize=FSZgraph;
+		fontcolor=blue;
+ 		label = "SOB flow";
+		style=dashed;
+		color=blue;
+	}
+
+	subgraph cluster_mul {
+		opg_mul;
+		opg_mul1;
+		fontsize=FSZgraph;
+		fontcolor=blue;
+ 		label = "MUL flow";
+		style=dashed;
+		color=blue;
+	}
+//#endif
+
+	subgraph cluster_div {
+		opg_div;
+		opg_div_cn;
+		opg_div_cr;
+		opg_div_sq;
+		opg_div_sr;
+		opg_div_quit;
+		fontsize=FSZgraph;
+		fontcolor=blue;
+ 		label = "DIV flow";
+		style=dashed;
+		color=blue;
+	}
+
+//#ifdef never
+	subgraph cluster_ash {
+		opg_ash;
+		opg_ash_cn;
+		fontsize=FSZgraph;
+		fontcolor=blue;
+ 		label = "ASH flow";
+		style=dashed;
+		color=blue;
+	}
+//#endif
+
+	subgraph cluster_ashc{
+		opg_ashc;
+		opg_ashc_cn;
+		opg_ashc_wl;
+		fontsize=FSZgraph;
+		fontcolor=blue;
+ 		label = "ASHC flow";
+		style=dashed;
+		color=blue;
+	}
+
+	subgraph cluster_jsr {
+		opa_jsr;
+		opa_jsr1;
+		opa_jsr_push;
+		opa_jsr_push_w;
+		opa_jsr2;
+		fontsize=FSZgraph;
+		fontcolor=blue;
+ 		label = "JSR flow";
+		style=dashed;
+		color=blue;
+	}
+
+	subgraph cluster_mtp {
+		opa_mtp;
+		opa_mtp_pop_w;
+		opa_mtp_reg;
+		opa_mtp_mem;
+		opa_mtp_mem_w;
+		fontsize=FSZgraph;
+		fontcolor=blue;
+ 		label = "MTP flow";
+		style=dashed;
+		color=blue;
+	}
+
+	subgraph cluster_mfp {
+		opa_mfp_reg;
+		opa_mfp_mem;
+		opa_mfp_mem_w;
+		opa_mfp_dec;
+		opa_mfp_push;
+		opa_mfp_push_w;
+		fontsize=FSZgraph;
+		fontcolor=blue;
+ 		label = "MFP flow";
+		style=dashed;
+		color=blue;
+	}
+
+	subgraph cluster_int {
+		int_ext;
+		int_getpc;
+		int_getpc_w;
+		int_getps;
+		int_getps_w;
+		int_getsp;
+		int_decsp;
+		int_pushps;
+		int_pushps_w;
+		int_pushpc;
+		int_pushpc_w;
+		fontsize=FSZgraph;
+		fontcolor=blue;
+		label = "INT flow";
+		style=dashed;
+		color=blue;
+	}
+
+	subgraph cluster_rti {
+		rti_getpc;
+		rti_getpc_w;
+		rti_getps;
+		rti_getps_w;
+		rti_newpc;		
+		fontsize=FSZgraph;
+		fontcolor=blue;
+		label = "RTI flow";
+		style=dashed;
+		color=blue;
+	}
+#endif
+} 

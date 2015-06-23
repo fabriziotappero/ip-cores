@@ -1,0 +1,964 @@
+#!/usr/bin/perl -w
+# $Id: vbomconv 672 2015-05-02 21:58:28Z mueller $
+#
+# Copyright 2007-2015 by Walter F.J. Mueller <W.F.J.Mueller@gsi.de>
+#
+# This program is free software; you may redistribute and/or modify it under
+# the terms of the GNU General Public License as published by the Free
+# Software Foundation, either version 2, or at your option any later version.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY, without even the implied warranty of MERCHANTABILITY
+# or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+# for complete details.
+#
+#  Revision History:
+# Date         Rev Version  Comment
+# 2015-02-15   646   1.11   add vivado support: add -xlpath, use instead
+#                           of XTWI_PATH; drop --ise_path; add @lib:unimacro;
+#                           drop --viv_vhdl; add --vsyn_prj, --dep_vsyn;
+#                           drop cygwin support;
+# 2014-07-26   575   1.10.1 use XTWI_PATH now (ise/vivado switch done later)
+# 2013-10-20   543   1.10   add --viv_vhdl
+# 2012-02-05   456   1.9.4  redo filename substitution (= and :); add --get_top
+# 2012-01-02   448   1.9.3  use in ghdl_m -fexplicit also when simprim used
+# 2011-11-27   433   1.9.2  use in ghdl_m -fexplicit when unisim used
+# 2011-08-13   405   1.9.1  always write 'vhdl' into xst prj files again; for
+#                           -xst_export: remove opt file export, add ucf_cpp
+#                           handling
+# 2011-06-26   385   1.9    add --ise_path, pass it to vbomconv --xst_prj
+# 2011-06-09   383   1.8.6  fix xst_vhdl.opt logic (use rtl/vlib now)
+# 2010-07-03   312   1.8.5  add --flist action
+# 2010-06-03   299   1.8.4  generate ucf->ncd dependencies in dep_xst
+# 2010-04-26   284   1.8.3  add _[sft]sim support for ISim
+# 2009-11-28   253   1.8.2  fixup print_help...;
+# 2009-11-22   252   1.8.1  add (export|dep)_isim, full ISim support;
+#                           add [isim] [sim], allow tag lists like [ghdl,isim];
+#                           --trace and messages to STDERR;
+# 2009-11-20   251   1.8    add isim_prj, first ISim support
+# 2008-03-09   124   1.7.3  add in .dep_(ghdl|xst) all dep on vbom dependencies
+#                           target now also dependant on .dep_ file
+# 2008-03-02   122   1.7.2  add @lib:<name> directive to include UNISIM
+# 2007-12-17   102   1.7.1  fix @ucf_cpp logic.
+# 2007-12-16   101   1.7    add @ucf_cpp pseudo tag (handle cpp'ed ucf files)
+# 2007-11-25    98   1.6.1  drop trailing blanks on input lines
+# 2007-11-02    94   1.6    added (xst|ghdl)_export
+# 2007-10-26    92   1.5.1  emit '--no-vital-checks' for --ghdl_m for _[sft]sim
+# 2007-10-14    98   1.5    handle .exe files under cygwin properly
+# 2007-09-15    82   1.4    handle C source objects properly
+# 2007-08-10    72   1.3    add [xst], [ghdl] prefix support
+# 2007-07-22    68   1.2    add "tag = val"; list files in 'ready to analyse'
+#                           order; add --ghdl_a option
+# 2007-07-08    65   1.1    add "tag : names"; inferral of _[ft]sim vboms
+# 2007-07-06    64   1.0    Initial version
+
+use 5.005;                                  # require Perl 5.005 or higher
+use strict;                                 # require strict checking
+use FileHandle;
+
+use Getopt::Long;
+
+my %opts = ();
+
+GetOptions(\%opts, "help", "trace", "xlpath=s",
+	           "dep_ghdl", "dep_xst", "dep_isim", "dep_vsyn",
+                   "xst_prj", "isim_prj",
+                   "vsyn_prj",
+	           "ghdl_a", "ghdl_a_cmd",
+	           "ghdl_i", "ghdl_i_cmd",
+	           "ghdl_m", "ghdl_m_cmd",
+	           "ghdl_export=s",
+	           "xst_export=s",
+                   "isim_export=s",
+                   "get_top",
+                   "flist") || exit 1;
+
+sub print_help;
+sub read_vbom;
+sub scan_vbom;
+sub copy_edir;
+sub write_vbomdep;
+sub canon_fname;
+
+my @vbom_queue;                             # list of pending vbom's
+my @srcfile_list;                           # list of sources in compile order
+my @xdcfile_list;                           # list of xdc files
+my %vbom_files;                             # key=vbom; val=full file list
+my %vbom_xdc;                               # key=vbom; val=xdc spec list
+my %vbom_done;                              # key=vbom; val=done flags
+my %vbom_rank;                              # key=vbom; val=vbom ranks
+my %srcfile_rank;                           # key=source file; val=file rank
+my %para_tbl;                               # substitution table
+my @ucf_cpp_list;
+my $is_ghdl = 0;                            # ghdl simulation target
+my $is_xst  = 0;                            # XST synthesis target
+my $is_isim = 0;                            # ISim simulation target
+my $is_vsyn = 0;                            # vivado synthesis target
+my $is_vsim = 0;                            # vivado simulation target
+my $is_sim  = 0;                            # simulation target (generic)
+my $is_any  = 0;                            # ignore tags (for --flist)
+my $nactions = 0;                           # number of action commands
+my $top_vbom;                               # top level vbom (from argv)
+my $stem;                                   # stem of $top_vbom
+my $top;                                    # top level entity name
+my $top_done = 0;                           # @top seen
+my $has_unisim;                             # @lib:unisim seen or implied
+my $has_unimacro;                           # @lib:unimacro seen
+my $has_simprim;                            # @lib:simprim seen or implied
+my $is_ssim;
+my $is_fsim;
+my $is_tsim;
+my $do_trace = exists $opts{trace};
+my $level = 0;                              # vbom nesting level
+my $xst_writevhdl = 1;
+my $xlpath=$opts{xlpath};
+my $no_xlpath = ! defined $xlpath || $xlpath eq "";
+
+autoflush STDOUT 1;		# autoflush, so nothing lost on exec later
+
+if (exists $opts{help}) {
+  print_help;
+  exit 0;
+}
+
+# ensure that one and only one vbom is specified
+
+if (scalar(@ARGV) != 1) {
+  print STDERR "vbomconv-E: only one vbom file name allowed\n\n";
+  print_help;
+  exit 1;
+}
+
+# check that only one action is defined, mark xst, gdhl, or isim class
+
+foreach (keys %opts) {
+  $nactions += 1 unless ($_ eq "trace" || $_ eq "xlpath");
+  $is_ghdl = 1   if ($_ eq "dep_ghdl");
+  $is_ghdl = 1   if ($_ =~ /^ghdl_/);
+
+  $is_xst  = 1   if ($_ eq "dep_xst");
+  $is_xst  = 1   if ($_ =~ /^xst_/);
+
+  $is_isim = 1   if ($_ eq "dep_isim");
+  $is_isim = 1   if ($_ =~ /^isim_/);
+
+  $is_vsyn = 1   if ($_ eq "dep_vsyn");
+  $is_vsyn = 1   if ($_ =~ /^vsyn_/);
+
+  $is_any  = 1   if ($_ eq "flist");
+}
+
+$is_sim = $is_ghdl | $is_isim | $is_vsim;
+
+print STDERR "-- [ghdl] active\n" if $do_trace && $is_ghdl;
+print STDERR "-- [xst] active\n"  if $do_trace && $is_xst;
+print STDERR "-- [isim] active\n" if $do_trace && $is_isim;
+print STDERR "-- [vsyn] active\n" if $do_trace && $is_vsyn;
+print STDERR "-- [vsim] active\n" if $do_trace && $is_vsim;
+print STDERR "-- [sim] active\n"  if $do_trace && $is_sim;
+
+if ($nactions > 1) {
+  print STDERR "vbomconv-E: only one action qualifier allowed\n\n";
+  print_help;
+  exit 1;
+}
+
+$top_vbom = $ARGV[0];
+
+$top_vbom .= ".vbom" unless $top_vbom =~ m{\.vbom$};
+
+$stem = $top_vbom;
+$stem =~ s{\..*$}{};
+
+$top = $stem;
+$top =~ s{^.*/}{};
+
+# now prepare virtual _fsim and _tsim vbom's
+# they are inferred from the _ssim vbom's
+
+if ($top_vbom =~ m{_ssim\.vbom$}) { # detect _ssim
+  $is_ssim = 1;
+}
+if ($top_vbom =~ m{_fsim\.vbom$}) { # map _fsim -> _ssim
+  $is_fsim = 1;
+  $top_vbom =~ s{_fsim\.vbom$}{_ssim.vbom};
+}
+if ($top_vbom =~ m{_tsim\.vbom$}) { # map _tsim -> _ssim
+  $is_tsim = 1;
+  $top_vbom =~ s{_tsim\.vbom$}{_ssim.vbom};
+}
+
+# traverse all vbom's start with command line argument
+
+push @vbom_queue, $top_vbom;
+
+while (@vbom_queue) {
+  my $cur_vbom = shift @vbom_queue;
+  read_vbom($cur_vbom);
+}
+
+# traverse internal vbom representation to build file table
+
+$vbom_rank{$top_vbom} = {min=>1, max=>1};
+scan_vbom($top_vbom);
+
+# sort file table, build file list (decreasing rank)
+#   sort first by decreasing rank and second by filename
+#   second sort only to get stable sequence, independent of hash keys
+
+my @srcpair_list;
+foreach (keys %srcfile_rank) {
+  push @srcpair_list, [$srcfile_rank{$_}, $_];
+}
+
+@srcfile_list = map {$_->[1]}
+                sort {$b->[0] <=> $a->[0] || $a->[1] cmp $b->[1]}
+                @srcpair_list;
+
+# setup vbom list by rank
+my @vbom_rank_list;
+foreach (sort keys %vbom_rank) {
+  push @vbom_rank_list, [$vbom_rank{$_}{min}, $vbom_rank{$_}{max}, $_];
+}
+my @vbomfile_list_min = map {$_->[2]}
+                        sort {$a->[0] <=> $b->[0] || $a->[1] cmp $b->[1]}
+                        @vbom_rank_list;
+
+# setup xdc files list (if one @xdc: seen)
+foreach (@vbomfile_list_min) {
+  push @xdcfile_list, @{$vbom_xdc{$_}} if exists $vbom_xdc{$_};
+}
+
+# now generate output and actions, depending on options given
+
+# --trace ------------------------------------------------------------
+
+if ($do_trace) {
+  print STDERR "\n";
+  print STDERR "filename substitution table:\n";
+  foreach (sort keys %para_tbl) {
+    print STDERR "  $_ = $para_tbl{$_}\n";
+  }
+
+  print STDERR "\n";
+  print STDERR "final vbom_rank table (sort by min rank):\n";
+  print STDERR "  min  max  var  vbom-name:\n";
+  foreach (sort {$a->[0] <=> $b->[0] || $a->[2] cmp $b->[2]} @vbom_rank_list) {
+    printf STDERR "  %3d  %3d  %3d  %s\n",
+      $_->[0], $_->[1], $_->[1]-$_->[0], $_->[2];
+  }
+
+  print STDERR "\n";
+  print STDERR "final srcfile_rank table (sort by rank):\n";
+  foreach (sort {$b->[0] <=> $a->[0] || $a->[1] cmp $b->[1]} @srcpair_list) {
+    printf STDERR "  %5d  %s\n", $_->[0], $_->[1];
+  }
+
+  print STDERR "\n";
+  print STDERR "properties:\n";
+  print STDERR "  \@top: $top\n";
+}
+
+# --ghdh_a -- ghdl analysis command ----------------------------------
+
+if (exists $opts{ghdl_a} || exists $opts{ghdl_a_cmd}) {
+  if ($no_xlpath && ($has_unisim || $has_unimacro || $has_simprim) ) {
+    print STDERR "vbomconv-E: --xlpath required with ghdl_a or ghdl_a_cmd";
+    exit 1;
+  }
+
+  foreach (@srcfile_list) {
+    my $file = $_;
+    my $cmd = "ghdl -a";
+    $cmd .= " -P$xlpath/unisim"    if $has_unisim;
+    $cmd .= " -P$xlpath/unimacro"  if $has_unimacro;
+    $cmd .= " -P$xlpath/simprim"   if $has_simprim;
+    $cmd .= " --ieee=synopsys";
+    $cmd .= " $file";
+    print "$cmd\n";
+    if (exists $opts{ghdl_a}) {
+      my $wrc = system "/bin/sh", "-c", $cmd;
+      if ($wrc != 0) {
+	my $rc = int($wrc/256);
+	if ($rc == 0) {
+	  my $sig = $wrc % 256;
+	  print STDERR "vbomconv-I: compilation aborted by signal $sig\n";
+	  exit(1);
+	} else {
+	  print STDERR "vbomconv-I: compilation failed (rc=$rc) $?\n";
+	  exit($rc);
+	}
+      }
+    }
+  }
+}
+
+# --ghdh_i -- ghdl inspection command --------------------------------
+
+if (exists $opts{ghdl_i} || exists $opts{ghdl_i_cmd}) {
+  my %ghdl_work;
+
+  # read ghdl "work-obj93.cf" file. It has the format
+  #   file . "<filename>" "<file_date>" "ghdl -i or -a date>":
+  #     entity <entity> at nn( nn) + nn on nn;
+  #     architecture <arch> of <entity> at nn( nn) + nn on nn;
+
+  if (-r "work-obj93.cf") {
+    open (WFILE, "work-obj93.cf") or
+      die "can't open for read work-obj93.cf: $!";
+    while (<WFILE>) {
+      if (m{^file \. \"(.*?)\"}) {
+	$ghdl_work{$1} = 1;
+      }
+    }
+    close (WFILE);
+  }
+
+  my $cmd = "ghdl -i";
+  my $nfile = 0;
+
+  foreach (@srcfile_list) {
+    next if /\.c$/;			    # skip C sources, only vhd handled
+    if (not exists $ghdl_work{$_}) {
+      $cmd .= " \\\n  $_";
+      $nfile += 1;
+    }
+  }
+
+  if ($nfile) {
+    print "$cmd\n";
+    if (exists $opts{ghdl_i}) {
+      exec "/bin/sh", "-c", $cmd;
+      die "failed to exec /bin/sh -c $cmd: $!";
+    }
+  } else {
+    print "# $cmd  ## all files already inspected\n";
+  }
+}
+
+# --ghdh_m -- ghdl make command --------------------------------------
+# Note: the 'buildin' make used by the -m option of ghdl does not
+#       check for object files linked with -Wl, e.g. vhpi objects.
+#       To force a re-elaboration the old executable is deleted first.
+#       If used from make with proper dependencies, this will just do
+#       the right thing.
+
+if (exists $opts{ghdl_m} || exists $opts{ghdl_m_cmd} ) {
+  my $cmd = "";
+
+  if ($no_xlpath && ($has_unisim || $has_unimacro || $has_simprim) ) {
+    print STDERR "vbomconv-E: --xlpath required with ghdl_m or ghdl_m_cmd";
+    exit 1;
+  }
+
+  if  (-r $stem) {		# check for old executable
+    $cmd .= "rm $stem\n" ; 	# rm to force elaboration
+  }
+
+  $cmd .= "ghdl -m";
+  $cmd .= " -o $stem";
+                                 # -fexplicit needed for ISE 13.1,13.3
+  $cmd .= ' -fexplicit'          if $has_unisim or $has_unimacro or $has_simprim;
+  $cmd .= " -P$xlpath/unisim"    if $has_unisim;
+  $cmd .= " -P$xlpath/unimacro"  if $has_unimacro;
+  $cmd .= " -P$xlpath/simprim"   if $has_simprim;
+  $cmd .= " --ieee=synopsys";
+  $cmd .= " --no-vital-checks"      if $is_ssim or $is_fsim or $is_tsim;
+
+  foreach (@srcfile_list) {
+    next unless /\.c$/;		# C source ?
+    my $ofile = $_;		# copy to break alias for following s///
+    $ofile =~ s{^.*/}{};	# remove directory path
+    $ofile =~ s/\.c$/.o/;	# add clause to link C source object file
+    $cmd .= " -Wl,$ofile";
+  }
+  $cmd .= " $top";
+  print "$cmd\n";
+  if (exists $opts{ghdl_m}) {
+    exec "/bin/sh", "-c", $cmd;
+    die "failed to exec /bin/sh -c $cmd: $!";
+  }
+}
+
+# --xst_prj ----------------------------------------------------------
+
+if (exists $opts{xst_prj}) {
+  ## $xst_writevhdl = 0; # needed in case "-use_new_parser yes" used
+  foreach (@srcfile_list) {
+    if ($xst_writevhdl) {
+      print "vhdl work $_\n";
+    } else {
+      print "work $_\n";       # for ISE S-6/V-6 compilations with '-ifmt VHDL'
+    }
+  }
+}
+
+# --isim_prj ---------------------------------------------------------
+
+if (exists $opts{isim_prj}) {
+  foreach (@srcfile_list) {
+    print "vhdl work $_\n";
+  }
+}
+
+# --vsyn_prj ---------------------------------------------------------
+
+if (exists $opts{vsyn_prj}) {
+  # setup sources
+  print "#\n";
+  print "# setup sources\n";
+  print "#\n";
+  print "set src_files {\n";
+  foreach (@srcfile_list) {
+    print "    $_\n";
+  }
+  print "}\n";
+  print "\n";
+
+  print "set obj [get_filesets sources_1]\n";
+  print "add_files -norecurse -fileset \$obj \$src_files\n";
+  print "set_property \"top\" \"$top\" \$obj\n";
+
+  # setup constraints
+  print "#\n";
+  print "# setup constraints\n";
+  print "#\n";
+
+  print "set xdc_files {\n";
+  foreach (@xdcfile_list) {
+    print "    $_\n";
+  }
+  print "}\n";
+  print "\n";
+
+  print "set obj [get_filesets constrs_1]\n";
+  print "add_files -norecurse -fileset \$obj \$xdc_files\n";
+
+  print "\n";
+}
+
+# --dep_ghdl ---------------------------------------------------------
+
+if (exists $opts{dep_ghdl}) {
+
+  my $stem_fsim = $stem;
+  my $stem_tsim = $stem;
+  $stem_fsim =~ s/_ssim$/_fsim/;
+  $stem_tsim =~ s/_ssim$/_tsim/;
+
+  print "#\n";
+  print "$stem : $stem.dep_ghdl\n";
+  if ($is_ssim) {
+    print "$stem_fsim : $stem.dep_ghdl\n";
+    print "$stem_tsim : $stem.dep_ghdl\n";
+  }
+  print "#\n";
+
+  foreach (@srcfile_list) {
+    if (/\.c$/) {
+      my $ofile = $_;		# copy to break alias for following s///
+      $ofile =~ s{^.*/}{};	# remove directory path
+      $ofile =~ s/\.c$/.o/;	# object file name
+      print "$stem : $ofile\n"; # depend on C source object file
+				# C source object compilation dependence
+      open (ODEPFILE, ">$ofile.dep_ghdl") or 
+	die "can't write $ofile.dep_ghdl: $!";
+      print ODEPFILE "$ofile : $_\n";
+      print ODEPFILE "\t\$(COMPILE.c) \$(OUTPUT_OPTION) \$<\n";
+      close ODEPFILE;
+    } else {
+      print "$stem : $_\n";
+    }
+  }
+
+  if ($is_ssim) {
+
+    foreach (@srcfile_list) {
+      my $file = $_;		# copy to break alias for following s///
+      if (/\.c$/) {
+	$file =~ s{^.*/}{};	# remove directory path
+	$file =~ s/\.c$/.o/;    # depend on object file for C sources
+      } else {
+	$file =~ s/_ssim\.vhd$/_fsim.vhd/;
+      }
+      print "$stem_fsim : $file\n";
+    }
+
+    foreach (@srcfile_list) {
+      my $file = $_;		# copy to break alias for following s///
+      if (/\.c$/) {
+	$file =~ s{^.*/}{};	# remove directory path
+	$file =~ s/\.c$/.o/;    # depend on object file for C sources
+      } else {
+	$file =~ s/_ssim\.vhd$/_tsim.vhd/;
+      }
+      print "$stem_tsim : $file\n";
+    }
+
+  }
+
+  write_vbomdep("$stem.dep_ghdl");
+
+}
+
+# --dep_xst ----------------------------------------------------------
+
+if (exists $opts{dep_xst}) {
+  print "#\n";
+  print "$stem.ngc : $stem.dep_xst\n";
+  print "#\n";
+  foreach (@srcfile_list) {
+    print "$stem.ngc : $_\n";
+  }
+  # handle cpp preprocessed ucf's
+  foreach (@ucf_cpp_list) {
+    my $file = $_;
+    $file =~ s/\.ucf$//;
+    print "#\n";
+    print "$file.ncd : $file.ucf\n";
+    print "include $file.dep_ucf_cpp\n";
+  }
+  # handle plain ucf's
+  if (scalar(@ucf_cpp_list)==0 && -r "$stem.ucf") {
+    print "#\n";
+    print "$stem.ncd : $stem.ucf\n";
+  }
+  write_vbomdep("$stem.dep_xst");
+}
+
+# --dep_isim ---------------------------------------------------------
+
+if (exists $opts{dep_isim}) {
+  my $stem_isim = $stem . "_ISim";
+
+  $stem_isim =~ s/_ssim_ISim$/_ISim_ssim/ if ($is_ssim);
+
+  my $stem_fsim_isim = $stem_isim;
+  my $stem_tsim_isim = $stem_isim;
+  $stem_fsim_isim =~ s/_ssim$/_fsim/;
+  $stem_tsim_isim =~ s/_ssim$/_tsim/;
+
+  print "#\n";
+  print "$stem_isim : $stem.dep_isim\n";
+  if ($is_ssim) {
+    print "$stem_fsim_isim : $stem.dep_isim\n";
+    print "$stem_tsim_isim : $stem.dep_isim\n";
+  }
+  print "#\n";
+
+  foreach (@srcfile_list) {
+    print "$stem_isim : $_\n";
+  }
+
+  if ($is_ssim) {
+
+    foreach (@srcfile_list) {
+      my $file = $_;		# copy to break alias for following s///
+      $file =~ s/_ssim\.vhd$/_fsim.vhd/;
+      print "$stem_fsim_isim : $file\n";
+    }
+
+    foreach (@srcfile_list) {
+      my $file = $_;		# copy to break alias for following s///
+      $file =~ s/_ssim\.vhd$/_tsim.vhd/;
+      print "$stem_tsim_isim : $file\n";
+    }
+
+  }
+
+  write_vbomdep("$stem.dep_isim");
+}
+
+# --dep_vsyn ---------------------------------------------------------
+
+if (exists $opts{dep_vsyn}) {
+  print "#\n";
+  print "$stem.bit : $stem.dep_vsyn\n";
+  print "#\n";
+  my @files;
+  push @files, @srcfile_list;
+  push @files, @xdcfile_list;
+  foreach (@files) {
+    print "$stem.bit : $_\n";
+  }
+  print "#\n";
+  foreach (@files) {
+    print "${stem}_syn.dcp : $_\n";
+  }
+  print "#\n";
+  foreach (@files) {
+    print "${stem}_rou.dcp : $_\n";
+  }
+  write_vbomdep("$stem.dep_vsyn");
+}
+
+# --ghdl_export or xst_export or isim_export -------------------------
+
+if (exists $opts{ghdl_export}  or
+    exists $opts{xst_export} or
+    exists $opts{isim_export}) {
+  my $edir;
+  $edir = $opts{ghdl_export} if exists $opts{ghdl_export};
+  $edir = $opts{xst_export}  if exists $opts{xst_export};
+  $edir = $opts{isim_export} if exists $opts{isim_export};
+
+  if (not -d $edir) {
+    print STDERR "vbomconv-I: create target directory $edir\n";
+    system("mkdir -p $edir") == 0 or die "mkdir failed: $?";
+  } else {
+    print STDERR "vbomconv-I: target directory $edir already exists\n";
+  }
+
+  open(PFILE, ">$edir/$stem.prj") or die "can't write open $edir/$stem.prj: $!";
+
+  foreach (@srcfile_list) {
+    my $fname  = $_;
+    my $fdpath = ".";
+    if (m{(.*)/(.*)}) {
+      $fname  = $2;
+      $fdpath = $1;
+    }
+    copy_edir($_, $edir);
+    print PFILE "vhdl work $fname\n";
+  }
+
+  close(PFILE);
+
+  # Note: currently no xflow opt files exported !!
+  if (exists $opts{xst_export}) {
+    open(XFILE, ">$edir/$stem.xcf") or 
+      die "can't write open $edir/$stem.xcf: $!";
+    close(XFILE);
+
+    foreach(glob("*.xcf")) { copy_edir($_, $edir); }
+
+    if (-r "$stem.ucf_cpp") {
+      system "/bin/sh", "-c", "make $stem.ucf";
+    }
+
+    foreach(glob("*.ucf")) { copy_edir($_, $edir); }
+  }
+
+}
+
+# --get_top ----------------------------------------------------------
+
+if (exists $opts{get_top}) {
+  print "$top\n";
+}
+
+# --flist ------------------------------------------------------------
+
+if (exists $opts{flist}) {
+
+  my @flist;
+
+  push @flist, @srcfile_list;
+  push @flist, sort keys %vbom_done;
+
+  if (scalar(@ucf_cpp_list)) {
+    foreach (@ucf_cpp_list) {
+      push @flist, $_."_cpp";
+    }
+  } else {
+    if (-r "$stem.ucf") {
+      push @flist, "$stem.ucf";
+    }
+  }
+
+  push @flist, @xdcfile_list;
+
+  foreach (sort @flist) {
+    my $fname  = $_;
+    my $fdpath = ".";
+    if (m{(.*)/(.*)}) {
+      $fname  = $2;
+      $fdpath = $1;
+    }
+    print "$fdpath/$fname\n";
+  }
+
+}
+
+#-------------------------------------------------------------------------------
+
+sub read_vbom {
+  my ($vbom) = @_;
+
+  print STDERR "-- open $vbom\n" if $do_trace;
+
+  open (IFILE, $vbom)    or die "can't open for read $vbom: $!";
+
+  my $vbom_path = "";
+  my $vbom_file = $vbom;
+  if ($vbom =~ m{^(.*)/([a-zA-Z0-9_.]*)$}) {
+    $vbom_path = $1;
+    $vbom_file = $2;
+  }
+
+  $vbom_done{$vbom} += 1;		    # mark this vbom already read
+
+  while (<IFILE>) {
+    chomp;
+    next if /^\s*#/;			    # drop comments
+    next if /^\s*$/;			    # drop empty lines
+
+    s/\s*$//;			            # drop trailing blanks
+
+    # process parameter definitions
+    if (m{([\w]+)\s*=\s*(.*)}) {
+      my $para = $1;
+      my $val  = $2;
+      if ($val eq "") {
+        print STDERR "vbomconv-E: invalid \'$_\' in $vbom_file\n";
+        exit 1;
+      }
+      if (not exists $para_tbl{$para}) {
+        $para_tbl{$para} = canon_fname($vbom_path, $val);
+        print STDERR "--- define \${$para} = $val\n" if $do_trace;
+      } else {
+        print STDERR "--- ignore \${$para} = $val\n" if $do_trace;
+      }
+      next;
+    }
+
+    # process parameter substitutions
+    while (m{\$\{([\w]+)\s*(:=)?\s*(.*?)\}}) {
+      my $para = $1;
+      my $del  = $2;
+      my $val  = $3;
+      my $pre  = $`;
+      my $post = $';
+      if (defined $del && $del eq ":=") {
+        if (not exists $para_tbl{$para}) {
+          $para_tbl{$para} = canon_fname($vbom_path, $val);
+          print STDERR "--- define \${$para := $val}\n" if $do_trace;
+        } else {
+          print STDERR "--- ignore \${$para := $val}\n" if $do_trace;
+        }
+      }
+      if (defined $para_tbl{$para}) {
+        if ($do_trace) {
+          print STDERR "--- use    \${$para} -> $para_tbl{$para}\n";
+        } else {
+          ## print STDERR "vbomconv-I: \${$para} -> $para_tbl{$para}\n";
+        }
+        $_ = $pre . "!" . $para_tbl{$para} . $post;
+      } else {
+        print STDERR "vbomconv-E: undefined \${$para} in $vbom_file\n";
+        exit 1;
+      }
+    }
+
+    if (/^\[([a-z,]+)\]\s*(.+)$/) {         # [xxx,yyy] tag seen
+      my $qual = $1;
+      my $name = $2;
+      my $keep = $is_any;
+      ## print STDERR "+++1 |$qual|$name|$vbom|\n";
+      foreach my $pref (split /,/,$qual) {
+        if ($pref =~ /^(ghdl|xst|isim|vsyn|vsim|sim)$/) {
+          $keep = 1 if ($pref eq "ghdl" && $is_ghdl);
+          $keep = 1 if ($pref eq "xst"  && $is_xst);
+          $keep = 1 if ($pref eq "isim" && $is_isim);
+          $keep = 1 if ($pref eq "vsyn" && $is_vsyn);
+          $keep = 1 if ($pref eq "vsim" && $is_vsim);
+          $keep = 1 if ($pref eq "sim"  && $is_sim);
+        } else {
+          print STDERR "vbomconv-W: unknown tag [$pref] in $vbom_file\n";
+        }
+      }
+      if (not $keep) {
+        print STDERR "--- drop \"$_\"\n" if $do_trace;
+        next;
+      }
+      $_ = $name;                           # remove [xxx] tag
+    }
+
+    my $tag;
+    my $val = $_;
+
+    # detect tag:val lines
+    if (m{^\s*(.*?)\s*:\s*(.*?)\s*$}) {
+      $tag = $1;
+      $val = $2;
+
+      # process @top:<entity> lines
+      if ($tag eq '@top') {
+        $top = $val unless $top_done;
+
+      # process @ucf_cpp:<file> lines
+      } elsif ($tag eq '@ucf_cpp') {
+        push @ucf_cpp_list, $val;
+
+      # process @xdc:<file> lines
+      } elsif ($tag eq '@xdc') {
+        push @{$vbom_xdc{$vbom}}, canon_fname($vbom_path, $val);
+
+      # process @lib:<name> lines
+      } elsif ($tag eq '@lib') {
+        if ($val eq 'unisim') {
+          $has_unisim = 1;
+        } elsif ($val eq 'unimacro') {
+          $has_unimacro = 1;
+        } elsif ($val eq 'simprim') {
+          $has_simprim = 1;
+        } else {
+          print STDERR "vbomconv-E: invalid lib type \'$tag\' in $vbom_file\n";
+          exit 1;
+        }
+
+      # catch invalid @ tags
+      } else {
+        print STDERR "vbomconv-E: invalid \'$tag:\' line in $vbom_file\n";
+        exit 1;
+      }
+      next;
+    }
+
+    # now do _fsim, _tsim mapping
+    $val =~ s{_ssim\.vhd$}{_fsim.vhd} if $is_fsim;
+    $val =~ s{_ssim\.vhd$}{_tsim.vhd} if $is_tsim;
+
+    # process normal .vhd or .vbom file lines
+    # canonize file name unless not already done by filename substitution
+    my $fullname;
+    if ($val =~ m{^!(.*)$}) {
+      $fullname = $1;
+    } else {
+      $fullname = canon_fname($vbom_path, $val);
+    }
+
+    # determine whether additional libs needed
+    if ($fullname =~ m{_ssim\.vhd$}) {	    # ends in _ssim.vhd
+      $has_unisim = 1;
+    }
+    if ($fullname =~ m{_[ft]sim\.vhd$}) {   # ends in _fsim.vhd or _tsim.vhd
+      $has_simprim = 1;
+    }
+
+    # build vbom table
+    push @{$vbom_files{$vbom}}, $fullname;
+    print STDERR "--- add    $fullname\n" if $do_trace;
+
+    # if a vbom, queue if not not already read
+    if ($fullname =~ m{\.vbom$} && not exists $vbom_done{$fullname} ) {
+       push @vbom_queue, $fullname;
+       print STDERR "--- queue  $fullname\n" if $do_trace;
+    }
+
+  }
+
+  $top_done = 1;
+
+  close (IFILE);
+}
+
+#-------------------------------------------------------------------------------
+
+sub scan_vbom {
+  my ($vbom) = @_;
+
+  $level += 1;
+  my $rank = 1000*$level + scalar(@{$vbom_files{$vbom}});
+  print STDERR "--> $level: $vbom\n" if $do_trace;
+
+  die "vbomcov-E excessive vbom stack depth \n" if $level>=1000;
+
+  if (exists $vbom_rank{$vbom}) {
+    $vbom_rank{$vbom}{min} = $level if $level < $vbom_rank{$vbom}{min};
+    $vbom_rank{$vbom}{max} = $level if $level > $vbom_rank{$vbom}{max};
+  } else {
+    $vbom_rank{$vbom} = {min=>$level, max=>$level};
+  }
+
+  foreach (@{$vbom_files{$vbom}}) {
+    my $file = $_;
+    $rank -= 1;
+    if (m{\.vbom$}) {
+      scan_vbom($file);
+    } else {
+      if (exists $srcfile_rank{$file}) {
+	if ($rank > $srcfile_rank{$file}) {
+	  print STDERR "   $file   $srcfile_rank{$file} -> $rank\n" if $do_trace;
+	  $srcfile_rank{$file} = $rank;
+	} else {
+	  print STDERR "   $file   $srcfile_rank{$file} (keep)\n" if $do_trace;
+	}
+      } else {
+	 $srcfile_rank{$file} = $rank;
+	 print STDERR "   $file   $srcfile_rank{$file} (new)\n" if $do_trace;
+      }
+    }
+  }
+
+  print STDERR "<-- $level: $vbom\n" if $do_trace;
+  $level -= 1;
+
+}
+
+#-------------------------------------------------------------------------------
+
+sub copy_edir {
+  my ($file, $edir) = @_;
+  print "cp -p $file $edir\n";
+  system("cp -p $file $edir")==0 or die "cp -p failed: $?";
+}
+
+#-------------------------------------------------------------------------------
+
+sub write_vbomdep {
+  my ($target) = @_;
+  print "#\n";
+  print "# .dep_* on .vbom dependencies\n";
+  print "#\n";
+  foreach (sort keys %vbom_done) {
+    print "$target : $_\n";
+  }
+}
+
+#-------------------------------------------------------------------------------
+sub canon_fname {
+  my ($vpath,$fname) = @_;
+    # get full relative file name (relative to cwd)
+    $fname = "$vpath/$fname" if $vpath ne "";
+
+    # remove 'inner' .., e.g.  ../x/../y -->  ../y
+    # this will also canonize the file names, thus same file same name
+
+    my @flist;
+    foreach (split "/",$fname) {
+      if (scalar(@flist) && $flist[$#flist] ne ".." && $_ eq "..") {
+	pop @flist;
+      } else {
+	push @flist, $_;
+      }
+    }
+
+    return join "/", @flist;
+}
+
+#-------------------------------------------------------------------------------
+
+sub print_help {
+  print "usage: vbomconf <command> file.vbom\n";
+  print "  --help           this message\n";
+  print "  --trace          trace recursive processing of vbom's\n";
+  print "  --dep_ghdl       generate ghdl dependencies for make\n";
+  print "  --dep_xst        generate xst  dependencies for make\n";
+  print "  --dep_isim       generate isim dependencies for make\n";
+  print "  --dep_vsyn       generate vsyn dependencies for make\n";
+  print "  --ghdl_a         generate and execute ghdl -a  (analyse)\n";
+  print "  --ghdl_a_cmd     like ghdl_a, but only print command, no exec\n";
+  print "  --ghdl_i         generate and execute ghdl -i  (inspect)\n";
+  print "  --ghdl_i_cmd     like ghdl_i, but only print command, no exec\n";
+  print "  --ghdl_m         generate and execute ghdl -m  (make)\n";
+  print "  --ghdl_m_cmd     like ghdl_m, but only print command, no exec\n";
+  print "  --xst_prj        generate xst project file\n";
+  print "  --isim_prj       generate isim project file\n";
+  print "  --vsyn_prj       generate vivado synthesis project definition\n";
+  print "  --ghdl_export=s  export all ghdl source files into directory s\n";
+  print "  --xst_export=s   export all xst source files into directory s\n";
+  print "  --isim_export=s  export all isim source files into directory s\n";
+  print "  --get_top        return top level entity name\n";
+  print "  --flist          list all files touched by vbom for all tags\n";
+}

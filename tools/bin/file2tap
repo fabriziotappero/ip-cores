@@ -1,0 +1,119 @@
+#!/usr/bin/perl -w
+# $Id: file2tap 686 2015-06-04 21:08:08Z mueller $
+#
+# Copyright 2008-2015 by Walter F.J. Mueller <W.F.J.Mueller@gsi.de>
+#
+# This program is free software; you may redistribute and/or modify it under
+# the terms of the GNU General Public License as published by the Free
+# Software Foundation, either version 2, or at your option any later version.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY, without even the implied warranty of MERCHANTABILITY
+# or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+# for complete details.
+#
+#  Revision History:
+# Date         Rev Version  Comment
+# 2015-06-03   686   1.1    fix -a option; support eom at end
+# 2008-12-07   175   1.0.1  remove some upperfluous 'my'
+# 2008-11-29   174   1.0    Initial version (import from tbird backup)
+#
+#
+# Create a simh tape container file (.tap) from a set of files
+#
+# Usage:  file2tap -c name -b n file1 ... filen
+#
+#   if -c name is omitted, stdout is used
+#
+
+use strict;
+use Fcntl qw(:seek O_RDWR);
+
+my $arg;
+my $cdone;
+my $blocksize = 512;
+my $nfile = 0;
+
+while ($arg = shift) {
+
+  if ($arg eq "-c") {
+    if (@ARGV) {
+      $arg = shift;
+      open(OFILE, ">$arg") || die ("Can't open output file $arg: $!");
+      $cdone = 1;
+    }
+
+  } elsif ($arg eq "-a") {
+    if (@ARGV) {
+      $arg = shift;
+      sysopen OFILE, $arg, O_RDWR || die ("Can't open output file $arg: $!");
+      my $buf;
+      my $len;
+
+      # check for EOM mark at end, if found, truncate it away
+      sysseek OFILE, -4, SEEK_END;
+      $len = sysread OFILE, $buf, 4;
+      if ($buf eq "\xff\xff\xff\xff") {
+        truncate OFILE, sysseek(OFILE, -4, SEEK_END);
+      }
+
+      # check for two EOF marks at end, if found, truncate 2nd away
+      sysseek OFILE, -8, SEEK_END;
+      $len = sysread OFILE, $buf, 8;
+      if ($buf ne "\x00\x00\x00\x00\x00\x00\x00\x00") {
+        die ("Didn't find double EOF at end of tap file");
+      }
+      truncate OFILE, sysseek(OFILE, -4, SEEK_END);
+
+      close OFILE;
+      open(OFILE, ">>$arg") || die ("Can't append to output file $arg: $!");
+      $cdone = 1;
+    }
+
+  } elsif ($arg eq "-b") {
+    if (@ARGV) {
+      $arg = shift;
+      $blocksize = 512 * int $arg;
+    }
+
+  } else {
+    if (!$cdone) {
+      open(OFILE, ">-") || die ("Can't open stdout: $!");
+    }
+
+    my @flist = split(",",$arg);
+    my $file;
+    foreach $file (@flist) {
+      add_file($file, $blocksize);
+    }
+    $nfile += 1;
+    end_file();
+  }
+}
+end_file();
+
+# ----------------------------------------------------------------------------
+sub end_file {
+  print OFILE "\x00\x00\x00\x00";
+}
+
+# ----------------------------------------------------------------------------
+sub add_file {
+  my($filename, $blocksize) = @_;
+  my($block, $bytes_read, $length, $nb);
+
+  open(FILE, $filename) || die("Can't open $filename: $!");
+  while($bytes_read = read(FILE, $block, $blocksize)) {
+    if($bytes_read < $blocksize) {
+      $block .= "\x00" x ($blocksize - $bytes_read);
+    }
+    $length = pack("V", $blocksize);
+    print OFILE $length, $block, $length;
+    $nb += 1;
+  }
+  close(FILE);
+  if ($cdone) {
+    printf "file: %3d  records: %5d  length: %5d  file: $filename\n",
+      $nfile, $nb, $blocksize;
+  }
+}

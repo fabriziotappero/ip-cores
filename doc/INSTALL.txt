@@ -1,0 +1,322 @@
+# $Id: INSTALL.txt 654 2015-03-01 18:45:38Z mueller $
+
+Guide to install and build w11a systems, test benches and support software
+
+  Table of content:
+  
+  1.  Download
+  2.  System requirements
+  3.  Setup environment variables
+  4.  Compile UNISIM/SIMPRIM libraries for ghdl
+  5.  Compile and install the support software
+       a. Compile sharable libraries
+       b. Setup Tcl packages
+  6.  The build system
+  7.  Building test benches
+  8.  Building systems
+       d. Available systems
+       e. Available bitkits with bit and log files
+  9.  Generate Doxygen based source code view
+
+1. Download ---------------------------------------------------------------
+
+  All instructions below assume that the project files reside in a
+  working directory with the name represented as <wdir>
+
+  - to download latest snapshot of trunk
+
+      cd <wdir>
+      svn co http://opencores.org/ocsvn/w11/w11/trunk
+
+  - to download tagged verions (from major releases)
+    list available svn tags
+      
+      svn ls http://opencores.org/ocsvn/w11/w11/tags
+
+    and download one of them
+
+      cd <wdir>
+      svn co http://opencores.org/ocsvn/w11/w11/tags/<tag>
+
+  - to download specific svn revision (from minor releases)
+    determine desired svn revsion from list given on
+      http://opencores.org/project,w11,overview
+
+    and download 
+
+      cd <wdir>
+      svn co -r <rev> http://opencores.org/ocsvn/w11/w11/trunk
+
+2. System requirements ----------------------------------------------------
+  
+  This project contains not only VHDL code but also support software. Therefore
+  quite a few software packages are expected to be installed. The following
+  list gives the Ubuntu/Debian package names, but mapping this to other
+  distributions should be straight forward. 
+
+  - building the bit files requires a Xilinx ISE WebPACK installation
+
+  - building and using the RLink backend software requires:
+    - full C/C++ development chain (gcc,g++,cpp,make)
+      -> package: build-essential
+    - Boost C++ library (>= 1.40), with date-time, thread, and regex
+      -> package: libboost-dev libboost-date-time-dev libboost-thread-dev
+                  libboost-regex-dev
+    - libusb 1.0 (>= 1.0.6)
+      -> package: libusb-1.0-0-dev
+    - Perl (>= 5.10)  (usually included in base installations)
+    - Tcl  (>= 8.5), with tclreadline support
+      -> package: tcl tcl-dev tcllib tclreadline
+
+  - for VHDL simulations one needs
+    - ghdl
+      -> see INSTALL_ghdl.txt for the unfortunately gory details
+
+  - additional requirements for using Cypress FX (on Nexys2/3) see
+    INSTALL_fx2_support.txt
+
+  - for doxygen documentation an up-to-date installation of doxygen is
+    required, version 1.8.3.1 or later
+
+  - optional but very useful is:
+    - gtkwave
+      -> package: gtkwave
+
+3. Setup environment variables --------------------------------------------
+
+  The make flow for building test benches (ghdl and ISim based) and systems
+  (Xilinx ISE xst based) as well as the support software (mainly the rlink
+  backend server) requires
+
+    - the definition of the environment variables:
+      - RETROBASE:  must refer to the installation root directory
+      - TCLINC:     pathname for includes of Tcl runtime library
+      - TCLLIBNAME: name of Tcl runtime library
+      - RETRO_FX2_VID and RETRO_FX2_PID: default USB VID/PID, see below
+    - that the tools binary directory is in the path
+    - that the tools library directory is in the library path
+    - optional environment variables:
+      - TCLLIB:     pathname for libraries of Tcl
+      - BOOSTINC:   pathname for includes of boost library
+      - BOOSTLIB:   pathname for libraries of boost library
+        {Note: Either both must be undefined, or both must be defined}
+    
+  For bash and alike use
+
+    export RETROBASE=<wdir>
+    export PATH=$PATH:$RETROBASE/tools/bin
+    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$RETROBASE/tools/lib
+
+  To access the man pages update also the MANPATH
+
+    export MANPATH=$MANPATH:$RETROBASE/doc/man
+
+  In most cases the boost library version coming with the distribution will
+  work, similar for Tcl, in those cases simply use
+
+    export TCLINC=/usr/include/tcl8.5
+    export TCLLIBNAME=tcl8.5
+
+  and don't setup BOOSTINC and BOOSTLIB.
+
+  After that building functional model based test benches will work. If you 
+  want to also build post-xst or post-par test benches read next section.
+
+  For Cypress FX2 (on Nexys2/3) related setup see INSTALL_fx2_support.txt
+
+4. Compile UNISIM/SIMPRIM libraries for ghdl ------------------------------
+
+  The build system for test benches also supports test benches run against
+  the gate level models derived after the xst, map or par step. In this
+  case ghdl has to link against a compiled UNISIM or SIMPRIM library.
+
+  To make handling of the parallel installion of several ISE WebPack versions
+  easy the compiled libraries are stored in sub-directories under $XILINX:
+
+     $XILINX/ghdl/unisim
+     $XILINX/ghdl/simprim
+
+  Two helper scripts will create these libraries:
+
+    <setup XTWI_PATH, see section 6a.> 
+
+    cd $RETROBASE
+    xise_ghdl_unisim
+    xise_ghdl_simprim
+
+  If you have several WebPack versions installed, repeat for each version.
+
+5. Compile and install the support software -------------------------------
+
+5a. Compile sharable libraries ---------------------------------------
+
+  Note: some c++11 features are used in the code
+    - N2343: decltype (used by boost bind)  -> since gcc 4.3
+    - N2431: nullptr                        -> since gcc 4.6
+    - N2930: range based for                -> since gcc 4.6
+    - N1984: auto-types variables           -> since gcc 4.4 
+
+  Required tools and libraries:
+    g++    >= 4.6    (see c++11 usage above)
+    boost  >= 1.35   (boost::thread api changed, new one is used)
+    linusb >= 1.0.5  (timerfd support)
+
+  Build was tested under:
+    ubuntu precise (14.04 LTS):  gcc 4.8.2  boost 1.54    libusb 1.0.17
+    debian wheezy  (7.0.8):      gcc 4.7.2  boost 1.49    libusb 1.0.11
+
+  To build all sharable libraries
+
+    cd $RETROBASE/tools/src
+    make -j 4
+
+  Default is to compile with -O2 and without -g. These options can be
+  overwritten with the CXXOPTFLAGS enviromnent variable (or make opion).
+  To build with -O3 optimize use
+    make -j 4 CXXOPTFLAGS=-O3
+  To build a debug version with full symbol table use
+    make -j 4 CXXOPTFLAGS=-g
+
+  To cleanup, e.g. before a re-build
+    
+    cd $RETROBASE/tools/src
+    rm_dep
+    make realclean
+
+5b. Setup Tcl environment --------------------------------------------
+
+  The Tcl files are organized in several packages. To create the Tcl
+  package files (pkgIndex.tcl)
+
+    cd $RETROBASE/tools/tcl
+    setup_packages
+
+  To use these packages it is convenient to make them available via the
+  'auto_path' mechanism. To do that add in your .tclshrc or .wishrc
+
+    lappend auto_path [file join $env(RETROBASE) tools tcl]
+    lappend auto_path [file join $env(RETROBASE) tools lib]
+
+  The w11 distribution contains two ready to use .tclshrc or .wishrc
+  files which
+    - include the auto_path statements above
+    - activate tclreadline (and thus in tclshrc an event loop)
+
+  To use them simply copy them into your home directory (or soft link them)
+
+    cd $HOME
+    ln -s $RETROBASE/tools/tcl/.tclshrc .
+    ln -s $RETROBASE/tools/tcl/.wishrc  .
+
+6. The build system -------------------------------------------------------
+
+  The generation of
+    - FPGA firmware (e.g. .bit files)
+    - test benches  (e.g. simulator images)
+  is based on make flows. 
+  
+  Two design tools are currently supported
+    - Xilinx Vivado
+      - Artix-7 based board (Basys3, Nexys4)
+      - see README_buildsystem_Vivado.txt
+    - Xilinx ISE 
+      - Spartan-3 and Spartan-6 based boards (S3board, Nexys2, Nexys3)
+      - see README_buildsystem_ISE.txt
+
+7. Building test benches --------------------------------------------------
+
+  General instructions are in
+    - README_buildsystem_Vivado.txt (for Basys3, Nexys4)
+    - README_buildsystem_ISE.txt    (for S3board, Nexys2, Nexys3)
+
+  For available test benches see w11a_tb_guide.txt
+
+8. Building systems and configuring FPGAs ---------------------------------
+
+  General instructions are in
+    - README_buildsystem_Vivado.txt (for Basys3, Nexys4)
+    - README_buildsystem_ISE.txt    (for S3board, Nexys2, Nexys3)
+
+8d. Available systems ------------------------------------------------
+
+  Ready to build designs are organized in the directories
+
+    $RETROBASE/rtl/sys_gen/<design>/<board>
+
+  with <design>
+    w11a            w11a system
+    tst_rlink       rlink over serial link tester
+    tst_rlink_cuff  rlink over FX2 interface tester
+
+  and <board>
+    basys3          b3: Digilent Basys3 board
+    nexys4          n4: Digilent Nexys4 board (cellular RAM version)
+    nexys3          n3: Digilent Nexys3 board
+    nexys2          n2: Digilent Nexys2 board (-1200 FPGA version)
+    s3board         s3: Digilent S3board (-1000 FPGA version)
+
+  To build the designs locally use
+
+     cd $RETROBASE/rtl/sys_gen/<design>/<board>
+     make sys_<dtype>_<btype>.bit
+
+  with in most cases <dtype> = <design> and <code> = 2 letter abriviation for 
+  the board, e.g. n4 for nexys4.
+
+8e. Available bitkits with bit and log files -------------------------
+
+  Tarballs with ready to use bit files and all logfiles from the tool 
+  chain can be downloaded from
+    http://www.retro11.de/data/oc_w11/bitkits/
+  This area is organized in folders for different releases. The tarball
+  file names contain information about release, Xlinix tool, and design:
+    <release>_<tool>_<design>.tgz
+
+  - Vivado based designs:
+      These designs can be loaded with the Vivado hardware server into the FPGA.
+
+  - ISE based designs:
+
+      These designs can be loaded with config_wrapper into the FPGA. The
+      procedures for the supported boards are given below.
+
+      Notes:
+        1. XTWI_PATH and RETROBASE environment variables must be defined.
+        2. config_wrapper bit2svf is only needed once to create the svf files.
+        3. fx2load_wrapper is needed once after each board power on.
+
+    a. for Digilent Nexys3 board (using Cypress FX2 USB controller)
+
+       xtwi config_wrapper --board=nexys3 bit2svf <design>.bit
+       fx2load_wrapper     --board=nexys3
+       xtwi config_wrapper --board=nexys3 jconfig <design>.svf
+
+    b. for Digilent Nexys2 board (using Cypress FX2 USB controller)
+
+       xtwi config_wrapper --board=nexys2 bit2svf <design>.bit
+       fx2load_wrapper     --board=nexys2
+       xtwi config_wrapper --board=nexys2 jconfig <design>.svf
+
+    c. for Digilent S3board (using ISE Impact)
+
+       xtwi config_wrapper --board=s3board iconfig <design>.bit
+
+
+9. Generate Doxygen based source code view --------------------------------
+
+   Currently there is not much real documentation included in the source
+   files. The doxygen generated html output is nevertheless very useful
+   to browse the code. C++, Tcl and Vhdl source are covered by setup files
+   contained in the project files.
+
+   To generate the html files
+
+     cd $RETROBASE/tools/dox
+     export RETRODOXY <desired root of html documentation>
+     ./make_doxy
+
+   If RETRODOXY is not defined '/tmp' is used. To view the docs use
+
+     firefox $RETRODOXY/w11/cpp/html/index.html &
+     firefox $RETRODOXY/w11/tcl/html/index.html &
+     firefox $RETRODOXY/w11/vhd/html/index.html &

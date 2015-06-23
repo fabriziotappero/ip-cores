@@ -1,0 +1,108 @@
+$Id: ECO-026-div.txt 579 2014-08-08 20:39:46Z mueller $
+
+Scope:
+  Introduced in release w11a_V0.61
+  Affects: all w11a systems
+
+Symptom summary:
+  The div instruction gave wrong results in some corner cases when either
+  divisor or quotient were the largest negative integer (100000 or -32768):
+    1. wrong q and r when  dd=n*(-32768), dr=-32768 with n even
+    2. V=1 set when division solvable and proper result is q=-32768
+
+Background:
+  The PDP-11/70 (KB11-C) and the w11a use very different division algorithms.
+  Both use a non-restoring divide. 
+  - The KB11-C uses a straight forward 2 quadrant core algorithm for positive 
+    dividends and positive or negative divisors. Negative dividends are first 
+    converted to positive, the results later corrected. This leads to quite
+    complex implementation with 35 micro states.
+  - The w11a uses a 4 quadrant algorithm which directly allows positive and
+    negative dividends and divisors. The qbit logic is much more complex in
+    this case. Advantage is that the whole divide algorithm can be implemented
+    with only 6 states in the main sequencer.
+  
+  In twos complement integer arithmetic, as used in the pdp11 and almost all
+  contemporary computers, the range of positive and negative numbers is
+  different, for 16 bit for example
+    oct 100000 to 077777
+    dec -32768 to +32767
+  so the smallest negative number has no positive counterpart. Trying to negate
+  the smallest negative number leads to the same number
+    mov #100000, r0
+    neg r0           --> r0 = 100000; V=1
+  
+  These special properties of the largest negative number easily lead to corner
+  cases which require special treatment, both the KB11-C and the w11a divide
+  algorithms need special rules and checks for this.
+
+Summary of issues:
+  1. when dividend was dd=n*(-32768) with an even n and the divisor was
+     dr=-32768 the old w11a algorithm returned wrong quotient and remainder
+     values and V=0 status.
+  2. for all divisions which result in a quotient of -32768 the old w11a
+     algorithm set the overflow (V=1) condition. Since in this case the
+     destination registers were not updated and still contained the 
+     dividend, software not checking the V code saw wrong quotient and
+     remainder values.
+
+Fixes:
+  - Issue 1: wrong q and r for dd=n*(-32768), dr=-32768 with n even.
+    - the corner case is detected in state s_opg_div by testing that divisor
+      is 0100000 and low order part of dividend is zero. When detected, the
+      qbit logic is modified and quotient and remainder corrections are done
+      unconditionally.
+
+  - Issue 2: V=1 set when division solvable and proper result is q=-32768.
+    The divide core algorithm calculates the correct q and r, only the
+    overflow testing was incorrect.
+    The old algorithm had two overflow abort conditions
+    - a check that bit 31 and 30 of the dividend are equal
+    - a check after the first division cycle
+    The new algorithm now has three overflow abort conditions
+    - the bit 31/30 check on the dividend was too restrictive. Valid divisions
+      with dd=(-32768)*(-32768)+n and dr=-32768 giving q=-32768 and r=n would
+      be rejected. The 31/30 check is now only applied when the divisor is not 
+      equal 0100000
+    - the division abort condition in the first division cycle was completely
+      revised, this avoids that solvable divisions are aborted at this stage
+    - the first two conditions don't catch all overflow situations. The
+      remaining ones all have after the quotient correction stage q>0 when 
+      a negative quotient is expected. A third overflow check was added to
+      s_opg_div_sr to handle these cases.
+
+Side effects:
+  - the old implementation guaranteed that the destination registers were
+    unchanged in case of overflow. The new does not, the overflow check in
+    s_opg_div_sr is done after the quotient is stored, and storing remainder 
+    is not suppressed in case of overflow. So both q and r regs are changed.
+  - with additional states it could be guaranteed that destination registers 
+    are never updated in case of overflow. See proviso below.
+  - the pdp-11/70 KB11-C in most cases keeps destination registers unchanged
+    in case of overflow, but also has a late check after one register has 
+    been modified.
+  - the J11 never updates registers in case of overflow. A case like 
+    0,177777 / 177777 were w11a now updates regs is known from J11
+    diagnostics to not update in J11.
+  - simh always preserves the destination registers in case of overflow.
+
+  !! the pdp11 processor handbook considers the destination registers as  !!
+  !! undefined in case of division overflow, so the w11a behavior is OK.  !!
+
+Provisos:
+  - the behavior after V=1 aborts of a div instruction is now different in 
+    - w11a   --> regs updated under some rare conditions
+    - KB11-C --> regs updated under some rare conditions
+                 but in cases different from w11a
+    - 11/44  --> regs updated under some conditions (see v7_longdivide_bug.txt)
+    - J11    --> regs never updated
+    - simh   --> regs never updated
+   --> that can lead to spurious failures in original DEC diagnostics when
+       they test the complete response
+   --> even though the current w11a behavious is full within specs it is unclear
+       whether all software tolerates this, especially non-DEC OS. Unix V7 is 
+       known to have an issue with ldiv and CPUs not preserving regs, see
+         http://minnie.tuhs.org/PUPS/v7_longdivide_bug.txt
+   --> Only further studes can show whether it is worth the effort and the
+       slow down of 1-2 cycles to guarantee preserved registers.
+

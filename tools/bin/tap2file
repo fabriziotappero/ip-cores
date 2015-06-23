@@ -1,0 +1,129 @@
+#!/usr/bin/perl -w
+# $Id: tap2file 686 2015-06-04 21:08:08Z mueller $
+#
+# Copyright 2015- by Walter F.J. Mueller <W.F.J.Mueller@gsi.de>
+#
+# This program is free software; you may redistribute and/or modify it under
+# the terms of the GNU General Public License as published by the Free
+# Software Foundation, either version 2, or at your option any later version.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY, without even the implied warranty of MERCHANTABILITY
+# or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+# for complete details.
+#
+#  Revision History:
+# Date         Rev Version  Comment
+# 2015-06-03   686   1.0.1  add print_usage; cleanups
+# 2015-05-24   684   1.0    Initial version
+#
+# Expand a simh tape container file (.tap) to a set of files
+#
+# Usage:  tap2file [--pref=pref] file
+#
+use 5.14.0;                                 # require Perl 5.14 or higher
+use strict;                                 # require strict checking
+
+use Getopt::Long;
+
+my %opts = ();
+
+GetOptions(\%opts, "pref=s", "help")
+  or die "bad options";
+
+sub close_ofile;
+sub print_usage;
+
+if (scalar(@ARGV) == 0 || exists $opts{help}) {
+  print_usage;
+  exit 0;
+}
+
+my $ifile = shift @ARGV;
+exit 0 unless defined $ifile;
+
+open(IFILE, "<$ifile") || die("Can't open $ifile: $!");
+
+my $basename = $ifile;
+$basename = $1 if $ifile =~ m|.*/(.*)|;
+my $fstem = $basename;
+$fstem = $1 if $basename =~ m|(.*)\..*|;
+
+my $pref = (exists $opts{pref}) ? $opts{pref} : "${fstem}_";
+
+my $nfile = 0;
+my $nrec  = 0;
+my $rlmin = 0;
+my $rlmax = 0;
+my $ofile = "";
+
+my $block;
+my $nb;
+
+while ($nb = read(IFILE, $block, 4)) {
+  my $metabeg = unpack("V", $block);
+
+  if ($metabeg == 0x00000000) {
+    close_ofile;
+    $nfile += 1;
+    next;
+  }
+  if ($metabeg == 0xffffffff) {
+    last;
+  }
+
+  unless (defined fileno OFILE) {
+    $ofile = sprintf("%s%02d.dat", $pref,$nfile);
+    open(OFILE, ">$ofile") || die("Can't open $ofile: $!");
+  }
+
+  $nb = read(IFILE, $block, $metabeg);
+  print OFILE $block;
+  if ($nrec == 0) {
+    $rlmin = $metabeg;
+    $rlmax = $metabeg;
+  } else {
+    $rlmin = $metabeg if $metabeg < $rlmin;
+    $rlmax = $metabeg if $metabeg > $rlmin;
+  }
+  $nrec += 1;
+
+  $nb = read(IFILE, $block, 4);
+  my $metaend = unpack("V", $block);
+  if ($nb != 4 || not defined $metaend) {
+    printf "bad meta tag:  beg=%8.8x\n", $metabeg;
+    last;
+  }
+  if ($metaend != $metabeg) {
+    printf "bad meta tags: beg=%8.8x end=%8.8x\n", $metabeg,$metaend;
+    last;
+  }
+}
+
+close_ofile;
+exit 0;
+
+# ----------------------------------------------------------------------------
+sub close_ofile {
+  return unless (defined fileno OFILE);
+  close(OFILE);
+  if ($rlmin == $rlmax) {
+    printf "%s: %6d records, length %5d\n",
+    $ofile, $nrec, $rlmin;
+  } else {
+    printf "%s: %6d records, length min=%5d, max=%5d\n",
+    $ofile, $nrec, $rlmin, $rlmax;
+  }
+  $nrec  = 0;
+  $rlmin = 0;
+  $rlmax = 0;
+}
+
+# ----------------------------------------------------------------------------
+sub print_usage {
+  print "usage: tap2file [options] ifile\n";
+  print "  ifile    input tap file\n";
+  print "  Options\n";
+  print "    --pref=p     use p as prefix for generated files\n";
+  print "    --help       this message\n";
+}

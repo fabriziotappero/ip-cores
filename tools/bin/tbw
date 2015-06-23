@@ -1,0 +1,290 @@
+#!/usr/bin/perl -w
+# $Id: tbw 642 2015-02-06 18:53:12Z mueller $
+#
+# Copyright 2007-2015 by Walter F.J. Mueller <W.F.J.Mueller@gsi.de>
+#
+# This program is free software; you may redistribute and/or modify it under
+# the terms of the GNU General Public License as published by the Free
+# Software Foundation, either version 2, or at your option any later version.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY, without even the implied warranty of MERCHANTABILITY
+# or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+# for complete details.
+#
+#  Revision History:
+# Date         Rev Version  Comment
+# 2015-01-04   629   1.2.6  BUGFIX: setup proper dsc values after -fifo
+# 2014-12-23   619   1.2.5  add -fifo and -verbose options
+# 2014-07-27   575   1.2.4  use xtwi to start ISim models
+# 2011-11-06   420   1.2.3  fix tbw.dat parsing (allow / in file names)
+# 2010-05-23   294   1.2.2  handle tb_code's in non-local directories
+# 2010-04-18   279   1.2.1  add -help and more text to print_usage()
+# 2009-11-22   252   1.2    add ISim support
+# 2007-09-15    82   1.1.1  test for ambigous matches of name arguments; for
+#                           "suff=[l1;l2;..]" style inlines use linkname_tmp.tmp
+#                           as filename
+# 2007-09-09    81   1.1    add fifo setup to tbw; allow multiple action lines
+#                           per target; support immediate mode data
+#                           "[line1;line2;...]" values
+# 2007-08-03    71   1.0.1  handle redefinition of existing symlink correctly
+# 2007-06-30    62   1.0    Initial version
+#
+# 'test bench wrapper' to setup symlink refering to stimulus file(s)
+#
+#  usage: tbw <tb_code> [file] [args]
+#
+#  will look for file (default is <tb_code>_stim.dat) and setup a symlink
+#  <tb_code>_stim_dat to refer to it. All args are passed along to <tb_code>
+#
+
+use 5.005;                                  # require Perl 5.005 or higher
+use strict;                                 # require strict checking
+use POSIX qw(mkfifo);
+use FileHandle;
+
+my $tb_code;
+my $is_isim;
+my $is_isim_run;
+my $is_fifo;
+my $is_verbose;
+
+my @args_pos;			# list of positional args
+my @args_nam;			# list of named args
+my @file_dsc;			# file descriptors from tbw.dat
+
+sub print_usage;
+
+autoflush STDOUT 1;		# autoflush, so nothing lost on exec later
+
+if (scalar(@ARGV) && $ARGV[0] =~ /^-*help$/) { # -help or --help given
+  print_usage;
+  exit 0;
+}
+
+if (scalar(@ARGV) == 0) {
+  print "tbw-E: name of test bench code missing\n";
+  print_usage;
+  exit 1;
+}
+
+$tb_code = shift @ARGV;
+my $tb_code_path = ".";
+my $tb_code_name = $tb_code;
+if ($tb_code =~ m|^(.*)/(.*)$|) {
+  $tb_code_path = $1;
+  $tb_code_name = $2;
+}
+
+my $tb_code_stem = $tb_code_name;
+$tb_code_stem =~ s/_[fst]sim$//;            # drop _ssim,_fsim, or _tsim
+
+if ($tb_code_stem =~ /_ISim$/) {            # is it an ISim executable ?
+  $is_isim = 1;
+  $tb_code_stem =~ s/_ISim$//;              # drop _ISim
+  if (scalar(@ARGV) && $ARGV[0] eq "-run") {
+    $is_isim_run = 1;
+    shift @ARGV;
+  }
+}
+
+if (scalar(@ARGV) && $ARGV[0] eq "-fifo") {
+  push @file_dsc, {tag=>'rlink_cext_fifo_rx', val=>'<fifo>'};
+  push @file_dsc, {tag=>'rlink_cext_fifo_tx', val=>'<fifo>'};
+  push @file_dsc, {tag=>'rlink_cext_conf',    val=>'<null>'};
+  $is_fifo = 1;
+  shift @ARGV;
+}
+if (scalar(@ARGV) && $ARGV[0] eq "-verbose") {
+  $is_verbose = 1;
+  shift @ARGV;
+}
+
+if (not -e $tb_code) {
+  print "tbw-E: $tb_code not existing or not executable\n";
+  print_usage;
+  exit 1;
+}
+
+#
+# read tbw.dat file in current directory or directory of executable
+#
+
+my $tbwdat_file = "tbw.dat";
+$tbwdat_file = "$tb_code_path/tbw.dat" unless (-r "tbw.dat");
+
+if ((!$is_fifo) && -r $tbwdat_file) {
+  my $ok = 0;
+  my $done = 0;
+
+  open (TBW, $tbwdat_file) or die "failed to open $tbwdat_file: $!";
+  while (<TBW>) {
+    chomp;
+    next if /^#/;
+    if ( m{^\s*\[([\.\/a-zA-Z0-9_]*)\]\s*$} ) {
+      last if $done;
+      $ok = 0;
+      $ok = 1 if ($1 eq $tb_code || $1 eq $tb_code_stem);
+    } elsif ( m{^\s*([a-zA-Z0-9_]*)\s*=\s*([a-zA-Z0-9_./<>]*)\s*$} ) {
+      if ($ok) {
+	push @file_dsc, {tag=>$1, val=>$2};
+	$done = 1;
+      }
+    } else {
+      print "tbw-E: bad line in tbw.dat:\n  $_\n";
+    }
+  }
+}
+
+#
+# if no tbw.dat or no matching stanza found, setup defaults
+#
+
+if (!$is_fifo) {
+  unless (scalar (@file_dsc)) {
+    push @file_dsc, {tag=>$tb_code_stem . "_stim",
+                     val=>$tb_code_stem . "_stim.dat"};
+  }
+} else {
+  push @file_dsc, {tag=>"rlink_cext_fifo_rx",
+                   val=>"<fifo>"};
+}
+
+#
+# now process argument list
+#
+
+{
+  my $ind = 0;
+  while (scalar(@ARGV)>0 && not $ARGV[0] =~ /^-/) {
+    my $arg = shift @ARGV;
+    my $ok;
+    if ($arg =~ /([a-zA-Z0-9_]*)=(.*)/) {   # named argument
+      my $tag = $1;
+      my $val = $2;
+      foreach my $dsc (@file_dsc) {
+	if ($dsc->{tag} =~ /$tag$/) {
+	  $dsc->{val} = $val;
+	  $ok += 1;
+	}
+      }
+      if ($ok == 0) {
+	print STDERR "tbw-F: can't match named argument: $arg\n";
+	exit 1;
+      } elsif ($ok > 1) {
+	print STDERR "tbw-F: ambiguous match for named argument: $arg\n";
+	exit 1;
+      }
+
+    } else {			            # positional argument
+      if ($ind < scalar(@file_dsc)) {
+	$file_dsc[$ind]->{val} = $arg;
+      } else {
+	print STDERR "tbw-F: too many positional arguments: $arg\n";
+	exit 1;
+      }
+      $ind += 1;
+    }
+  }
+}
+
+if ($is_verbose) {
+  foreach my $dsc (@file_dsc) {
+    my $tag = $dsc->{tag};
+    my $val = $dsc->{val};
+    printf "    %s = %s\n", $tag, $val;
+  }
+}
+
+#
+# now handle all specified file descriptors
+#
+
+foreach my $dsc (@file_dsc) {
+  my $tag = $dsc->{tag};
+  my $val = $dsc->{val};
+  if ($val eq "<fifo>") {	# handle FIFO's
+    next if (-p $tag);
+    print "tbw-I: create FIFO $tag\n";
+    mkfifo($tag, 0666) || die "can't mkfifo $tag: $!";
+
+  } else {			# handle link to file cases
+
+    if ($val =~ /^\[(.*)\]$/) {	# immediate data case: "[line1;line2;...]"
+      my @lines = split /;/, $1;
+      my $fname = "$tag\_tmp.tmp";
+      open TFILE,">$fname" or die "can't create temporary file $fname: $!";
+      foreach (@lines) {
+	s/^\s*//;
+	s/\s*$//;
+	print TFILE "$_\n";
+      }
+      close TFILE;
+      $val = $fname;
+
+    } else {
+      unlink "$tag\_tmp.tmp" if (-e "$tag\_tmp.tmp"); # remove old .tmp file
+      $val = "/dev/null" if ($val eq "<null>");       # null file case
+    }
+
+    if (not -r $val) {
+      print "tbw-F: file for $tag not existing or not readable: $val\n";
+      exit 1;
+    }
+    if (-l $tag) {
+      my $cur_link = readlink $tag;
+      if ($cur_link ne $val) {
+	print "tbw-I: redefine $tag -> $val\n";
+	unlink $tag
+	  or die "failed to unlink: $!";
+	symlink $val, $tag
+	  or die "failed to symlink 1: $!";
+      }
+    } else {
+      if (-e $tag) {
+	print "tbw-F: $tag exists but is not a symlink\n";
+	exit 1;
+      } else {
+	print "tbw-I: define $tag -> $val\n";
+	symlink $val, $tag
+	  or die "failed to symlink 2: $!";
+      }
+    }
+  }
+}
+
+#
+# here all ok, finally exec test bench
+#
+
+if ($is_isim_run) {                         # handle for isim 'run all'
+  my $cmd = "xtwi" . " " . $tb_code . " " . join " ",@ARGV;
+  open (ISIM_RUN, "| $cmd")
+    or die "failed to open process pipe to isim: $!";
+  print ISIM_RUN "run all\n";
+  print ISIM_RUN "quit\n";
+  close (ISIM_RUN)
+     or die "failed to close process pipe to isim: $!";
+
+} else {                                    # otherwise just exec
+  exec $tb_code,@ARGV
+    or die "failed to exec: $!";
+}
+
+# ----------------------------------------------------------------------------
+sub print_usage {
+  print "usage: tbw <tb_code>  [opts] [filedefs] [ghdl-opts]\n";
+  print "  opts\n";
+  print "    -run      for _ISim tb's, runs the tb with a 'run all' command\n";
+  print "    -fifo     use rlink_cext fifo, ignore tbw.dat\n";
+  print "    -verbose  show the used tag,value settings before execution\n";
+  print "  filedefs define tb input, either filename in tbw.dat order or\n";
+  print "    tag=name or tag=[<content>] pairs with tag matching one in in\n";
+  print "    tbw.dat. The [<content>] form allows to give data inline, e.g.\n";
+  print "    like \"_conf=[.rpmon 1]\"\n";
+  print "  ghdl-opts are all other options starting with a '-', they are\n";
+  print "     passed to the testbench. Some useful ghdl options are:\n";
+  print "      --wave=x.ghw\n";
+  print "      --stack-max-size=16384\n";
+  print "      --stop-time=1ns  --disp-time  --trace-processes\n";
+}

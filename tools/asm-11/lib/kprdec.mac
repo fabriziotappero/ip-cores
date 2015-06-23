@@ -1,0 +1,52 @@
+; $Id: kprdec.mac 503 2013-04-06 19:44:13Z mueller $
+; Copyright 2013- by Walter F.J. Mueller <W.F.J.Mueller@gsi.de>
+; License disclaimer see LICENSE_gpl_v2.txt in $RETROBASE directory
+;
+; synchronous (polling) console print: print signed decimal number
+; Call:
+;   jsr  pc, kprdec
+; Arguments:
+;   r0: number to print
+; 
+; r1-r5 registers preserved
+;  
+
+kprdec: mov     r1,-(sp)        ; save r1,..,r3
+        mov     r2,-(sp)
+        mov     r3,-(sp)
+
+        mov     r0,r2           ; setup number to convert
+        bge     1$              ; if negative
+        neg     r2              ; negate
+        mov     #'-,r0          ; and print a '-'
+        jsr     pc,kprchr
+
+1$:     mov     #101$,r1        ; r1 points behind end of buffer
+        clrb    -(r1)           ; ensure 0-termination
+        movb    #'.,-(r1)       ; and trailing '.' to indicate decimal
+        mov     #5,r0           ; loop over 5 digits
+
+        tst     r2              ; number 0
+        bne     2$              ; if not convert
+        movb    #'0,-(r1)       ; if yes, ensure that '0' is printed
+        br      3$
+
+2$:     mov     r2,r3           ; r2 is rest to convert
+        beq     3$              ; break if zero
+        clr     r2              ; now (r2,r3) 32bit rest to convert
+        div     #10.,r2         ; div: r2->quotient; r3->reminder
+        add     #'0,r3          ; r3 is reminder, convert to char
+        movb    r3,-(r1)        ; write (backwards) to buffer
+        sob     r0,2$           ; go for next digit
+
+3$:     mov     r1,r0           ; r1 now points to convered string
+        jsr     pc,kprstr       ; print it
+
+        mov     (sp)+,r3        ; restore r1,..,r3
+        mov     (sp)+,r2
+        mov     (sp)+,r1
+        rts     pc
+
+100$:   .blkb   7.              ; buffer
+101$:                           ; end-of-buffer
+        .even

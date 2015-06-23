@@ -1,0 +1,112 @@
+#!/usr/bin/perl -w
+# $Id: svn_set_ignore 601 2014-11-07 22:44:43Z mueller $
+#
+# Copyright 2007-2014 by Walter F.J. Mueller <W.F.J.Mueller@gsi.de>
+#
+# This program is free software; you may redistribute and/or modify it under
+# the terms of the GNU General Public License as published by the Free
+# Software Foundation, either version 2, or at your option any later version.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY, without even the implied warranty of MERCHANTABILITY
+# or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+# for complete details.
+#
+#  Revision History:
+# Date         Rev  Vers    Comment
+# 2014-11-04   601   1.1    use 'svn info' rather /.svn check for svn >= 1.7
+# 2010-04-26   284   1.0.1  add error check for GetOptions
+# 2007-06-16    56   1.0    Initial version
+#
+
+use 5.005;                                  # require Perl 5.005 or higher
+use strict;                                 # require strict checking
+
+use Getopt::Long;
+
+sub do_dir;
+
+my @dirlist;
+my @def_ipat;
+
+my %opts = ();
+
+GetOptions(\%opts, "dry-run")
+  or die "bad options";
+
+if (@ARGV) {
+  push @dirlist, @ARGV;
+} else {
+  @dirlist = `find -type d | grep -v "\.svn"`;
+  die "bad find|grep" if $?;
+}
+
+open (CVSIG, ".cvsignore") or die "no top level .cvsigore found";
+@def_ipat = grep /.+/, <CVSIG>;
+close (CVSIG);
+
+foreach (@dirlist) { chomp; do_dir($_); }
+
+#-------------------------------------------------------------------------------
+
+sub do_dir {
+  my ($dirname) = @_;
+  my @cur_ipat;
+  my @loc_ipat;
+  my @sum_ipat;
+  my @new_ipat;
+  my %ipat;
+
+  # skip ise directories (they have sometimes strange chars in dir names
+  return if $dirname =~ m|/ise/|;
+  # check for svn working directory
+  my $svn_info = `svn info $dirname 2>&1`;
+  return if $?;
+
+  print "$dirname\n";
+  open (SVN, "svn pg svn:ignore $dirname|") or die "failed to open svn pg pipe";
+  @cur_ipat = grep /.+/, <SVN>;	# prop get and drop empty lines
+  close (SVN);
+
+  if ($dirname ne "." && -r "$dirname/.cvsignore") {
+    open (CVSIG, "$dirname/.cvsignore") 
+      or die "failed to read local .cvsignore";
+    @loc_ipat = grep /.+/, <CVSIG>;
+    close (CVSIG);
+  }
+
+  push @sum_ipat, @def_ipat;
+  push @sum_ipat, @loc_ipat;
+
+  foreach (@sum_ipat) {
+    if (exists $ipat{$_}) {
+      my $pat = $_;
+      chomp $pat;
+      print "duplicate ignore: $pat in $dirname\n";
+    } else {
+      $ipat{$_} = 1;
+      push @new_ipat, $_;
+    }
+  }
+
+  if (join("",@cur_ipat) ne join("",@new_ipat)) {
+    print "update svn:ignore for $dirname\n";
+    print "old svn:ignore:\n";
+    print "   ", join "   ",@cur_ipat if @cur_ipat;
+    print "local .cvsignore:\n";
+    print "   ", join "   ",@loc_ipat if @loc_ipat;
+    print "new svn:ignore:\n";
+    print "   ", join "   ",@new_ipat if @new_ipat;
+
+    if (not exists $opts{"dry-run"}) {
+      open (TMP, ">/tmp/svn_set_ignore_$$") or die "failed to open tmp file";
+      print TMP join "",@new_ipat;
+      close (TMP);
+      print `svn ps svn:ignore -F /tmp/svn_set_ignore_$$ $dirname`;
+      die "bad svn ps" if $?;
+      unlink "/tmp/svn_set_ignore_$$" or die "failed to delete tmp file";
+    }
+
+  }
+
+}

@@ -1,0 +1,307 @@
+#!/usr/bin/perl -w
+# $Id: ti_w11 680 2015-05-14 13:29:46Z mueller $
+#
+# Copyright 2013-2015 by Walter F.J. Mueller <W.F.J.Mueller@gsi.de>
+# License disclaimer see LICENSE_gpl_v2.txt in $RETROBASE directory
+#
+#  Revision History:
+# Date         Rev Version  Comment
+# 2015-05-14   680   1.3.1  use now -f1,-f1e,-f2,-f2e (fx now f1e)
+# 2015-04-13   667   1.3    rename -fu->-fc, add -f2,-fx; setup good defaults
+# 2015-01-02   640   1.2.2  BUGFIX: allow 'M' unit in baud rates
+# 2014-12-23   619   1.2.1  use -fifo tbw option for test bench starts
+# 2014-07-13   570   1.2    BUGFIX: split options args into ti_rri opts and cmds
+# 2013-05-05   516   1.1    renamed to ti_w11
+# 2013-04-26   510   1.0    Initial version (derived from dorri)
+#
+
+use 5.005;                                  # require Perl 5.005 or higher
+use strict;                                 # require strict checking
+use FileHandle;
+
+sub print_usage;
+
+autoflush STDOUT 1;             # autoflush, so nothing lost on exec later
+
+my $sysbase = "$ENV{RETROBASE}/rtl/sys_gen/w11a";
+
+my $opt_dry;
+my $opt_b;
+my $opt_io = '';
+my $opt_f = '';
+my $opt_tmu;
+my $tirri;
+my $val_term;
+my $val_tb_s3  = "tbw $sysbase/s3board/tb/tb_w11a_s3 -fifo";
+my $val_tb_n2  = "tbw $sysbase/nexys2/tb/tb_w11a_n2 -fifo";
+my $val_tb_n3  = "tbw $sysbase/nexys3/tb/tb_w11a_n3 -fifo";
+my $val_tb_b3  = "tbw $sysbase/basys3/tb/tb_w11a_b3 -fifo";
+my $val_tb_n4  = "tbw $sysbase/nexys4/tb/tb_w11a_n4 -fifo";
+my $val_tb_bn4 = "tbw $sysbase/nexys4_bram/tb/tb_w11a_br_n4 -fifo";
+my $val_tb;
+my $val_e;
+
+my @arglist;
+
+#
+# process ti_w11 options
+#
+while (scalar(@ARGV)) {
+  my $curarg = $ARGV[0];
+
+  if ($curarg =~ m{^-dry$} ) {		    # -dry
+    $opt_dry = 1;
+    shift @ARGV;
+
+  } elsif ($curarg =~ m{^-b$} ) {	    # -b
+    $opt_b = 1;
+    shift @ARGV;
+
+  } elsif ($curarg =~ m{^-tmu$} ) {	    # -tmu
+    $opt_tmu = 1;
+    shift @ARGV;
+
+  } elsif ($curarg =~ m{^-s3$} ) {	    # -s3 (use -f2 by default)
+    $opt_io = 'f';
+    $opt_f  = '2';
+    $val_tb = $val_tb_s3;
+    shift @ARGV;
+
+  } elsif ($curarg =~ m{^-n2$} ) {	    # -n2 (use -fc by default)
+    $opt_io = 'f';
+    $opt_f  = 'c';
+    $val_tb = $val_tb_n2;
+    shift @ARGV;
+
+  } elsif ($curarg =~ m{^-n3$} ) {	    # -n3 (use -fc by default)
+    $opt_io = 'f';
+    $opt_f  = 'c';
+    $val_tb = $val_tb_n3;
+    shift @ARGV;
+
+  } elsif ($curarg =~ m{^-b3$} ) {	    # -b3 (use -f1x by default)
+    $opt_io = 'f';
+    $opt_f  = '1x';
+    $val_tb = $val_tb_b3;
+    shift @ARGV;
+
+  } elsif ($curarg =~ m{^-n4$} ) {	    # -n4 (prim serport fine)
+    $opt_io = 'f';
+    $opt_f  = '1';
+    $val_tb = $val_tb_n4;
+    shift @ARGV;
+
+  } elsif ($curarg =~ m{^-bn4$} ) {	    # -bn4 (prim serport fine)
+    $opt_io = 'f';
+    $opt_f  = '1';
+    $val_tb = $val_tb_bn4;
+    shift @ARGV;
+
+  } elsif ($curarg =~ m{^-f(c|1|1x|2|2x)$} ) { # -f..
+    $opt_f = $1;
+    shift @ARGV;
+
+  } elsif ($curarg =~ m{^-t([su])(\d?),?} ) {	# -t[su]...
+    my $devnam = ($1 eq 's') ? '/dev/ttyS' : '/dev/ttyUSB';
+    my $devnum = $2;
+    my ($dev,$baud,$opt1,$opt2) = split /,/,$curarg;
+    $baud  = '115k' unless defined $baud;
+
+    if ($baud !~ m{^\d*[kM]?$}) {
+      print STDERR "ti_w11-E: invalid format of -ts or -tu option\n";
+      exit 1;
+    }
+
+    $opt_io = 't';
+    $val_term = sprintf '%s%d,%s', $devnam, $devnum, $baud;
+    $val_term .= ",$opt1" if defined $opt1;
+    $val_term .= ",$opt2" if defined $opt2;
+    shift @ARGV;
+
+  } elsif ($curarg =~ m{^-u$} )  {          # -u
+    $opt_io = 'u';
+    shift @ARGV;
+
+  } elsif ($curarg =~ m{^-e$} ) {	    # -e <file>
+    print STDERR "ti_w11-W: multiple -e options, only last taken\n"
+      if defined $val_e;
+    shift @ARGV;
+    if (scalar(@ARGV) == 0 || $ARGV[0] =~ m{^-}) {
+      print STDERR "ti_w11-E: no file name after -e option\n";
+      exit 1;
+    } else {
+      $val_e = shift @ARGV;
+      if (not -r $val_e) {
+	print STDERR "ti_w11-E: file '$val_e' not found\n";
+	exit 1;
+      }
+    }
+  } else {
+    last;
+  }
+}
+
+#
+# process remaining arguments, separate ti_rri options and commands
+#
+
+# handle options (all starting with -)
+my @tiopts;
+while (scalar(@ARGV)) {
+  last unless $ARGV[0] =~ m{^--};
+  push @tiopts, shift @ARGV;
+}
+
+# handle comands
+my @ticmds;
+while (scalar(@ARGV)) {
+  my $curarg = shift @ARGV;
+  if ($curarg =~ m{^@(.*)$} && ! -r $1) {
+    print STDERR "ti_w11-E: file '$1' not found\n";
+    exit 1;
+  }
+  push @ticmds,$curarg;
+}
+
+#
+# check that either -(s3|n2|n3|n4|bn4) or -t or -u given
+# setup options for either case
+#
+
+if ($opt_io eq 'f') {
+  my $fifoopts = ",noinit";                 # fifo always with deferred init
+  $fifoopts .= ",xon" if $opt_f eq 'x';
+  push @arglist, "--fifo=$fifoopts";
+  push @arglist, "--run=$val_tb";
+} elsif ($opt_io eq 't') {
+  push @arglist, "--term=$val_term";
+} elsif ($opt_io eq 'u') {
+  push @arglist, '--cuff';
+} else {
+  print STDERR "ti_w11-E: neither -(s3|n2|n3|b3|n4|bn4) nor -t,-u specified\n";
+  print_usage();
+  exit 1;
+}
+
+#
+# setup all other ti_rri options
+#
+
+push @arglist, '--logl=2';
+push @arglist, '--int' unless $opt_b;
+push @arglist, '--pack=rw11';
+push @arglist, @tiopts;                     # add options from ARGV
+push @arglist, '--';
+
+#
+# actions prior to first exec
+#   setup tmu ect
+#   setup access path --> handle -f options
+#
+if ($opt_io eq 'f') {
+  if ($opt_tmu) {
+    push @arglist, 'rlc oob -sbcntl 13   1';
+  }
+  if ($opt_f eq 'c') {
+    push @arglist, 'rlc oob -sbdata  8 0x4'; # portsel = 0100 -> fx2
+    push @arglist, 'rlc oob -sbdata 16 0x4'; # swi     = 0100 -> fx2
+  } elsif ($opt_f eq '1x') {
+    push @arglist, 'rlc oob -sbdata  8 0x2'; # portsel = 0010 -> 1st ser XON
+    push @arglist, 'rlc oob -sbdata 16 0x2'; # swi     = 0010 -> 1st ser XON
+  } elsif ($opt_f eq '2') {
+    push @arglist, 'rlc oob -sbdata  8 0x1'; # portsel = 0001 -> 2nd ser
+    push @arglist, 'rlc oob -sbdata 16 0x1'; # swi     = 0001 -> 2nd ser
+  } elsif ($opt_f eq '2x') {
+    push @arglist, 'rlc oob -sbdata  8 0x3'; # portsel = 0011 -> 2nd ser XON
+    push @arglist, 'rlc oob -sbdata 16 0x3'; # swi     = 0011 -> 2nd ser XON
+  }
+}
+
+#
+# --fifo always uses deferred init, so add a rlc init after the oob's
+#
+push @arglist, 'rlc init' if $opt_io eq 'f';
+
+#
+# initialize w11 cpu system
+#
+push @arglist, 'rw11::setup_sys';
+
+#
+# handle -e option
+#
+
+if (defined $val_e) {
+  if ($val_e =~ m/\.mac$/) {
+    push @arglist, "cpu0 ldasm -file $val_e -sym ldasm_sym -lst ldasm_lst";
+  } else {
+    push @arglist, "cpu0 ldabs $val_e";
+  }
+  push @arglist, 'rw11::cpumon';
+  push @arglist, 'rw11::cpucons';
+  push @arglist, 'cpu0 cp -stapc 0200';
+}
+
+push @arglist, @ticmds;                     # add commands from ARGV
+
+#
+# find ti_rri executable
+#
+
+$tirri=`which ti_rri`;
+chomp $tirri;
+if ($tirri eq '' || ! -e $tirri) {
+  print STDERR "ti_w11-E: failed to locate ti_rri\n";
+  exit 1;
+}
+
+#
+# print command line
+#
+if (1) {
+ print 'ti_rri ', join (' ', map {(m{\s}) ? "\"$_\"" : $_} @arglist) , "\n";
+}
+
+#
+# if dry run, stop here
+#
+exit 0 if $opt_dry;
+#
+# and do it
+#
+exec $tirri, @arglist
+  or die "failed to exec: $!";
+
+exit 1;
+
+# ----------------------------------------------------------------------------
+sub print_usage {
+  print "usage: ti_w11 <setup options> <ti_rri opts and cmds>...\n";
+  print "  setup options for ghdl simulation runs:\n";
+  print "    -b3       start tb_w11a_b3 simulation (default: -f1x)\n";
+  print "    -n4       start tb_w11a_n4 simulation\n";
+  print "    -bn4      start tb_w11a_br_n4 simulation\n";
+  print "    -n3       start tb_w11a_n3 simulation (default: -fc)\n";
+  print "    -n2       start tb_w11a_n2 simulation (default: -fc)\n";
+  print "    -s3       start tb_w11a_s3 simulation (default: -f2)\n";
+  print "    -f..      simulation communication options\n";
+  print "      -fc       use fx2 data path (cuff)\n";
+  print "      -f1       use 1st serport\n";
+  print "      -f1x      use 1st serport with xon\n";
+  print "      -f2       use 2nd serport   (fusp)\n";
+  print "      -f2x      use 2nd serport with xon\n";
+  print "    -tmu      activate trace and monitoring unit\n";
+  print "  setup options for FPGA connects:\n";
+  print "    -u        use --cuff connect\n";
+  print "    -t..      use --term connect\n";
+  print "      -ts*[,opts]   use /dev/ttyS*   (* is device number)\n";
+  print "      -tu*[,opts]   use /dev/ttyUSB* (* is device number)\n";
+  print "                    opts can be ',break', ',xon'\n";
+  print "  common options:\n";
+  print "    -e <file> load and execute file\n";
+  print "                file type '.mac': on the fly compile with asm-11\n";
+  print "                any other file type: assume lda format\n";
+  print "\n";
+  print "  either one of -s3,-n2,-n3,-b3,-n4,-bn4  must be given -> sim run\n";
+  print "  or one of -t or -u must be given            -> fpga run\n";
+}

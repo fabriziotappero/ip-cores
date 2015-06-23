@@ -1,0 +1,100 @@
+#!/usr/bin/perl -w
+# $Id: console_starter 581 2014-08-10 21:48:46Z mueller $
+#
+# Copyright 2009-2014 by Walter F.J. Mueller <W.F.J.Mueller@gsi.de>
+#
+# This program is free software; you may redistribute and/or modify it under
+# the terms of the GNU General Public License as published by the Free
+# Software Foundation, either version 2, or at your option any later version.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY, without even the implied warranty of MERCHANTABILITY
+# or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+# for complete details.
+#
+#  Revision History:
+# Date         Rev  Vers    Comment
+# 2014-08-10   581   1.1    rename to console_starter
+# 2010-07-04   312   1.0.3  correct telnet_wrapper path
+# 2010-04-26   284   1.0.2  add error check for GetOptions
+# 2009-11-08   248   1.0.1  proper -h handling & text; add -t support;
+# 2009-11-07   247   1.0    Initial version
+#
+
+use 5.005;                                  # require Perl 5.005 or higher
+use strict;                                 # require strict checking
+
+use Getopt::Long;
+
+my %opts = ();
+GetOptions(\%opts, "h", "t:s", "d:s", "s", "w", "l")
+  or die "bad options";
+
+if (exists $opts{h}) {
+  print "usage: console_starter [-h] [-t type] [-d type] [-s] [-w] [-l]\n";
+  print "  -h       help, print this text and quit\n";
+  print "  -t term  set terminal type, vt100 or vt52 (def: vt100)\n";
+  print "  -d dev   set device type, DLx or DZx for x'the line (def: DL0)\n";
+  print "  -s       use simh ports, default is to use rri ports\n";
+  print "  -w       use wide 132 column screen (default 80 columns)\n";
+  print "  -l       use long 48 lines screen (default 24 lines)\n";
+  exit 0;
+}
+
+my $emu    = "xterm";
+my $telnet = $ENV{"RETROBASE"} . "/tools/bin/telnet_wrapper";
+
+my @args;
+my $term = "vt100";
+my $dev  = "DL";
+my $line = 0;
+my $port;
+my $title;
+
+if (exists $opts{t}) {
+  if ($opts{t} =~ m{^(vt100|vt52)$} ) {
+    $term = $opts{t};
+  } else {
+    printf "unsupported terminal type: %s\n", $opts{t};
+    exit 1;
+  }
+}
+
+if (exists $opts{d}) {
+  if ($opts{d} =~ m{^(DL|DZ)(\d*)$}i ) {
+    $dev  = uc $1;
+    $line = int $2;
+  } else {
+    printf "unsupported device type: %s\n", $opts{d};
+    exit 1;
+  }
+}
+
+if (exists $opts{s}) {                      # simh ports
+  $port = 5670 if ($dev eq "DL");
+  $port = 5671 if ($dev eq "DZ");
+  $title = sprintf "\"%s %s\"", $dev, $term;
+} else {                                    # rri ports
+  $port = 8000+$line if ($dev eq "DL");
+  $port = 8002+$line if ($dev eq "DZ");
+  $title = sprintf "\"%s%d %s\"", $dev, $line, $term;
+}
+
+my $geo_w = 80;
+my $geo_l = 24;
+$geo_w = 132 if exists $opts{w};
+$geo_l =  48 if exists $opts{l};
+
+push @args, "-j", "-rightbar", "-sb", "-sl", "500";
+push @args, "-bg", "gray90", "-fg", "black";
+push @args, "-ti", $term;
+push @args, "-geo", sprintf("%dx%d", $geo_w, $geo_l);
+push @args, "-T", $title;
+push @args, "-e", $telnet, "localhost", sprintf("%d",$port);
+
+print $emu, " ", join " ",@args, "\n";
+
+my $rc = system $emu, @args;
+if ($rc != 0) {
+  print STDERR "xterm failed with rc=$rc\n";
+}

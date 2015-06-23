@@ -1,0 +1,214 @@
+#!/usr/bin/perl -w
+# $Id: xise_msg_filter 646 2015-02-15 12:04:55Z mueller $
+#
+# Copyright 2011-2015 by Walter F.J. Mueller <W.F.J.Mueller@gsi.de>
+#
+# This program is free software; you may redistribute and/or modify it under
+# the terms of the GNU General Public License as published by the Free
+# Software Foundation, either version 2, or at your option any later version.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY, without even the implied warranty of MERCHANTABILITY
+# or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
+# for complete details.
+#
+#  Revision History:
+# Date         Rev Version  Comment
+# 2015-01-30   640   1.1.2  renamed from isemsg_filter
+# 2014-02-01   550   1.1.1  rename --pack to --pacc (accepted is meant here)
+# 2012-01-04   450   1.1    preliminary check for par 'all constraints met'
+# 2011-08-14   406   1.0    Initial version
+#
+
+use 5.005;                                  # require Perl 5.005 or higher
+use strict;                                 # require strict checking
+use FileHandle;
+
+use Getopt::Long;
+
+my %opts = ();
+
+GetOptions(\%opts, "help", "pacc") || exit 1;
+
+sub print_help;
+sub read_mfs;
+sub read_log;
+
+my $type   = shift @ARGV;
+my $mfsnam = shift @ARGV;
+my $lognam = shift @ARGV;
+my @flist;
+my @mlist;
+my $nackcnt = 0;
+my $ackcnt  = 0;
+my $misscnt = 0;
+
+
+autoflush STDOUT 1;		# autoflush, so nothing lost on exec later
+
+if (exists $opts{help}) {
+  print_help;
+  exit 0;
+}
+
+if (!defined $type || !defined $mfsnam || !defined $lognam) {
+  print STDERR "xise_msg_filter-E: one of 'type mfset log' missing \n\n";
+  print_help;
+  exit 1;
+}
+
+if ($type !~ m{^(xst|tra|map|par|twr|bgn)$}) {
+  print STDERR "xise_msg_filter-E: type must be  xst,tra,map,par,twr, or bgn\n";
+  exit 1;
+}
+
+if (read_mfs()) {exit 1;}
+if (read_log()) {exit 1;}
+
+foreach (@mlist) {
+  my $msgorig = $_->[0];
+  my $msgflat = $_->[1];
+  my $msgmatch = 0;
+  foreach (@flist) {
+    my $filt = $_->[0];
+    if ($msgflat =~ m{$filt}) {
+      $_->[1] += 1;
+      $msgmatch = 1;
+      last;
+    }
+  }
+  if ($msgmatch) {
+    $_->[2] += 1;
+  } else {
+    $nackcnt += 1;
+  }
+}
+
+if ($nackcnt) {
+  print "Unexpected messages of type [$type] from $lognam:\n";
+  foreach (@mlist) {
+    next if $_->[2];
+    print $_->[0] . "\n";
+  }
+  print "\n";
+}
+
+foreach (@flist) {
+  if ($_->[1]) {
+    $ackcnt  += 1;
+  } else {
+    $misscnt += 1;
+  }
+}
+
+if ($ackcnt && exists $opts{pacc}) {
+  print "Accepted messages of type [$type] from $lognam:\n";
+  foreach (@flist) {
+    next if $_->[1] == 0;
+    printf "%4d: %s\n", $_->[1], $_->[0];
+  }
+  print "\n";
+}
+
+if ($misscnt) {
+  print "Missed messages of type [$type] from $lognam:\n";
+  foreach (@flist) {
+    next if $_->[1] != 0;
+    printf "%4d: %s\n", $_->[1], $_->[0];
+  }
+  print "\n";
+}
+
+#-------------------------------------------------------------------------------
+sub read_mfs {
+  if (not -r $mfsnam) {
+    print STDERR "xise_msg_filter-E: \'$mfsnam\' not existing or readable\n";
+    return 1;
+  }
+
+  open (FFILE, $mfsnam)    or die "can't open for read $mfsnam: $!";
+
+  my $intyp = 0;
+
+  while (<FFILE>) {
+    chomp;
+    next if /^\s*#/;			    # drop comments
+    next if /^\s*$/;			    # drop empty lines
+
+    if (m{^\[([a-z]{3})\]$}) {
+      if ($1 eq $type) {
+        $intyp = 1;
+      } else {
+        $intyp = 0;
+      }
+    } else {
+      if ($intyp) {
+        push @flist, [$_, 0];
+      }
+    }
+  }
+
+  close (FFILE);
+
+  return 0;
+}
+
+#-------------------------------------------------------------------------------
+sub read_log {
+  if (not -r $lognam) {
+    print STDERR "xise_msg_filter-E: \'$lognam\' not existing or readable\n";
+    return 1;
+  }
+
+  open (LFILE, $lognam)    or die "can't open for read $lognam: $!";
+
+  my $msgorig = "";
+  my $msgflat = "";
+  my $inmsg = 0;
+  my $parallmet = 0;
+
+  while (<LFILE>) {
+    chomp;
+
+    $parallmet = 1 if ($type eq "par" && m/All c/);
+
+    if (m{^(INFO|WARNING|ERROR):}) {
+      if ($inmsg) {push @mlist, [$msgorig, $msgflat, 0];}
+      $inmsg = 1;
+      $msgorig = $_;
+      $msgflat = $_;
+    } elsif ($inmsg && m{^\s\s\s\S}) {
+      $msgorig .= "\n" . $_;
+      my $txt = $_;
+      $txt =~ s{\s\s}{};                    # replace 3 leading blanks by one !
+      $msgflat .= $txt;
+    } else {
+      if ($inmsg) {push @mlist, [$msgorig, $msgflat, 0];}
+      $inmsg = 0;
+    }
+  }
+
+  if ($inmsg) {push @mlist, [$msgorig, $msgflat, 0];}
+
+  close (LFILE);
+
+  if ($type eq "par" && $parallmet==0) {
+    printf "!! ----------------------------------- !!\n";
+    printf "!! par: FAILED TO REACH TIMING CLOSURE !!\n";
+    printf "!! ----------------------------------- !!\n";
+  }
+
+  return 0;
+}
+
+#-------------------------------------------------------------------------------
+
+sub print_help {
+  print "usage: xise_msg_filter [options] type mfset log\n";
+  print "  type   log file type: xst,tra,map,par,twr, or bgn\n";
+  print "  mfset  message filter set file\n";
+  print "  log    log file\n";
+  print "  Options:\n";
+  print "    --pacc           print summary of accepted messages\n";
+  print "    --help           this message\n";
+}
