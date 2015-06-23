@@ -1,0 +1,128 @@
+//
+// Filename: cordic.nac
+// Purpose : N-address code (NAC) implementation for a fixed-point universal 
+//           CORDIC supporting all directions (ROTATION, VECTORING) and 
+//           operation modes (CIRCULAR, LINEAR, HYPERBOLIC). 
+//           The arithmetic representation used is signed fixed-point 
+//           (Q2.14S). The implementation is based partly on the following 
+//           sources (as references):
+//           [1] The simple fixed-point CORDIC tools from:
+//           http://www.dcs.gla.ac.uk/~jhw/cordic/
+//           [2] Jorg Arndt, Matters Computational (free ebook): 
+//           http://www.jjj.de/fxt/
+//           [3] Jean-Michel Muller, Elementary Functions: Algorithms and 
+//           Implementation, Second Edition, Birkhauser, 2006.
+//           [4] Uwe Meyer-Baese, Digital Signal Processing with Field 
+//           Programmable Gate Arrays, Third Edition, Springer, 2007.
+// Author  : Nikolaos Kavvadias (C) 2010
+// Date    : 01-Nov-2010
+// Revision: 0.3.0 (31/10/10)
+//           Initial version.
+//           0.3.1 (01/11/10)
+//           Some hand optimizations.
+//           0.3.2 (01/11/10)
+//           Interface changes, implementation of a unified CORDIC (can 
+//           compute any function).
+//           0.3.3 (08/11/10)
+//           Replaced the three coefficient LUTs with a single one.
+// 
+
+constant s16 0, 1, 2, 4, 14, 28, 15;
+globalvar s16 cordic_tab[42]={65535,8999,4184,2058,1025,512,256,128,64,32,16,8,4,2,16384,8192,4096,2048,1024,512,256,128,64,32,16,8,4,2,12867,7596,4013,2037,1022,511,255,127,63,31,15,7,3,1};
+
+procedure cordic (in s16 direction, in s16 mode, in s16 xin, in s16 yin, in s16 zin, out s16 xout, out s16 yout, out s16 zout)
+{
+  localvar s16 k, d;
+  localvar s16 x, y, z;
+  localvar s16 xbyk, ybyk, i, tabval;
+  localvar s16 t0, t1, t2, t3, t4, t5, t6, t7;
+  localvar s16 zero, one, ldirection, lmode, offset;
+  
+S_1:
+  zero <= ldc 0;
+  one <= ldc 1;
+  x <= mov xin;
+  y <= mov yin;
+  z <= mov zin;
+  ldirection <= mov direction;
+  lmode <= mov mode;
+//  kstart = ((mode == HYPERBOLIC) ? 1 : 0);
+  k <= muxeq lmode, 2, one, zero;
+//  offset = ((mode == HYPERBOLIC) ? 0 : ((mode == LINEAR) ? 14 : 28)); 
+  t0 <= muxeq lmode, 1, 14, 28;
+  offset <= muxeq lmode, 2, 0, t0;
+  i <= ldc 4;
+  S_2 <= jmpun;
+
+//  for (k = kstart; k < CORDIC_NTAB; ++k) {
+S_2:
+  S_3, S_EXIT <= jmplt k, 14;
+  
+//again:
+S_3:
+  // precompute invariants: y>>k, -(y>>k), x>>k, cordic_ctab[k]
+  t0 <= shr y, k;
+  t1 <= neg t0;
+//  xbyk = (x>>k);
+  xbyk <= shr x, k;
+//  ybyk = ((mode == HYPERBOLIC) ? -(y>>k) : ((mode == LINEAR) ? 0 : (y>>k)));
+  t5 <= muxeq lmode, 1, zero, t0;
+  ybyk <= muxeq lmode, 2, t1, t5;
+//  tabval = ((mode == HYPERBOLIC) ? cordic_htab[k] : ((mode == LINEAR) ? cordic_btab[k] : cordic_ctab[k]));
+  t2 <= add k, offset;
+  tabval <= load cordic_tab, t2;
+//  if (direction == ROTATION) {
+//    d = ((z>=0) ? 0 : 1);
+  t7 <= shr z, 15;
+  t1 <= muxeq t7, 0, zero, one; 
+//  } else { // VECTORING
+//    d = ((y<0) ? 0 : 1);      		
+//  }
+  t2 <= shr y, 15;
+  t3 <= muxne t2, 0, zero, one;
+  d <= muxeq ldirection, 0, t1, t3;
+  S_4, S_5 <= jmpeq d, 0;
+
+S_4:
+//   x = x - ybyk;
+  x <= sub x, ybyk;
+//   y = y + xbyk;
+  y <= add y, xbyk;
+//   z = z - tabval;
+  z <= sub z, tabval;
+  S_6 <= jmpun;
+  
+S_5:
+//  x = x + ybyk;
+  x <= add x, ybyk;
+//  y = y - xbyk;
+  y <= sub y, xbyk;
+//  z = z + tabval;
+  z <= add z, tabval;
+  S_6 <= jmpun; 
+ 
+S_6:
+//  if ((k == i) && (mode == HYPERBOLIC)) {
+  t0 <= seteq k, i;
+  t1 <= seteq lmode, 2;
+  t2 <= and t0, t1;
+  S_7, S_8 <= jmpeq t2, 1;
+
+S_7:
+//    i = ((i << 1) + i) + 1;
+//    goto again;
+//  }
+  t3 <= shl i, 1;
+  t4 <= add t3, i;
+  i <= add t4, 1;
+  S_3 <= jmpun;
+  
+S_8:
+  k <= add k, 1;
+  S_2 <= jmpun;
+  
+S_EXIT:
+  xout <= mov x;
+  yout <= mov y;
+  zout <= mov z;
+}
