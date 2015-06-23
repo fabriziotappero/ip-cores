@@ -1,0 +1,259 @@
+<head>
+<link rel="stylesheet" href="../../style.css" type="text/css">
+</head>
+<a href="javascript:history.go(-1)" onMouseOver="self.status=document.referrer;return true">Go Back</a>
+<p align='right'><a href='fade_ether_protocol.tar.gz'>Source code</a></p>
+<body>
+<div class="main">
+ <div class="mid" id="dm">
+  <div class="content" id="dmc">
+   <h2>
+    Details
+   </h2>
+   <p>
+    Name: fade_ether_protocol
+    <br/>
+    Created: Dec 14, 2012
+    <br/>
+    Updated: Oct  5, 2014
+    <br/>
+    SVN Updated: Jun  2, 2015
+    
+    
+    
+    
+    
+    
+   </p>
+   <h2>
+    Other project properties
+   </h2>
+   <p>
+    Category:
+    
+     Communication controller
+    
+    <br/>
+    Language:
+    
+     VHDL
+    
+    <br/>
+    Development status:
+    
+     Beta
+    
+    <br/>
+    Additional info:
+    
+     FPGA proven
+    
+    <br/>
+    WishBone Compliant: No
+    <br/>
+    License: Others
+   </p>
+   <div id="d_Description">
+    <h2>
+     
+     
+     Description
+    </h2>
+    <p id="p_Description">
+     This project implements the simple and light protocol for transmission
+of data from low resources FPGA connected to the Ethernet PHY
+and an embedded system running Linux OS.
+The main goal was to assure the reliable transmission over unreliable
+Ethernet link without need to buffer significant amount of data
+in the FPGA. This created a need to obtain possibly early 
+acknowledgment of received packets from the embedded system,
+and therefore the protocol had to be implemented in layer 3.
+     <br/>
+     The Ethernet type 0xfade was used (unregistered, but as this
+protocol should be used only in a small private networks,
+without routers, with switches only, it should not be a problem).
+     <br/>
+     We assume, that the FPGA is capable to store one "set" of packets
+(in the example design length of this set is equal to 32).
+To start the transmission, receiver sends the "start transmission"
+packet:
+     <br/>
+    </p>
+    <p class="u_cmd">
+     TGT,SRC,0xfade,0x0001,pad to 64 bytes
+    </p>
+    <br/>
+    After reception of the "start transmission" packet, the transmitter
+(FPGA) starts to send the data packets:
+    <br/>
+    <p class="u_cmd">
+     TGT,SRC,0xfade,0xa5a5,set &amp; packet number, delay, 1024 bytes of data
+    </p>
+    <br/>
+    After reception of the correct data packet, the receiver sends the
+"acknowledge" packet:
+    <br/>
+    <p class="u_cmd">
+     TGT,SRC,0xfade,0x0003,set &amp; packet number, pad to 64 bytes
+    </p>
+    <br/>
+    Another packet may be used to request immediate stop of transmission:
+    <br/>
+    <p class="u_cmd">
+     TGT,SRC,0xfade,0x0005, pad to 64 bytes
+    </p>
+    <br/>
+    When first packets from the current set buffered in FPGA are 
+transmitted and acknowledged, they may be replaced with the packets
+from the next set - the current state of transmission is stored
+in desc_memory in the desc_manager entity.
+    <br/>
+    When particular packet is not acknowledged, it is transmitted once
+again. In current example design each packet has simple attributes:
+    <ol>
+     <li>
+      set number
+     </li>
+     <li>
+      valid (ready to be sent)
+     </li>
+     <li>
+      sent (has been sent at least once - used for delay adaptation)
+     </li>
+     <li>
+      confirmed (reception has been confirmed, packet may be replaced
+   with the same packet from the next set)
+     </li>
+    </ol>
+    List of packets is cyclically browsed to move the "head" and "tail"
+pointers.
+    <br/>
+    If the data packets are sent too quickly, the acknowledge
+packets from the embedded system are received too late,
+and the packet is retransmitted before acknowledge arrives.
+The same may occur if the embedded system is overloaded 
+with packets from different slaves and drops some packets.
+    <br/>
+    Therefore paradoxically resending of packets as soon as possible
+does not provide the maximal throughput, and a delay between
+packets must be introduced.
+    <br/>
+    Of course if this delay is too big, the transmission also slows down.
+To find the optimal delay, I have implemented a simple adaptive
+algorithm based on analysis of the ratio between number of all sent
+packets and of retransmitted packets: Nretr/Nall
+    <br/>
+    If the data packets are sent too quickly, the ratio of Nretr/Nall
+increases indicating, that the delay should be higher.
+    <br/>
+    If the ratio Nretr/Nall is near to 0, we may reduce the delay.
+Such a simple algorithm works quite satisfactory.
+    <br/>
+    In the embedded system, the fpga_l3_fade.ko driver allows you
+to service multiple FPGA slaves connected to different network
+interfaces.
+    <br/>
+    The "max_slaves" parameter lets you to set the maximum number of 
+slaves, when module is loaded.
+    <br/>
+    After that, you can open /dev/l3_fpga0, /dev/l3_fpga1 ...
+devices, to connect different slaves.
+To connect one of those devices to particular FPGA slave,
+you need to use the ioctl command L3_V1_IOC_STARTMAC 
+(please see the attached receiver2.c application for
+an example).
+    <br/>
+    The data received from the FPGA are placed in a kernel
+buffer (each subdevice has its own buffer) which may be mmapped
+to the user space application, providing very quick access
+to the data. Another ioctl commands:  L3_V1_IOC_READPTRS
+and L3_V1_IOC_WRITEPTRS allow you to read the head and tail
+pointers in this buffer and to confirm reception of data.
+The attached receiver2.c application uses the described
+mechanisms and simply tests, if the connected FPGA slave
+sends consecutive 32-bit integers.
+    <br/>
+    The project is also hosted at my website:
+    
+     http://www.ise.pw.edu.pl/~wzab/fpga_l3_fade
+    
+    <br/>
+    Description of the project is also available at
+    
+     http://arxiv.org/abs/1208.4490
+    
+    <br/>
+    The updated description is published in the article:
+    
+     http://proceedings.spiedigitallibrary.org/proceeding.aspx?articleid=1763152
+    
+    <h2>
+     DISCLAIMER:
+    </h2>
+    The published sources are "the first iteration". They work for me,
+but I do not provide any warranty. You can use it only on your 
+own risk!
+    <br/>
+    <h2>
+     LICENSING:
+    </h2>
+    <ol>
+     <li>
+      My kernel driver is released under the GPL license
+     </li>
+     <li>
+      My user space application is public domain
+     </li>
+     <li>
+      My FPGA code is published with BSD license
+     </li>
+     <li>
+      The core kept in FPGA_with_MAC directory includes also very
+   slightly modified Ethernet MAC 
+   http://opencores.org/project,ethernet_tri_mode
+   which is published under LGPL. (The core located in the FPGA_no_MAC 
+   directory does not use MAC core, the Ethernet PHY is controlled directly
+   by simple state machines.)
+     </li>
+     <li>
+      Due to licensing issues I can include only xco files for blocks
+   generated by Xilinx tools
+     </li>
+    </ol>
+    <h2>
+     REBUILDING of FPGA CORES
+    </h2>
+    My sources have been tested with three boards: SP601, Atlys and
+Spartan-3E Starter Kit. In the FPGA_with_MAC and FPGA_no_MAC
+subdirectories there are
+three subdirectories: sp601, atlys and sk3e. In each of those
+subdirectories there is the "build.sh" script, which
+should recreate the .bit file needed to configure particular
+board.
+    <h2>
+     EXPERIMENTAL "JUMBO FRAMES" BASED IMPLEMENTATION FOR 1Gb/s and 10GB/s LINKS
+    </h2>
+    In the directory experimental_jumbo_frames_version you can find
+the experimental version of my protocol, working with the 10Gb/s link on the 
+KC705 board and with 1Gb/s link on the Atlys board.
+It uses longer "jumbo frames" with 8192 bytes of user data to transmit
+data from the FPGA.
+The high speed operation has exposed serious disadvantages of the previous
+implementation. E.g. the concept of "sets" of packets has been dropped,
+and instead packets are sequentially (modulo 2^32) numbered in the data
+stream.
+Additionally a possibility to send user defined commands (16-bit command
+code, 32-bit command argument, 12-bytes return value (with 8 bytes defined
+by the user)) to the FPGA.
+The design has been initially tested, and is working, but it still
+needs some improvements.
+After the cleanup, this approach will be ported also to the version
+working with standard frames.
+   </div>
+  </div>
+  <div style="clear:both;margin-left:200px;">
+  </div>
+ </div>
+</div>
+</body>
+<p id='foot'>Database updated on 12 June 2015</p>

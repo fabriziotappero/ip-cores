@@ -1,0 +1,159 @@
+DESCRIPTION
+
+This archive implements the simple and light protocol for transmission
+of data from low resources FPGA connected to the Ethernet MAC
+and an embedded system running Linux OS.
+The main goal was to assure the reliable transmission over unreliable
+Ethernet link without need to buffer significant amount of data
+in the FPGA. This created a need to obtain possibly early 
+acknowledgment of received packets from the embedded system,
+and therefore the protocol had to be implemented in layer 3.
+
+The Ethernet type 0xfade was used (unregistered, but as this
+protocol should be used only in a small private networks,
+without routers, with switches only, it should not be a problem).
+
+We assume, that the FPGA is capable to store one "set" of packets
+(in the example design length of this set is equal to 32).
+To start the transmission, receiver sends the "start transmission"
+packet:
+TGT,SRC,0xfade,0x0001,pad to 64 bytes
+
+After reception of the "start transmission" packet, the transmitter
+(FPGA) starts to send the data packets:
+TGT,SRC,0xfade,0xa5a5,set & packet number, delay, 1024 bytes of data
+
+
+After reception of the correct data packet, the receiver sends the
+"acknowledge" packet:
+TGT,SRC,0xfade,0x0003,set & packet number, pad to 64 bytes
+
+Another packet may be used to request immediate stop of transmission:
+TGT,SRC,0xfade,0x0005, pad to 64 bytes
+
+When first packets from the current set buffered in FPGA are 
+transmitted and acknowledged, they may be replaced with the packets
+from the next set - the current state of transmission is stored
+in desc_memory in the desc_manager entity.
+
+When particular packet is not acknowledged, it is transmitted once
+again. In current example design each packet has simple attributes:
+1. set number
+2. valid (ready to be sent)
+3. sent (has been sent at least once - used for delay adaptation)
+4. confirmed (reception has been confirmed, packet may be replaced
+   with the same packet from the next set)
+
+List of packets is cyclically browsed to move the "head" and "tail"
+pointers.
+I've also tried another approach with more sophisticated packet
+manager based on linked lists, but it is not fully debugged and not
+ready for release yet. However the approach with cyclic browsing is
+sufficient, as anyway an additional delay between packets had to be
+introduced to achieve optimal transmission.
+
+If the data packets are sent too quickly, the acknowledge
+packets from the embedded system are received too late,
+and the packet is retransmitted before acknowledge arrives.
+The same may occur if the embedded system is overloaded 
+with packets from different slaves and drops some packets.
+
+Therefore paradoxically resending of packets as soon as possible
+does not provide the maximal throughput, and a delay between
+packets must be introduced.
+Of course if this delay is too big, the transmission also slows down.
+
+To find the optimal delay, I have implemented a simple adaptive
+algorithm based on analysis of the ratio between number of all sent
+packets and of retransmitted packets: Nretr/Nall
+If the data packets are sent too quickly, the ratio of Nretr/Nall
+increases indicating, that the delay should be higher.
+If the ratio Nretr/Nall is near to 0, we may reduce the delay.
+Such a simple algorithm works quite satisfactory.
+
+In the embedded system, the fpga_l3_fade.ko driver allows you
+to service multiple FPGA slaves connected to different network
+interfaces.
+The "max_slaves" parameter lets you to set the maximum number of 
+slaves, when module is loaded.
+
+After that, you can open /dev/l3_fpga0, /dev/l3_fpga1 ...
+devices, to connect different slaves.
+To connect one of those devices to particular FPGA slave,
+you need to use the ioctl command L3_V1_IOC_STARTMAC 
+(please see the attached receiver2.c application for
+an example).
+The data received from the FPGA are placed in a kernel
+buffer (each subdevice has its own buffer) which may be mmapped
+to the user space application, providing very quick access
+to the data. Another ioctl commands:  L3_V1_IOC_READPTRS
+and L3_V1_IOC_WRITEPTRS allow you to read the head and tail
+pointers in this buffer and to confirm reception of data.
+The attached receiver2.c application uses the described
+mechanisms and simply tests, if the connected FPGA slave
+sends consecutive 32-bit integers.
+
+DISCLAIMER:
+The published sources are "the first iteration". They work for me,
+but I do not provide any warranty. You can use it only on your 
+own risk!
+
+I hope to prepare the new, more mature version, which will be 
+described in a "official" publication (I'll send the reference, 
+when it is ready).
+
+I'll also publish further versions of sources on my website:
+http://www.ise.pw.edu.pl/~wzab/fpga_l3_fade
+
+
+LICENSING:
+1. My kernel driver is released under the GPL license
+2. My user space application is public domain
+3. My FPGA code is published with BSD license
+4. I include also very slightly modified Ethernet MAC 
+   http://opencores.org/project,ethernet_tri_mode
+   which is published under LGPL.
+5. Due to licensing issues I can include only xco files for blocks
+   generated by Xilinx tools (in case of sources for 
+   Spartan 3E Starter Kit instead of binary dcm1.xaw file
+   I had to include the generated dcm1.vhd file to avoid binary
+   attachment in shar archive).
+   I hope that you'll be able to rebuild my design with them
+
+REBUILDING of FPGA CORES
+The sources are split into two sections:
+FPGA_with_MAC - this is the older version with Ethernet MAC taken from
+                http://opencores.org/project,ethernet_tri_mode
+FPGA_no_MAC - this is the newer version with renoved Ethernet MAC
+              instead two small state machines are implemented in
+	      ethernet_sender_X and ethernet_receiver_X (X=4 or 8)
+              controlling the PHY directly.
+
+My sources have been tested with three boards: SP601, Atlys and
+Spartan-3E Starter Kit. In the FPGA subdirectory there are
+three subdirectories: sp601, atlys and sk3e. In each of those
+subdirectories you there is the "build.sh" script, which
+should recreate the .bit file needed to configure particular
+board.
+
+If you create something basing on this my work, I'll be glad if you
+provide information about my project (especially if you cite my 
+article, after it is ready and published)
+
+EXPERIMENTAL "JUMBO FRAMES" BASED IMPLEMENTATION FOR 1Gb/s and 10GB/s LINKS
+In the directory experimental_jumbo_frames_version you can find
+the experimental version of my protocol, working with the 10Gb/s link on the 
+KC705 board and with 1Gb/s link on the Atlys board.
+It uses longer "jumbo frames" with 8192 bytes of user data to transmit
+data from the FPGA.
+The high speed operation has exposed serious disadvantages of the previous
+implementation. E.g. the concept of "sets" of packets has been dropped,
+and instead packets are sequentially (modulo 2^32) numbered in the data
+stream.
+Additionally a possibility to send user defined commands (16-bit command
+code, 32-bit command argument, 12-bytes return value (with 8 bytes defined
+by the user)) to the FPGA.
+The design has been initially tested, and is working, but it still
+needs some improvements.
+After the cleanup, this approach will be ported also to the version
+working with standard frames.
