@@ -1,0 +1,259 @@
+     1	/*#include <stdio.h>*/
+     2	
+     3	#define LIMIT 1500000 /*size of integers array*/
+     4	#define PRIMES 100000 /*size of primes array*/
+     5	
+     6	nocall my_org() {
+     7		asm {
+     8			org	0x100800200
+     9			db	"BOOT"
+    10			jmp	crt_start
+    11			.align 8
+    12	sp_save:
+    13			dw	0
+    14		}
+    15	}
+    16	
+
+
+*** local symbol table ***
+
+
+
+
+    17	int main(){
+    18	    int i,j,numbers[LIMIT];
+    19	    int primes[PRIMES];
+    20		int limit;
+    21		int start_tick,end_tick;
+    22	
+    23		asm {
+    24			sei
+    25			lw		r1,#0xAB
+    26			outb	r1,0xdc0600
+    27		}
+    28		start_tick = get_tick();
+    29		asm {
+    30			lw		r1,#0xAC
+    31			outb	r1,0xdc0600
+    32		}
+    33		printf("Start tick %d\r\n", start_tick);
+    34		asm {
+    35			lw		r1,#0xAD
+    36			outb	r1,0xdc0600
+    37			cli
+    38		}
+    39	
+    40		limit=LIMIT;
+    41	
+    42	    /*fill the array with natural numbers*/
+    43		for (i=0;i<limit;i++){
+    44			numbers[i]=i+2;
+    45		}
+    46	
+    47	    /*sieve the non-primes*/
+    48	    for (i=0;i<limit;i++){
+    49	        if (numbers[i]!=-1){
+    50	            for (j=2*numbers[i]-2;j<limit;j+=numbers[i])
+    51	                numbers[j]=-1;
+    52	        }
+    53	    }
+    54	
+    55	    /*transfer the primes to their own array*/
+    56	    j = 0;
+    57	    for (i=0;i<limit&&j<PRIMES;i++)
+    58	        if (numbers[i]!=-1)
+    59	            primes[j++] = numbers[i];
+    60	
+    61		end_tick = get_tick();
+    62		printf("Clock ticks %d\r\n", end_tick-start_tick);
+    63	
+    64	    /*print*/
+    65	    for (i=0;i<PRIMES;i++)
+    66	        printf("%d\n",primes[i]);
+    67	
+    68	return 0;
+    69	}
+    70	
+
+
+*** local symbol table ***
+
+i          =fffffff8    -    Auto        Long
+j          =fffffff0    -    Auto        Long
+numbers    =ff48e4f0    -    Auto        Array of Long
+primes     =ff3caff0    -    Auto        Array of Long
+limit      =ff3cafe8    -    Auto        Long
+start_tick =ff3cafe0    -    Auto        Long
+end_tick   =ff3cafd8    -    Auto        Long
+
+
+
+    71	int printf(char *p)
+    72	{
+    73		int *q;
+    74		asm {
+    75			lw		r1,#0xAE
+    76			outb	r1,0xdc0600
+    77		}
+    78		q = &p;
+    79	
+    80		for (; *p; p++) {
+    81			if (*p=='%') {
+    82				p++;
+    83				switch(*p) {
+    84				case '%':
+    85					putch('%');
+    86					break;
+    87				case 'c':
+    88					q++;
+    89					putch(*q);
+    90					break;
+    91				case 'd':
+    92					q++;
+    93					putnum(*q);
+    94					break;
+    95				case 's':
+    96					q++;
+    97					putstr(*q);
+    98					break;
+    99				}
+   100			}
+   101			else
+   102				putch(*p);
+   103		}
+   104	}
+   105	
+
+
+*** local symbol table ***
+
+p          =000018    -    Auto        Pointer to Char
+q          =fffffff8    -    Auto        Pointer to Long
+
+
+
+   106	void putch(char ch)
+   107	{
+   108		asm {
+   109			lw		r1,#0xAF
+   110			outb	r1,0xdc0600
+   111		}
+   112		asm {
+   113			lw		r1,#0x0a
+   114			lw		r2,24[bp]
+   115			lw		r3,#1
+   116			syscall	#410
+   117		}
+   118		asm {
+   119			lw		r1,#0xB0
+   120			outb	r1,0xdc0600
+   121		}
+   122	}
+   123	
+
+
+*** local symbol table ***
+
+ch         =000018    -    Auto        Char
+
+
+
+   124	void putnum(int num)
+   125	{
+   126		asm {
+   127			lw		r1,#0xB1
+   128			outb	r1,0xdc0600
+   129		}
+   130		asm {
+   131			lw		r1,#0x15
+   132			lw		r2,24[bp]
+   133			lw		r3,#5
+   134			syscall	#410
+   135		}
+   136		asm {
+   137			lw		r1,#0xB2
+   138			outb	r1,0xdc0600
+   139		}
+   140	}
+   141	
+
+
+*** local symbol table ***
+
+num        =000018    -    Auto        Long
+
+
+
+   142	void putstr(char *p)
+   143	{
+   144		asm {
+   145			lw		r1,#0x14
+   146			lw		r2,24[bp]
+   147			syscall	#410
+   148		}
+   149	}
+   150	
+
+
+*** local symbol table ***
+
+p          =000018    -    Auto        Pointer to Char
+
+
+
+   151	int get_tick()
+   152	{
+   153		asm {
+   154			lw		r1,#0
+   155			syscall	#416
+   156		}
+   157	}
+   158	
+
+
+*** local symbol table ***
+
+
+
+
+   159	void crt_start()
+   160	{
+   161		asm {
+   162			lw		r1,#0xAA
+   163			outb	r1,0xdc0600
+   164			sw		sp,sp_save
+   165			lw		sp,#0x1_07FFFFF8
+   166			lea		xlr,prog_abort
+   167			call	main
+   168			lw		sp,sp_save
+   169			bra		retcode
+   170	prog_abort:
+   171		}
+   172		putstr("Program aborted abnormally.");
+   173		asm {
+   174			lw	sp,sp_save
+   175	retcode:
+   176		}
+   177	}
+
+
+*** local symbol table ***
+
+
+
+
+
+ *** global scope typedef symbol table ***
+
+putch      =000000    -    Global      Function returning 
+get_tick   =000000    -    Global      Function returning Long
+my_org     =000000    -    Global      Function returning 
+printf     =000000    -    Global      Function returning Long
+main       =000000    -    Global      Function returning Long
+putnum     =000000    -    Global      Function returning 
+putstr     =000000    -    Global      Function returning 
+crt_start  =000000    -    Global      Function returning 
+
+ *** structures and unions ***
+
