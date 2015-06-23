@@ -1,0 +1,286 @@
+-- Manchester to UART Converter
+-- 		Manchester signal from Bosch speed doom controller keyboard
+-- 		Device 			: EPM7128
+		Total macrocells 	: 114/128
+-- Design by 	Kenneth YK Ho 
+-- 		eyeonfly Limited
+-- 		8 November 2004
+
+LIBRARY ieee;
+USE ieee.std_logic_1164.ALL;
+USE ieee.std_logic_arith.ALL;
+USE ieee.std_logic_unsigned.ALL;
+
+entity Man2uart is
+	port (	RxD	 	: in std_logic;
+		clk  		: in std_logic; 
+		reset  		: in std_logic;
+		check_pt1  	: out std_logic;
+		check_pt2 	: out std_logic;
+		check_pt3  	: out std_logic;
+		check_pt4 	: out std_logic;
+		check_pt5  	: out std_logic;
+		uart 		: out std_logic
+		);
+end Man2uart;
+
+architecture behavioural of Man2uart is
+	type state_type is (guard_time, preamble, sync_start, data);
+	type bit_type is (start,s0,s1,s2,s3,s4,s5,s6,s7,stop);
+	signal uart_bit, next_bit					: bit_type;
+	signal state, next_state 					: state_type;
+	signal phase_one, phase_two, phase_three 			: std_logic;
+	signal Data_in, Data_change, Data_bit 				: std_logic;
+	signal Data_counter 						: std_logic_vector(3 downto 0);
+	signal clock_timer	 					: std_logic_vector(5 downto 0);
+	signal uart_active, uart_start, bit_change			: std_logic;
+	signal uart_not_start						: std_logic;
+	signal uart_delay						: std_logic_vector(6 downto 0);
+	signal Data_buffer, TxD						: std_logic_vector(7 downto 0);
+	signal check							: std_logic_vector(3 downto 0);
+
+begin	
+	process (clk,reset)
+	variable timer 		: std_logic_vector(6 downto 0);  
+	variable Data_out 	: std_logic_vector(7 downto 0);
+	begin
+		if reset = '1' then
+			state <= guard_time;
+			timer := "0000000";
+			uart <= '1';
+			uart_start <= '0';
+			uart_active <='0';
+		elsif clk = '1' and clk'event then
+		if clock_timer /= 108 then
+			clock_timer <= clock_timer + 1;
+		else
+			clock_timer <= "000000";
+			timer := unsigned(timer) + 1 ;
+			
+			state <= next_state;
+			Data_in <= RxD;
+			data_bit <= not RxD;
+			if Data_in = RxD then 
+				Data_change <= '0';
+			else
+				Data_change <= '1';
+			end if;
+------------creat time phase---------------------
+			if timer = 12 then
+				phase_one <= '1'; 
+			elsif timer = 19 or timer = 1 then
+				phase_one <= '0'; 
+			else
+				phase_one <= phase_one;
+			end if;
+			if timer = 25 then
+				phase_two <= '1'; 
+			elsif timer = 38 or timer = 1 then
+				phase_two <= '0'; 
+			else
+				phase_two <= phase_two;
+			end if;
+			if timer = 39 then
+				phase_three <= '1'; 
+			elsif timer = 70 or timer = 1 then
+				phase_three <= '0'; 
+			else
+				phase_three <= phase_three;
+			end if;
+			if timer = 91 then
+				timer := "1011010";
+			end if;
+
+check_pt1 <= check(0);
+check_pt2 <= check(1);
+check_pt3 <= check(2);
+check_pt4 <= check(3);
+uart_not_start <= not uart_start;
+check_pt5 <= uart_not_start; 
+
+			if Data_change = '1' then
+				case state is
+					when guard_time =>
+check <= "0001";
+						if timer = "1011010" then
+							if Data_in = '0' then
+								timer := "0000000";
+								next_state <= guard_time;
+							else
+								timer := "0000000";
+								next_state <= preamble;
+							end if;
+						else
+							timer := "0000000";
+							next_state <= guard_time;
+						end if;
+					when preamble =>
+check <= "0010";
+						if Data_in = '0' then
+							if phase_one = '1' then
+								next_state <= preamble;
+							elsif phase_three = '1' then
+								timer := "0000000";
+								next_state <= sync_start;
+							else
+								if timer > 70 then
+									timer := "0000000";
+									next_state <= guard_time;
+								end if;
+							end if;
+						else
+							timer := "0000000";
+--							if phase_two = '1' then
+--								next_state <= preamble;
+--							else
+--								next_state <= guard_time;
+--							end if;
+						end if;
+					when sync_start =>
+check <= "0100";
+						if Data_in = '0' then
+							timer := "0000000";
+							if phase_one = '1' then
+								Data_counter <= "0000";
+								next_state <= data;
+							else
+								if timer > 70 then
+									timer := "0000000";
+									next_state <= guard_time;
+								end if;
+							end if;
+						else
+							timer := "0000000";
+							if phase_three = '1' then
+								next_state <= sync_start;
+							else
+								if timer > 70 then
+									timer := "0000000";
+									next_state <= guard_time;
+								end if;
+							end if;
+						end if;
+					when data =>
+check <= "1000";
+						if phase_one = '1' then
+							next_state <= data;
+						elsif phase_two = '1' then
+							timer := "0000000";
+							if Data_counter = "1000" then
+								uart_active <= '1';
+								Data_buffer <= Data_out;
+								next_state <= guard_time;
+							else 
+								Data_counter <= Data_counter + 1;
+								Data_out(7 downto 0) := Data_bit & Data_out(7 downto 1);
+								next_state <= data;
+							end if;	
+						else
+								if timer > 39 then
+									timer := "0000000";
+									next_state <= guard_time;
+								end if;
+						end if;
+					when others =>
+						next_state <= guard_time;
+				end case;
+			end if;
+----------- UART state 			
+			uart_bit <= next_bit;
+			
+			if uart_delay = 104 then
+				uart_delay <= "0000000";
+				bit_change <= '1';
+			else
+				uart_delay <= uart_delay + 1;
+				bit_change <= '0';
+			end if;
+			
+			if uart_active ='1' and uart_start = '0' then
+				uart_active <= '0';
+				uart_start <= '1';
+				TxD <= Data_buffer;
+			end if;
+			
+			if bit_change = '1' then
+				case uart_bit is
+					when start =>
+						if uart_start = '0' then
+							next_bit <= stop;
+						else
+							uart <= '0';
+							next_bit <= s0;
+						end if;
+					when s0 =>
+						if uart_start = '0' then
+							next_bit <= stop;
+						else
+						uart <= TxD(0);
+						next_bit <= s1;
+						end if;
+					when s1 =>
+						if uart_start = '0' then
+							next_bit <= stop;
+						else
+							uart <= TxD(1);
+							next_bit <= s2;
+						end if;
+					when s2 =>
+						if uart_start = '0' then
+							next_bit <= stop;
+						else
+							uart <= TxD(2);
+							next_bit <= s3;
+						end if;
+					when s3 =>
+						if uart_start = '0' then
+							next_bit <= stop;
+						else
+							uart <= TxD(3);
+							next_bit <= s4;
+						end if;
+					when s4 =>
+						if uart_start = '0' then
+							next_bit <= stop;
+						else
+							uart <= TxD(4);
+							next_bit <= s5;
+						end if;
+					when s5 =>
+						if uart_start = '0' then
+							next_bit <= stop;
+						else
+							uart <= TxD(5);
+							next_bit <= s6;
+						end if;
+					when s6 =>
+						if uart_start = '0' then
+							next_bit <= stop;
+						else
+							uart <= TxD(6);
+							next_bit <= s7;
+						end if;
+					when s7 =>
+						if uart_start = '0' then
+							next_bit <= stop;
+						else
+							uart <= TxD(7);
+							next_bit <= stop;
+							uart_start <= '0';
+						end if;
+					when stop =>
+						uart <= '1';
+						if uart_start = '0' then
+							next_bit <= stop;
+						else
+							next_bit <= start;
+						end if;
+					when others =>
+						next_bit <= stop;
+						uart_start <= '0';
+				end case;
+			end if;
+		end if;
+		end if;
+	end process;
+end behavioural;
