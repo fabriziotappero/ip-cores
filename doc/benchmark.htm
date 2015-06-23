@@ -1,0 +1,212 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<HTML>
+<HEAD>
+<META http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+<META name="GENERATOR" content="IBM WebSphere Studio Homepage Builder Version 9.0.2.0 for Windows">
+<META http-equiv="Content-Style-Type" content="text/css">
+<TITLE></TITLE>
+</HEAD>
+<BODY>
+<P><B>4 Benchmark Test</B><BR>
+<BR>
+This test was using RTL simulation bench. When C program calls &nbsp;print(&quot;$time&quot;),
+test bench in verilog prints $time.So call at start and finish of dhrystone
+benchmark program. By using this technique you can measure exact clock
+time for execution of benchmark program.<BR>
+<BR>
+</P>
+<P>print &quot;C&quot; program</P>
+<TABLE border="1">
+  <TBODY>
+    <TR>
+      <TH align="left">
+      <PRE>void print(unsigned char* ptr)//Verilog Test Bench Use 
+{
+        #ifdef DOS
+                        printf(&quot;%s &quot;,ptr); 
+        #else
+                
+        while (*ptr) {
+        
+                *(volatile unsigned char*)print_port=*(ptr++);
+        }
+
+        *(volatile unsigned char*)print_port=0x00;//Write Done
+        #endif
+}
+</PRE>
+      </TH>
+    </TR>
+  </TBODY>
+</TABLE>
+<P><BR>
+Test bench in Verilog HDL</P>
+<TABLE border="1">
+  <TBODY>
+    <TR>
+      <TH align="left">
+      <PRE>//YACC Test Bench
+//Apr.5.2005 Tak.Sugawara
+
+`include &quot;define.h&quot;
+`timescale 1ns/1ps
+
+module yacc_test;
+        reg clock=0;
+        reg Reset=0;
+        reg int_req_usr=0;
+        reg RXD=1'b1;
+        wire TXD;
+        wire [31:0] mem_data_w;
+        wire mem_write;
+        wire [15:0] mem_address;
+        always #20 clock=~clock;
+
+
+
+        initial begin
+                Reset=0;
+                #800 Reset=1;
+        end     
+
+`ifdef RTL_SIMULATION
+ yacc cpu(.clock(clock),.Async_Reset(Reset),.MemoryWData(mem_data_w),
+                  .MWriteFF(mem_write),
+                  .data_port_address(mem_address),.RXD(RXD),.TXD(TXD));
+`else
+        yacc cpu(.clock(clock),.Async_Reset(Reset),        .RXD(RXD),.TXD(TXD));
+        
+`endif
+
+
+
+
+
+
+
+
+        task Cprint;// String OUT until the byte 00 or xx detected with least Byte first and justified.
+                integer i;
+                begin :Block
+                        i=0;
+                        while (1) begin
+                                if (char_buffer[i*8 +:8] ===8'h00 || char_buffer[i*8 +:8]===8'hxx) begin
+                                                disable Block;
+                                end     
+                                $write(&quot;%c&quot;,char_buffer[i*8 +:8]);
+                                i=i+1;  
+                        end
+                end
+        endtask
+
+   reg [0:640*2-1] char_buffer;
+   integer  counter=0;    
+   always @ (posedge clock ) begin
+            if ((mem_write === 1'b1)) begin 
+                   if (mem_address==`Print_Port_Address) begin
+                                if (mem_data_w[7:0]===8'h00) begin
+                                        char_buffer[counter*8 +:8]=mem_data_w[7:0];
+                                        if (char_buffer[0  +:8*7]===&quot;$finish&quot;) begin
+                                                        $stop;                          
+                                                        
+                                        end else if (char_buffer[0  +:8*5]===&quot;$time&quot;) begin
+                                                        $display(&quot;Current Time on Simulation=%d&quot;,$time);                                
+                                                        
+                                        end else  Cprint;//$write(&quot;%s&quot;,char_buffer);
+
+                                        for (counter=0; counter&lt; 80*2; counter=counter+1) begin
+                                                char_buffer[counter*8 +:8]=8'h00;
+                                        end
+                                        counter=0;
+                                
+                                end else begin
+                                        char_buffer[counter*8 +:8]=mem_data_w[7:0];
+                                        counter=counter+1;
+                                end
+                   end
+           else if (mem_address==`Print_CAHR_Port_Address) begin
+                                $write(&quot;%h &quot;,mem_data_w[7:0]);
+                   end else if (mem_address==`Print_INT_Port_Address) begin
+                                $write(&quot;%h &quot;,mem_data_w[15:0]);//Little Endian 
+                   end else if (mem_address==`Print_LONG_Port_Address) begin
+                                $write(&quot;%h &quot;,mem_data_w[31:0]);//Big Endian
+                   end 
+        end //if
+   end //always
+
+
+//uart read port
+  wire [7:0] buffer_reg;
+  wire int_req;
+  reg sync_reset;
+
+  localparam LF=8'h0a;  
+        always @(posedge clock, negedge Reset) begin
+                if (!Reset) sync_reset &lt;=1'b1;
+                else sync_reset&lt;=1'b0;
+        end
+        
+   
+
+   uart_read   uart_read_port( .sync_reset(sync_reset), .clk(clock), .rxd(TXD),.buffer_reg(buffer_reg), .int_req(int_req));
+
+        always @(posedge int_req) begin
+                begin :local
+                
+                        reg [7:0] local_mem [0:1000];
+                        integer i=0;
+                        
+                        if (i&gt;=1000) $stop;//assert(0);
+
+                        if (buffer_reg==LF) begin :local2 //pop stack
+                                integer j;
+                                j=0;
+                                while( j &lt; i) begin
+                                        $write( &quot;%c&quot;,local_mem[j]);
+                                        j=j+1;
+                                end
+                                $write(&quot;     : time=%t\n&quot;,$time);
+                                i=0;//clear stack       
+                        end else begin//push stack
+                                
+                                local_mem[i]=buffer_reg;
+                                i=i+1;
+                         end
+                end
+                
+        end
+endmodule
+
+</PRE>
+      </TH>
+    </TR>
+  </TBODY>
+</TABLE>
+<P><BR>
+</P>
+<P>Figure below shows Spartan3 and Stratix2 result.<BR>
+<BR>
+Test Start :330310ns<BR>
+Test Stop: 498050ns<BR>
+<BR>
+Since 10 cycles was done,<BR>
+&nbsp;1 Cycle Time=(498050-330310)/10=167740ns<BR>
+This means<BR>
+&nbsp;596000Dhrystones/Sec<BR>
+<BR>
+VAX Computer is&nbsp;1757Dhrysones/Sec,this results 34DMIPS<BR>
+<BR>
+In this test bench System Clock is set at 50MHz,<BR>
+Therefore Final Result is as follows.<BR>
+<BR>
+<B>17DMIPS for Spartan3</B> (allowable synthesized maximum frequency is 25MHz)<BR>
+<B>110DMIPS for Stratix2</B>(allowable synthesized maximum frequency is 165MHz)<BR>
+<BR>
+</P>
+<P><IMG src="dhrystone.png" width="783" height="715" border="0"></P>
+<P>Note:<BR>
+In Dhrystone benchmark, assembled &quot;strcmp&quot;&nbsp;was&nbsp;used&nbsp;instead&nbsp;of &quot;C strcmp &quot;.This is important for <B><I>fast</I></B> DMIPS.<BR>
+<BR>
+</P>
+</BODY>
+</HTML>
