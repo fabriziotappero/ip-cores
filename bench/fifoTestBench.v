@@ -1,0 +1,90 @@
+//////////////////////////////////////////////////////////////////////
+////                                                              ////
+////  fifoTestBench.v                                             ////
+////                                                              ////
+////                                                              ////
+////  This file is part of the ONFI controller                    ////
+////  http://opencores.org/project,onfi                           ////
+////                                                              ////
+////                                                              ////
+////  Author(s):                                                  ////
+////       Jeff Anderson                                          ////
+////       jeaander@opencores.org                                 ////
+////                                                              ////
+////                                                              ////
+////  All additional information is available in the README.txt   ////
+////  file.                                                       ////
+////                                                              ////
+//////////////////////////////////////////////////////////////////////
+////                                                              ////
+//// Copyright (C) 2013  Author(s)                                ////
+////                                                              ////
+//// This source file may be used and distributed without         ////
+//// restriction provided that this copyright statement is not    ////
+//// removed from the file and that any derivative work contains  ////
+//// the original copyright notice and the associated disclaimer. ////
+////                                                              ////
+//// This source file is free software; you can redistribute it   ////
+//// and/or modify it under the terms of the GNU Lesser General   ////
+//// Public License as published by the Free Software Foundation; ////
+//// either version 2.1 of the License, or (at your option) any   ////
+//// later version.                                               ////
+////                                                              ////
+//// This source is distributed in the hope that it will be       ////
+//// useful, but WITHOUT ANY WARRANTY; without even the implied   ////
+//// warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR      ////
+//// PURPOSE.  See the GNU Lesser General Public License for more ////
+//// details.                                                     ////
+////                                                              ////
+//// You should have received a copy of the GNU Lesser General    ////
+//// Public License along with this source; if not, download it   ////
+//// from http://www.opencores.org/lgpl.shtml                     ////
+////                                                              ////
+////                                                              ////
+//////////////////////////////////////////////////////////////////////
+//
+// CVS Revision History at EOF
+//
+ 
+// synopsys translate_off
+//`include "timescale.v"
+// synopsys translate_on
+
+module fifoTestBench();
+  reg clk_rd,clk_wr,rst,wr_en,rd_en;
+  reg[7:0] d_i;
+  
+  wire[7:0] d_o;
+  wire full, empty;
+  
+  fifo fifo(clk_rd,clk_wr,d_i[7:0],d_o[7:0],rst,wr_en,rd_en,full,empty);
+  
+  initial begin
+    clk_rd = 0;
+    clk_wr = 0;
+    rst = 1;
+    d_i = 8'h1;
+    wr_en = 0;
+    rd_en = 0;
+  end
+  
+  always 
+    #5 clk_wr = !clk_wr;
+  always 
+    #15 clk_rd = !clk_rd;
+  
+  initial begin
+  #20 rst = 0;
+  #10 wr_en = 1;
+  #150 wr_en = 0;
+  #10 rd_en = 1;
+  end
+  
+endmodule
+
+//////////////////////////////////////////////////////////////////////
+//
+// CVS Revision History
+//
+// $Log: $
+//
