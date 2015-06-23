@@ -1,0 +1,211 @@
+#=======================================================================
+# 
+# ca_prng_description.txt
+# -----------------------
+# README file for the ca_prng IP-core. The file
+# contains a brief introduction to cellular automata based pattern
+# generation, a description of the core and how to use the core.
+# 
+# 
+# Author: Joachim Strömbergson
+# Copyright (c) 2008, InformAsic AB
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+#     * Redistributions of source code must retain the above copyright
+#       notice, this list of conditions and the following disclaimer.
+# 
+#     * Redistributions in binary form must reproduce the above
+#       copyright notice, this list of conditions and the following
+#       disclaimer in the documentation and/or other materials
+#       provided with the distribution.
+#
+# THIS SOFTWARE IS PROVIDED BY InformAsic AB ''AS IS'' AND ANY EXPRESS
+# OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+# WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL InformAsic AB BE LIABLE FOR ANY
+# DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
+# GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+# WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+# NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+# SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#
+#=======================================================================
+
+
+1: Introduction
+---------------
+A cellular automata (CA) is a discrete model that consists of a grid
+(1D, 2D, 3D ) with objects called cells. Each cell can be in one of a
+given finite set of states (on and off, different colours etc). Each
+cell has a set of cells in close proximity called neighbours. Given the
+current internal state of a cell, the states of the cells in the close
+proximity and a given set of update rules the next state of a cell can
+be determined. For more information about cellular automata, se [1].
+
+The ca_prng IP-core implements a 1D binary cellular automata with wrap
+around at the edges (i.e. a ring). The update rules for a given 
+cell is based on the current state of the cell and the state of its
+two nearest neighbours (left and right). The cell state for a given cell
+(i), stored in the ca_state_reg register array can thus be given by
+the state in cells (i-1), (i) and (i+1) as inputs to the update rule, se
+figure 1.
+
+                    ---------------------
+    ca_state_reg:   |...|i-1| i |i+1|...|
+                    --------------------- 
+                          \   |   /
+                        (update_rule)          
+                              |
+                    ---------------------
+    ca_state_new:   |...|i-1| i |i+1|...|
+                    --------------------- 
+
+  Figure 1: State update for a cell (i) based on neighbour cells
+            and the update rule.
+
+With a three input, binary state the update rule set consists of eight
+possible bit updates. In total the ca_prng supports 256 update
+rules. For different rules and possible patterns, see [2].
+
+The default update rule used in the ca_prng is rule30. Rule30 is an
+update rule that when applied to the CA will produce a class III,
+aperiodic, chaotic behaviour. The rule was discovered by Stephen Wolfram
+[3].
+
+
+2: IP-core description
+----------------------
+The ca_prng is a CA with 32 cells, implemented as a 32 bit wide
+register. Each register (cel) has separate update logic that looks at
+the current state of the register and its two nearest neighbours (with
+wrap around). The total state update latency for all cells is thus one
+cycle.
+
+The actual update of the registers is controlled by external control
+signals that allows a user to set the register initial pattern
+(state) and request generation of new pattern.
+
+Loading of initial pattern is is accomplished by setting the
+input_pattern_data port to the desired inital pattern and then
+asserting the load_input_pattern port for one clock cycle.
+
+Requesting a new pattern is accomplished by asserting the next_pattern
+port.
+
+After reset the ca_prng will use rule30 as the update rule. Changing the
+rule is done by assigning the new rule to the update_rule port and then
+asserting the load_update_rule for one clock cycle.
+
+The generated pattern is available as a 32 bit value on the prng_data
+port. 
+
+
+Figure 2 shows input and output ports of the ca_prng core.
+
+
+                          ––––––––––-
+    input_pattern_data   |           |
+                -------->|           |
+                         |           |
+     load_init_pattern   |           |
+                 ------->|           |  prng_data
+                         |           |-------->
+          next_pattern   |           |
+                -------->|           |
+                         |           |
+           update_rule   |  ca_prng  |
+                -------->|           |
+                         |           |
+       load_upate_rule   |           |
+                 ------->|           |
+                         |           |
+                         |           |
+                         |           |
+                   clk   |           |
+                -------->|           |
+                         |           |
+               reset_n   |           |
+                -------->|           |
+                         |––––––––––-|
+
+  Figure 2: Input and output ports of the ca_prng core.
+  
+The ca_prng core is a positive edge triggered synchronous design. All
+internal registers are equipped with a synhronous, active low reset.
+
+
+3: IP-core delivery contents
+----------------------------
+The ca_prng core is provided as RTL source code written in Verilog 2001
+compliant code. The ca_prng delivery also contains a testbench that
+verifies the functionality. Finally the core contains a functional model
+written in Python as well as documentation (this file).
+
+The provided testbench has been used to verify the core using the
+ModelSim as well as the Icarus Verilog simulators. 
+
+The ca_prng core has been implemented in FPGA tools from Altera and
+Xilinx. The following table lists the area and speed achieved for the
+ca_prng core as a stand alone core.
+
+Altera Devices (implemented using Quartus 9.0)
+Stratix II
+---------
+Device: EP2S15
+ALUT:   106
+Reg:    40
+Mem:    0
+DSP:    0
+fmax:   300 MHz
+
+Cyclone III
+-----------
+Device: EP3C5
+LE:     234 
+Reg:    40
+Mem:    0
+Mult:   0
+fmax:   250 MHz
+
+
+Xilinx Devices (implemented using ISE 11.0)
+Spartan 3A
+----------
+Device: xc3s50a-5
+Slices: 93
+Reg:    48 (replicated update_rule_reg)
+Mem:    0
+Mult:   0
+fmax:   250 MHz
+
+Virtex-5
+--------
+Device: xc5vlx30-3
+Slices: 42
+Reg:    40
+Mem:    0
+Mult:   0
+fmax:   400 MHz
+
+
+4: References
+-------------
+[1]     Wikipedia. Cellular Automaton. Web page. 2009.
+        http://en.wikipedia.org/wiki/Cellular_automaton
+
+[2]     Wolfram MathWorld. Elementary Cellular Automaton. Web
+        page. 2009.
+        http://mathworld.wolfram.com/ElementaryCellularAutomaton.html
+
+[3]     Wikipedia. Rule 30 description. Web page. 2009.
+        http://en.wikipedia.org/wiki/Rule_30
+
+#=======================================================================
+# EOF ca_prng_description.txt
+#=======================================================================
+
