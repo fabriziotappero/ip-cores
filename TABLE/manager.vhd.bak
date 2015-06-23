@@ -1,0 +1,317 @@
+--------------------------------------------------------
+	library IEEE;
+	use IEEE.STD_LOGIC_1164.ALL;
+	use IEEE.STD_LOGIC_ARITH.ALL;
+	use IEEE.STD_LOGIC_UNSIGNED.ALL;
+	use ieee.numeric_std.all;
+---------------------------------------------
+
+	ENTITY  manager IS
+	GENERIC(DATA_WIDTH :INTEGER := 64;
+			CTRL_WIDTH :INTEGER := 8);
+	PORT(
+	
+				SIGNAL in_data :IN   STD_LOGIC_VECTOR(63 DOWNTO 0);
+				SIGNAL in_ctrl : IN   STD_LOGIC_VECTOR(7 DOWNTO 0);
+				SIGNAL in_wr :IN STD_LOGIC;
+				SIGNAL in_rdy : OUT STD_LOGIC;	
+				SIGNAL in_rd: IN std_logic;	
+				SIGNAL in_key 		: IN STD_LOGIC_VECTOR(9 DOWNTO 0);
+				SIGNAL out_mac: OUT std_logic_VECTOR(47 downto 0);
+				SIGNAL out_port: OUT std_logic_VECTOR(7 downto 0);
+				SIGNAL out_rd_rdy: OUT std_logic	;
+				SIGNAL out_rdy : IN STD_LOGIC;	
+				SIGNAL en :IN STD_LOGIC;
+				SIGNAL reset :IN STD_LOGIC;
+				SIGNAL clk   :IN STD_LOGIC
+--				SIGNAL mac_out:OUT STD_LOGIC_VECTOR(47 DOWNTO 0);
+--				SIGNAL mac_weight_out: OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+--				SIGNAL mac_exit_port_out: OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+--				SIGNAL mac_cnt_out: OUT std_logic_VECTOR(7 downto 0);
+--				SIGNAL mac_wr_out : OUT STD_LOGIC;
+--				SIGNAL wrd_cnt: OUT std_logic_VECTOR(7 downto 0)
+	);
+	END ENTITY;
+ 
+
+	
+ ------------------------------------------------------
+	ARCHITECTURE behavior OF manager IS 
+		COMPONENT table is
+				generic (
+						ADDR_WIDTH :integer := 10);
+			port (
+								SIGNAL	clk			: 	IN std_logic;
+								SIGNAL	reset 		: 	IN STD_LOGIC;
+								SIGNAL	in_mac		: 	IN std_logic_VECTOR(47 downto 0);
+								SIGNAL	in_weight	: 	IN std_logic_VECTOR(7 downto 0);
+								SIGNAL	in_port		: 	IN std_logic_VECTOR(7 downto 0);
+								SIGNAL	in_wr		: 	IN std_logic;	
+								SIGNAL	in_rd		: 	IN std_logic;
+								SIGNAL  in_key 		: IN STD_LOGIC_VECTOR(9 DOWNTO 0);
+								SIGNAL	out_mac		: 	OUT std_logic_VECTOR(47 downto 0);
+								SIGNAL	out_port	: 	OUT std_logic_VECTOR(7 downto 0);
+								SIGNAL	out_rd_rdy	: 	OUT std_logic	
+			);
+		end COMPONENT table ;
+	-------COMPONENET SMALL FIFO
+				COMPONENT  small_fifo IS
+			GENERIC(WIDTH :INTEGER := 72;
+					MAX_DEPTH_BITS :INTEGER := 3);
+			PORT(
+			
+					   
+			 SIGNAL din : IN STD_LOGIC_VECTOR(71 DOWNTO 0);--input [WIDTH-1:0] din,     // Data in
+			 SIGNAL wr_en : IN STD_LOGIC;--input          wr_en,   // Write enable
+			 
+			 SIGNAL rd_en : IN STD_LOGIC;--input          rd_en,   // Read the next word 
+			 
+			 SIGNAL dout :OUT STD_LOGIC_VECTOR(71 DOWNTO 0);--output reg [WIDTH-1:0]  dout,    // Data out
+			 SIGNAL full : OUT STD_LOGIC;--output         full,
+			 SIGNAL nearly_full : OUT STD_LOGIC;--output         nearly_full,
+			 SIGNAL empty : OUT STD_LOGIC;--output         empty,
+			 
+			
+			SIGNAL reset :IN STD_LOGIC;
+			SIGNAL clk   :IN STD_LOGIC
+
+			);
+			END COMPONENT;
+-------COMPONENET SMALL FIFO
+------------ one hot encoding state definition
+	TYPE state_type IS (IN_MODULE_HDRS,START,ADD_ENTRY,WORD_1,WORD_2,WORD_3,WORD_4,WORD_5,WORD_6, IN_PACKET);
+	ATTRIBUTE enum_encoding: STRING;
+	ATTRIBUTE enum_encoding of state_type : type is "onehot";
+
+	SIGNAL state, state_next : state_type; 
+	
+---------------------------------------------------------------------------------------------------------
+		  SIGNAL wr_en 			: 	STD_LOGIC;
+		  SIGNAL data_in 		:	STD_LOGIC_VECTOR(71 DOWNTO 0);
+		  SIGNAL rd_en 			: 	STD_LOGIC;
+		  SIGNAL rd_en_p 		: 	STD_LOGIC;
+		  SIGNAL dout 			: 	STD_LOGIC_VECTOR(71 DOWNTO 0);
+		  SIGNAL fifo_data 		:	STD_LOGIC_VECTOR(63 DOWNTO 0);--output reg
+		  SIGNAL fifo_ctrl 		:	STD_LOGIC_VECTOR(7 DOWNTO 0);--output 
+		  SIGNAL full 			: 	STD_LOGIC;--output     
+		  SIGNAL nearly_full 	: 	STD_LOGIC;--output         
+		  SIGNAL empty 			: 	STD_LOGIC;--output        
+		
+		  SIGNAL table_in_mac_i : STD_LOGIC_VECTOR(47 DOWNTO 0);
+		  SIGNAL table_in_wr_i : STD_LOGIC;
+		  SIGNAL table_in_mac_i_e1 : STD_LOGIC;
+		  SIGNAL table_in_mac_i_e2 : STD_LOGIC;
+		  SIGNAL table_in_mac: STD_LOGIC_VECTOR(47 DOWNTO 0);
+		  SIGNAL table_in_wr: STD_LOGIC;		
+		  SIGNAL table_in_rd: STD_LOGIC;
+		  SIGNAL table_out_mac: STD_LOGIC_VECTOR(47 DOWNTO 0);
+		  SIGNAL table_out_rd_rdy: STD_LOGIC;
+		  SIGNAL word_cnt  : NATURAL ;
+		  SIGNAL word_cnt_rst : STD_LOGIC;
+		  SIGNAL mac_cnt  : INTEGER ;
+		  SIGNAL mac_cnt_rdy : STD_LOGIC;
+		  SIGNAL done_macs  : INTEGER ;
+		  SIGNAL done_macs_up : STD_LOGIC;
+		  SIGNAL done_macs_rst : STD_LOGIC;
+		  SIGNAL mac: STD_LOGIC_VECTOR(47 DOWNTO 0);
+		  SIGNAL mac_weight: STD_LOGIC_VECTOR(7 DOWNTO 0);
+		  SIGNAL mac_exit_port: STD_LOGIC_VECTOR(7 DOWNTO 0);
+		  SIGNAL mac_wr			:STD_LOGIC;
+		  SIGNAL mac_wr_i			:STD_LOGIC;
+
+	BEGIN
+	
+	table_Inst : table 
+				generic MAP (ADDR_WIDTH =>10)
+			port MAP(
+									clk			=>	clk	,
+									reset 		=>	reset	,
+									in_mac		=>	mac	,
+									in_weight	=>	mac_weight,
+									in_port		=>	mac_exit_port,
+									in_wr		=>	mac_wr	,
+									in_rd		=>	in_rd	,
+									in_key		=>  in_key	,
+									out_mac		=>	out_mac	,
+									out_port	=>	out_port,
+									out_rd_rdy	=>	out_rd_rdy
+			);
+
+	-------PORT MAP SMALL FIFO
+--		small_fifo_Inst :  small_fifo 
+--	GENERIC MAP(WIDTH  => 72,
+--			MAX_DEPTH_BITS  => 3)
+--	PORT MAP(
+--    din =>(data_in),    
+--      wr_en =>in_wr,   
+--      rd_en => rd_en,   
+--      dout =>dout,   
+--      full =>full,
+--      nearly_full =>nearly_full,
+--      empty => empty,	
+--      reset => reset ,
+--      clk  => clk 
+--
+--	);
+--
+---------PORT MAP SMALL FIFO
+--		in_rdy <=  NOT nearly_full;
+--		rd_en <=  (NOT empty);
+--		fifo_data <=dout(71 DOWNTO 8);
+--		fifo_ctrl <=DOUT(7 DOWNTO 0);
+--		data_in<=in_data & in_ctrl;
+		wr_en <= in_wr and en;
+--		wrd_cnt <=  std_logic_vector(to_unsigned(word_cnt, 8));
+--		mac_cnt_out <=  std_logic_vector(to_unsigned(mac_cnt, 8));
+--		mac_out <=mac  ;
+--		mac_weight_out<=mac_weight;
+--		mac_exit_port_out <=mac_exit_port;	
+--		mac_wr_out	<=mac_wr;
+		----------------------------------------	
+--	    mac <= fifo_data(63 downto 16) ;
+--	    mac_weight<= fifo_data(15 downto 8);
+--	    mac_exit_port<= fifo_data(7 downto 0);	
+--		mac_exit_port<= std_logic_vector(to_unsigned(done_macs, 8));
+		PROCESS(clk)
+		BEGIN		
+			IF clk'EVENT AND clk ='1' THEN
+			rd_en_p <=rd_en;
+			END IF;
+		END PROCESS;
+		
+		PROCESS(reset,clk)
+		BEGIN
+			IF (reset ='1') THEN
+				state <=IN_MODULE_HDRS;
+			ELSIF clk'EVENT AND clk ='1' THEN
+				state<=state_next;
+			END IF;
+		END PROCESS;
+		PROCESS(state, fifo_data, rd_en_p, in_ctrl )
+			BEGIN
+									  mac_cnt_rdy	<= '0'; 
+									  done_macs_up  <= '0';
+									  done_macs_rst <= '0';
+									  mac_wr_i <= '0';
+									  word_cnt_rst			<= '0';
+									  state_next <= state;
+				CASE state IS
+					WHEN IN_MODULE_HDRS =>
+									   word_cnt_rst				<= '1';
+									   done_macs_rst 			<= '1';
+						IF ( in_ctrl=X"FF" and wr_en ='1' ) THEN			
+							
+							state_next 					<= WORD_1;
+						END IF;	
+												
+					WHEN WORD_1		=>	 
+					 IF wr_en ='1'  THEN
+									 
+									  state_next                 <= WORD_2;
+					END IF;
+					WHEN WORD_2		=>	 
+					 IF wr_en ='1'  THEN
+									 
+									  state_next                 <= WORD_3;
+					END IF;
+					WHEN WORD_3		=>	 
+					 IF wr_en ='1'  THEN
+									 
+									  state_next                 <= WORD_4;
+					END IF;
+					
+					WHEN WORD_4		=>	 
+					 IF wr_en ='1'  THEN
+									  
+									  state_next                 <= WORD_5;
+					
+					END IF;
+					WHEN WORD_5		=>	 
+					 IF wr_en ='1'  THEN
+									  
+									  state_next                 <= WORD_6;
+					END IF;
+					
+					WHEN WORD_6		=>	 
+					 IF wr_en ='1'  THEN
+									  mac_cnt_rdy	<= '1';
+									  done_macs_rst 			<= '1';
+									  state_next                 <= ADD_ENTRY;
+					END IF;
+					
+					WHEN ADD_ENTRY => 
+									
+									 IF (wr_en ='1'  AND in_ctrl /= X"00") THEN 
+										state_next                 <= IN_MODULE_HDRS;
+									 ELSIF wr_en ='1'  AND done_macs < mac_cnt THEN
+											
+											  done_macs_up  <= '1';				
+											  mac_wr_i <= '1';
+										      state_next                 <= ADD_ENTRY;	
+									
+									END IF;	
+										
+					WHEN OTHERS		=>
+				END CASE;
+			END PROCESS;
+		
+	PROCESS(reset,clk)
+		BEGIN
+			IF (reset ='1') THEN
+			ELSIF clk'EVENT AND clk ='1' THEN
+				IF mac_cnt_rdy = '1' THEN
+				  mac_cnt <= CONV_integer(in_data(31 downto 24));
+				END IF;
+				 mac <= in_data(63 downto 16) ;
+				 mac_weight<= in_data(15 downto 8);
+				 mac_exit_port<= in_data(7 downto 0);
+				 mac_wr<=mac_wr_i;
+			END IF;
+		END PROCESS;	
+		
+-------register out put
+
+-------------
+process (clk)
+		variable   cnt		   : integer range 0 to 255;
+	begin
+		if (rising_edge(clk)) then
+
+			if word_cnt_rst   = '1' then
+				-- Reset the counter to 0
+				cnt := 0;
+
+			elsif rd_en_p = '1' then
+				-- Increment the counter if counting is enabled			   
+				cnt := cnt + 1;
+
+			end if;
+		end if;
+
+		-- Output the current count
+		word_cnt <= cnt;
+	end process;
+	
+	process (clk)
+		variable   cnt		   : integer range 0 to 255;
+	begin
+		if (rising_edge(clk)) then
+
+			if done_macs_rst = '1' then
+				-- Reset the counter to 0
+				cnt := 0;
+
+			elsif done_macs_up = '1' then
+				-- Increment the counter if counting is enabled			   
+				cnt := cnt + 1;
+
+			end if;
+		end if;
+
+		-- Output the current count
+		done_macs <= cnt;
+	end process;
+----------------
+END behavior;
+   
+   

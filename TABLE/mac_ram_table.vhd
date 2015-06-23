@@ -1,0 +1,466 @@
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.STD_LOGIC_ARITH.ALL;
+use IEEE.STD_LOGIC_UNSIGNED.ALL;
+use ieee.numeric_std.all;
+USE IEEE.STD_LOGIC_MISC.ALL;
+USE WORK.CONFIG.ALL;
+entity mac_ram_table is
+generic (
+        ADDR_WIDTH :integer := 10
+    );
+	port (
+	clk: IN std_logic;
+	reset : IN STD_LOGIC;
+	in_mac_no_prt: IN std_logic_VECTOR(63 downto 0);--MAC NUMBER internal port
+	in_address   : IN STD_LOGIC_VECTOR(9 DOWNTO 0);
+	in_wr: IN std_logic;
+	in_check : IN STD_LOGIC;
+	match_address : OUT STD_LOGIC_VECTOR(9 DOWNTO 0);
+	match:  OUT STD_LOGIC;
+	unmatch:  OUT STD_LOGIC;
+	in_rd : IN STD_LOGIC;
+	in_key : IN STD_LOGIC_VECTOR(9 DOWNTO 0);
+	last_address : IN STD_LOGIC_VECTOR(9 DOWNTO 0);
+	out_rd_rdy : OUT std_logic;
+--	vd_add_rm_out : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+--	vd_rm_out :  OUT STD_LOGIC;
+	out_port : OUT STD_LOGIC_VECTOR(7 DOWNTO 0);
+    out_mac : OUT STD_LOGIC_VECTOR(47 DOWNTO 0)
+	);
+end mac_ram_table;
+
+architecture Behavioral of mac_ram_table is
+	
+	----------------------------------------------------------------
+	COMPONENT valid_address is
+		generic (
+				ADDR_WIDTH :integer := ADDR_WIDTH
+			);
+			port (
+					clk: IN std_logic;
+					reset : IN STD_LOGIC;
+					in_wr_address : IN STD_LOGIC_VECTOR(ADDR_WIDTH-1 DOWNTO 0);
+					in_wr: IN std_logic;
+					in_key : IN STD_LOGIC_VECTOR(9 DOWNTO 0);
+					in_rd : IN STD_LOGIC;
+					in_rm_address_no : IN STD_LOGIC_VECTOR(ADDR_WIDTH-1 DOWNTO 0);
+					in_rm : IN STD_LOGIC;
+					out_address : OUT STD_LOGIC_VECTOR(ADDR_WIDTH-1 DOWNTO 0);
+					out_rdy : OUT std_logic
+
+			);
+	end COMPONENT valid_address;
+	------------------------
+	COMPONENT Aging_Timer is
+	   generic(
+		  N: integer := 32;  -- 32 bits couter
+		  M: integer := 125000  -- 125000  = 1 miliscond
+	   );
+	   port(
+		  clk, reset: in std_logic;
+		  timeout: out std_logic;
+		  timer_aging_bit: out std_logic;
+		  count_out: out std_logic_vector(31 downto 0)--N-1
+	   );
+	end COMPONENT Aging_Timer;
+	
+	
+----------------------------------------------------------------------------
+	-------COMPONENET SMALL FIFO
+	COMPONENT  small_fifo IS
+	GENERIC(WIDTH :INTEGER := 8;
+			MAX_DEPTH_BITS :INTEGER := 5);
+	 PORT(   
+     SIGNAL din : IN STD_LOGIC_VECTOR(WIDTH-1 DOWNTO 0);--input [WIDTH-1:0] din,     // Data in
+     SIGNAL wr_en : IN STD_LOGIC;--input          wr_en,   // Write enable    
+     SIGNAL rd_en : IN STD_LOGIC;--input          rd_en,   // Read the next word    
+     SIGNAL dout :OUT STD_LOGIC_VECTOR(WIDTH-1 DOWNTO 0);--output reg [WIDTH-1:0]  dout,    // Data out
+     SIGNAL full : OUT STD_LOGIC;--output         full,
+     SIGNAL nearly_full : OUT STD_LOGIC;--output         nearly_full,
+     SIGNAL empty : OUT STD_LOGIC;--output         empty,    	
+     SIGNAL reset :IN STD_LOGIC;
+     SIGNAL clk   :IN STD_LOGIC
+	 );
+	END COMPONENT;
+-------COMPONENET SMALL FIFO	
+------------------------------------------------------
+	
+------------------------------------------------------------
+COMPONENT ram_256x48 is
+
+	generic 
+	(
+		DATA_WIDTH : natural := 48;
+		ADDR_WIDTH : natural := ADDR_WIDTH
+	);
+
+	port 
+	(
+		clk		: in std_logic;
+		raddr	: in natural range 0 to 2**ADDR_WIDTH - 1;
+		waddr	: in natural range 0 to 2**ADDR_WIDTH - 1;
+		data	: in std_logic_vector((DATA_WIDTH-1) downto 0);
+		we		: in std_logic := '1';
+		q		: out std_logic_vector((DATA_WIDTH -1) downto 0)
+	);
+
+end COMPONENT ram_256x48;
+	TYPE 		state_type 				IS(IDLE, ADD_1, ADD_2, SCAN_1, SCAN_2);
+	SIGNAL 		state, state_next 	 : 	state_type;
+	TYPE 		state_search_type 		IS(IDLE,  CHECK, FOUND, UNFOUND);
+	SIGNAL 		state_search		 :  state_search_type;
+	SIGNAL 		state_next_search 	 :  state_search_type;
+	attribute 	enum_encoding 		 :  string;
+	attribute 	enum_encoding of state_type : type is "onehot";
+	------------------------------------------------------		
+	SIGNAL 		in_mac_no_prt_i		:  STD_LOGIC_VECTOR(55 DOWNTO 0);
+	SIGNAL 		mac_prt				:  STD_LOGIC_VECTOR(55 DOWNTO 0);
+	SIGNAL 		q_mac_prt			:  STD_LOGIC_VECTOR(55 DOWNTO 0);
+	SIGNAL 		cnt 				:  INTEGER ;
+	SIGNAL 		in_check_p			:  STD_LOGIC;
+	SIGNAL 		match_i				:  STD_LOGIC;
+	SIGNAL 		unmatch_i				:  STD_LOGIC;
+	---------------------------------------------------------------------------
+	SIGNAL 		time_out 			:  STD_LOGIC;
+	SIGNAL 		timer_aging_bit 	:  STD_LOGIC;	
+	---------------------------------------------------------------------------
+	--------- Signals to connect with Valid Address Module-------------
+	SIGNAL  	vd_add				:  STD_LOGIC_VECTOR(ADDR_WIDTH-1 DOWNTO 0);
+	SIGNAL		vd_add_wr			:  STD_LOGIC;
+	SIGNAL		vd_in_rd			:  STD_LOGIC;
+	SIGNAL		vd_add_rm			:  STD_LOGIC_VECTOR(ADDR_WIDTH-1 DOWNTO 0);
+	SIGNAL		vd_rm				:  STD_LOGIC;
+	SIGNAL		vd_out_add  		:  STD_LOGIC_VECTOR(ADDR_WIDTH-1 DOWNTO 0);
+	SIGNAL		vd_out_rdy			:  STD_LOGIC;
+	SIGNAL		out_rd_rdy_i		:  STD_LOGIC;
+	---------------------------------------------------------------------------
+	--------- Signals to connect with Fifo Module---------------------
+	SIGNAL		write_cmd_rd		:  STD_LOGIC;       
+	SIGNAL	  	write_cmd_address	:  STD_LOGIC_VECTOR(ADDR_WIDTH-1 DOWNTO 0);   
+	SIGNAL	 	write_cmd_empty		:  STD_LOGIC;	
+	SIGNAL		time_out_cmd_rd		:  STD_LOGIC;       
+	SIGNAL		time_out_cmd_empty	:  STD_LOGIC;
+	SIGNAL		time_out_fifo_wr	:  STD_LOGIC;
+	---------------------------------------------------------------------------
+	--------- Signals to connect with VALID AGING Ram ----------------
+	SIGNAL		raddr_av			:  STD_LOGIC_VECTOR(ADDR_WIDTH-1 DOWNTO 0); 
+	SIGNAL		waddr_av 			:  STD_LOGIC_VECTOR(ADDR_WIDTH-1 DOWNTO 0);
+	SIGNAL		data_av				:  STD_LOGIC_VECTOR(1 DOWNTO 0);
+	SIGNAL		we_av				:  STD_LOGIC;
+	SIGNAL		ag_vd_q				:  STD_LOGIC_VECTOR(1 DOWNTO 0);
+	---------------------------------------------------------------------------
+	--------- Signals to connect with MAC reading Ram ----------------
+	SIGNAL 		ram_mac_out 		:  STD_LOGIC_VECTOR(47 DOWNTO 0);
+	-------------------------------------------------
+	--------- Signals to connect with MAC Searching Ram ----------------
+	SIGNAL 		ram_q		 		:  STD_LOGIC_VECTOR(55 DOWNTO 0);
+	---------------------------------------------------------------------------
+	SIGNAL		cnt_1				:  STD_LOGIC_VECTOR(ADDR_WIDTH-1 DOWNTO 0);
+	SIGNAL		cnt_1_restart		:  STD_LOGIC;
+	SIGNAL		cnt_1_up			:  STD_LOGIC;
+	---------------------------------------------------------------------------
+begin
+	---------------------------------------------------------------------------
+
+	-------PORT MAP SMALL FIFO DATA
+		------------------------
+			Aging_Timer_Inst :  Aging_Timer 
+			   GENERIC MAP ( 
+								N => 32 , 	 
+								M => 1025000 -- = 1 --miliscond  
+							)
+				   port MAP(
+					  clk => clk, 
+					  reset => reset,
+					  timeout =>open ,
+					  timer_aging_bit =>timer_aging_bit,
+					  count_out => open
+				   );
+
+					time_out<='0';--testing without aging bit
+--Search  new MAC inside the table the address  
+		ram_256x48_search_Inst : ram_256x48 
+
+			GENERIC MAP	(
+					DATA_WIDTH => 56, ADDR_WIDTH => ADDR_WIDTH)
+
+				port MAP (
+					clk			=>	 clk		,
+					raddr	    =>	  CONV_INTEGER(cnt)			,
+					waddr	    =>	  CONV_INTEGER(in_address)			,
+					data	    =>	  in_mac_no_prt(63 DOWNTO 8)		,
+					we		    =>	 in_wr		,
+					q		    =>	 ram_q		
+				);
+			
+-----------------------------------------------------------------------	
+
+		PROCESS(clk, reset)
+				BEGIN
+					IF reset= '1' THEN
+								state_search	<=	IDLE	;
+					ELSIF clk'EVENT AND clk = '1' THEN
+								state_search		<=	state_next_search	;
+						IF(in_check = '1') THEN
+								in_mac_no_prt_i <= in_mac_no_prt(63 DOWNTO 8);
+						
+						END IF;
+						IF(match_i = '1') THEN
+								match_address 		<= std_logic_vector(to_unsigned(cnt - 1, ADDR_WIDTH)); 
+						
+						END IF;
+					END IF;		
+	END PROCESS;
+	
+	PROCESS(state_search, in_check, ram_q, in_mac_no_prt_i, cnt, last_address)
+		BEGIN
+								state_next_search	<=	state_search	;
+								match_i 			<=  '0'	;
+								unmatch_i 			<=  '0'	; 
+				
+		CASE state_search IS
+		WHEN IDLE => 
+					IF(in_check = '1' ) THEN																
+								state_next_search	<= CHECK	;
+					END IF;
+		WHEN CHECK =>			
+					IF (ram_q = in_mac_no_prt_i )THEN
+								match_i 			<=  '1'	;
+								state_next_search	<=	IDLE	;
+					ELSIF (cnt = CONV_INTEGER(last_address)) 	THEN
+								unmatch_i <=  '1'; 
+								state_next_search	<=	IDLE	;								
+					END IF;
+	
+		WHEN OTHERS=>			
+								state_next_search	<=	IDLE	;
+			
+		END CASE;
+	END PROCESS;	
+
+---------Register Out put--------------
+	process (clk)
+	begin
+		if (rising_edge(clk)) then
+			match	<= match_i;
+			unmatch	<= unmatch_i;			
+		end if;
+	end process;
+
+-----------------------------------------
+	
+	process (clk)
+		variable   cnt1		   : integer range 0 to 2**ADDR_WIDTH-1;
+	begin
+		if (rising_edge(clk)) then
+
+			if reset = '1' then
+				cnt1 := 0;
+			elsIF(in_check = '1'  ) THEN
+					cnt1 := 0;
+			else  	   
+				cnt1 := cnt1 + 1;
+			end if;
+		end if;
+		cnt <= cnt1;
+	end process;
+
+ -------------------------------------------------------------------
+ -------------------------------------------------------------------
+ -------------------------------------------------------------------
+--Write new MAC inside the table the address is provided by out side 
+		ram_256x48_Inst : ram_256x48 
+
+			GENERIC MAP	(
+					DATA_WIDTH => 56, ADDR_WIDTH => ADDR_WIDTH)
+
+				port MAP (
+					clk				    =>	 clk		,
+					raddr	   		    =>	CONV_INTEGER(vd_out_add)		,--this is coming from the valid address
+					waddr	    	    =>	 CONV_INTEGER(in_address)		,
+					data	    	    =>	 mac_prt		,--MAC=>PORT
+					we		    	    =>	 in_wr	,	
+					q		            =>	 q_mac_prt --Next MAC address		
+				);	
+				mac_prt(55 DOWNTO 8) <= in_mac_no_prt(63 DOWNTO 16);
+				mac_prt(7 DOWNTO 0) <= in_mac_no_prt(7 DOWNTO 0);
+				out_mac 			<=q_mac_prt(55 DOWNTO 8);
+				out_port 			<=q_mac_prt(7 DOWNTO 0);
+	WRITE_command_Inst :  small_fifo 
+		GENERIC MAP(WIDTH  => ADDR_WIDTH,
+				MAX_DEPTH_BITS  => 5)
+		PORT MAP(				   
+				   din 					=>	in_address,    
+				   wr_en 				=>	in_wr, 		
+				   rd_en 				=> 	write_cmd_rd,       
+				   dout 				=>	write_cmd_address,   
+				   full 				=>	open,
+				   nearly_full 			=>	open,
+				   empty 				=> 	write_cmd_empty,
+				   reset 				=> 	reset ,
+				   clk  				=> 	clk 
+		);
+	time_command_Inst :  small_fifo 
+		GENERIC MAP(WIDTH  => 1,
+				MAX_DEPTH_BITS  => 2)
+		PORT MAP(				   
+				   din 					=>	"1",    
+				   wr_en 				=>	time_out_fifo_wr, 		
+				   rd_en 				=> 	time_out_cmd_rd,       
+				   dout 				=>	open,   
+				   full 				=>	open,
+				   nearly_full 			=>	open,
+				   empty 				=>	time_out_cmd_empty,
+				   reset 				=> 	reset ,
+				   clk  				=> 	clk 
+		);
+		time_out_fifo_wr <= time_out AND  (time_out_cmd_empty);--onòy one element can be sotred in this 
+-------------------------------------------------------------------						
+------------------------------------------------------------
+	--Write new MAC inside the table the address is provided by out side 
+		Aging_Valid_256x48_Inst : ram_256x48 
+
+			GENERIC MAP	(
+					DATA_WIDTH => 2, ADDR_WIDTH => ADDR_WIDTH)
+
+				port MAP (
+					clk					=>	 clk		,
+					raddr	   			=>	 CONV_INTEGER(raddr_av)		,
+					waddr	    		=>	 CONV_INTEGER(waddr_av)		,
+					data	    		=>	 data_av	,
+					we		    		=>	 we_av		,
+					q		    		=>	 ag_vd_q		
+				);
+-------------------------------------------------------------------------------------
+	valid_address_Inst : valid_address 
+		GENERIC MAP (ADDR_WIDTH =>ADDR_WIDTH)
+		PORT MAP    (
+					clk					=>	 clk		,
+					reset 				=>	 reset		,
+					in_wr_address 		=>	 vd_add		,
+					in_wr				=>	 vd_add_wr	,
+					in_rd 				=>	 in_rd	,
+					in_key 				=>	 in_key	,
+					in_rm_address_no 	=>	 vd_add_rm	,
+					in_rm 				=>	 vd_rm		,
+					out_address 		=>   vd_out_add ,
+					out_rdy 			=>   vd_out_rdy
+
+			);		
+					
+-------------------------------------------------------------------------------------
+		PROCESS(clk, reset)
+				BEGIN
+				IF reset= '1' THEN
+					state				<=	IDLE	;
+				ELSIF clk'EVENT AND clk = '1' THEN
+					state				<=	state_next	;
+					out_rd_rdy_i		    <=  vd_out_rdy;
+					out_rd_rdy		    <=  out_rd_rdy_i ;
+				END IF;		
+		END PROCESS;
+		
+		PROCESS(state, write_cmd_empty, time_out_cmd_empty,
+				write_cmd_address, timer_aging_bit, write_cmd_address, ag_vd_q, cnt_1)
+		BEGIN				
+					vd_add_rm 		    <=  (OTHERS=>'0');
+					vd_rm			    <=  '0';
+					vd_add	 		    <=  (OTHERS=>'0');
+					vd_add_wr		    <=  '0';
+					raddr_av   		    <=	(OTHERS=>'0');
+					waddr_av		    <=	(OTHERS=>'0');
+					data_av	   		    <=	(OTHERS=>'0');
+					we_av			    <=	'0';
+					write_cmd_rd	    <=  '0';
+					time_out_cmd_rd		<=  '0';
+					cnt_1_restart		<=  '0';
+					cnt_1_up 			<=  '0';	
+					state_next		    <=	state	;
+							
+				
+		CASE state IS
+	
+		WHEN IDLE => 
+							cnt_1_restart	<= '1';
+					IF write_cmd_empty = '0' THEN
+							write_cmd_rd<=  '1';
+							state_next	<=  ADD_1	;
+					ELSIF(time_out_cmd_empty = '0' ) THEN	
+							
+							time_out_cmd_rd		<=  '1';
+							state_next	<=  SCAN_1	;
+					END IF;
+		WHEN ADD_1 => 
+							---Read the Valid and  Aging bit 
+							raddr_av	<=	write_cmd_address	;
+							state_next	<=	ADD_2	;
+		WHEN ADD_2 => 
+							---Write the Valid and  Aging bit 
+							data_av		<=	 '1' & timer_aging_bit ;
+							waddr_av	<=	write_cmd_address	;
+							we_av		<=	'1'	;
+							--Write the Valid Address
+							vd_add 		<=  write_cmd_address	;
+							vd_add_wr 	<=  NOT ag_vd_q(1)	;
+							state_next	<=	IDLE	;
+		WHEN SCAN_1 =>		
+							
+							raddr_av   	<=	cnt_1 ;
+							state_next	<=	SCAN_2	;		
+		
+		WHEN SCAN_2 =>		cnt_1_up 	<= '1';
+							
+		--		ELSIF cnt_1 = CONV_INTEGER(last_address)THEN 		--LAST ELEMNET REACHED
+		IF cnt_1 = CONV_INTEGER(last_address) THEN 		--LAST ELEMNET REACHED
+							state_next	<=	IDLE	;	
+											
+		ELSIF ( ag_vd_q(1) = '1' AND ( ag_vd_q(0) /= timer_aging_bit )  )THEN 
+--							data_av(1) 	<=	'1';
+--							data_av(0) 	<=	ag_vd_q(0); --do not change it 
+--							we_av		<=	'1'	;
+							state_next	<=	SCAN_1	;
+							
+	    ELSIF ( ag_vd_q(1)  = '1' AND ( ag_vd_q(0) = timer_aging_bit ) )THEN 
+							---delete this valid address 
+							vd_add_rm 	<=  cnt_1 ;
+							vd_rm		<=  '1';
+							-----------------------------
+							data_av(1) 	<=	'0';
+							data_av(0) 	<=	timer_aging_bit; 
+							waddr_av	<=	cnt_1 ;								
+							we_av		<=	'1'	;
+							state_next	<=	SCAN_1	;
+		ELSE 
+							state_next	<=	SCAN_1	;
+							END IF;
+						
+		WHEN OTHERS=>			
+							state_next	<=	IDLE	;		
+		END CASE;
+	END PROCESS;	
+	
+--	vd_add_rm_out <= vd_add_rm 	 ;
+--	vd_rm_out <=time_out_cmd_rd;
+--	vd_rm_out <=vd_rm;
+	process (clk)
+		variable   cnt1		   : integer range 0 to 2**ADDR_WIDTH-1;
+	begin
+		if (rising_edge(clk)) then
+
+			if reset = '1' then
+				cnt1 := 0;
+			elsIF(cnt_1_restart = '1'  ) THEN
+					cnt1 := 0;
+			elsif cnt_1_up = '1' then  	   
+				cnt1 := cnt1 + 1;
+			end if;
+		end if;
+		cnt_1 <= std_logic_vector(to_unsigned(cnt1 , ADDR_WIDTH)); 
+	end process;
+	
+
+
+		
+end Behavioral;
+

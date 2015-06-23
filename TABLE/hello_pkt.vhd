@@ -1,0 +1,416 @@
+---this file could be used to build ARP RESPONSE 
+
+--------------------------------------------------------
+
+	LIBRARY IEEE;
+	USE IEEE.STD_LOGIC_1164.ALL;
+	use ieee.numeric_std.all;
+	use IEEE.STD_LOGIC_ARITH.ALL;
+	use IEEE.STD_LOGIC_UNSIGNED.ALL;
+	
+	USE WORK.CONFIG.ALL;
+-------------------------------
+
+	ENTITY  hello_pkt IS
+	GENERIC(DATA_WIDTH :INTEGER := 64;
+			CTRL_WIDTH :INTEGER := 8);
+	PORT(
+
+	SIGNAL tx_in_data : IN   STD_LOGIC_VECTOR(63 DOWNTO 0);
+	SIGNAL tx_in_ctrl : IN  STD_LOGIC_VECTOR(7 DOWNTO 0);
+    SIGNAL tx_in_wr :  IN STD_LOGIC;
+	SIGNAL rx_in_data : IN   STD_LOGIC_VECTOR(63 DOWNTO 0);
+	SIGNAL rx_in_ctrl : IN  STD_LOGIC_VECTOR(7 DOWNTO 0);
+    SIGNAL rx_in_wr :  IN STD_LOGIC;
+
+	SIGNAL out_data : OUT   STD_LOGIC_VECTOR(63 DOWNTO 0);
+	SIGNAL out_ctrl : OUT  STD_LOGIC_VECTOR(7 DOWNTO 0);
+    SIGNAL out_wr :  OUT STD_LOGIC;
+--	SIGNAL out_cnt : OUT  STD_LOGIC_VECTOR(7 DOWNTO 0);
+--	SIGNAL cnt_enable :OUT STD_LOGIC;
+    SIGNAL out_rdy :IN STD_LOGIC;
+	SIGNAL in_rdy :OUT STD_LOGIC;
+    SIGNAL reset :IN STD_LOGIC;
+    SIGNAL clk   :IN STD_LOGIC
+	);
+	END ENTITY hello_pkt;
+ ------------------------------------------------------
+	ARCHITECTURE behavior OF hello_pkt IS 
+	------------------------
+	COMPONENT Aging_Timer is
+	   generic(
+		  N: integer := 32;  -- 32 bits couter
+		  M: integer := TIMER_PERIOD  -- 125000  = 1 miliscond
+	   );
+	   port(
+		  clk, reset: in std_logic;
+		  timeout: out std_logic;
+		  timer_aging_bit: out std_logic;
+		  count_out: out std_logic_vector(31 downto 0)--N-1
+	   );
+	end COMPONENT Aging_Timer;
+	
+	
+----------------------------------------------------------------------------
+------------ one hot encoding state definition	
+	TYPE state_type is (IDLE,TIMEOUT, WRITE_HEADER);
+--	ATTRIBUTE enum_encoding: STRING;
+--	ATTRIBUTE enum_encoding OF state_type: TYPE IS "onehot";
+	SIGNAL state, state_next: state_type; 
+	TYPE state_ch_type is (IDLE,IN_PACKET);
+	SIGNAL state_ch, state_ch_next: state_ch_type;
+------------end state machine definition
+    TYPE counters_type IS ARRAY (0 TO 3) OF STD_LOGIC_VECTOR(31 DOWNTO 0);
+    SIGNAL tx_array : counters_type;
+    SIGNAL rx_array : counters_type;
+	TYPE status_type IS ARRAY (0 TO 3) OF STD_LOGIC_VECTOR(7 DOWNTO 0);
+	CONSTANT status : status_type:=(X"00", X"00", X"00", X"00");
+--	SIGNAL FCS : STD_LOGIC_VECTOR(15 DOWNTO 0);
+	SIGNAL MSGSeqnum : STD_LOGIC_VECTOR(15 DOWNTO 0);
+	SIGNAL MSGSeqnum_up : STD_LOGIC;
+---------------internal signals
+    SIGNAL 		out_data_p 			:   STD_LOGIC_VECTOR(DATA_WIDTH-1 DOWNTO 0);
+	SIGNAL 		out_ctrl_p 			:   STD_LOGIC_VECTOR(CTRL_WIDTH-1 DOWNTO 0);
+    SIGNAL 		out_wr_p 			:  	STD_LOGIC;
+--	SIGNAL 		source_port			: 	STD_LOGIC_VECTOR(1 DOWNTO 0);--just four ports
+--	SIGNAL 		dest_port			: 	STD_LOGIC_VECTOR(15 DOWNTO 0);--just four ports
+	SIGNAL 		word_cnt			: 	INTEGER;
+	SIGNAL 		word_cnt_up			: 	STD_LOGIC;
+	SIGNAL 		word_cnt_rst		: 	STD_LOGIC;
+	SIGNAL 		time_out 			: 	STD_LOGIC;
+	SIGNAL 		clear_to_send		: 	STD_LOGIC;
+		------IP HEADER CHECK SUM CALCULATIONS
+	
+	CONSTANT TEMP  : INTEGER :=17664 + 	0 + 0 + 16401 + CONV_INTEGER(DIST_UNICAST_LB(31 DOWNTO 16)) +
+			 CONV_INTEGER(DIST_UNICAST_LB(15 DOWNTO 0)) + CONV_INTEGER(DIST_MULTICAST_ALL(31 DOWNTO 16))+
+			 CONV_INTEGER(DIST_MULTICAST_ALL(15 DOWNTO 0));
+	CONSTANT TEMP1 : STD_LOGIC_VECTOR(19 DOWNTO 0 ):= std_logic_vector(to_unsigned(TEMP, 20));
+	CONSTANT TEMP2 : STD_LOGIC_VECTOR(3 DOWNTO 0 ) := TEMP1(19 DOWNTO 16);
+	CONSTANT TEMP3 :  STD_LOGIC_VECTOR(15 DOWNTO 0 ) := TEMP1(15 DOWNTO 0)+ TEMP2;
+	CONSTANT FCS :  STD_LOGIC_VECTOR(15 DOWNTO 0 ) := NOT TEMP3;
+			  
+--		+ 	X"0000" + 	X"0000" +	X"4011"  +	DIST_UNICAST_LB(31 DOWNTO 16)+
+--				DIST_UNICAST_LB(15 DOWNTO 0) + 	DIST_MULTICAST_ALL(31 DOWNTO 16)
+--				+ DIST_MULTICAST_ALL(15 DOWNTO 0);
+	-------------------------------------
+-------------------------------------------
+	BEGIN
+	
+   
+	
+---------------------------------------------------------------------------------
+   
+		
+---------------------------------------------------------------------------------	  
+	
+	
+	-------PORT MAP SMALL FIFO DATA
+		------------------------
+			Aging_Timer_Inst :  Aging_Timer 
+			   GENERIC MAP ( 
+								N => 32 , 	 
+								M =>TIMER_PERIOD-- 125000  = 1 miliscond  
+							)
+				   port MAP(
+					  clk => clk, 
+					  reset => reset,
+					  timeout =>open ,
+					  timer_aging_bit =>open,
+					  count_out => open
+				   );
+
+					time_out<= '0';
+		process (clk)
+			variable   cnt		   : STD_LOGIC_VECTOR(15 DOWNTO 0);
+		begin
+			if (rising_edge(clk)) then
+
+				if reset = '1' then
+					-- Reset the counter to 0
+					cnt := (OTHERS=>'0');
+
+				elsif MSGSeqnum_up = '1' then
+					-- Increment the counter if counting is enabled			   
+					cnt := cnt + '1';
+
+				end if;
+			end if;
+
+			-- Output the current count
+				MSGSeqnum <=  cnt;
+	--		cnt_enable <= word_cnt_up;
+	end process;
+
+--------------------------------------------------
+
+		PROCESS(reset,clk)
+		BEGIN
+			IF (reset ='1') THEN
+					state 								<=	IDLE;
+			ELSIF clk'EVENT AND clk ='1' THEN
+					state								<=	state_next;
+			END IF;
+		END PROCESS;
+		PROCESS(state, clear_to_send, time_out, word_cnt, out_rdy)
+		BEGIN
+					state_next							<=	state;
+					word_cnt_up							<=	'0';
+					word_cnt_rst						<=	'0';
+					in_rdy								<=	'1';
+					MSGSeqnum_up						<=	'0';
+			CASE state IS
+			WHEN IDLE =>
+				in_rdy									<=	'1';
+				IF time_out ='1' THEN 
+					word_cnt_rst						<=	'1';
+					state_next         		    	 	<=	TIMEOUT;	
+				END IF;
+			WHEN TIMEOUT =>
+					in_rdy								<=	'0';
+--				 IF clear_to_send ='1' THEN 
+					word_cnt_rst						<=	'1';
+					MSGSeqnum_up						<=	'1';
+					state_next         		    	 	<=	WRITE_HEADER;	
+--				  END IF;
+			WHEN WRITE_HEADER =>
+					in_rdy								<=	'0';
+					IF word_cnt > 21   THEN 					
+					state_next         		    	 	<=	IDLE;	
+					ELSIF ( word_cnt <= 21 ) AND out_rdy = '1' THEN 	
+					word_cnt_up							<=	'1';	
+							
+					state_next         		    	 	<=	WRITE_HEADER;	
+				END IF;
+			WHEN OTHERS =>
+					state_next 							<=	IDLE;
+			END CASE;
+		END PROCESS;
+		--------------------------------------------------------------------
+		process (clk)
+		variable   cnt		   : INTEGER;
+	begin
+		if (rising_edge(clk)) then
+
+			if word_cnt_rst = '1' then
+				-- Reset the counter to 0
+				cnt := 0;
+
+			elsif word_cnt_up = '1' then
+				-- Increment the counter if counting is enabled			   
+				cnt := cnt + 1;
+
+			end if;
+		end if;
+
+		-- Output the current count
+		word_cnt <= cnt;
+--		cnt_enable <= word_cnt_up;
+	end process;
+--	out_cnt <= std_logic_vector(to_unsigned(word_cnt, 8));	
+			-------------------OUTPUT ASSIGNMENT
+		
+
+		with word_cnt select
+		out_data_p <= DEFAULT_INT_PORT & X"0014" & X"0040" &X"00A0" WHEN 1,
+				   X"FFFFFFFFFFFF" & mac_array(0)(47 DOWNTO 32) when 2,
+				   mac_array(0)(31 DOWNTO 0) & X"0800" & X"4500"when 3,
+				   X"0000000000004011" when 4,
+				   FCS & DIST_UNICAST_LB & DIST_MULTICAST_ALL(31 DOWNTO 16) WHEN 5, 
+				   DIST_MULTICAST_ALL(15 DOWNTO 0) & DIST_PORT & DIST_PORT&X"0000" WHEN 6,
+				   X"0000"& DIST_VER & DIST_MSGTYPE & NODE_ID&X"00"& NODE_TYPE(23 downto 16)WHEN 7,
+				   NODE_TYPE(15 DOWNTO 0) & MSGSeqnum & X"00000000" WHEN 8,
+				
+				   X"00" & status(0) & mac_array(0) WHEN  9,--port 0
+				   vlan_array(0) & ip_array(0) & subnet_array(0)(31 DOWNTO 16) WHEN  10,--port 0
+				   subnet_array(0)(15 DOWNTO 0) & tx_array(0) & rx_array(0)(31 DOWNTO 16) WHEN  11,
+				
+				   rx_array(0)(15 DOWNTO 0) & X"01" & status(1) & mac_array(1)(47 DOWNTO 16)  WHEN  12, 
+				   mac_array(1)(15 DOWNTO 0)& vlan_array(1) & ip_array(1) WHEN  13,
+				   subnet_array(1)& tx_array(1) WHEN  14,
+				
+				   rx_array(1) &  X"02" & status(2) & mac_array(2)(47 DOWNTO 32) WHEN  15,--port 0
+				   mac_array(2)(31 DOWNTO 0)& vlan_array(2) & ip_array(2)(31 DOWNTO 16)&X"0"  WHEN  16,
+				   ip_array(2)(15 DOWNTO 0)&subnet_array(2)& tx_array(2)(31 DOWNTO 16) WHEN  17,
+				
+				   tx_array(2)(15 DOWNTO 0)& rx_array(2) &  X"03" & status(3)WHEN  18,
+				   mac_array(3) &  vlan_array(3)&X"0" WHEN  19,
+				   ip_array(3) & subnet_array(3) WHEN  20,
+				   tx_array(3) &  rx_array(3) WHEN  21,
+				  ( OTHERS=>'0') when others;
+
+
+				out_wr_p 	<=     word_cnt_up when word_cnt >= 1  AND word_cnt <= 21 else
+								 '0';
+				 out_ctrl_p <= X"FF" when word_cnt = 1 else
+								X"01"  when word_cnt = 21 else
+							   X"00" ;
+	
+			PROCESS(reset,clk)
+				BEGIN
+					
+					IF clk'EVENT AND clk ='1' THEN
+							out_data			<=		out_data_p; 
+							out_ctrl			<=		out_ctrl_p; 
+							out_wr				<=		out_wr_p;
+--							out_wr_p			<=		word_cnt_up;
+					END IF;
+				END PROCESS;
+			
+		
+------------------------------counters array-----------------------------------------
+		process (clk)
+		variable   cnt		   : STD_LOGIC_VECTOR(31 DOWNTO 0);
+	begin
+		if (rising_edge(clk)) then
+
+			if reset = '1' then
+				-- Reset the counter to 0
+				cnt := (others=>'0');
+
+			elsif tx_in_wr='1' AND tx_in_ctrl = X"FF" AND tx_in_data(63 DOWNTO 48) =X"0001" then
+				-- Increment the counter if counting is enabled			   
+				cnt := cnt + '1';
+
+			end if;
+		end if;
+
+		-- Output the current count
+		tx_array(0) <= cnt;
+	end process;
+		process (clk)
+		variable   cnt		   : STD_LOGIC_VECTOR(31 DOWNTO 0);
+	begin
+		if (rising_edge(clk)) then
+
+			if reset = '1' then
+				-- Reset the counter to 0
+				cnt := (others=>'0');
+
+			elsif tx_in_wr='1' AND tx_in_ctrl = X"FF" AND tx_in_data(63 DOWNTO 48) =X"0004" then
+				-- Increment the counter if counting is enabled			   
+				cnt := cnt + '1';
+
+			end if;
+		end if;
+
+		-- Output the current count
+		tx_array(1) <= cnt;
+	end process;
+		process (clk)
+		variable   cnt		   : STD_LOGIC_VECTOR(31 DOWNTO 0);
+	begin
+		if (rising_edge(clk)) then
+
+			if reset = '1' then
+				-- Reset the counter to 0
+				cnt := (others=>'0');
+
+			elsif tx_in_wr='1' AND tx_in_ctrl = X"FF" AND tx_in_data(63 DOWNTO 48) =X"0010" then
+				-- Increment the counter if counting is enabled			   
+				cnt := cnt + '1';
+
+			end if;
+		end if;
+
+		-- Output the current count
+		tx_array(2) <= cnt;
+	end process;
+		process (clk)
+		variable   cnt		   : STD_LOGIC_VECTOR(31 DOWNTO 0);
+	begin
+		if (rising_edge(clk)) then
+
+			if reset = '1' then
+				-- Reset the counter to 0
+				cnt := (others=>'0');
+
+			elsif tx_in_wr='1' AND tx_in_ctrl = X"FF" AND tx_in_data(63 DOWNTO 48) =X"0040" then
+				-- Increment the counter if counting is enabled			   
+				cnt := cnt + '1';
+
+			end if;
+		end if;
+
+		-- Output the current count
+		tx_array(3) <= cnt;
+	end process;
+	
+		process (clk)
+		variable   cnt		   : STD_LOGIC_VECTOR(31 DOWNTO 0);
+	begin
+		if (rising_edge(clk)) then
+
+			if reset = '1' then
+				-- Reset the counter to 0
+				cnt := (others=>'0');
+
+			elsif rx_in_wr='1' AND rx_in_ctrl = X"FF" AND rx_in_data(31 DOWNTO 16) =X"0000" then
+				-- Increment the counter if counting is enabled			   
+				cnt := cnt + '1';
+
+			end if;
+		end if;
+
+		-- Output the current count
+		rx_array(0) <= cnt;
+	end process;
+		process (clk)
+		variable   cnt		   : STD_LOGIC_VECTOR(31 DOWNTO 0);
+	begin
+		if (rising_edge(clk)) then
+
+			if reset = '1' then
+				-- Reset the counter to 0
+				cnt := (others=>'0');
+
+			elsif rx_in_wr='1' AND rx_in_ctrl = X"FF" AND rx_in_data(31 DOWNTO 16) =X"0002" then
+				-- Increment the counter if counting is enabled			   
+				cnt := cnt + '1';
+
+			end if;
+		end if;
+
+		-- Output the current count
+		rx_array(1) <= cnt;
+	end process;
+		process (clk)
+		variable   cnt		   : STD_LOGIC_VECTOR(31 DOWNTO 0);
+	begin
+		if (rising_edge(clk)) then
+
+			if reset = '1' then
+				-- Reset the counter to 0
+				cnt := (others=>'0');
+
+			elsif rx_in_wr='1' AND rx_in_ctrl = X"FF" AND rx_in_data(31 DOWNTO 16) =X"0004" then
+				-- Increment the counter if counting is enabled			   
+				cnt := cnt + '1';
+
+			end if;
+		end if;
+
+		-- Output the current count
+		rx_array(2) <= cnt;
+	end process;
+		process (clk)
+		variable   cnt		   : STD_LOGIC_VECTOR(31 DOWNTO 0);
+	begin
+		if (rising_edge(clk)) then
+
+			if reset = '1' then
+				-- Reset the counter to 0
+				cnt := (others=>'0');
+
+			elsif rx_in_wr='1' AND rx_in_ctrl = X"FF" AND rx_in_data(31 DOWNTO 16) =X"0006" then
+				-- Increment the counter if counting is enabled			   
+				cnt := cnt + '1';
+
+			end if;
+		end if;
+
+		-- Output the current count
+		rx_array(3) <= cnt;
+	end process;
+------------------------------counters array-----------------------------------------
+END behavior;
+   
