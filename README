@@ -1,0 +1,130 @@
+
+Asynchronous Spatial Division Multiplexing Router for On-Chip Networks
+
+Version: 0.2 
+
+On-chip networks or networks-on-chip (NoCs) are the on-chip communication fabric for
+current and future multiprocessor SoCs (MPSoCs) and chip multiprocessors (CMPs).
+Compared with synchronous NoCs, asynchronous NoCs have following benefits:
+  * Tolerance to all kinds of delay variations caused by process, power and temperature
+    variations.
+  * Low transmission latency.
+  * Zero dynamic power when idle.
+  * Unified sync/async interface and easy clock domain integration.
+
+Most NoCs use the wormhole flow control method. Many complex flow control methods are
+built upon the wormhole method, such as virtual channel (VC), TDMA, and SDM. VC is the
+most utilized flow control in both sync and async NoCs. However, it is found VC
+compromises the throughput performance of asynchronous NoCs. This project provides a new
+asynchronous router structure which use SDM rather than VC. It has been shown that SDM
+achieve better throughput than VC in the same router configuration.
+
+This project provide a reconfigurable asynchronous SDM router which can be configured
+into a basic wormhole router or an SDM router with multiple virtual circuits in every
+direction.    
+
+Features:
+  * 5-port router for mesh network (0 south, 1 west, 2 north, 3 east, 4 local)
+  * The dimension order routing (XY routing)
+  * Available flow control methods: wormhole, SDM, VC
+  * Reconfigurable number of virtual circuits, buffer size, data width
+  * Fully synthesizable router implementation
+  * SystemC testbench provided
+
+Languages:
+  * Routers are written in synthesizable SystemVerilog
+  * Test benches are provided by SystemC 
+
+Software requirements:
+  * The open source Nangate 45nm cell library
+  * Synopsys Design Compiler (Synthesis)
+  * Cadence IUS -- NC Simulator (for SystemC/Verilog co-simulation)
+
+File structure:
+  * common                              files needed for both SDM and VC routers
+   \- script                            synthesis scripts for all routers
+   |- src                               HDL for all routers
+   \- tb                                test bench files for all routers
+  * doc                                 documents
+  * lib                                 minimal Nangate 45nm cell lib
+  * sdm                                 SDM/wormhole router design
+   \- define.v                          HDL configuration file
+   |- define.h                          test bench configuration
+   |- sim                               simulation run dir
+   |- src                               HDL
+   |- syn                               synthesis run dir
+    \- script                           synthesis script
+   \- tb                                test bench
+  * vc                                  VC router deign
+   \- define.v                          HDL configure file
+   |- define.h                          test bench configuration
+   |- sim                               simulation run dir
+   |- src                               HDL
+   |- syn                               synthesis run dir
+    \- script                           synthesis script
+   \- tb                                test bench
+
+How to run:
+  * to synthesize a router
+    1. set up your design compiler enviornment and your cell library.
+    2. modify the "define.v" configuration file for the strcture your want.
+       currently including:
+         ENABLE_CLOS   use the 2-stage Clos switch instead of crossbar
+         ENABLE_CRRD   use the CRRD dispatching algorithm for the Clos
+         ENABLE_MRMA   use the multi-resource matching arbiter instead of MNMA
+         ENABLE_CHANNEL_SLICING  use channel slicing
+         ENABLE_LOOKAHEAD  use the lookahead pipelines
+         ENABLE_EOF    router use eof bit to indicate end-of-frame
+    3. modify the "compile.tcl" scription for the design parameters.
+       currently including: 
+         VCN   number of virtual circuits
+         DW    the data width of a single virtual circuit
+         IPD   the depth of input buffers
+         OPD   the depth of putput buffers
+    4. if another cell lib is used, change "cell_lib.v" in common\src and other related
+       files. (very likely you need to email me for further instructions :-) )
+    5. modify the "tech.tcl" in common/script for your cell library.
+    6. run the synthesis at [sdm/vc]/syn
+       dc_shell -f script/compile.tcl
+    7. the synthesized netlist is inside [sdm/vc]/syn/file/
+
+  * to run post-synthesis simulation
+    1. check the netlists in [sdm/vc]/syn/file/
+    2. modify the testbench configuration "define.h" according to your requirements.
+       Especially make sure the following are matched (at least in the SDM routers):
+         ChBW = DW/8; SubChN = VCN
+    3. make sure your NC-Simulator is installed alright (proper SystemC support).
+    4. run the compilation at [sdm/vc]/sim
+       compile.sh
+    5. run the simulation at [sdm/vc]/sim
+       ncsim -tcl noctb
+    6. the simulation output files are *.ana at [sdm/vc]/sim
+       "throughput.ana":
+         {simulation time in ps} TAB {throughput in bytes}
+       "delay.ana":
+         {simulation time in ps} TAB {avg. frame latency} TAB {avg. path setup delay}
+
+  * The process of synthesize and simulate the VC router is similar to the procedure of
+    the wormhole/SDM router.
+
+For any questions and bug reports,
+    please email to Wei Song through <wsong83@gmail.com>.
+
+Wei Song
+08/06/2011
+
+=================================================
+Known issues:
+* 28/05/2012     reported by Zhou, Peiyuan
+    The Nangate_typ.db in ./lib/ is precompiled using DC_vC2009.06-SP2.
+    If lower versions of DC is used to synthesize the project, DC may fail to load 
+  this cell library and request a higher version.
+    In this case, you need to recompile the Nangate Cell library from the original
+  Liberty cell library provided in the Nangate 45nm open cell library PDK. There are
+  three lib formats provided in the Nangate library: ccs, ecsm and nldm. The ccs and 
+  ecsm formats provide more accurate delay infomation than nldm, so please use those
+  two whenever possible. For asynchronous circuits, the typical corner is used in 
+  most cases.
+    If you do not know how to compile a libarty library in DC, read the man page for
+  commands "read_lib" and "write_lib" in DC.
+       
