@@ -1,0 +1,173 @@
+################################################################################
+##            _   _            __   ____                                      ##
+##           / / | |          / _| |  __|                                     ##
+##           | |_| |  _   _  / /   | |_                                       ##
+##           |  _  | | | | | | |   |  _|                                      ##
+##           | | | | | |_| | \ \_  | |__                                      ##
+##           |_| |_| \_____|  \__| |____| microLab                            ##
+##                                                                            ##
+##           Bern University of Applied Sciences (BFH)                        ##
+##           Quellgasse 21                                                    ##
+##           Room HG 4.33                                                     ##
+##           2501 Biel/Bienne                                                 ##
+##           Switzerland                                                      ##
+##                                                                            ##
+##           http://www.microlab.ch                                           ##
+################################################################################
+TOPLEVEL := $(shell cat $(REL_PATH)/$(PROJECT_TOP))
+PROJECT_NGD=$(TOPLEVEL).ngd
+PROJECT_EDF=$(TOPLEVEL).edf
+PROJECT_NCF=$(TOPLEVEL).ncf
+PROJECT_MAP=$(TOPLEVEL)-map.ncd
+PROJECT_MAP_PCF=$(TOPLEVEL)-map.pcf
+PROJECT_PAR=$(TOPLEVEL)-par.ncd
+PROJECT_TRACE=$(TOPLEVEL).twr
+PROJECT_BIT=$(TOPLEVEL).bit
+
+include $(REL_PATH)/$(PROJECT_DEVICE)
+include $(REL_PATH)/$(PROJECT_XILINX)
+
+define run_translate
+@echo "==========================================================="
+@echo "  Translating "
+@echo "==========================================================="
+rm -rf ngdbuild
+rm -f $(PROJECT_NGD)
+mkdir ngdbuild
+cd ngdbuild && ngdbuild -intstyle ise -dd temp -nt timestamp  \
+	-uc ../$(REL_PATH)/$(PROJECT_UCF)\
+	../$(PROJECT_EDF) $(PROJECT_NGD) >& /dev/null
+cp ngdbuild/$(PROJECT_NGD) $(PROJECT_NGD)
+endef #run_translate
+
+define run_map
+@echo "==========================================================="
+@echo "  Mapping "
+@echo "==========================================================="
+rm -rf map
+rm -f $(PROJECT_MAP)
+mkdir map
+cd map && map -intstyle ise -ol $(MAP_EFFORT) $(MAP_OPTIONS) -cm $(MAP_COVER_MODE) \
+	-pr b -c 100 -tx off \
+	-o $(PROJECT_MAP) ../$(PROJECT_NGD) >& /dev/null
+cp map/$(PROJECT_MAP) $(PROJECT_MAP)
+cp map/$(PROJECT_MAP_PCF) $(PROJECT_MAP_PCF)
+endef #run_map
+
+define run_guided_par
+@echo "==========================================================="
+@echo "  Guided Placing and Routing  "
+@echo "==========================================================="
+if test ! -f $(PROJECT_PAR) ; then \
+echo "INFO: No previous placement run found. Running normal PAR"; \
+rm -rf par; \
+rm -f $(PROJECT_PAR); \
+mkdir par; \
+cd par && par -w -intstyle ise -ol high ../$(PROJECT_MAP) \
+	$(PROJECT_PAR) ../$(PROJECT_MAP_PCF) >& \dev\null;\
+cp $(PROJECT_PAR) .. \
+; \
+else \
+rm -rf par; \
+mkdir par; \
+mv -f $(PROJECT_PAR) par/$(PROJECT_PAR).guide.ncd; \
+cd par && par -w -intstyle ise -ol high -gf $(PROJECT_PAR).guide.ncd -gm leverage ../$(PROJECT_MAP) \
+	$(PROJECT_PAR) ../$(PROJECT_MAP_PCF) >& \dev\null;\
+cp $(PROJECT_PAR) .. \
+; \
+fi
+endef #run_guided_par
+
+define run_par
+@echo "==========================================================="
+@echo "  Placing and Routing  "
+@echo "==========================================================="
+rm -rf par
+rm -f $(PROJECT_PAR)
+mkdir par
+cd par && par -w -intstyle ise -ol $(PAR_EFFORT) ../$(PROJECT_MAP) \
+	$(PROJECT_PAR) ../$(PROJECT_MAP_PCF) >& /dev/null
+cp par/$(PROJECT_PAR) $(PROJECT_PAR)
+endef #run_par
+
+define run_gentimsim
+@echo "==========================================================="
+@echo "  Generating Full Timing Simulation Netlist  "
+@echo "  ... "
+rm -rf timsim
+mkdir timsim
+netgen -sim -ofmt vhdl -dir timsim -w $(PROJECT_PAR) >& timsim/netgen.log
+@echo vlib work > timsim/$(TOPLEVEL)-par.do
+@echo vcom -work work $(TOPLEVEL)-par.vhd >> timsim/$(TOPLEVEL)-par.do
+@echo vsim -t ps -sdftyp $(TOPLEVEL)=./$(TOPLEVEL)-par.sdf -sdfnoerror work.$(TOPLEVEL) >> timsim/$(TOPLEVEL)-par.do
+@echo " Full Timing Simulation Netlist available in sandbox/timsim"
+@echo "==========================================================="
+endef #run_gentimsim
+
+define run_trace
+@echo "==========================================================="
+@echo "  Generating Timing Report "
+@echo "  ... "
+rm -rf trace
+mkdir trace
+rm -f $(PROJECT_TRACE)
+cd trace && trce -intstyle ise -e $(NR_OF_TIMING_TRACES) -s $(subst -,,$(SPEED_GRADE)) ../$(PROJECT_PAR)\
+            -o $(PROJECT_TRACE) ../$(PROJECT_MAP_PCF) -ucf ../$(REL_PATH)/$(PROJECT_UCF) >& trace.log
+cp trace/$(PROJECT_TRACE) .
+@echo " Full Timing trace available in sandbox/$(PROJECT_TRACE)"
+@echo "==========================================================="
+endef #run_trace
+
+define run_bitgen
+@echo "==========================================================="
+@echo "  Generating Bitfile "
+@echo "  ... "
+rm -rf bitgen
+mkdir bitgen
+rm -f $(PROJECT_BIT)
+cd bitgen && bitgen -w -g UnusedPin:$(UNUSED_PINS)  ../$(PROJECT_PAR) $(PROJECT_BIT) >& bitgen.log
+cp bitgen/$(PROJECT_BIT) ../bitfile/$(PROJECT_BIT)
+@echo "  Xilinx bitfile available in bitfile/$(PROJECT_BIT)"
+@echo "==========================================================="
+endef #run_bitgen
+
+
+
+
+default: $(PROJECT_NGD) $(PROJECT_MAP) $(PROJECT_MAP_PCF) $(PROJECT_PAR) $(PROJECT_BIT)
+
+force_translate:
+	@$(run_translate)
+force_map:
+	@$(run_map)
+
+$(PROJECT_NGD): $(PROJECT_EDF) $(PROJECT_NCF) $(REL_PATH)/$(PROJECT_UCF)
+	@$(run_translate)
+
+$(PROJECT_MAP) $(PROJECT_MAP_PCF): $(PROJECT_NGD) $(REL_PATH)/$(PROJECT_XILINX)
+	@$(run_map)
+$(PROJECT_PAR): $(PROJECT_MAP) $(PROJECT_MAP_PCF) $(REL_PATH)/$(PROJECT_XILINX)
+ifeq ($(GUIDED_PAR),1)
+	@$(run_guided_par)
+else
+	@$(run_par)
+endif
+ifeq ($(GENERATE_SIMULATION_FILES),1)
+	@$(run_gentimsim)
+else
+	@echo "==========================================================="
+	@echo "  Timing Simulation netlist NOT generated  "
+	@echo "==========================================================="
+endif
+ifeq ($(GENERATE_TIMING_TRACE_FILE),1)
+	@$(run_trace)
+else
+	@echo "==========================================================="
+	@echo "  Timing Trace File NOT generated  "
+	@echo "==========================================================="
+endif
+
+$(PROJECT_BIT) : $(PROJECT_PAR) $(REL_PATH)/$(PROJECT_XILINX)
+	@$(run_bitgen)
+
+.PRECIOUS: %.prj %.bit %.edf %.ngd %-map.ncd %-par.ncd %.twr

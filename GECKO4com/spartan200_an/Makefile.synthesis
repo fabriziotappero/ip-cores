@@ -1,0 +1,72 @@
+################################################################################
+##            _   _            __   ____                                      ##
+##           / / | |          / _| |  __|                                     ##
+##           | |_| |  _   _  / /   | |_                                       ##
+##           |  _  | | | | | | |   |  _|                                      ##
+##           | | | | | |_| | \ \_  | |__                                      ##
+##           |_| |_| \_____|  \__| |____| microLab                            ##
+##                                                                            ##
+##           Bern University of Applied Sciences (BFH)                        ##
+##           Quellgasse 21                                                    ##
+##           Room HG 4.33                                                     ##
+##           2501 Biel/Bienne                                                 ##
+##           Switzerland                                                      ##
+##                                                                            ##
+##           http://www.microlab.ch                                           ##
+################################################################################
+SYNTHESIZER=synplify_premier_dp
+
+TOPLEVEL := $(shell cat $(REL_PATH)/$(PROJECT_TOP))
+VHDL_FILES := $(shell cat $(REL_PATH)/$(PROJECT_LIST))
+VHDL_FILES_EXTENDED = $(addprefix $(REL_PATH)/vhdl/,$(VHDL_FILES))
+PROJECT_PRJ=$(TOPLEVEL).prj
+PROJECT_EDF=$(TOPLEVEL).edf
+PROJECT_NCF=$(TOPLEVEL).ncf
+
+include $(REL_PATH)/$(PROJECT_DEVICE)
+
+define create_prj
+echo "Generating Synplify project:" $(PROJECT_PRJ)
+echo -e "# Automatic generated project file.\n# DO NOT EDIT!\n# Edit options in the file $(PROJECT_OPTIONS)!\n" > $(PROJECT_PRJ)
+echo -e $(foreach file, $(VHDL_FILES_EXTENDED),\
+          "add_file -vhdl -lib work \"../$(file)\"\n") >> $(PROJECT_PRJ)
+echo "impl -add $(TOPLEVEL) -type fpga" >> $(PROJECT_PRJ)
+echo  "set_option -technology $(TECHNOLOGY)" >> $(PROJECT_PRJ)
+echo  "set_option -part $(PART)" >> $(PROJECT_PRJ)
+echo  "set_option -package $(PACKAGE)" >> $(PROJECT_PRJ)
+echo  "set_option -speed_grade $(SPEED_GRADE)" >> $(PROJECT_PRJ)
+if test -f $(REL_PATH)/$(PROJECT_OPTIONS); then\
+   cat $(REL_PATH)/$(PROJECT_OPTIONS) >> $(PROJECT_PRJ); else\
+   echo "# You can add project options in $(PROJECT_OPTIONS)" >>  $(PROJECT_PRJ);\
+fi
+echo  "project -result_file \"./$(TOPLEVEL).edf\"" >> $(PROJECT_PRJ)
+endef #create_prj
+
+define run_synth
+@echo "==========================================================="
+@echo "  Synthetizing with $(SYNTHESIZER)"
+@echo "==========================================================="
+rm -rf synth
+rm -f $(PROJECT_EDF)
+mkdir synth
+cp $(PROJECT_PRJ) synth/$(PROJECT_PRJ)
+cd synth; $(SYNTHESIZER) -log ./$(TOPLEVEL).log -batch ./$(PROJECT_PRJ) >& /dev/null
+cp synth/$(PROJECT_EDF) .
+cp synth/$(PROJECT_NCF) .
+endef #run_synth
+
+.PHONY: default
+
+#rules
+default : $(PROJECT_EDF)
+
+force_synth :
+	@$(run_synth)
+
+$(PROJECT_EDF) : $(PROJECT_PRJ)
+	@$(run_synth)
+
+$(PROJECT_PRJ) : $(VHDL_FILES_EXTENDED) $(REL_PATH)/$(PROJECT_OPT)
+	@$(create_prj)
+
+.PRECIOUS: %.prj 

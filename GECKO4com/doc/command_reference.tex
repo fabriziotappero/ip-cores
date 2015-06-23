@@ -1,0 +1,358 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%            _   _            __   ____                                      %%
+%%           / / | |          / _| |  __|                                     %%
+%%           | |_| |  _   _  / /   | |_                                       %%
+%%           |  _  | | | | | | |   |  _|                                      %%
+%%           | | | | | |_| | \ \_  | |__                                      %%
+%%           |_| |_| \_____|  \__| |____| microLab                            %%
+%%                                                                            %%
+%%           Bern University of Applied Sciences (BFH)                        %%
+%%           Quellgasse 21                                                    %%
+%%           Room HG 4.33                                                     %%
+%%           2501 Biel/Bienne                                                 %%
+%%           Switzerland                                                      %%
+%%                                                                            %%
+%%           http://www.microlab.ch                                           %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{Implemented Commands}
+\label{chap:commands}
+The {\sc GECKO4com} implements 36 {\sc SCPI} commands as shown in
+Table~\ref{tab:scpi commands}. The commands starting with a \verb+*+ are
+compliant with the IEEE488.1~\cite{ieee488_1} and IEEE488.2~\cite{ieee488_2}
+standards and will not be described in this chapter. The exception to the above
+is the description of the \verb+*PUD+, \verb+*PUD?+ and \verb+*RST+ commands.
+\begin{table}[hb]
+\begin{tabular}{|l|l|l|l|}
+\hline
+\verb+*CLS+&\verb+*ESE+&\verb+*ESE?+&\verb+*ESR?+\\
+\hline
+\verb+*IDN?+&\verb+*IST?+&\verb+*OPC+&\verb+*OPC?+\\
+\hline
+\verb+*PUD+&\verb+*PUD?+&\verb+*RST+&\verb+*SRE+\\
+\hline
+\verb+*SRE?+&\verb+*STB?+&\verb+*TST?+&\verb+*WAI+\\
+\hline
+\verb+BITFLASH+&\verb+BITFLASH?+&\verb+BOARD?+&\verb+CONFIG+\\
+\hline
+\verb+ERASE+&\verb+FIFO+&\verb+FIFO?+&\verb+FPGA+\\
+\hline
+\verb+FPGA?+&\verb+HEXSWITCH+&\verb+HEXSWITCH?+&\verb+IDENTIFY+\\
+\hline
+\verb+TRANS+&\verb+USERRESET+&\verb+VGA:BGCOL+&\verb+VGA:CLEAR+\\
+\hline
+\verb+VGA:CURSOR+&\verb+VGA:CURSOR?+&\verb+VGA:FGCOL+&\verb+VGA:PUTSTR+\\
+\hline
+\end{tabular}
+\caption{{\sc SCPI} commands implemented in the {\sc GECKO4com}}
+\label{tab:scpi commands}
+\end{table}
+%-----------------------------------------------------------------------------
+\section{Protected User Data}
+\label{sec: PUD}
+The IEEE488.1~\cite{ieee488_1} and IEEE488.2~\cite{ieee488_2} standards describe
+the \verb+*PUD+ and \verb+*PUD?+ as optional commands. These two commands
+provide a Protected User Data (PUD) area of at least 63 bytes. The {\sc GECKO4com}
+implements a PUD of 2048 bytes and violates the standard in the protection
+requirement.\\
+ \\
+\textbf{Reading the PUD area:}\\
+When executing the \verb+*PUD?+ command the {\sc GECKO4com} puts the contents of
+the complete PUD memory (2048 bytes) in the output queue. The PUD memory can
+only be read completely; there exist no possibility to read only a part of it.\\
+ \\
+\textbf{Writing the PUD area:}\\
+The PUD area can be written with the \verb*+*PUD <payload>+ command. The number
+of spaces (\verb*+ +) between the command and the payload must be exactly
+one. All the other spaces are interpreted as payload. The size of
+the payload can be anywhere between 1 and 2048 bytes. Upon receiving this
+command the {\sc GECKO4com} will start writing at address 0 of the PUD memory.
+If the payload size is more than 2048 bytes the {\sc GECKO4com} will wrap around
+and overwrite earlier written data. After having received the payload, the {\sc
+GECKO4com} will store the complete 2048 bytes of the PUD memory in an external
+attached flash.\\
+\textit{Note:  If there is no Flash chip mounted on the {\sc GECKO4main}, the
+PUD memory area will become volatile.\note}\\
+\textit{Important: Each execution of the} \verb+*PUD+ \textit{command will initiate a
+sector erase/program cycle of the attached Flash chip; therefore, the number of 
+the} \verb+*PUD+ \textit{command invocation is limited by the number of 
+sector erase cycles specified by the Flash chip manufacturer.\important}\\
+ \\
+\textbf{PUD memory organization:}\\
+The PUD memory organization is shown in Figure~\ref{fig:PUD mem org}.
+\begin{figure}
+\centering%
+\includegraphics[width=0.7\columnwidth]{figs/pud_memory_org}
+\caption{Memory organization of the PUD area. The memory is continues; the
+64-byte blocks are only shown to indicate the thirteen ASCII lines.}
+\label{fig:PUD mem org}
+\end{figure}
+The area between \verb+0x000+ and \verb+0x4BF+ is completely user definable;
+however the area between \verb+0x4C0+ and \verb+0x7FF+ is used to store thirteen
+lines of sixty four ASCII characters that are displayed in the Static User Window
+ (SUW) of the VGA-controller (see Chapter~\ref{sec: vga}).\\
+  \\
+\textbf{PUD command error handling:}\\
+Both the \verb+*PUD+ and \verb+*PUD?+ are always executed successfully; therefore
+there is no command error generated for either of these commands.
+%-----------------------------------------------------------------------------
+\section{Global Reset}
+The {\sc GECKO4com} provides the means to activate the Global Reset. It is
+important to not confuse the Global Reset with the User Reset as described in
+Chapter~\ref{chap:user_reset}. The {\sc GECKO4com} activates the Global Reset by
+pulling the signal actively low. In case of a deactivated Global Reset, the
+{\sc GECKO4com} leaves this pin floating. No pull-up on this signal is provided
+by the {\sc GECKO4com}. For more details on the requirements of the Global Reset
+(GR) signal please refer to the {\sc GECKO4main} technical reference
+guide~\cite{gecko4main}.\\
+ \\
+\textbf{GR activation:}\\
+There are two situations for which the {\sc GECKO4com} activates the Global
+Reset line, namely:
+\begin{enumerate}
+\item \textbf{Unconfigured FPGA:} If the user FPGA on the {\sc GECKO4main} is
+not configured the Global Reset line is kept activate.
+In case no user FPGA is mounted, the the Global Reset line is deactivated.
+\item \textbf{Reset command:} By executing the \verb+*RST+ command, the Global
+Reset line is activated for a period between 10~ms and 11~ms.
+\end{enumerate}
+\textit{Important: The {\sc GECKO4com} is uneffected by the state of the Global Reset
+line.\important}\\
+ \\
+\textbf{GR command error handling:}\\
+The \verb+*RST+ command always executes correctly; therefore there is no command
+error generated for this command.
+%-----------------------------------------------------------------------------
+\section{User Reset}
+\label{chap:user_reset}
+Contrary to the Global Reset signal the User Reset signal is only connected to
+the user FPGA on the {\sc GECKO4main}. This User Reset signal provides the means
+of resetting the logic inside the user FPGA without effecting attached
+boards. The User Reset (UR) signal is an \emph{active low} signal that is actively
+driven for both a \verb+1+ and a \verb+0+. The User Reset signal is connected to
+pin \textbf{Y9} of the user FPGA.\\
+ \\
+\textbf{UR activation:}\\
+There are two situations for which the User Reset line is activated, namely:
+\begin{enumerate}
+\item \textbf{Unconfigured FPGA:} If the user FPGA on the {\sc GECKO4main} is
+not configured the User Reset line is kept activate up to a period of 10~ms to
+11~ms after the done line of the user FPGA went high.
+In case no user FPGA is mounted, the User Reset line is deactivated.
+\item \textbf{Reset command:} By executing the \verb+USERRESET+ command, the
+User Reset line is activated for a period between 10~ms and 11~ms.
+\end{enumerate}
+\textit{Important: The {\sc GECKO4com} is uneffected by the state of the User Reset
+line.\important}\\
+\textit{Important: The User Reset line is uneffected by the state of the Global
+Reset line.\important}\\
+ \\
+\textbf{UR command error handling:}\\
+The \verb+USERRESET+ command always executes correctly; therefore there is no command
+error generated for this command.
+%-----------------------------------------------------------------------------
+\section{Bitfile Storage}
+To be able to operate the {\sc GECKO4main} in an environment where a USB
+connection is not wanted, the {\sc GECKO4com} provides the means to store the
+user FPGAs configuration in a non-volatile memory. The user FPGAs configuration,
+further referred to as \emph{bitfile}, is generated by the Xilinx toolchain and
+consists of a variable length header and the configuration data in form of a
+bitstream~\cite{FPGAFAQ_0026}. The {\sc GECKO4com} provides four commands to
+manipulate the bitfile storage.
+\begin{itemize}
+\item \verb*+BITFLASH <bitfile>+. This command stores the \verb+<bitfile>+ in
+the non-volatile memory of the {\sc GECKO4com}. This command can take upto two
+seconds to complete due to the speed of the non-volatile memory. This command
+is only succesfull in case of an empty non-volatile memory, otherwise an
+execution error is generated.\\
+\textit{Important: (1) The {\sc GECKO4com} does not control if the provided
+bitfile is suitable for the mounted user FPGA and
+(2) only a single space (}\verb*+ +\textit{)  must be provided between the command and
+the bitfile.}
+\item \verb+CONFIG+. This command configures the user FPGA with the bitfile
+stored in the non-volatile memory. If the non-volatile memory does not contain a
+bitfile an execution error is generated.
+\item \verb+ERASE+. This command erases the non-volatile memory and must be
+provided before the programming of a new bitfile into the non-volatile memory.
+This command can take several seconds to complete.
+\item \verb+BITFLASH?+. This command returns \verb+EMPTY+ if the non-volatile
+memory is empty, and the stored bitfile otherwise.
+\end{itemize}
+\textit{Note: It is highly discouraged to use the }\verb+BITFLASH <bitfile>+
+\textit{ and }
+\verb+ERASE+ \textit{ commands in a script due to their execution time. Most likely a
+time-out error is generated on the USBTMC protocol due to these execution
+times. \note}
+%-----------------------------------------------------------------------------
+\section{{\sc GECKO4main} information}
+\label{sec: main info}
+The {\sc GECKO4com} provides two commands to report the current status of the
+{\sc GECKO4main} system. Both these commands always execute successfully and
+return an ASCII string.
+\begin{itemize}
+\item \verb+FPGA?+. This command returns the detected user FPGA type and its
+configuration state. Possible user FPGAs are listed in the {\sc GECKO4main}
+Technical Reference Manual~\cite{gecko4main}. If no user FPGA is
+mounted or the {\sc GECKO4com} was unable to determine the FPGA type this
+command returns the message \emph{No FPGA mounted or unknown FPGA type} and all
+user FPGA manipulations are prohibited.
+\item \verb+BOARD?+. This command returns the powering status, e.g. USB
+supplied, GENIO1 supplied, powering BUS, of the {\sc GECKO4main} and the status
+of the {\sc GECKO4com}'s non-volatile memory (empty or programmed) [see previous
+section].
+\end{itemize}
+Furthermore the {\sc GECKO4com} provides the means of identifying optically an
+attached {\sc GECKO4main} by means of the command \verb+IDENTIFY+. After
+execution of this command the eight LEDs of {\sc GECKO4main} will start to
+become red, afterwards they change to green and finally they will go off one
+after the other. This sequence lasts for approximately one second.
+%-----------------------------------------------------------------------------
+\section{User FPGA configuration}
+The {\sc GECKO4com} provides the means to configure the user FPGA. This
+configuration is independent of the current state of the user FPGA. This means
+that the user FPGA can be configured as many times as required and with as many
+bitfiles as wanted. By this flexibility of the {\sc GECKO4com} progression
+testing and scripted simulations/emulations. The configuration time for even the
+largest Spartan 3 5000 FPGA is only a few tens of milliseconds.
+
+The command to configure the user FPGA is \verb*+FPGA <bitfile>+. This command
+\textbf{must} only contain one space (\verb*+ +). In case no user FPGA is
+mounted or the {\sc GECKO4com} was unable to detect the mounted user FPGA  this
+command will generate an execution error.\\
+\textit{Important: The {\sc GECKO4com} does not control if the provided bitfile
+is suitable for the mounted user FPGA. It is up to the user to make sure that
+the bitfile that is uploaded is generated for the correct user FPGA type. In
+case a wrong bitfile is uploaded the command will execute successfully; however
+the user FPGA will refuse to load it. To be able to see if the user FPGA has
+been configured correctly the }\verb+FPGA?+\textit{ command can be used to ask
+the current status if the user FPGA. \important}
+%-----------------------------------------------------------------------------
+\section{Mechanical Switch}
+\label{sec: hexswitch}
+The {\sc GECKO4main} provides a hexadecimal encoded switch that is further
+referred to as \emph{hexswitch}. The {\sc GECKO4com} provides two commands to
+manipulate this switch.
+\begin{itemize}
+\item \verb*+HEXSWITCH <value>+. This command overrides the mechanical switch and
+forces the \verb+<value>+ to appear on both the user FPGA side (see
+Chapter~\ref{sec:mem map}) as well as from the PC side. The parameter
+\verb+<value>+ can be any of the set [0-9,A-F,a-f]. Between the command and the
+parameter \verb+<value>+ there may be as many spaces (\verb*+ +) as wanted. This
+command executes successfully as long as the parameter \verb+<value>+ is in the
+set mentioned before. This command is persistent until either the board is
+powered, or an \verb+INITIATE_CLEAR+ USBTMC message~\cite{usbtmc} is send. This
+command may be send as often as required and will each time override the
+previous value send.
+\item \verb+HEXSWITCH?+. This command reports the current state of the hexswitch
+or the override value if a \verb+HEXSWITCH+ command has been issued before this
+command. The result of this command is an ASCII character of the set [0-9,A-F]
+followed by a new-line character (\verb+0x0A+).
+\end{itemize}
+%-----------------------------------------------------------------------------
+\section{User FPGA communication}
+The {\sc GECKO4com} provides three commands that allows for communication
+between the PC and the user FPGA. These commands are \verb+FIFO+, \verb+FIFO?+,
+and \verb+TRANS+. More information on these commands and the protocols involved
+can be found in Chapter~\ref{chap:fpga}.
+%-----------------------------------------------------------------------------
+\section{VGA controller}
+\label{sec: vga commands}
+The {\sc GECKO4com} provides a VGA controller not only for debug purposes but
+also for demonstration purposes. The VGA controller implemented in the {\sc
+GECKO4com} has one USBTMC window (see Chapter~\ref{sec: vga} for further
+information). The commands to manipulate this window are listed below.
+\begin{itemize}
+\item \verb*+VGA:FGCOL <value>+. This command sets the forground color of the
+VGA window. The parameter \verb+<value>+ can be any character between \verb+0+
+and \verb+7+ (see also Chapter~\ref{sec: vga}).
+\item \verb*+VGA:BGCOL <value>+. This command sets the background color of the
+VGA window. The parameter \verb+<value>+ can be any character between \verb+0+
+and \verb+7+ (see also Chapter~\ref{sec: vga}).
+\item \verb+VGA:CLEAR+. This command clears the VGA window and puts the cursor
+on the left top position of the screen.
+\item \verb+VGA:CURSOR?+. This command returns the current cursor position. The
+format returned is a string in the form \verb+<x>,<y>+ where
+$\text{x}\in[0..63]$ and $\text{y}\in[0..31]$.
+\item \verb*+VGA:CURSOR <x>,<y>+. This command sets the current cursor position
+to (x,y). The parameters: $\text{x}\in[0..63]$ and $\text{y}\in[0..31]$.\\
+\textit{Note: The parameters x and y must be specified as ASCII characters and
+not as bytes, e.g. 31 equals the character ``3'' (0x33) followed by the
+character ``1'' (0x31).\note}
+\item \verb*+VGA:PUTSTR <string>+. This command displays all the bytes following
+the space (\verb*+ +) at the current cursor position on the VGA window as ASCII
+characters. A new-line character (\verb+0x0A+) will forse a new line and all
+bytes with a value smaller than the ASCII character space (\verb+0x20+) will be
+ignored.\\
+\textit{Important: No commands can be concatinated with this command. Doing so
+will ``print'' them on the VGA screen rather than executing them.\important}
+\end{itemize}
+%-----------------------------------------------------------------------------
+\section{The Status Byte Register}
+\label{sec: SBR}
+The IEEE488.1~\cite{ieee488_1} and IEEE488.2~\cite{ieee488_2} standards define
+an obligatory status byte register as shown in Figure~11-8 in the
+IEEE488.2~\cite{ieee488_2} standard. The {\sc GECKO4com} implements this
+register with the obligatory \emph{MSS}, \emph{ESB}, and \emph{MAV} bits.
+Besides from these obligatory bits, the {\sc GECKO4com} implements 2 extra
+status bits.
+\begin{itemize}
+\item \textbf{Bit 3.} Bit 3 in the Status Byte Register indicates when \verb+1+
+that the user FPGA is configured and running. When this bit is \verb+0+ the user
+FPGA is either not present or not configured.
+\item \textbf{Bit 2.} Bit 2 in the Status Byte Register indicates when \verb+1+
+that the {\sc GECKO4com} is in \emph{transparent mode} (see Chapter~\ref{sec:trans mode}).
+When this bit is \verb+0+ the {\sc GECKO4com} is in normal operation mode.
+\end{itemize}
+If the {\sc GECKO4com} is in \emph{transparent mode} it does only supply the
+\emph{MSS} bit, the \emph{MAV} bit, and the transparent bit (bit 2) of the
+Status Byte Register. It is left to the user FPGA to provide the following bits:
+\begin{itemize}
+\item \textbf{Bit 7 (ESB).} In \emph{transparent mode} the user FPGA {\sc must}
+provide the \emph{ESB} bit. This bit is at pin \verb+AE6+ of the user FPGA and
+of type {\sc lvcmos25}.
+\item \textbf{Bit 3.} In \emph{transparent mode} this bit is user definable by
+the user FPGA. This bit is at pin \verb+AE8+ of the user FPGA and of type {\sc
+lvcmos25}.
+\end{itemize}
+For the user FPGA to know if the {\sc GECKO4com} is in \emph{transparent mode},
+the pin \verb+AD6+ at the user FPGA is a copy of bit 2 in the Status Byte
+Register. Figure~\ref{fig:stb} shows the Status Byte Register as provided by the
+{\sc GECKO4com}.
+\begin{figure}[t]
+\centering%
+\includegraphics[width=0.8\columnwidth]{figs/status_byte_register}
+\caption{The Status Byte Register as defined by the {\sc GECKO4com}.}
+\label{fig:stb}
+\end{figure}
+%-----------------------------------------------------------------------------
+\def\srt#1{}
+\begin{thebibliography}{10}
+\bibitem{FPGAFAQ_0026}
+Alan Nishioka and Philip Freidin,
+\newblock{\em FPGA-FAQ 0026---{T}ell me about the .{BIT} file format.}
+\newblock \verb+www.fpga-faq.com+, Nov. 2001
+
+\bibitem{gecko4main}
+Dr. Theo Kluter,
+\newblock{\em {\sc GECKO4main} {T}echnical {R}eference {M}anual.}
+\newblock Bern University of Applied Sciences, Biel/Bienne, Switzerland, 2011.
+
+\bibitem{ieee488_1}
+IEEE, Inc.
+\newblock{\em {IEEE} {S}tandard {C}odes, {F}ormats, {P}rotocols, and
+{C}ommon {C}ommands for {U}se {W}ith {IEEE} {S}td 488.1-1987, {IEEE}
+{S}tandard {D}igital {I}nterface for {P}rogrammable {I}nstrumentation.}
+\newblock ISBN 1-55937-238-9, New York, 1992.
+
+\bibitem{ieee488_2}
+IEC and IEEE.
+\newblock{\em {IEC} 60488-2, {IEEE} 488.2: {S}tandard digital interface for
+programmable instrumentation --- {P}art 2: {C}odes, formats, protocols and
+common commands.}
+\newblock First edition, 2005-05.
+
+\bibitem{usbtmc}
+USB Implementers Forum, Inc.
+\newblock{\em {U}niversal {S}erial {B}us {T}est and {M}easurement {C}lass
+{S}pecification ({USBTMC})--{R}evision 1.0.}
+\newblock April, 2003
+\end{thebibliography}

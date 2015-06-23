@@ -1,0 +1,144 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%            _   _            __   ____                                      %%
+%%           / / | |          / _| |  __|                                     %%
+%%           | |_| |  _   _  / /   | |_                                       %%
+%%           |  _  | | | | | | |   |  _|                                      %%
+%%           | | | | | |_| | \ \_  | |__                                      %%
+%%           |_| |_| \_____|  \__| |____| microLab                            %%
+%%                                                                            %%
+%%           Bern University of Applied Sciences (BFH)                        %%
+%%           Quellgasse 21                                                    %%
+%%           Room HG 4.33                                                     %%
+%%           2501 Biel/Bienne                                                 %%
+%%           Switzerland                                                      %%
+%%                                                                            %%
+%%           http://www.microlab.ch                                           %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{User FPGA communication}
+\label{chap:fpga}
+The {\sc GECKO4com} provides two FIFOs of each four kilo bytes to stream data
+from the PC to the user FPGA and vice versa. These FIFOs can operate in the
+IEEE488.x mode or in transparent mode. 
+This chapter will first introduce how to steam data through
+these FIFOs. After that it will describe the IEEE488.x mode. It will end with
+the description of the transparent mode.
+%-------------------------------------------------------------------------------
+\section{FIFO communication}
+\label{sec:fifo com}
+The {\sc GECKO4com} uses the {\sc usbtmc} protocol to stream data over an USB
+connection. This {\sc usbtmc} protocol has three important aspects:
+\begin{itemize}
+\item \textbf{Packet format}. Each {\sc usbtmc} packet consists of a header and
+data payload. In all cases the {\sc GECKO4com} handles the header
+generation/interpretation. The user FPGA only sees/provides the data payload.
+\item \textbf{Payload format}. The data payload as provided in an {\sc usbtmc}
+packet is byte based, e.g. can be any number of bytes (minimal one).
+\item \textbf{Message size}. Messages that are send/received can be divided into
+multiple {\sc usbtmc} packets.
+\end{itemize}
+To be able to be as versatile as possible, the {\sc GECKO4com} imposes that the
+messages send to/received from the user FPGA {\sc must} be word aligned. This
+means that the \textbf{message size} {\sc must} always be a multiple of four bytes.
+Failing to do so may result in unpredictable results, or even hang the {\sc
+GECKO4com}.
+
+As the {\sc usbtmc} protocol does not provide the means to send the size of a 
+message with the first {\sc usbtmc} packet, special care has to be taken when
+reading messages coming from the PC. Messages coming from the PC are stored in
+the Rx-FIFO. The Rx-FIFO can be accessed by the memory-mapped registers as
+described in Chapter~\ref{sec:mem map}. For the user FPGA to be able to
+determine the end of a message, the {\sc GECKO4com} marks the last short (2
+bytes) of the message with a special valid combination (see Chapter~\ref{sec:bus
+prot}).\\
+\textit{Important: An empty Rx FIFO does not mean that a message has ended, only
+the special valid combination indicates the end of a send message.\important}
+
+Similar to the reception of messages, also the transmission of messages can be
+split-up in multiple {\sc usbtmc} packets. For the {\sc GECKO4com} to know the
+size of a transmitted message, the user FPGA must write first the size of the
+message (one or two short(s) [2 bytes]) prior to putting the messages bytes in
+the Tx-FIFO. The size register and the Tx-FIFO can be accessed by the
+memory-mapped registers as described in Chapter~\ref{sec:mem map}.\\
+\textit{Important: The user FPGA {\sc must} send as many bytes as it indicated
+in the size register. If the Tx-FIFO is full, the user FPGA {\sc must} wait
+until it can send again data to the Tx-FIFO.\important}
+%-------------------------------------------------------------------------------
+\section{IEEE488.x mode}
+The \emph{IEEE488.x} mode is the default mode of the {\sc GECKO4com}. In this
+mode it provides IEEE488.x compliancy and the SCPI command interpretation of the
+commands described in Chapter~\ref{chap:commands}. In this mode messages to and
+from the user FPGA can {\sc only} be send by using the \verb+FIFO+ and
+\verb+FIFO?+ command set; hence the PC forms the master and the user FPGA has
+the role of slave.\\
+ \\
+\textbf{Sending messages from the PC to the user FPGA}\\
+Before explaining the protocol involved in sending messages it is emphased that,
+ as described in the previous section, the size of a message should be at least
+4 bytes and word aligned (meaning an integer multiple of 4 bytes). Although
+the {\sc GECKO4com} will fill up the message with up to 3 dummy bytes in case of
+word-mis-alignment, no guarantees are given on proper operation.
+
+The sending of a message is initiated by invoking the \verb*+FIFO <message>+
+command at the PC side. Between the command and the message only a single space
+(\verb*+ +) is allowed; all other spaces are interpreted as being part of the
+message. The message (\verb+<message>+) itself may be any stream of bytes, there
+are no restrictions as all bytes of the message will be send 1-to-1 to the
+Rx-FIFO of the {\sc GECKO4com}. At the moment the {\sc GECKO4com} receives the
+\verb+FIFO+ command it will activate the \textbf{Data Available Interrupt (DAI)} 
+(see Chapter~\ref{sec: irqs}) for one \textbf{bus clock} cycle. Directly after
+the generation of the DAI the {\sc GECKO4com} will start copying the message to
+the Rx-FIFO.
+
+The user FPGA {\sc must} after the reception of the DAI start reading the
+message data from Rx-FIFO within one second. Failing to do so may result in a
+communication time-out in the {\sc usbtmc} communication channel. The user FPGA
+must read data from the Rx-FIFO up to the short that is marked as last
+short of the message (see Chapter~\ref{sec:bus prot}). To avoid time-outs in the
+{\sc usbtmc} communication channel the user FPGA has to read at least 512 bytes
+each second.\\
+ \\
+\textbf{Receiving messages from the user FPGA}\\
+To receive a message from the user FPGA the PC has to initiate the communication
+by sending the \verb+FIFO?+ command to the {\sc GECKO4com}. After the reception
+of this command the {\sc GECKO4com} will activate the \textbf{Data Request
+Interrupt (DRI)} (see Chapter~\ref{sec: irqs}) for one \textbf{bus clock} cycle.
+After the generation of the DRI the {\sc GECKO4com} will wait for the message
+from the user FPGA and transfer it to the PC.\\
+The user FPGA must after the reception of the DAI send the message size
+and some message bytes within one second. Failing to do so may result in a
+communication time-out in the {\sc usbtmc} communication channel. The user FPGA
+starts the sending of the message by first writing its size to the size register
+at address \verb+0x01+ (see Chapter~\ref{sec:mem map}). The size is written by
+first writing the low short (2 bytes) to address \verb+0x01+ followed by the
+writing of the high short to address \verb+0x01+. Example: The message size is
+\verb+0x000A1234+ bytes. Sending this message would require writing (1) the
+value \verb+0x1234+ to address \verb+0x01+, followed by (2) writing the value
+\verb+0x000A+ to address \verb+0x01+, followed by (3) writing all the messages
+bytes to address \verb+0x00+. The user FPGA must make sure that if the Tx-FIFO
+is not full it fills it with at least 512 bytes each second; failing in doing so
+may trigger a time-out in the {\sc usbtmc} communication channel.
+%-------------------------------------------------------------------------------
+\section{Transparent mode}
+\label{sec:trans mode}
+The {\sc GECKO4com} can be put into transparent mode by invoking the
+\verb+TRANS+ command (see Chapter~\ref{chap:commands}). Once put in transparent
+mode the {\sc GECKO4com} can only be put back into \emph{IEEE488.x} mode by power
+cycling the board, resetting the board, or invoking an \verb+INITIATE_CLEAR+
+{\sc usbtmc} message.\\
+\textit{Important: The {\sc GECKO4com} will only switch to transparent mode if
+the user FPGA is configured. If the user FPGA is not configured an execution
+error is generated and the {\sc GECKO4com} stays in IEEE488.x mode.\important}\\
+
+When in transparent mode the {\sc GECKO4com} will disable all command
+interpretations; all commands, as listed in Chapter~\ref{chap:commands}, are
+interpreted as part of a message and are not executed. In the transparent mode
+all messages send from the PC are directly copied to the Rx-FIFO. Each new
+message will trigger a \textbf{Data Available Interrupt (DAI)}. The sending of
+messages from the user FPGA to the PC can be done by writing the message size
+followed by the message bytes themselves in the Tx-FIFO.\\
+\textit{Note: In the transparent mode the Data Request Interrupt (DRI) has no
+function.\note}\\
+
+This mode is useful when the user wants to implements a new SCPI command
+interpreter (see also Chapter~\ref{sec: SBR} concerning the Status Byte
+Register) or an own protocol on top of the {\sc usbtmc} protocol.

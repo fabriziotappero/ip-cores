@@ -1,0 +1,132 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%            _   _            __   ____                                      %%
+%%           / / | |          / _| |  __|                                     %%
+%%           | |_| |  _   _  / /   | |_                                       %%
+%%           |  _  | | | | | | |   |  _|                                      %%
+%%           | | | | | |_| | \ \_  | |__                                      %%
+%%           |_| |_| \_____|  \__| |____| microLab                            %%
+%%                                                                            %%
+%%           Bern University of Applied Sciences (BFH)                        %%
+%%           Quellgasse 21                                                    %%
+%%           Room HG 4.33                                                     %%
+%%           2501 Biel/Bienne                                                 %%
+%%           Switzerland                                                      %%
+%%                                                                            %%
+%%           http://www.microlab.ch                                           %%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\chapter{Bus transactions}
+\label{appen:bus}
+This appendix describes the timing diagram of valid bus transactions and
+transactions containing errors. Although the timing diagrams are shown for a
+three datum burst transaction, it also reflects the single datum transaction.
+%-----------------------------------------------------------------------------
+\section{Write transactions}
+In the write transaction the data flows from the user FPGA towards the {\sc
+GECKO4com}. The timing diagram of a correct write transaction is shown in
+Figure~\ref{fig:write correct}.
+A write transaction is initiated by activating the $\overline{\textbf{start
+trans}}$ signal and sending the \emph{Transmission Control Word (TCW)} (see
+Chapter~\ref{sec:bus prot} and Figure~\ref{fig:TCW}) over the \textbf{data
+cntrl} lines.\\
+\textit{Important: All signals are active for one clock period of the
+\textbf{bus clock}.\important}
+\begin{figure}[hb]
+\centering%
+\includegraphics[width=\columnwidth]{figs/write_transaction_no_bus_error}
+\caption{A correct write transaction that causes no bus error. Here a 3-short
+burst transaction is shown. The blue lines represent tri-stated FPGA pins.}
+\label{fig:write correct}
+\end{figure}
+ \\
+After the initiation of the write transaction the user FPGA has to wait for the
+{\sc GECKO4com} to activate the $\overline{\textbf{start send}}$ signal
+(dependency \ding{'312}). Sending data before this dependency will result in
+unpredictable results. After the reception of the $\overline{\textbf{start
+send}}$ signal the user FPGA may start transmitting the data payload(shown by
+\ding{'313}). The data payload may be a continues stream or chunk-ed into parts.
+For each datum the user FPGA has to put the datum on the \textbf{data cntrl}
+lines and activate both the $\overline{\textbf{valid lo}}$ and
+$\overline{\textbf{valid hi}}$ lines to indicate valid data. After the sending
+of the last datum, the user FPGA has to end the transaction by activating the
+$\overline{\textbf{end trans}}$ signal as shown at \ding{'314}. The
+$\overline{\textbf{end trans}}$ signal may be activated after or in parallel
+with the sending of the last datum of the payload.\\
+\textit{Important: the {\sc GECKO4com} does not check whether or not the user
+FPGA sends the correct number of data. It assumes that the user FPGA does send
+the number of data as announced in the Transmission Control Word (TCW).\important}
+%-----------------------------------------------------------------------------
+\section{Write transaction aborts}
+Write transactions can be aborted under the conditions described in
+Chapter~\ref{sec:mem map}. An aborted transaction is indicated by the {\sc
+GECKO4com} by the activation of the $\overline{\textbf{error}}$ line. This
+condition can occur anywhere during the transaction. Figure~\ref{fig:write
+error 1} and Figure~\ref{fig:write error 2} show two examples of aborted write
+transactions.
+\begin{figure}[pt]
+\centering%
+\includegraphics[width=\columnwidth]{figs/write_transaction_bus_error_1}
+\caption{An aborted write transaction before the reception of the
+$\overline{\textbf{start trans}}$ signal.}
+\label{fig:write error 1}
+\end{figure}
+\begin{figure}[pb]
+\centering%
+\includegraphics[width=\columnwidth]{figs/write_transaction_bus_error_2}
+\caption{An aborted write transaction after the reception of the
+$\overline{\textbf{start trans}}$ signal.}
+\label{fig:write error 2}
+\end{figure}
+After the reception of the activated $\overline{\textbf{error}}$ signal the user
+FPGA is required to activate the $\overline{\textbf{end trans}}$ signal to end
+the transaction (as shown in dependency \ding{'315}).\\
+\textit{Important: Failing to adhere to dependency \ding{'315} may leave the bus
+in an undefined state.\important}
+%-----------------------------------------------------------------------------
+\section{Read transactions}
+Simular to the write transaction a read transaction is initiated  by activating the $\overline{\textbf{start
+trans}}$ signal and sending the \emph{Transmission Control Word (TCW)} (see
+Chapter~\ref{sec:bus prot} and Figure~\ref{fig:TCW}) over the \textbf{data
+cntrl} lines. As during the read transaction the data has to flow from the {\sc
+GECKO4com} to the user FPGA the controlling of the bi-directional signals, shown
+in  Table~\ref{tab:gecko4 bus signals}, need special attention.
+Figure~\ref{fig:read correct} depicts a none-aborted read transaction for a
+burst of three. 
+\begin{figure}[t]
+\centering%
+\includegraphics[width=\columnwidth]{figs/read_transaction_no_bus_error}
+\caption{A correct read transaction that causes no bus error. Here a 3-short
+burst transaction is shown. The blue lines represent tri-stated FPGA pins.}
+\label{fig:read correct}
+\end{figure}
+One cycle after the initialization of a read transaction (\ding{206}) the user
+FPGA has to tristate all bi-directional signals. The user FPGA has to keep the
+bi-directional signals in tristate up to one cycle after receiving an activated
+$\overline{\textbf{end trans}}$ signal (\ding{208}).\\
+\textit{Important: Failing to adhere to dependency \ding{206} and dependency \ding{208} may
+destroy the IOB buffers of either or both the user FPGA and the {\sc GECKO4com}
+FPGA!\important}\\
+Two cycles after the reception of a read transaction (\ding{206}) the {\sc GECKO4com} will
+start driving the bi-directional signals. The {\sc GECKO4com} will send the
+requested number of shorts in one continues burst (\ding{207}) over the \textbf{data cntrl}
+lines and activates the $\overline{\textbf{valid low}}$ and
+$\overline{\textbf{valid low}}$ as described in Chapter~\ref{sec:bus prot}. During the transmission of the last datum of the read transaction
+the {\sc GECKO4com} ends the transmission by activation of the
+$\overline{\textbf{end trans}}$ signal. The \textbf{bus clock} cycle after the
+activation of the $\overline{\textbf{end trans}}$ signal the {\sc GECKO4com}
+puts all the bi-directional signals in three-state.\newpage
+\textit{Important: The user FPGA has to make sure it has enough buffer capacity
+to store the requested amount of data, as there is no way to interrupt the data
+flow coming from the {\sc GECKO4com}.\important}
+%-----------------------------------------------------------------------------
+\section{Read transactions abort}
+Read transactions can be aborted under the conditions described in
+Chapter~\ref{sec:mem map}. An aborted transaction is indicated by the {\sc
+GECKO4com} by the activation of the $\overline{\textbf{error}}$ line together
+with the activation of the $\overline{\textbf{end trans}}$ signal (\ding{209}). 
+Figure~\ref{fig:read error} shows an aborted read transaction.
+\begin{figure}[t]
+\centering%
+\includegraphics[width=\columnwidth]{figs/read_transaction_bus_error}
+\caption{An aborted read transaction. The blue lines represent tri-stated FPGA pins.}
+\label{fig:read error}
+\end{figure}
