@@ -1,0 +1,295 @@
+
+README for the T48 uController project
+======================================
+Version: $Id: README 295 2009-04-01 19:32:48Z arniml $
+
+
+Introduction
+------------
+
+The T48 µController core is an implementation of the MCS-48 microcontroller
+family architecture. While being a controller core for SoC, it also aims for
+code-compatability and cycle-accuracy so that it can be used as a drop-in
+replacement for any MCS-48 controller.
+It can be configured to better suit the requirements and characteristics of
+the integrating system. On the other hand, nearly the full functionality of a
+stock 8048/8049 is available.
+
+
+Download
+--------
+
+Download the latest stable release from the project homepage at OpenCores.org:
+
+  http://www.opencores.org/projects.cgi/web/t48/overview/
+
+You can get the latest version of the design files from CVS:
+
+  http://www.opencores.org/pdownloads.cgi/list/t48
+
+Please keep in mind that this is work in progress and might contain smaller or
+bigger problems.
+You should also check the Tracker for known bugs and see if they affect your
+work.
+
+
+Installation
+------------
+
+Once the directory structure is generated either by check-out from CVS or by
+unpacking the tar-archive, the central project initialization file should be
+set up. A template called init_project.template.sh is located in the sw
+directory where a copy can be edited. Normally, only the definition for the
+variable PROJECT_DIR has to be adjusted to the path where the directory
+structure is located.
+The commands for setting the necessary variables assume a bash/sh-like
+shell. In case you run a different shell like csh or ksh, you should adjust
+these commands as well.
+
+The meaning of the variables is as follows:
+
+  * PROJECT_DIR
+    Points to the root of the project installation. All further references are
+    derived from its setting.
+
+  * VERIF_DIR
+    Location of the verification suite.
+
+  * SIM_DIR
+    Directory for running simulations.
+
+These variables must be properly set whenever scripts or makefiles of the T48
+project are executed. Otherwise, you will most likely encounter error
+messages.
+
+NOTE: The concepts of the mentioned shells require that the init_project.sh is
+      run in the context of the shell. I.e. you should 'source' the script
+      instead of executing it like a command. This will make sure that the
+      variable settings are really effective in the calling shell instance.
+
+
+Directory Structure
+-------------------
+
+The project's directory structure follows the proposal of OpenCores.org.
+
+t48
+ |
+ \--+-- rtl
+    |    |
+    |    \-- vhdl           : VHDL code containing the RTL description
+    |         |               of the core.
+    |         +-- system    : RTL VHDL code of sample systems.
+    |         |
+    |         \-- t8243     : RTL VHDL code of 8243 core.
+    |
+    +-- bench
+    |    |
+    |    \-- vhdl           : VHDL testbench code.
+    |
+    +-- sim
+    |    |
+    |    \-- rtl_sim        : Directory for running simulations.
+    |
+    +-- syn
+    |    |
+    |    \-- t8048          : T8048 toplevel example synthesis.
+    |         |
+    |         +-- b5x300    : for SpartanIIe 300.
+    |         |
+    |         \-- jopcyc    : for Cyclone EP1C12.
+    |
+    \-- sw                  : General purpose scripts and files.
+         |
+         +-- i8039emu       : An MCS-48 emulator written in C.
+         |
+         \-- verif          : The verification suite.
+              |
+              +-- include   : Global includes and makefiles.
+              |
+              +-- black_box : Black-box verification tests.
+              |
+              +-- white_box : White-box verification tests.
+              |
+              \-- gp_sw     : General purpose software.
+
+
+Compiling the VHDL Code
+-----------------------
+
+VHDL compilation and simulation tasks take place inside in sim/rtl_sim
+directory. The project setup supports only the batch mode of certain
+simulators. However, there should be no problems to integrate the testbench
+and RTL code into arbitrary simulation environments.
+
+The main file for compilation is Makefile.hier which contains all information
+regarding the dependencies of the source files and their compilation
+order. There is a dedicated file for each supported simulator that maps the
+generic information of Makefile.hier to object files specific to the given
+simulator.
+
+Compilation is based on the make-utility, thus invocation looks like this:
+
+$ make -f Makefile.<simulator>
+
+where <simulator> denotes one of the supported simulators:
+
+  * Makefile.ghdl
+    Tristan Gingold's GHDL simulator/compiler, a VHDL front-end for gcc.
+    http://ghdl.free.fr/
+
+  * Makefile.simili
+    DISCONTINUED
+    VHDL Simili, a VHDL simulator by Symphony EDA
+    http://www.symphonyeda.com/
+
+Make will analyze all VHDL files (RTL and testbench code) and elaborate all
+three testbench top-levels if appropriate for the chosen simulator:
+
+  * tb_behav_c0
+    The main testbench for regression testing.
+    Instantiates the plain t48_core and provides internal RAM (256 bytes) and
+    ROM (2k bytes) plus 2k bytes of external ROM.
+
+  * tb_t8048_behav_c0
+    The testbench for the t8048 sample system.
+
+  * tb_t8039_behav_c0
+    The testbench for the 8039 sample system.
+
+  * tb_t8243_behav_c0
+    Testbench containing the t48_core and the synchronous t8243 flavour.
+
+  * tb_t8048_t8243_behav_c0
+    Testbench containing the t8048 and the asynchronous t8243 toplevel.
+
+Each Makefile has a 'clean' target to delete all intermediate data:
+
+$ make -f Makefile.<simulator> clean
+
+The basic simple sequence list can be found in COMPILE_LIST. This can be
+useful to quickly set up the analyze stage of any compiler or
+synthesizer. Especially when synthesizing the code, you want to skip the VHDL
+configurations in *-c.vhd and everything below the bench/ directory.
+
+Preparation of the ROM Files
+----------------------------
+
+All testbenches listed above need two files in hex-format. They contain the
+program for the T48 core and are loaded into internal and external ROM at
+simulation startup. Their existance is mandatory as they are referenced in the
+VHDL code of the ROM model lpm_rom.vhd. In case they are missing, the
+simulation will stop immediately after elaborating the design.
+
+These files are:
+
+  * rom_t49.hex
+    Internal ROM contents for 8x49 derivatives,
+    address range 000H to 7FFH.
+    Intel hex format, starting at address 000H.
+
+  * rom_t49_ext.hex
+    External ROM contents for t8x49 derivatives,
+    address range 800H to FFFH.
+    Intel hex format, starting at address 800H.
+
+  * rom_t48.hex
+    Internal ROM contents for t8x48 derivatives,
+    address range 000H to 3FFH.
+    Intel hex format, starting at address 000H.
+
+  * rom_t48_ext.hex
+    External ROM contents for t8x48 derivatives,
+    address range 400H to FFFH.
+    Intel hex format, starting at address 000H.
+
+  * rom_t3x.hex
+    Internal ROM contents for t803x derivatives,
+    empty.
+
+  * rom_t3x_ext.hex
+    External ROM contents for t803x derivatives,
+    address range 000H to FFFH.
+    Intel hex format, starting at address 000H.
+
+The verification flow for the T48 project generates these files
+automatically from the assembler source files.
+
+All regression tests and the general purpose software is organized in a cell
+structure. Currently, this means that the software for a cell is contained in
+a dedicated directory where the assembler run takes place. In the future,
+there will be more aspects to a cell.
+
+Assembling, linking and putting the hex-files in place is under the control of
+the make-mechanism. E.g. to assemble the source code of a cell, issue the
+following command:
+
+$ make -f $VERIF_DIR/include/Makefile.cell
+
+This generates the linker file (test.p) and distributes its contents to the
+required ROM files for internal and external program ROM. The target 'simu'
+copies these files automatically to the simulation directory. So most likely,
+for running a test case or any other software, you will want to issue:
+
+$ make -f VERIF_DIR/include/Makefile.cell all clean
+
+The 'all' target generates hex files for all supported testbenches.
+
+The only supported assembler is Alfred Arnold's macroassembler AS. See
+
+  http://john.ccac.rwth-aachen.de:8000/as/
+
+
+Verification Environment
+------------------------
+
+The verification environment consists of a number of test programs. They are
+all self-checking. I.e. after testing the targeted functionality, they emit a
+pass/fail information. This information is detected by the testbench which
+stops the simulation and prints out the simulation result. This is the default
+mechanism for stopping the VHDL simulation.
+
+Pass/fail is signalled by a certain sequence of the accumulator contents:
+
+  1) Accumulator contains AAH
+  2) Accumulator contains 55H
+  3) Accumulator contains 01H   -> Pass
+     Accumulator contains 00H   -> Fail
+
+The detection is modelled like a state machine and in case the sequence is of
+bytes inside the accumulator does not match, the detection process restarts
+from the beginning. This mechanism is part of all verification tests.
+
+The complete regression suite can be executed with the run_regression.pl
+script. For each test cell, it steps through the sequence
+
+  1) Assemble the source code
+  2) Run the compiled VHDL design (currently only GHDL)
+  3) Optionally perform a dump compare against the C-model
+
+It is highly recommended to redirect the output of run_regression.pl into a
+file. Otherwise, analyzing the messages related to each test cell is almost
+impossible.
+
+
+FPGA Implementation
+-------------------
+
+All of the design files contain pure RTL code. Also the RAM for the data
+memory is described by generic RTL code. It should be translated automatically
+by the tool chain to a technology specific RAM macro.
+
+There is a generic method for the program memory ROM as well, although this
+project uses a flow where hex-files are loaded by lpm_rom.vhd as the default
+method. Convert the ROM image to an RTL VHDL file with one of the two
+following commands (either from hex or bin format):
+
+  $ hex2rom -b [rom image file] rom_t48 10l8s > rom_t48.vhd
+  $ hex2rom -b [rom image file] rom_t49 11l8s > rom_t49.vhd
+
+The option -b specifies that [rom image file] contains binary data. Skip this
+option to process a file in hex format.
+
+These resulting RTL representations are instantiated by t48_rom-struct-a.vhd
+and t49_rom-struct-a.vhd. Altera and Xilinx design tools will detect and
+extract the ROM and turn it into a memory macro.
