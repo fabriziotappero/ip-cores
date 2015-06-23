@@ -1,0 +1,162 @@
+SXP Processor
+1st version.
+Decoderless Stage Pipeline
+
+This style does not make for a set number of instructions.
+Instrucions are built from the configuration of the pre decoded
+setup bits.
+
+Issues:
+1. How to organize a ext bus read and write
+
+----------------------------------------------------------------------------------------------------
+Destination for write back data
+  00 Register  (Aritmetic,  Logical and Memory Loads)
+  01 PC        (Flow control)
+  10 Memory    (Store)
+  11 Extension Interface
+ 
+---------------------------------------------------------------------------------------------------
+Source (Register or immediate)
+
+1st Source for the ALU must be a register , PC or Ext Data Bus 1 (Ext Reg A)
+2nd Source for the ALU must be a register, immediate or Ext Data Bus 2 (Ext Reg B)
+
+       A    B
+ 000 (Reg, Reg) 
+ 001 (Reg, Imm)  Dest Reg and Src Reg are same
+ 010 (PC , Reg)
+ 011 (PC , Imm)
+
+ 100 (Reg, Ext)
+ 101 (Ext, Reg)
+ 110 (Ext, Imm)
+ 111 (Ext, Ext)
+
+--------------------------------------------------------------------------------------------------
+ALU Instruction
+
+  ALU Output       YA        YB
+              |----------|-----------|
+  000 PASS    |     A    |    B      |
+  001 ADD     |  A + B   | A + B (SE)|
+  010 SUB     |  A - B   | A - B (SE)|
+  011 MULT    | A*B(MSW) |   A*B(LSW)|
+  100 AND/OR  |    A & B |  A | B    |
+  101 XOR     |    A ^ B | ~(A ^ B)  |
+  110         | RESERVED | RESERVED  |
+  111 PASS_SW |   Al:Ah  |  Bl:Bh    |
+              |-----------------------
+  
+  Note: (SE) means sign extended from 16th bit up to 32nd bit.
+        (MSW) means most significant word result
+        (LSW) means least significant word result
+
+The ALU instructions are condensed by using both YA and YB outputs for multiple functions.
+
+  example:
+  The add result that comes out of result YA is a A(32 bits) + B(32 bits) add.
+  YB result is be a A(32 bits) + B(16 sign extended bits)
+  *** This takes care of worrying about an instruction to sign extend bits for relative jumps. 
+
+
+
+  ALU Development Note:
+  The best way to catagorize the ALU instructions is by number of inputs and number of outputs.
+
+  Single Input -> Single Output (NOT and etc..)
+  Single Input -> Double Output (I don't know of any)
+  Double Input -> Single Output (ADD, SUB, AND, OR, XOR)
+  Double Input -> Double Output (MULT)
+
+  The double input single output instructions can be combined.
+  I am tempted to say that there will not be any single input commands
+  to simpluify the ALU module and instructions.
+
+
+---------------------------------------------------------------------------------------------
+  Write Back Data Source 
+
+  Code    Data Source
+  ---- ---------------------------
+  0000 ALU output A
+  0001 ALU output B
+  0010 From Memory (Load) 
+  0011 From Extension Interface 
+
+  0100 ALU A FLag Z (zero extended)
+  0101 ALU A Flag N (zero extended)
+  0110 ALU A Flag V (zero extended)
+  0111 ALU A Flag C (zero extended)
+
+  1000 ALU B FLag Z (zero extended)
+  1001 ALU B Flag N (zero extended)
+  1010 ALU B Flag V (zero extended)
+  1011 ALU B Flag C (zero extended)
+
+  1100 EXT ALU FLag Z (zero extended)
+  1101 EXT ALU Flag N (zero extended)
+  1110 EXT ALU Flag V (zero extended)
+  1111 EXT ALU Flag C (zero extended)
+
+  Note:   
+    Flag Z = Zero flag (1 if result all zeros) 
+    Flag N = Negative flag (1 if MSB is a one)
+    FLag C = Carry flag (1 if carry with sub or add)
+    Flag V = Overflow flag (1 if overflow with sub or add) 
+
+-----------------------------------------------------------------------------------------------
+Conditional jump instructions 
+
+Dest = PC
+Source = Reg, Reg 
+ALU = PASS
+WB_SRC = YA
+(The msb of YB will be used to determine if the jump should be taken)
+
+JNZ R1 (Address) , R2 (lsb condition value)
+JZ R1 (Address) , R2 (lsb condition value)
+The (bits that control this are only used when PC is the target)
+The lsb of the instruction is used to determine if this is a conditional (1) or uncond jump(0). 
+The next to lsb is used to determine if the jump is a JZ or JNZ for conditional jumps.
+
+(NEW)
+The third bit is used to detmermine if this is a jump and link as well.
+The register for the link is held in the destination address. 
+This field was unused in pc dest operations and is perfect for all sort of
+jump and link options. It also greatly simplified the architecture.
+(Link address was tied to addrb which caused huge limitations.)
+This conditional jump will happen if the lsb of the instruction is a 1
+
+--------------------------------------------------------------------------------------------------
+ALU Extension instructions
+
+ALU input words A and B are always broadcasted to the ext interface.
+
+If an extension ALU instruction is to be used then the write back source is 
+set to the extention inteface. This bypasses the base ALU completely and allow the
+results to be written back to the destination.
+
+-------------------------------------------------------------------------------------------------
+
+Ext read instructions.
+
+In Ext Bus reads, the Ext circuit should use the ALU Op + WB src fields to determine what
+type of Ext operation is required.
+
+Ex. ALU instruction 0 is used to make a call to the read the Ext bus.
+If ALU instruction is 1 - 7 then it could be an ext ALU instruction. 
+   
+----------------------------------------------------------------------------------------------------
+The interupt is internal controlled by an interupt module inside the sxp.
+
+Even though you cannot issue a [pc] dest, [pc,imm] src JAL type instruction, the interupt module
+can control and insert the JAL signal.
+
+I have not figured out how the user can generate an interupt that causes a JAL to happen.
+One way is write the vector address in one reg and enter a JAL type instruction. This should
+work OK, it is just not as clean as the internal interupt generated signal.
+
+By using the immediate field, there are a total of 65535 possible interupts. This should
+surfice.
+
