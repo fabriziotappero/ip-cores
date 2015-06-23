@@ -1,0 +1,336 @@
+\chapter{Cache/Memory Controller Module}
+\label{cache}
+
+    The project includes a cache+memory controller module from revision 114.\\
+        
+    Both the I- and the D-Cache are implemented. But the parametrization 
+    generics are still mostly unused, with many values hardcoded. And SDRAM is 
+    not supported yet. Besides, there are some loose ends in the implementation 
+    still to be solved, exlained in section ~\ref{cache_problems}.\\
+    
+    
+\section{Cache Initialization and Control}
+\label{cache_init_and_control}
+
+    The cache module comes up from reset in an indeterminate, unuseable state.
+    It needs to be initialized before being enabled.\\
+    Initialization means mostly marking all D- and I-cache lines as invalid. 
+    The old R3000 had its own means to achieve this, but this core implements an
+    alternative, simplified scheme.\\
+
+    The standard R3000 cache control flags in the SR are not used, either. Instead,
+    two flags from the SR have been repurposed for cache control.\\
+
+\subsection{Cache control flags}
+\label{cache_control_flags}
+    
+    Bits 17 and 16 of the SR are NOT used for their standard R3000 purpose.
+    Instead they are used as explained below:
+    
+    \begin{itemize}
+    \item Bit 17: Cache enable              [reset value = 0]
+    \item Bit 16: I- and D-Cache line invalidate   [reset value = 0]
+    \end{itemize}
+
+    You always use both these flags together to set the cache operating mode:
+    
+    \begin{itemize}
+    \item Bits 17:16='00'\\
+        Cache is enabled and working.
+    \item Bits 17:16='01'\\
+        Cache is in D- and I-cache line invalidation mode.\\
+        Writing word X.X.X.N to ANY address will 
+        invalidate I-Cache line N (N is an 8-bit word and X is an 8-bit 
+        don't care). Besides, the actual write will be performed too; be 
+        careful...\\
+    
+        Reading from any address will cause the 
+        corresponding D-cache line to be invalidated; the read will not be
+        actually performed and the read value is undefined.\\
+    \item Bits 17:16='10'\\
+        Cache is disabled; no lines are being invalidated.\\
+    \item Bits 17:16='11'\\
+        Cache behavior is UNDETERMINED -- i.e. guaranteed crash.\\
+    \end{itemize}
+    
+    Now, after reset the cache memory comes up in an undetermined state but 
+    it comes up disabled too. Before enabling it, you need to invalidate all
+    cache lines in software (see routine cache\_init in the memtest sample).\\
+
+\section{Cache Tags and Cache Address Mirroring}
+\label{cache_tags}
+
+    In order to save space in the I-Cache tag table, the tags are shorter than 
+    they should -- 14 bits instead of the 20 bits we would need to cover the
+    entire 32-bit address:
+
+\needspace{10\baselineskip}
+\begin{verbatim}
+
+                _________ <-- These address bits are NOT in the tag
+               /         \
+    31 ..   27| 26 .. 21  |20 ..          12|11  ..        4|3:2|
+    +---------+-----------+-----------------+---------------+---+---+
+    | 5       |           | 9               | 8             | 2 |   |
+    +---------+-----------+-----------------+---------------+---+---+
+    ^                     ^                 ^               ^- LINE_INDEX_SIZE
+    5 bits                9 bits            LINE_NUMBER_SIZE
+
+    \end{verbatim}\\
+    
+    Since bits 26 downto 21 are not included in the tag, there will be a 
+    'mirror' effect in the cache. We have effectively split the memory space 
+    into 32 separate blocks of 1MB which is obviously not enough but will do
+    for the initial versions of the core.
+    
+    In subsequent versions of the cache, the tag size needs to be enlarged AND 
+    some of the top bits might be omitted when they're not needed to implement 
+    the default MIPS memory map (namely bit 30 which is always '0').
+
+    
+\section{Memory Controller}
+\label{memory_controller}
+
+    The cache functionality and the memory controller functionality are so 
+    closely related that I found it convenient to bundle both in the same 
+    module: I have experimented with separate modules and was unable to come up
+    with the same performance with my synthesis tools of choice.
+    So, while it would be desirable to split the cache from the memory controller
+    at some later version, for the time being they are a single module.\\
+
+    The memory controller interfaces the cache to external memory, be it off-core 
+    or off-chip.
+    The memory controller implements the refill and writethrough state machines,
+    that will necessarily be different for different kinds of memory.\\
+
+
+\subsection{Memory Map Definition}
+\label{memory_map_definition}    
+    
+    The MIPS architecture specs define a memory map which determines which areas
+    are cached and which is the default address translation \cite[p.~2-8]{r3k_ref_man}.\\
+    Neither the memory translation nor the cacheable/uncacheable attribute of
+    the standard MIPS architecture have been implemented. In this core, program 
+    addresses are always identical to hardware addresses.\\
+
+    When requested to perform a refill or a writethrough, the memory controller 
+    needs to know what type of memory it is to be dealing with. The type of
+    memory for each memory area is defined in a hardcoded memory map 
+    implemented in function 'decode\_address\_mips1', defined in package 
+    'mips\_pkg.vhdl'. This function will synthesize into regular, combinational 
+    decode logic.\\
+
+    For each address, the memory map logic will supply the following information:
+
+\begin{enumerate}
+    \item What kind of memory it is.
+    \item How many wait states to use.
+    \item Whether it is writeable or not (ignored in current version).
+    \item Whether it is cacheable or not (ignored in current version).
+\end{enumerate}
+        
+    In the present implementation the memory map can't be modified at run time.\\
+    
+    These are the currently supported memory types:
+    
+\begin{tabular}{ll}
+\hline
+Identifier & Description \\
+\hline
+MT\_BRAM            & Synchronous, on-chip FPGA BRAM\\
+MT\_IO\_SYNC        & Synchronous, on-chip register (meant for I/O)\\
+MT\_SRAM\_16B       & Asynchronous, off-chip static memory, 16-bit wide\\
+MT\_SRAM\_8B        & Asynchronous, off-chip static memory, 8-bit wide\\
+MT\_DDR\_16B        & Unused yet\\
+MT\_UNMAPPED        & Unmapped area\\
+\hline
+\end{tabular}
+   
+\subsection{Invalid memory accesses}
+\label{invalid_memory}
+
+    Whenever the CPU attempts an invalid memory access, the 'unmapped' output 
+    port of the Cache module will be asserted for 1 clock cycle.
+    
+    The accesses that will raise the 'unmapped' output are these:
+    
+    \begin{enumerate}
+    \item Code fetch from address decoded as MT\_IO\_SYNC.
+    \item Data write to memory address decoded as other than RAM or IO.
+    \item Any access to an address decoded as MT\_UNMAPPED.
+    \end{enumerate}
+    
+    The 'unmapped' output is ignored by the current version of the parent MCU 
+    module -- it is only used to raise a permanent flag that is then connected
+    to a LED for debugging purposes, hardly a useful approach in a real project.
+    
+    In subsequent versions of the MCU module, the 'unmapped' signal will trigger
+    a hardware interrupt.
+    
+    Note again that the memory attributes 'writeable' and 'cacheable' are not
+    used in the current version. In subsequent versions 'writeable' will be 
+    used and 'cacheable' will be removed.
+    
+\subsection{Uncacheable memory areas}
+\label{uncacheable_memory}
+
+    There are no predefined 'uncacheable' memory areas in the current version of
+    the core; all memory addresses are cacheable unless they are defined as
+    IO (see mips\_cache.vhdl).\\
+    In short, if it's not defined as MT\_UNMAPPED or MT\_IO\_SYNC, it is 
+    cacheable.
+
+\section{Cache Refill and Writethrough Chronograms}
+\label{cache_state_machine}
+
+
+The cache state machine deals with cache refills and data writethroughs. It is
+this state machine that 'knows' about the type and size of the external 
+memories. when DRAM is eventually implemented, or when other widths of SRAM are
+supported, this state machine will need to change.
+
+The following subsections will describe the refill and writethrough procedures.
+Bear in mind that there is a single state machine that handles it all -- refills
+and writethroughs can't be done simultaneously.
+
+
+\subsubsection{SRAM interface read cycle timing -- 16-bit interface}
+\label{sram_read_cycle_16b}
+
+The refill procedure is identical for both D- and I-cache refills. All that 
+matters is the type of memory being read. 
+
+
+
+\needspace{15\baselineskip}
+\begin{verbatim}
+==== Chronogram 4.1: 16-bit SRAM refill -- DATA ============================
+              __    __    __    __    __    __    _     __    __    __    __
+clk         _/  \__/  \__/  \__/  \__/  \__/  \__/ ..._/  \__/  \__/  \__/ 
+
+cache/ps    ?| (1)             | (2)             | ... | (2)             |??
+
+refill_ctr  ?| 0                                 | ... |  3              |??
+
+chip_addr   ?|  210h           |  211h           | ... |  217h           |--
+
+data_rd     -XXXXX  [218h]     XXXXX  [219h]     | ... XXXXX  [217h]     |-- 
+             |<- 2-state sequence              ->| 
+            _                                                             __
+sram_oe_n    \____________________________________ ... __________________/  
+             |<- Total: 24 clock cycles to refill a 4-word cache line  ->|  
+============================================================================
+\end{verbatim}\\
+
+(NOTE: signal names left-clipped to fit page margins)
+
+In the diagram, the data coming into bram\_data\_rd is depicted with some delay.
+
+Signal \emph{cache/ps} is the current state of the cache state machine, and
+in this chronogram it takes the following values:
+
+\begin{enumerate}
+\item data\_refill\_sram\_0
+\item data\_refill\_sram\_1
+\end{enumerate}
+
+Each of the two states reads a halfword from SRAM. The two-state sequence is 
+repeated four times to refill the four-word cache entry.
+
+Signal \emph{refill\_ctr} counts the word index within the line being refilled,
+and runs from 0 to 4.\\
+
+
+\subsubsection{SRAM interface read cycle timing -- 8-bit interface}
+\label{sram_read_cycle_8b}
+
+The refill from an 8-bit static memory is essentially the same as depicted 
+above, except we need to read 4 bytes (over the LSB lines of the static memory 
+data bus) instead of 2 16-bit halfwords. The operation takes correspondingly
+longer to perform and uses an extra address line but is otherwise identical.
+
+TODO: 8-bit refill chronogram to be done.
+
+
+\subsubsection{16-bit SRAM interface write cycle timing}
+\label{sram_write_cycle}
+
+The path of the state machine that deals with SRAM writethroughs is linear so 
+a state diagram would not be very interesting. As you can see in the source 
+code, all the states are one clock long except for states 
+\emph{data\_writethrough\_sram\_0b} and \emph{data\_writethrough\_sram\_1b}, 
+which will be as long as the number of wait states plus one.
+This is the only writethrough parameter that is influenced by the wait state 
+attribute.\\
+
+A general memory write will be 32-bit wide and thus it will take two 16-bit 
+memory accesses to complete. Unaligned, halfword or byte wide CPU writes might 
+in some cases be optimized to take only a single 16-bit memory access. This 
+module does no such optimization yet.
+For simplicity, all writethroughs take two 16-bit access cycles, even if one
+of them has both we\_n signals deasserted.\\
+
+The following chronogram has been copied from a simulation of the 'hello' 
+sample. It's a 32-bit wide write to address 00000430h.
+As you can see, the 'chip address' (the address fed to the SRAM chip) is the 
+target address divided by 2 (because there are 2 16-bit halfwords to the 32-bit 
+word). In this particular case, all the four bytes of the long word are written 
+and so both the we\_n signals are asserted for both halfwords.
+
+In this example, the SRAM is being accessed with 1 WS: WE\_N is asserted for
+two cycles. 
+Note how a lot of cycles are used in order to guarantee compliance with the
+setup and hold times of the SRAM against the we, address and data lines.
+
+\needspace{15\baselineskip}
+\begin{verbatim}
+==== Chronogram 4.3: 16-bit SRAM writethrough, 32-bit wide =================
+                     __    __    __    __    __    __    __    __    __    _
+clk                _/  \__/  \__/  \__/  \__/  \__/  \__/  \__/  \__/  \__/ 
+
+cache/ps           ?| (1) | (2) | (3)       | (4) | (5) | (6)       | (7) |?
+
+sram_chip_addr     ?|          218h               |       219h            |?
+
+sram_data_wr       -------|       0000h           |         044Ch         |-
+                   _____________             ___________             _______
+sram_byte_we_n(0)               \___________/           \___________/
+                   _____________             ___________             _______
+sram_byte_we_n(1)               \___________/           \___________/
+
+                   _________________________________________________________
+sram_oe_n          
+============================================================================
+\end{verbatim}\\
+
+Signal \emph{cache/ps} is the current state of the cache state machine, and
+in this chronogram it takes the following values:
+
+\begin{enumerate}
+\item data\_writethrough\_sram\_0a
+\item data\_writethrough\_sram\_0b
+\item data\_writethrough\_sram\_0c
+\item data\_writethrough\_sram\_1a
+\item data\_writethrough\_sram\_1b
+\item data\_writethrough\_sram\_1c
+\end{enumerate}
+
+   
+
+\section{Known Problems}
+\label{cache_problems}
+
+    The cache implementation is still provisional and has a number of 
+    acknowledged problems:
+
+\begin{enumerate}
+\item All parameters hardcoded -- generics are almost ignored.
+\item SRAM read state machine does not guarantee internal FPGA $T_{hold}$. 
+        In my current target board it works because the FPGA hold times 
+        (including an input mux
+        in the parent module) are far smaller than the SRAM response times, but
+        it would be better to insert an extra cycle after the wait states in
+        the sram read state machine.
+\item Cache logic mixed with memory controller logic.
+\end{enumerate}
+

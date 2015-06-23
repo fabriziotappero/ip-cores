@@ -1,0 +1,158 @@
+\chapter{Design Notes}
+\label{notes}
+
+\section{Project Goals}
+\label{goals}
+
+    The first iteration of the project will be deemed finished when it can do
+    the following:
+
+\begin{enumerate}
+    \item Run a minimal set of MIPS-I opcodes.\\
+        Excluding unaligned load/store (formerly patented).\\
+        Excluding all CPA instructions.\\
+        Excluding all CP0 instructions related to TLB.\\
+        Cache instructions will not be implemented as defined.
+    \item Catch all undefined opcodes (and trigger exception).
+    \item Operate in kernel/user mode as per the architecture definition.
+    \item Handle exceptions in a manner compatible to MIPS-I standard.
+    \item Code cache and data cache, even if not standard.\\
+        No MMU and no TLB, and no cache-related instructions.
+    \item Implement as much of CP0 as necessary for the above goals.
+    \item Interface to external SRAM (or FLASH) on 8- and 16-bit data bus.
+    \item Be no bigger than Plasma in a Spartan-3 or Cyclone-2 device, and
+        no slower -- Plasma is used as a reference in many ways.\\
+        Speed measured in raw clock frequency for the time being.
+        (I.e. don't not consider stalls, interlocks, etc. yet)
+    \item Interlock behavior of MUL/DIV and L* compatible to toolchain.\\
+        That is, interlock loads instead of relying on a delay slot.
+\end{enumerate}
+
+
+    Unaligned load/stores are excluded not because of patent concerns (the
+    patents already expired) but because they're not essential for a first
+    version of the core. The same goes for all other exclusions.
+
+    As of rev. 154 all the 1st block goals have been accomplished (but not very
+    heavily tested; many bugs remain, probably).\\
+    
+    For a second iteration I plan on the following:
+\begin{enumerate}
+    \item Proper interlocking of load cycles (with no wasted cycles).
+    \item External interrupt support.
+    \item Trap handlers (instruction emulation) for unaligned load and store 
+        instructions.
+    \item Trap handlers (instruction emulation) for the most usual MIPS32 
+        instructions.
+    \item Some much needed optimization of the caches.
+\end{enumerate}
+    None of these things have been done.\\
+
+    
+    Note that 32-bit memory interfaces are not to be implemented any time soon, 
+    mainly because I don't have any actual hardware with which to test it.
+    
+
+\section{Development status}
+\label{status}
+
+    The CPU is already able to execute almost any MIPS-I code (excluding some
+    unimplemented instructions such as cache control).\\
+    It can pass a basic opcode test and can execute some basic applications 
+    compiled with standard gcc tools (specifically, it can run an 'Adventure' 
+    demo and a tiny 'hello world' program, see section 6).\\
+    
+    Hardware interrupt support is entirely missing.
+    
+    The most important limitations are the very basic memory interface, with
+    no support for SDRAM, and the absence of MIPS32 trap handlers -- which 
+    means that the ubiquitous MIPS32 toolchains can't be easily used with 
+    this core.
+    
+    The memory controller can already access external static memory (SRAM or 
+    FLASH) on 8-bit and/or 16 bit buses. Still does not support SDRAM, nor 
+    static RAM in other bus widths.
+    My main development target is a DE-1 board from Terasic (Cyclone-2) and I 
+    have focused in the kind of memory it has.
+    
+    Wait states can be configured at synthesis, see section 
+    ~\ref{memory_map_definition}.
+    Code sample 'memtest' takes advantage of this to do a basic test of the
+    external SRAM, and code sample 'Adventure' uses both Flash and SRAM.
+    All the code samples habe been tested with the cache enabled and disabled, 
+    and they ship with the cache enabled (i.e. with C startup code that 
+    initializes and enables the cache).
+    
+    
+    The code samples can be found in the /src directory (see section 
+    ~\ref{samples}).
+
+
+    This is a summary of the state of the CPU at this time:
+\begin{itemize}
+    \item MIPS-I things not implemented
+    \begin{enumerate}
+        \item External hardware interrupts.
+    \end{enumerate}
+
+    \item Things implemented but not fully tested.
+    \begin{enumerate}
+        \item Rte instruction.
+        \item Kernel/user modes.
+    \end{enumerate}
+
+    \item Things with provisional implementation
+    \begin{enumerate}
+        \item Load interlocks: the pipeline is stalled for every load instruction,
+            even if the target register is not used in the following
+            instruction. So that every load takes two cycles.\\
+            The interlock logic should check register indices and stall only if
+            there is a data hazard.\\
+            Note that all that's needed is a better identification of stall
+            conditions; the logic to enable a load instruction that does not
+            stall to overlap the next instruction is already in place.\\
+            The interlock logic needs a stronger test bench anyway.
+        \item Documentation is too sparse and source code is barely commented.\\
+        \item The D-Cache handles RAW hazards in a very inefficient way.\\
+            Data refills in a SW+LW sequence should only be triggered when the
+            SW invalidates the same line the LW is loading. Instead, the current
+            cache triggers the data refill always (for a SW+LW sequence, that 
+            is).\\
+            This performance drag has to be fixed without ruining the clock rate
+            (that's the catch).
+    \end{enumerate}
+\end{itemize}
+
+\section{Performance}
+\label{performance}
+    In my main test system, a Cyclone-2 grade -7, the core
+    with caches and with mul/div and all other necessary functionality, plus 
+    a barebones UART, will be below 2500 LEs + 18 BRAMs, running at least at 
+    50 MHz (with 'balanced optimization' on Quartus-II).\\
+    
+    As soon as the core is in a stable state I will include a few synthesis
+    performance numbers for common configurations.\\
+
+    As soon as I can build a dhrystone benchmark I will post results (and commit
+    the code). The core needs a timer before I can do that.\\
+    
+    My first performance target will be a real R3000 at the same clock rate.
+    I can anticipate that performance will be MUCH lower than that (by a factor 
+    of 4 or more) due to the bus widths and the wait states, AND the inefficient
+    cache implementation. I'll work on that as soon as the basic stuff is done.
+   
+\section{Next steps}
+\label{next_steps}
+    \begin{itemize}
+    \item Implement efficient load interlock detection with no wasted cycles.
+    \item Do whatever it takes to use standard C library functions.
+    \item Alternatively, build a small C library replacement.
+    \item Add a couple of benchmarks, including one with FP arithmetic.
+    \item Modify the software simulator so it can boot uClinux.
+    \item Make a uClinux port suitable for a R3000 derivative, from BuildRoot.
+    \item Make a freeRTOS port suitable for a R3000 derivative.
+    \end{itemize}
+
+    Some of the above items are done, others are in progress and others
+    are pipe dreams at this point.
+    

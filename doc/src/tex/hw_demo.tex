@@ -1,0 +1,153 @@
+\chapter{Hardware Demo}
+\label{hw_demo}
+
+\section{Pre-generated demo}
+\label{pregenerated_demo}
+
+    The project includes a few synthesizable code samples, including a 
+    'Hello world' demo and a memory tester. Only the 'hello' demo is included 
+    in pre-generated form, the others have to be built using the included 
+    makefiles -- assuming you have a mips toolchain.\\
+
+    'Pre-generated' in this context means that all the vhdl files necessary for 
+    building the demo are already included with the project, including the 
+    configuration package that contains the program's object code, and the only 
+    tool needed is the synthesis tool.
+    
+    The pregenerated demo is included just for convenience, so that you can 
+    launch some small application on hardware without installing a C toolchain.\\
+    
+    A constraints file is provided ('/vhdl/demo/c2sb\_demo.csv') which includes
+    all the pin constraints for the default target board, in CSV format. This
+    constraints file is shared by all demos targeted to the DE-1 board.\\
+
+    The default target board is TerasIC's DE-1, with a Cyclone-II FPGA 
+    (EP2C20F484C7). This is the only hardware platform the core has been 
+    tested in, so far.\\
+
+    I have used the free Altera IDE (Altera Quartus II 9.0). This version of
+    Quartus does not even require a free license file and can be downloaded for
+    free from the altera web site. But if you have a DE-1 board on hand I guess
+    you already know that.\\
+
+    I assume you are familiar with Altera tools but anyway this is how to set up
+    a project using Quartus II:
+
+    \begin{enumerate}
+        \item Create new project with the new project wizard.
+            Top entity should be c2sb\_demo.
+            Suggested path is /syn/altera/(project name).
+        \item Set target device as EP2C20F484C7.
+            This choice tells the synth tool what speed grade and chip package
+            we'll be targetting.
+        \item 'Next' your way out of the new project wizard.
+        \item Add to the project all the vhdl files in /vhdl and /vhdl/demo, 
+              except mips\_cache\_stub.vhdl and sdram\_controller.vhdl.
+        \item Add to the project all the vhdl files in /vhdl/SoC. 
+        \item Select file c2sb\_demo.vhdl as top.
+        \item Import pin constraints file (assignments-\textgreater import assignments).
+        \item Create a clock constraint for signal clk (51 MHz or some other
+            suitable speed which gives us some minimal slack).
+        \item In the device settings window, click "Device and pin options...".
+        \item Select tab "Dual-Purpose pins".
+        \item Double-click on nCEO value column and select "use as regular I/O".
+            IMPORTANT: otherwise the synthesis will fail; we need to use a FPGA
+            pin that happens to be dual-purpose (programming and regular).
+        \item Select 'speed' optimization.
+        \item Save the project and synthesize.
+        \item Make sure the clock constraint is met (timing analyzer report).
+            There is a random element to the synthesis process, as you know,
+            but the core as shipped should pass the constraint.
+        \item Program the FPGA from Quartus-2
+        \item If you have a terminal hooked to the serial port (19200/8/N/1) you
+            should see a welcome message after depressing the reset button.
+            (by default this is pushbutton 2).
+    \end{enumerate}
+    
+    In the present version, the synthesis will produce a lot of warnings. The 
+    ugliest are about unused pins and an undeclared clock line. None of them 
+    should be really scary.\\
+
+    Note that none of the on-board goodies are used in the demo except as noted
+    in section ~\ref{porting_hw_demo} below.\\
+
+    In order to generate the demos (not using the pre-generated file) you
+    have to use the makefiles provided with the code samples. Please see 
+    the sample readme files and the makefiles for details. In short, provided
+    you have a MIPS toolchain installed and Python 2.5+, all you have to do
+    is run make (which will automatically build all the vhdl files where they
+    need to be, etc.) and run the synthesis.\\
+    
+
+\section{Porting to other dev boards}
+\label{porting_hw_demo}
+
+    I will only deal here with the 'hello' demo, the process is the same
+    for all other samples that don't involve external FLASH.\\
+
+    The 'hello' demo should be easily portable to any board which has all of 
+    this:
+
+    \begin{itemize}
+    \item An FPGA capable enough (the demo uses internal memory for code).
+    \item At least 4KB of 16-bit wide external, asynchronous, old-fashioned SRAM.
+    \item A reset pin (possibly a pushbutton).
+    \item A clock input (uart modules assume 50MHz, see below).
+    \item RXD and TXD UART pins, plus a connector, header or whatever.
+    \end{itemize}
+
+    The only module that care at all about clock rate is the UART embedded into
+    the SoC module. It's hardwired to 19200 bauds when clocked at 50MHz, so if you
+    use a different frequency you must edit the generics in the demo entity
+    accordingly -- the demo generics are passed all the way down to whatever
+    module needs them.\\
+    The UART has hardly been tested at clock rates other than 50MHz and has not 
+    passed any independent test bench; try the core first at 50 MHz.\\
+
+    Though there is no reset control logic, the reset input is synchronized 
+    internally, so you can use a raw pushbutton -- you may trigger multiple 
+    resets if your pushbutton isn't tight but you'll never cause metastability 
+    trouble.\\
+
+    Assuming you take care of all of the above, the easiest way I see to port
+    the demo is just editing the top module ports ('/vhdl/demo/c2sb\_demo.vhdl')
+    to match your board setup. The only tricky part is the interface to FLASH 
+    and SDRAM.\\
+
+    All the code in this project is vendor agnostic (or should be, I have only
+    tried it on Quartus and ISE). Specifically, it does not instantiate memory
+    blocks (relying instead on memory inference) or clock managers or buffers.
+    This has its drawbacks but is an stated goal of the project -- in the long
+    run it pays, I think, and it certainly makes the porting easier.\\
+    
+\section{'Adventure' demo}
+\label{adventure}
+
+    There is another demo targeting the same hardware as the 'hello' demo above:
+    a port of 'Adventure'. The C source (included) has been slightly modified
+    to not use any library functions nor any filesystem (instead uses a built-in
+    constant string table).\\
+    
+    Build steps are the same as for the hello demo (the make target is 'demo').\\
+    
+    Since the binary executable is too large to fit internal BRAM, it has to be 
+    executed from the DE-1 onboard flash. You need to write file 'adventure.bin'
+    to the start of the FLASH using the 'Control Panel' tool that came with your
+    DE-1 board. That's the only salient difference. That and the amount of SRAM;
+    The 512KB present on the DE-1 are enough but I don't remember right now
+    what is the minimum, please look at the map file. This should only matter
+    if you want to port to another board.\\
+    
+    The game will offer you an auto-walkthrough option. Answer 'y' and it will
+    play itself for about 250 moves, leaving you at an intermediate stage of 
+    the game from which you can play on.\\
+    
+    Now, admittedly 'Adventure' is no standard benchmark and even running it to 
+    completion does not guarantee that there are no bugs hidden in the cache or 
+    any of the opcodes.
+    On the other hand, when you get to the \emph{maze of twisty little passages} 
+    you know you have a computer, finished or not. The 'Adventure' demo is 
+    great as a confidence builder.\\
+    
+    Besides, running Adventure on a computer built by myself is something 
+    I've always wanted to do :)\\

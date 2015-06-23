@@ -1,0 +1,110 @@
+
+\chapter{Usage}
+
+\section{Main Modules}
+\label{main_modules}
+
+The core is split in three main modules:
+
+\begin{enumerate}
+    \item The CPU (mips\_cpu.vhdl).
+    \item The cache+memory controller (mips\_cache.vhdl).
+    \item A 'SoC' entity which combines CPU+Cache (mips\_soc.vhdl).
+\end{enumerate}
+
+The entity you should use in your projects is the SoC module. The project 
+includes a 'hardware demo' built around this module (see section 
+~\ref{pregenerated_demo}) which is meant as an usage example.\\
+
+
+\section{Bootstrap Code}
+\label{bootstrap_code}
+
+Though the core is meant to run mostly from off-chip memory, the current version
+of the SoC module includes a small ROM implemented as FPGA BRAM and called 
+'bootstrap BRAM'. In the current version of the core, this BRAM can be loaded
+with arbitrary code and its size can be configured by using generics, but it 
+can't be removed from the SoC. Even though the memory map can be modified to 
+boot from external FLASH and not use a BRAM at all, a BRAM will still be 
+inferred within the SoC -- subsequent versions will fix this.
+
+As can be seen in table~\ref{tab_soc_memory_map}, the internal BRAM is mirrored
+all over a wide area starting at \texttt{0xb8000000}. In practice, this means
+the BRAM will be mapped at the CPU reset address (\texttt{0xbfc00000}) and thus
+the bootstrap code should be placed there.
+Unless the bootstrap BRAM is very small, it will span over the interrupt vector
+address too (\texttt{0xbfc00180}).
+
+For example, the 'Adventure' demo included with the project uses bootstrap 
+code included in file \texttt{/src/common/bootstrap.s}. This bootstrap code
+is fairly incomplete (interrupt response code is mostly a stub) yet it's enough
+to boot most applications. 
+Note that the C startup code, which deals with things like initializing the 
+static variables on the data segment, etc. is not part of this bootstrap code. 
+It can be found in file \texttt{/src/common/c\_startup.s}
+
+So, in short, the code loaded onto the startup BRAM should include the most 
+basic system initialization (cache initialization at least) and the entry point
+for the interrupt response code; plus a jump to the main program entry address.
+
+Anyone trying to build some application on this core is advised to use the code 
+samples as starting points, specially the makefiles.
+
+
+\subsection{Loading Bootstrap Code on the SoC Module}
+\label{loading_bootstrap_code}
+
+Once the code that is to be loaded on the bootstrap BRAM has been built, you 
+need to load it onto the bootstrap BRAM within the FPGA.
+
+As you probably already know, there are several possible ways to deal with this 
+and most of them involve using \emph{'Memory Initialization Files'} of
+some sort. This project is different.
+
+So far, this project does not include any support for using IMF 
+files of any kind. Instead, the bootstrap BRAM is inferred and initialized 
+using regular VHDL constructs and a constant passed to the SoC module as a 
+generic.
+
+This scheme has a big drawback: every time the object code within the FPGA 
+changes, the whole synthesis needs to be re-run. This drawback is manageable
+as long as the core is not used in any big project or if the bootstrap code 
+does not change often.
+
+On the other hand, I see some big advantages in using regular BRAM inference in
+this stage of the project:
+
+\begin{enumerate}
+\item The whole scheme is totally vendor agnostic.
+\item Object code embedded on VHDL constants can very easily be used in both simulation and synthesis.
+\end{enumerate}
+
+So, whatever object code is to be used to initialize the SoC bootstrap BRAM has
+to be passed to the SoC module instance as a generic constant (see section 
+~\ref{soc_generics}). The constant must be of type \texttt{t\_obj\_code}, which 
+is defined in package \emph{mips\_pkg}.
+
+
+\subsection{Building the Bootstrap Initialization Constant}
+\label{boot_code_conversion}
+
+    The project includes a python script (\texttt{/tools/build\_pkg/build\_pkg.py}) 
+    whose purpose is to build an VHDL \texttt{t\_obj\_code} constant out of a 
+    \emph{binary} object code file. 
+       
+    This script will read one or more big-endian, binary object files and will 
+    produce a  VHDL package file that will contain initialization constants for 
+    the bootstrap BRAM and for some other memories that are only used in the 
+    simulation test bench.
+    The package can optionally include too some simulation and synthesis 
+    configuration constants -- such as the size of the bootstrap BRAM.
+    
+    The makefiles included in the code samples invoke this script twice: once
+    to generate a package called \emph{sim\_params\_pkg} and used in the 
+    simulation test bench; and once to build a package called 
+    \emph{bootstrap\_code\_pkg} used for synthesis.
+    
+    Please refer to the makefiles for usage examples, and read the script source
+    for more detailed usage instructions.
+    
+    
