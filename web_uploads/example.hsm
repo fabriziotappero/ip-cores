@@ -1,0 +1,80 @@
+---------------------------------------------------
+-- HASM Example File
+---------------------------------------------------
+.equ fpgabase      0xa0000000;
+.equ membase       0x80000000;
+.equ memfaultcount 0xa0000010;
+
+.isr isr_handler;
+
+
+
+start:  
+   call mem_test;
+
+
+stophere:
+    jmp stophere;
+   
+
+
+
+---------------------------------------------------
+-- mem_test shows how to implement a simple memory
+-- test in hasm.
+---------------------------------------------------
+mem_test:
+   ld rega,membase;         -- Base address of memory
+   ld regc,0x0;             -- Loop count
+mem_write: 
+
+   ld regb,0x5a5a5a5a;      -- Test pattern A
+   wr rega,regb;            -- Write rega to address pointed to by regb   
+   add rega,0x04;           -- Bump mem pointer
+
+   ld regb,0xa5a5a5a5;      -- Test pattern B
+   wr rega,regb;            -- Write rega to address pointed to by regb
+   add rega,0x04;           -- Bump mem pointer
+
+   add regc,0x01;           -- Bump loop count
+   cmp_e regc,0x100;        -- Done writing?
+   jmp mem_write;           -- No, keep going
+
+   ld rega,membase;         -- Finished writing so reinit for a read
+   ld regc,0x0;             -- Reinit the loop pointer
+mem_verify:
+   rd regb,rega;            -- Read back first location
+   cmp_e regb,0x5a5a5a5a;   -- First value ok?
+   call mem_fault;          -- Values didn't match so call fault handler
+   add rega,0x4;            -- Bump the address pointer
+   rd regb,rega;            -- Get the next value
+   cmp_e regb,0xa5a5a5a5;   -- Check against second patter
+   call mem_fault;          -- Didn't match, call the handler
+   add regc,0x1;            -- Bump the iteration count
+   cmp_e regc,0x100;        -- Done yet?
+   jmp mem_verify;          -- No, keep going
+   ret;                     -- Yep return
+
+
+
+---------------------------------------------------
+-- mem_fault is responsible for incrementing the
+-- fault count stored in the FPGA.
+---------------------------------------------------
+mem_fault:
+   push rega;               -- Save rega
+   rd rega,memfaultcount;   -- Get the fault count
+   add rega,0x1;            -- Increment the fault count
+   wr rega,memfaultcount;   -- Write the fault count back
+   pop rega;                -- Restore rega
+   ret;                     -- Return to caller
+
+---------------------------------------------------
+-- isr_handler gets called when then the 
+-- machine_interrupt input to the cycle_simulator 
+-- file is brought high. 
+---------------------------------------------------
+isr_handler:
+   push regd;
+   pop regd;
+   ret;
