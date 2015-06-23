@@ -1,0 +1,713 @@
+                                      ; FAT16 READER V.050303 - Armando Astarloa - 16 BIT VER.
+                                      ; APERT - UPV/EHU 2003 - DISTRIBUTED UNDER GPL LICENCE
+                                      ;
+                                      ; s0 -> TMP0 s1 -> TMP1 s2 -> TMP2 s3 -> TMP3 s4 -> TMP4 / SECTORS_PER_CLUSTER_READED s5 -> TMP5/SECTOR_WORDS_READED (256 TO 0)
+                                      ; s6 -> TMP s7 -> SECTORS_PER_CLUSTER s8 -> CLUSTER_BEGIN_LBA0 (FAT) s9 -> CLUSTER_BEGIN_LBA1 sA -> CLUSTER_BEGIN_LBA2 
+                                      ; sB -> CLUSTER_BEGIN_LBA3 sC -> ROOT_DIRECTORY_FIRST_CLUSTER0 (SUPPOSED LESS THAN 256 - USUALLY 2)
+                                      ; sD -> data[7:0] WB MASTER sE -> data[15:8] WB MASTER sF -> acummulator
+                                      CONSTANT DATA_WB_OUT_7_0_MASTER, 00
+                                      CONSTANT DATA_WB_OUT_15_8_MASTER, 01
+                                      CONSTANT CONTROL_WB_OUT_MASTER, 02
+                                      ; D7 = D6 = D5 = D4 = D3 = D2 = A0_MASTER D1 = W_WE_MASTER D0 = STB_O_MASTER
+                                      ; STROBE_O_MASTER = 1 & W_WE=0 & WB_A0 = 0 
+                                      CONSTANT READ_SLAVE, 01
+                                      ; STROBE_O_MASTER = 1 & W_WE=1 & WB_A0 = 0 
+                                      CONSTANT WRITE_LBA_15_0, 03
+                                      ; STROBE_CF_READER = 1 & W_WE=1 & WB_A0 = 1 
+                                      CONSTANT WRITE_LBA_27_16, 07
+                                      ;--
+                                      ;-- SLAVE INTERFACE
+                                      ;--
+                                      CONSTANT DATA_WB_OUT_7_0_SLAVE, 03
+                                      CONSTANT DATA_WB_OUT_15_8_SLAVE, 04
+                                      CONSTANT CONTROL_WB_OUT_SLAVE, 05
+                                      ; D7 =  D6 =  D5  D4 =  D3 = 
+                                      ; D2 = TAG1_ERROR
+                                      ; D1 = TAG0_WORD_AVAILABLE
+                                      ; D0 = ACK_O_SLAVE
+                                      CONSTANT ACK_O_SLAVE, 01
+                                      CONSTANT TAG0_WORD_AVAILABLE, 02
+                                      CONSTANT ERROR, 04
+                                      ;--
+                                      ;-- BUS CONTROL SIGNALS
+                                      ;--
+                                      CONSTANT CONTROL_OUT_MASTER, 06
+                                      ; D7 =  D6 = D5 = D4 = D3 = D2 = D1 = 
+                                      ; D0 = WB_BUS_MASTER_WRITE_ENABLE
+                                      CONSTANT WB_BUS_MASTER_WRITE_ENABLE, 01
+                                      CONSTANT CONTROL_OUT_SLAVE, 07
+                                      ; D7 =  D6 = D5 = D4 = D3 = D2 = D1 = 
+                                      ; D0 = WB_BUS_SLAVE_WRITE_ENABLE
+                                      CONSTANT WB_BUS_SLAVE_WRITE_ENABLE, 01
+                                      ;--
+                                      ;-- EXTERNAL REGISTERS FOR MORE DATA ALLOCATION (OTHER OPTION IS THE USE OF
+                                      ;-- ANOTHER BLOCK RAM IF IT IS AVALIABLE
+                                      ;--
+                                      CONSTANT TMP_OUT_0, 08
+                                      CONSTANT TMP_OUT_1, 09
+                                      CONSTANT TMP_OUT_2, 0A
+                                      CONSTANT TMP_OUT_3, 0B
+                                      CONSTANT TMP_OUT_4, 0C
+                                      CONSTANT TMP_OUT_5, 0D
+                                      CONSTANT TMP_OUT_6, 0E
+                                      CONSTANT TMP_OUT_7, 0F
+                                      ;--
+                                      ;-- INPUT PORTS
+                                      ;--
+                                      ;--
+                                      ;-- WISHBONE INTERFACE PORTS - INPUTS
+                                      ;--
+                                      CONSTANT CONTROL_WB_IN_MASTER, 00
+                                      ; D7 = D6 = D5 = D4 = D3 = D2 = 
+                                      ; D1 = ERROR_INPUT
+                                      ; D0 = ACK_I_MASTER
+                                      ;
+                                      CONSTANT ACK_I_MASTER, 01
+                                      CONSTANT ERROR_INPUT, 02
+                                      CONSTANT CONTROL_WB_IN_SLAVE, 01
+                                      ; D7 = D6 = D5 = D4 = D3 = D2 = 
+                                      ; D1 = -
+                                      ; D0 = STB_I_SLAVE
+                                      ;
+                                      CONSTANT STB_I_SLAVE, 01
+                                      ;CONSTANT TAG0_FORCE_RESET,02			
+                                      ;--
+                                      ;-- WISHBONE INTERFACE PORTS - INPUTS
+                                      ;--
+                                      CONSTANT DATA_WB_IN_7_0_MASTER, 02
+                                      CONSTANT DATA_WB_IN_15_8_MASTER, 03
+                                      ;--
+                                      ;-- EXTERNAL REGISTERS FOR MORE DATA ALLOCATION (OTHER OPTION IS THE USE OF
+                                      ;-- ANOTHER BLOCK RAM IF IT IS AVALIABLE
+                                      ;--
+                                      CONSTANT TMP_IN_0, 04
+                                      CONSTANT TMP_IN_1, 05
+                                      CONSTANT TMP_IN_2, 06
+                                      CONSTANT TMP_IN_3, 07
+                                      CONSTANT TMP_IN_4, 08
+                                      CONSTANT TMP_IN_5, 09
+                                      CONSTANT TMP_IN_6, 0A
+                                      CONSTANT TMP_IN_7, 0B
+                                      ;--
+                                      ;-- REGISTERS INITIALIZATION
+                                      ;--
+                      inicialization: 
+                                      ;
+                                      ; WISHBONE INTERFACES INIZIALIZATION
+                                      ;
+                                      LOAD sF, 00
+                                      OUTPUT sF, DATA_WB_OUT_7_0_MASTER
+                                      OUTPUT sF, DATA_WB_OUT_15_8_MASTER
+                                      OUTPUT sF, DATA_WB_OUT_7_0_SLAVE
+                                      OUTPUT sF, DATA_WB_OUT_15_8_SLAVE
+                                      OUTPUT sF, CONTROL_WB_OUT_MASTER
+                                      OUTPUT sF, CONTROL_WB_OUT_SLAVE
+                                      ;
+                                      ; WAIT FOR 410NS*3 (RESET DELAY)
+                                      
+                                main: 
+                                      ; PROCESS MASTER BOOT RECORD
+                                      CALL process_master_boot_record
+                                      ; PROCESS ROOT DIRECTORY
+                                      CALL process_root_directory
+                               start: 
+                                      CALL cluster_2_lba
+                                      ;CALL write_lba_to_slave
+                                      ; sector_per_cluster -> sector_per_cluster_readed
+                                      LOAD s4, s7
+                                      ; 256 -> (s6) SECTOR_WORDS_READED 
+                                      CALL read_sector
+                                idle: 
+                                      INPUT s6, CONTROL_WB_IN_SLAVE
+                                      ; CHECK STB INPUT 
+                                      ; CONTROL_WB_IN_SLAVE-> TMP (s6)
+                                      ; IF STB=1 GO TO THE NEXT STATE 
+                                      ; IF STB=0 GO TO THE IDLE STATE
+                                      AND s6, STB_I_SLAVE
+                                      JUMP Z, idle
+             transfer_word_to_master: 
+                                      CALL read_word_from_slave
+                                      CALL write_a_word_to_master
+                                      ; (SECTOR WORDS READED)-1
+                                      SUB s5, 01
+          check_sectors_words_readed: 
+                                      ; IF sector_words_readed = 0 THEN READ_NEW_SECTOR
+                                      ; IF sector_words_readed > 0 THEN TRANSFER_WORD_TO_MASTER
+                                      AND s5, s5
+                                      CALL Z, check_sector_per_cluster_readed
+                                      JUMP idle
+                   track_new_cluster: 
+                                      ; save the number of dummy reads that must be done when the fat sector will be readed
+                                      ; an are stored into s5 register
+                                      ; in s0 bits 6-0 of the cluster number (offset in the sector -> 256 words-fat16 entries)
+                                      ; as is each read operation a word is readed no multiplication is needed
+                                      ; RESTORE CLUSTER NUMBER
+                                      INPUT s0, TMP_IN_4
+                                      INPUT s1, TMP_IN_5
+                                      INPUT s2, TMP_IN_6
+                                      INPUT s3, TMP_IN_7
+                                      ;
+                                      ; compose LBA address of the sector of the fat that must be readed
+                                      ; 
+                                      ; SHIFT RIGHT 15-8 TO 7-0 
+                                      ;
+                                      LOAD sF, 07
+                            do_shift: 
+                                      SR0 s3
+                                      ; uses the carry for the MSB and stores LSB into the carry
+                                      SRA s2
+                                      SRA s1
+                                      SRA s0
+                                      SUB sF, 01
+                                      JUMP NZ, do_shift
+                                      CALL add_load_fat_begin_lba
+                                      ; adds fat_begin_lba to the sector relative to the fat obteined from the cluster
+                                      ; now there is the lba of the FAT sector that must be readed in s0,s1,s2,s3
+                                      CALL write_lba_to_slave
+                                      ; -- DUMMY READ OF THE WORDS OF THE SECTOR TILL THE ONE OF THE CLUSTER INTEGER 
+                                      INPUT sF, TMP_IN_4
+                                      AND sF, 7F
+                                      CALL do_dummy_reads_from_slave
+                                      ;
+                                      ;  (sD) data[7:0] WB MASTER -> (s0) TEMPORAL REGISTER
+                                      ;  (sE) data[7:0] WB MASTER -> (s1) TEMPORAL REGISTER
+                                      ; READ 2 BYTES
+                                      CALL read_word_from_slave
+                                      LOAD s0, sD
+                                      LOAD s1, sE
+                                      ;  (sD) data[7:0] WB MASTER -> (s2) TEMPORAL REGISTER
+                                      ;  (sE) data[7:0] WB MASTER -> (s3) TEMPORAL REGISTER
+                                      ; READ 2 BYTES
+                                      ;
+                                      ; CHECK IF ITS THE LAST ONE
+                                      ; CB3-CL2-CB1-CB0 IN FAT LITTLE ENDIAN ORDER CB0-CB1 CB2-CB3
+                                      LOAD sF, sE
+                                      SUB sF, FF
+                                      JUMP NZ, continue_file_processing
+                                      LOAD sF, sD
+                                      SUB sF, FF
+                                      JUMP NZ, continue_file_processing
+                            file_end: 
+                                      ; infinite loop (file readed and tranferred)
+                                      JUMP file_end
+            continue_file_processing: 
+                                      ; in s0,s1 is the cluster name
+                                      ; --
+                                      ; (SECTOR WORDS READED)= 256
+                                      ; sector_per_cluster -> sector_per_cluster_readed
+                                      LOAD s2, 00
+                                      LOAD s3, 00
+                                      LOAD s4, s7
+                                      CALL cluster_2_lba
+                                      CALL read_sector
+                                      RETURN
+              add_load_fat_begin_lba: 
+                                      INPUT sF, TMP_IN_0
+                                      ADD s0, sF
+                                      INPUT sF, TMP_IN_1
+                                      ADDCY s1, sF
+                                      INPUT sF, TMP_IN_2
+                                      ADDCY s2, sF
+                                      INPUT sF, TMP_IN_3
+                                      ADDCY s3, sF
+                                      RETURN
+     check_sector_per_cluster_readed: 
+                                      ; IF sector_per_cluster_readed = 0 THEN TRACK_NEW_CLUSTER
+                                      ; IF sector_per_cluster_readed > 0 THEN CHECK SECTOR WORDS READED
+                                      ; (sector_per_cluster_readed)-1
+                                      ; (SECTOR WORDS READED)= 256
+                                      SUB s4, 01
+                                      AND s4, s4
+                                      JUMP Z, track_new_cluster
+                     read_new_sector: 
+                                      ; (SECTOR WORDS READED)= 256
+                                      ; increment LBA
+                                      ; sector_per_cluster -> sector_per_cluster_readed-1
+                                      ADD s0, 01
+                                      ADDCY s1, 00
+                                      ADDCY s2, 00
+                                      ADDCY s3, 00
+                         read_sector: 
+                                      LOAD s5, 00
+                                      CALL write_lba_to_slave
+                                      RETURN
+                                      ;
+                                      ; --
+                                      ; -- PROCESS MASTER BOOT RECORD (READ LBA BEGIN OF THE FIRST PARTITION)
+                                      ; --
+          process_master_boot_record: 
+                                      ;
+                                      ; LOAD LBA FOR MBR READ
+                                      ;
+                                      LOAD s0, 00
+                                      LOAD s1, 00
+                                      LOAD s2, 00
+                                      LOAD s3, 00
+                                      CALL write_lba_to_slave
+                                      ; information of the lba begin for the first partition
+                                      ; has an offset of 454 bytes -> 227(0xE3) words
+                                      LOAD sF, E3
+                                      CALL do_dummy_reads_from_slave
+                                      ;
+                                      ; --
+                                      ; -- MBR READ - Partition_LBA_Begin EXTRACTION
+                                      ; --
+                                      ;
+                                      ;  (sD) data[7:0] WB MASTER -> (s0) lba
+                                      ;  (sE) data[15:8] WB MASTER -> (s1) lba
+                                      ;  (sD) data[7:0] WB MASTER -> (s2) lba
+                                      ;  (sE) data[15:8] WB MASTER -> (s3) lba
+                                      CALL store_all_temporal_registers
+                                      LOAD s8, s0
+                                      LOAD s9, s1
+                                      LOAD sA, s2
+                                      LOAD sB, s3
+                                      ;
+                                      ; NOW IS THE LBA_BEGIN ON THE TMP REGISTERS
+                                      ; --------------------
+                                      ; READ FIRST SECTOR (FAT32 VOLUMEN ID) OF THE PARTITION
+                                      ; ---------------------
+                                      CALL write_lba_to_slave
+                                      ;
+                                      ; READ -> SECTORS_PER_CLUSTER (OFFSET 0x0D)
+                                      ;
+                                      ; offset 0x0D (13) => READ 13 bytes -> 6(0x06) words and drop LSB in the next
+                                      LOAD sF, 06
+                                      CALL do_dummy_reads_from_slave
+                                      ;
+                                      ;  (sE) data[7:0] WB MASTER -> (s7) SECTORS PER CLUSTER
+                                      CALL read_word_from_slave
+                                      LOAD s7, sE
+                                      ;
+                                      ; READ -> Number_of_Reserved_Sectors (2 bytes) (OFFSET 0x0E)
+                                      ;
+                                      ; offset 0x0E (14) => READ 2 bytes -> 1(0x01) words
+                                      ;  (sD) data[15:8] WB MASTER -> (s6) TEMPORAL REGISTER
+                                      CALL read_word_from_slave
+                                      LOAD s6, sD
+                                      ;  (sE) data[7:0] WB MASTER -> (s4) TEMPORAL REGISTER
+                                      ;
+                                      LOAD s4, sE
+                                      ;
+                                      ;fat_begin_lba = Partition_LBA_Begin + Number_of_Reserved_Sectors
+                                      ;
+                                      ADD s8, s6
+                                      ADDCY s9, s4
+                                      ADDCY sA, 00
+                                      ADDCY sB, 00
+                                      ; store fat_begin_lba in external registers
+                                      OUTPUT s8, TMP_OUT_0
+                                      OUTPUT s9, TMP_OUT_1
+                                      OUTPUT sA, TMP_OUT_2
+                                      OUTPUT sB, TMP_OUT_3
+                                      ;
+                                      ;cluster_begin_lba = Partition_LBA_Begin + Number_of_Reserved_Sectors + 
+                                      ;				(Number_of_FATs * Sectors_Per_FAT)+ RootDirSectors;
+                                      ;cluster_begin_lba = fat_begin_lba + (Number_of_FATs * Sectors_Per_FAT)+ RootDirSectors;
+                                      ; READ -> Number_of_Fats (OFFSET 0x10) (always 2)
+                                      ;
+                                      ; offset 0x10 (16) => READ 2 bytes -> 1(0x01) words
+                                      ;
+                                      ;  (sD) data[7:0] WB MASTER -> (s6) TEMPORAL REGISTER
+                                      CALL read_word_from_slave
+                                      LOAD s6, sD
+                                      ;		
+                                      ; FOR FAT16 => NUMBER OF SECTORS OCCUPIED BY THE ROOT DIRECTORY (BYTES_PER_SEC=512) 
+                                      ;
+                                      ; READ -> RootEntCnt (OFFSET 0x11) (FAT16 PROCESSING)
+                                      ; RootDirSectors=((BPB_RootEntCnt*32)+(BPB_BytesPerSec-1))/BPB_BytesPerSec
+                                      ; offset 0x11 (17) => READ 1 bytes 
+                                      ;
+                                      ;  (sE) data[7:0] WB MASTER -> (s0) TEMPORAL REGISTER		
+                                      LOAD s0, sE
+                                      ;  (sD) data[15:0] WB MASTER -> (sD) TEMPORAL REGISTER - offset 0x12 (18) => READ 1 bytes 	
+                                      CALL read_word_from_slave
+                                      LOAD s1, sD
+                                      ; MULTIPLY BY 32 (100000) 5 SHIFTS TO THE LEFT
+                                      LOAD sF, 05
+                                      ; LSB '0'
+                             mult_32: 
+                                      SL0 s0
+                                      ; CARRY -> LSB , MSB -> CARRY
+                                      SLA s1
+                                      SUB sF, 01
+                                      JUMP NZ, mult_32
+                                      ;BPB_RootEntCnt*32+(BPB_BytesPerSec-1) 511 (0x1FF)
+                                      ;ADD s0,FF (if rounds up => not necessary??)
+                                      ;ADDCY s1,01
+                                      ;/BPB_BytesPerSec (512) (1000000000)9 SHIFTS TO THE RIGHT
+                                      LOAD sF, 09
+                             div_512: 
+                                      ; uses the carry for the MSB and stores LSB into the carry
+                                      SR0 s1
+                                      SRA s0
+                                      SUB sF, 01
+                                      JUMP NZ, div_512
+                                      ; ROUNDs UP
+                                      ;ADD s0,01
+                                      ;ADDCY s1,00
+                                      ;fat_begin_lba + RootDirSectors
+                                      ADD s8, s0
+                                      ADDCY s9, s1
+                                      ADDCY sA, s2
+                                      ADDCY sB, s3
+                                      ; READ -> Sectors_per_fat (OFFSET 0x24)
+                                      ;
+                                      ; offset 0x16 (22) => READ 2 bytes -> 01(0x01) words
+                                      ;
+                                      LOAD sF, 01
+                                      CALL do_dummy_reads_from_slave
+                                      CALL store_all_temporal_registers
+                                      ;  (Number_of_FATs * Sectors_Per_FAT)
+                                      ; Number_of_FATs = 2 (10) . Do a shift to the left of the Sectors_Per_Fat
+                                      ; ***	FAT16 = Sectors_per_fat(BPB_FATSz16)
+                                      ; LSB '0'
+                                      SL0 s0
+                                      ; CARRY -> LSB , MSB -> CARRY
+                                      SLA s1
+                                      ;SLA s2 for fat16 only 2 bytes
+                                      ;SLA s3
+                                      ; fat_begin_lba + RootDirSectors + (Number_of_FATs * Sectors_Per_FAT)
+                                      ADD s8, s0
+                                      ADDCY s9, s1
+                                      ADDCY sA, 00
+                                      ADDCY sB, 00
+                                      ; cluster_begin_lba is stored in s8, s9, sA, SB
+                                      ;
+                                      ; FOR FAT16 ROOT DIRECTORY POSITION IS FIXED 
+                                      ; root_first_lba =  fat_begin_lba(in external regs) + (Number_of_FATs * Sectors_Per_FAT) (s0,s1,s2,s3)
+                                      ;
+                                      LOAD s2, 00
+                                      LOAD s3, 00
+                                      CALL add_load_fat_begin_lba
+                                      ; s0,s1,s2,s3 have Root directory begin lba
+                                      RETURN
+        store_all_temporal_registers: 
+                                      ; READ 2 BYTES
+                                      CALL read_word_from_slave
+                                      ;  (sD) data[7:0] WB MASTER -> (s0) TEMPORAL REGISTER
+                                      ;  (sE) data[7:0] WB MASTER -> (s1) TEMPORAL REGISTER
+                                      LOAD s0, sD
+                                      LOAD s1, sE
+                                      ;  (sD) data[7:0] WB MASTER -> (s2) TEMPORAL REGISTER
+                                      ;  (sE) data[7:0] WB MASTER -> (s3) TEMPORAL REGISTER
+                                      ; READ 2 BYTES
+                                      CALL read_word_from_slave
+                                      LOAD s2, sD
+                                      LOAD s3, sE
+                                      RETURN
+              process_root_directory: 
+                                      ; INPUT :
+                                      ; s0,s1,s2,s3 root directory lba (FAT16- FIXED)
+                                      ; CALL cluster_2_lba
+                                      ; now s0,s1,s2,s3 contains the lba for the root directory
+                                      ; the first 32 byte record on the sector must be the root directory information
+                                      ; check if EOF (first byte of the 32 bytes is 0)
+                                      CALL write_lba_to_slave
+                    check_for_a_file: 
+                                      CALL read_word_from_slave
+                                      ;  (sD) data[7:0] WB MASTER -> (s6) TEMPORAL REGISTER
+                                      LOAD s6, sD
+                                      LOAD sF, s6
+                                      AND sF, sF
+                                      ; if sF=0 the is not directory => error
+                                      JUMP Z, put_error_code
+                                      ;
+                                      ; check that is not a deleted entry
+                                      ;
+                                      ;  (sD) data[7:0] WB MASTER -> (s6) TEMPORAL REGISTER
+                                      LOAD sF, E5
+                                      AND sF, s6
+                                      ; if s6=E5 is a deteled entry => check for new one (offset => sF)
+                                      JUMP Z, check_next_directory_entry
+                     check_attribute: 
+                                      ; ATTRIBUTE -> OFFSET Bh
+                                      ; check that is not a directory or LONG NAME
+                                      ; 00arshdv - DV for long name - D for directory
+                                      ;  (sD) data[7:0] WB MASTER -> (s6) TEMPORAL REGISTER
+                                      LOAD sF, 04
+                                      CALL do_dummy_reads_from_slave
+                                      CALL read_word_from_slave
+                                      LOAD s6, sE
+                                      LOAD sF, 03
+                                      AND sF, s6
+                                      JUMP NZ, check_next_directory_entry_attribute
+                                      ; if s6=0 that is not a file => error
+                                      ;JUMP Z,check_next_directory_entry		
+                                      ; check that is not a directory
+                                      ; check that is a file (short filename entry)
+                                      ; in other case error
+                                      ; 
+                                      ;
+                                      ; READ CLUSTER INFORMATION FOR THE FILE
+                                      ;
+                                      CALL read_dir_cluster_hi_cluster_low
+                                      RETURN
+          check_next_directory_entry: 
+                                      ; go fwd 11 words
+                                      LOAD sF, 05
+                                      CALL do_dummy_reads_from_slave
+check_next_directory_entry_attribute: 
+                                      ; go fwd 5 words
+                                      LOAD sF, 0A
+                                      CALL do_dummy_reads_from_slave
+                                      JUMP check_for_a_file
+     read_dir_cluster_hi_cluster_low: 
+                                      ; INPUT :
+                                      ;	   before arrive here first two bytes of the directory 
+                                      ;	   structure must be readed 
+                                      ; OUTPUT :
+                                      ; s0,s1 : CLUS_LOW 
+                                      ; s2,s3 : CLUS_HI
+                                      ;
+                                      ; READ -> cluster_HI (OFFSET 0x14) 
+                                      ;
+                                      ; offset 0x14 (20) => READ 18 bytes -> 9(0x09) words
+                                      ;
+                                      LOAD sF, 04
+                                      CALL do_dummy_reads_from_slave
+                                      ;  (sD) data[7:0] WB MASTER -> s2
+                                      ;  (sE) data[7:0] WB MASTER -> s3
+                                      ; READ 2 BYTES
+                                      CALL read_word_from_slave
+                                      LOAD s2, sD
+                                      LOAD s3, sE
+                                      OUTPUT sE, TMP_OUT_7
+                                      ;
+                                      ; READ -> cluster_low(OFFSET 0x1A) 
+                                      ;
+                                      ; offset 0x1A (26) => READ 4 bytes -> 2(0x02) words
+                                      ;
+                                      LOAD sF, 02
+                                      CALL do_dummy_reads_from_slave
+                                      ;  (sD) data[7:0] WB MASTER ->  s0
+                                      ;  (sE) data[7:0] WB MASTER ->  s1
+                                      ; READ 2 BYTES
+                                      CALL read_word_from_slave
+                                      LOAD s0, sD
+                                      LOAD s1, sE
+                                      ; s0,s1 clus_low s3,s4 - clus_high
+                                      RETURN
+                                      ; -- MBR READ OPERATION - LBA BEGIN DETERMINATION
+                                      ; '00' -> LBA_7_0,LBA_15_8,LBA_23_16,LD_LBA_27_24
+                       cluster_2_lba: 
+                                      ; --
+                                      ; -- LBA ADDRESS DETERMINATION
+                                      ; --
+                                      ; lba_addr = cluster_begin_lba + (cluster_number - 2) * sectors_per_cluster;  
+                                      ;
+                                      ; INPUT :
+                                      ; s0 : CLUSTER_NUMBER0, s1 : CLUSTER_NUMBER1, s2: CLUSTER_NUMBER2, s3 : CLUSTER_NUMBER3
+                                      ; OUTPUT :
+                                      ; s0 : LBA_ADDR_7_0 TMP1, s1 : LBA_ADDR_15_8, s2 : LBA_ADDR_24_16, s3 : LBA_ADDR_27_24
+                                      ;
+                                      ; cluster_number - 2
+                                      ;
+                                      OUTPUT s0, TMP_OUT_4
+                                      OUTPUT s1, TMP_OUT_5
+                                      OUTPUT s2, TMP_OUT_6
+                                      OUTPUT s3, TMP_OUT_7
+                                      SUB s0, 02
+                                      SUBCY s1, 00
+                                      SUBCY s2, 00
+                                      SUBCY s3, 00
+                                      ;
+                                      ; (cluster_number - 2) * sectors_per_cluster(s7);
+                                      ;
+                                      ; to perform the multiplication as sector_per_cluster is 2 multiple must be known
+                                      ; who many times must be shifted
+                                      ; (use sD as temporal register)
+                                      LOAD sF, 08
+                                      LOAD sD, s7
+                            multiply: 
+                                      SR0 sD
+                                      ; loop until detection of the 1 (2 multiple) - Add timeout!!!
+                                      JUMP C, add_cluster_begin_lba
+                                      ; LSB '0'
+                                      SL0 s0
+                                      ; CARRY -> LSB , MSB -> CARRY
+                                      SLA s1
+                                      SLA s2
+                                      SLA s3
+                                      JUMP multiply
+               add_cluster_begin_lba: 
+                                      ; lba_addr (TMP0,TMP1,TMP2,TMP3)= cluster_begin_lba + (cluster_number - 2) * sectors_per_cluster;  
+                                      ADD s0, s8
+                                      ADDCY s1, s9
+                                      ADDCY s2, sA
+                                      ADDCY s3, sB
+                                      RETURN
+                                      ; --
+                                      ; -- WRITE A WORD INTO THE WB SLAVE INTERFACE (TO THE MASTER)
+                                      ; --
+                                      ; INPUTS :
+                                      ; TMP0 : LSB TO DATA_WB_OUT_7_0_SLAVE
+                                      ; TMP1 : MSB TO DATA_WB_OUT_15_8_SLAVE
+                                      ;
+              write_a_word_to_master: 
+                                      ; TMP0 => DATA_WB_OUT_7_0_SLAVE
+                                      OUTPUT sD, DATA_WB_OUT_7_0_SLAVE
+                                      ; 00 => DATA_WB_OUT_15_8_SLAVE
+                                      ;LOAD sF,00 -- 8 BIT VERSION
+                                      ;OUTPUT sF,DATA_WB_OUT_15_8_SLAVE -- 8 BIT VERSION
+                                      OUTPUT sE, DATA_WB_OUT_15_8_SLAVE
+                                      CALL write_a_byte_to_master
+                                      ; 
+                                      ; CHECK STB INPUT | CONTROL_WB_IN_SLAVE-> TMP (s6)
+                                      ;
+                         wait_strobe: 
+                                      INPUT s6, CONTROL_WB_IN_SLAVE
+                                      ;
+                                      ;
+                                      AND s6, STB_I_SLAVE
+                                      JUMP Z, wait_strobe
+                                      ; TMP1 => DATA_WB_OUT_7_0_SLAVE
+                                      ; OUTPUT sE,DATA_WB_OUT_7_0_SLAVE
+                                      ; 00 =>DATA_WB_OUT_15_8_SLAVE
+                                      ;LOAD sF,00 -- 8 BIT VERSION
+                                      ;OUTPUT sF,DATA_WB_OUT_15_8_SLAVE -- 8 BIT VERSION
+                                      ;CALL write_a_byte_to_master -- 8 BIT VERSION
+                                      RETURN
+              write_a_byte_to_master: 
+                                      ;
+                                      ; WB SLAVE WRITE ENABLE ACTIVE
+                                      ;
+                                      LOAD sF, WB_BUS_SLAVE_WRITE_ENABLE
+                                      OUTPUT sF, CONTROL_OUT_SLAVE
+                                      ;
+                                      ; ACK TO THE MASTER UNTIL STB FINISH
+                                      ;
+                   ack_to_the_master: 
+                                      LOAD sF, ACK_O_SLAVE
+                                      OUTPUT sF, CONTROL_WB_OUT_SLAVE
+                                      ;
+                                      ;
+                                      LOAD sF, 00
+                                      OUTPUT sF, CONTROL_OUT_SLAVE
+                                      OUTPUT sF, CONTROL_WB_OUT_SLAVE
+                                      RETURN
+                                      ; --
+                                      ; -- WRITE A LBA INTO THE WB MASTER INTERFACE (TO THE SLAVE)
+                                      ; --
+                                      ; INPUTS :
+                                      ; TMP0 : LBA_ADDR_7_0, TMP1 : LBA_ADDR_15_8, TMP2 : LBA_ADDR_24_16, TMP3 : LBA_ADDR_27_24
+                                      ;
+                                      ;
+                  write_lba_to_slave: 
+                                      ;
+                                      ; WB MASTER WRITE ENABLE ACTIVE
+                                      ;
+                                      LOAD sF, WB_BUS_MASTER_WRITE_ENABLE
+                                      OUTPUT sF, CONTROL_OUT_MASTER
+                                      
+                                      ;write_lba_15_0_to_slave:
+                                      ;
+                                      ; TMP0 : LBA_ADDR_7_0 (s0)	=> DATA_WB_OUT_7_0_MASTER
+                                      ; TMP1 : LBA_ADDR_15_8 (s1)	=> DATA_WB_OUT_15_8_MASTER
+                                      ;
+                                      OUTPUT s0, DATA_WB_OUT_7_0_MASTER
+                                      OUTPUT s1, DATA_WB_OUT_15_8_MASTER
+                                      ;
+                                      ; --
+                                      ; -- WRITE LBA 15-0 TO THE SLAVE
+                                      ; -- 
+                                      ;
+                                      ; WB_CONTROL_OUT_MASTER
+                                      ; W_WE_MASTER = 1
+                                      ; STB_O_MASTER = 1
+                                      ; A0 = 0
+                                      ;
+                                      LOAD sF, WRITE_LBA_15_0
+                                      OUTPUT sF, CONTROL_WB_OUT_MASTER
+                                      ;
+                                      ; WAIT FOR THE ACK
+                                      ;
+                                      CALL wait_for_the_ack
+                                      ;write_lba_27_16_to_slave:	
+                                      ;
+                                      ; TMP2 : LBA_ADDR_23_16 (s2)	=> DATA_WB_OUT_7_0_MASTER
+                                      ; TMP3 : LBA_ADDR_27_24 (s3)	=> DATA_WB_OUT_15_8_MASTER
+                                      ;
+                                      OUTPUT s2, DATA_WB_OUT_7_0_MASTER
+                                      OUTPUT s3, DATA_WB_OUT_15_8_MASTER
+                                      
+                                      ; -- 
+                                      ; -- WRITE LBA 27-16 TO THE SLAVE
+                                      ; -- 
+                                      ; WB_CONTROL_OUT_MASTER
+                                      ; W_WE_MASTER = 1
+                                      ; STB_O_MASTER = 1
+                                      ; A0 = 0
+                                      ;
+                                      LOAD sF, WRITE_LBA_27_16
+                                      OUTPUT sF, CONTROL_WB_OUT_MASTER
+                                      ;
+                                      ; WAIT FOR THE ACK	
+                                      ;
+                                      CALL wait_for_the_ack
+                                      ; --
+                                      ; -- FINISH WRITE OPERATION ON THE MASTER WB INTERFACE
+                                      ; --
+                                      ;
+                                      ; WB_CONTROL_OUT_MASTER
+                                      ; W_WE_MASTER = 0
+                                      ; STB_O_MASTER = 0
+                                      ; A0 = 0
+                                      ;
+                                      LOAD sF, 00
+                                      OUTPUT sF, CONTROL_WB_OUT_MASTER
+                                      OUTPUT sF, CONTROL_OUT_MASTER
+                                      RETURN
+                                      ; --
+                                      ; -- PERFORM DUMMY READS FROM THE WB SLAVE
+                                      ; --
+                                      ; -- IN sF ARE THE NUMBER OF WORDS THAT MUST BE READED
+                                      ; --
+           do_dummy_reads_from_slave: 
+                                      LOAD s6, sF
+              dummy_reads_from_slave: 
+                                      CALL read_word_from_slave
+                                      SUB s6, 01
+                                      JUMP NZ, dummy_reads_from_slave
+                                      RETURN
+                                      
+                                      ; --
+                                      ; -- PERFORM A WORD READING FROM THE WB SLAVE
+                                      ; --
+                read_word_from_slave: 
+                                      ; WB_CONTROL_OUT_MASTER
+                                      ; W_WE_MASTER = 0
+                                      ; STB_O_MASTER = 1
+                                      ; A0 = 0
+                                      ; wait state
+                                      LOAD sF, READ_SLAVE
+                                      OUTPUT sF, CONTROL_WB_OUT_MASTER
+                                      ;
+                                      ; WAIT FOR THE ACK	
+                                      ;
+                                      ; CALL wait_for_the_ack
+                                      ;JUMP Z,data_available_on_wb_master
+                    wait_for_the_ack: 
+                                      ;
+                                      ; CONTROL_WB_IN_MASTER -> TMP (s6)
+                                      ;
+                                      INPUT sF, CONTROL_WB_IN_MASTER
+                                      ;
+                                      AND sF, ACK_I_MASTER
+                                      JUMP Z, wait_for_the_ack
+         data_available_on_wb_master: 
+                                      ; This part is not necessary in write operations
+                                      ; DATA_WB_IN_7_0_MASTER -> (sD) data[7:0] WB MASTER
+                                      ; DATA_WB_IN_15_8_MASTER -> (sE) data[15:8] WB MASTER
+                                      INPUT sD, DATA_WB_IN_7_0_MASTER
+                                      INPUT sE, DATA_WB_IN_15_8_MASTER
+                                      ; DISABLE RD/WR OPERATION REQUEST
+                                      LOAD sF, 00
+                                      OUTPUT sF, CONTROL_WB_OUT_MASTER
+                                      RETURN
+                      put_error_code: 
+                                      LOAD sF, ERROR
+                                      OUTPUT sF, CONTROL_WB_OUT_SLAVE
+                                      JUMP put_error_code
+                           interrupt: 
+                                      RETURNI ENABLE
