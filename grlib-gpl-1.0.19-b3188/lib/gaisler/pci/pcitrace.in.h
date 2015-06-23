@@ -1,0 +1,17 @@
+#ifndef CONFIG_PCI_TRACE
+#define CONFIG_PCI_TRACE 0
+#endif
+
+#if defined CONFIG_PCI_TRACE512
+#define CFG_PCI_TRACEBUF 512
+#elif defined CONFIG_PCI_TRACE1024
+#define CFG_PCI_TRACEBUF 1024
+#elif defined CONFIG_PCI_TRACE2048
+#define CFG_PCI_TRACEBUF 2048
+#elif defined CONFIG_PCI_TRACE4096
+#define CFG_PCI_TRACEBUF 4096
+#else
+#define CFG_PCI_TRACEBUF 256
+#endif
+
+

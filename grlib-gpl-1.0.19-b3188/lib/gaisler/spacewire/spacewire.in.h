@@ -1,0 +1,66 @@
+#ifndef CONFIG_SPW_ENABLE
+#define CONFIG_SPW_ENABLE 0
+#endif
+
+#ifndef CONFIG_SPW_NUM
+#define CONFIG_SPW_NUM 1
+#endif
+
+#if defined CONFIG_SPW_AHBFIFO4
+#define CONFIG_SPW_AHBFIFO 4
+#elif defined CONFIG_SPW_AHBFIFO8
+#define CONFIG_SPW_AHBFIFO 8
+#elif defined CONFIG_SPW_AHBFIFO16
+#define CONFIG_SPW_AHBFIFO 16
+#elif defined CONFIG_SPW_AHBFIFO32
+#define CONFIG_SPW_AHBFIFO 32
+#elif defined CONFIG_SPW_AHBFIFO64
+#define CONFIG_SPW_AHBFIFO 64
+#else
+#define CONFIG_SPW_AHBFIFO 4
+#endif
+
+#if defined CONFIG_SPW_RXFIFO16
+#define CONFIG_SPW_RXFIFO 16
+#elif defined CONFIG_SPW_RXFIFO32
+#define CONFIG_SPW_RXFIFO 32
+#elif defined CONFIG_SPW_RXFIFO64
+#define CONFIG_SPW_RXFIFO 64
+#else
+#define CONFIG_SPW_RXFIFO 16
+#endif
+
+#ifndef CONFIG_SPW_RMAP
+#define CONFIG_SPW_RMAP 0
+#endif
+
+#if defined CONFIG_SPW_RMAPBUF2
+#define CONFIG_SPW_RMAPBUF 2
+#elif defined CONFIG_SPW_RMAPBUF4
+#define CONFIG_SPW_RMAPBUF 4
+#elif defined CONFIG_SPW_RMAPBUF6
+#define CONFIG_SPW_RMAPBUF 6
+#elif defined CONFIG_SPW_RMAPBUF8
+#define CONFIG_SPW_RMAPBUF 8
+#else
+#define CONFIG_SPW_RMAPBUF 4
+#endif
+
+#ifndef CONFIG_SPW_RMAPCRC
+#define CONFIG_SPW_RMAPCRC 0
+#endif
+
+#ifndef CONFIG_SPW_NETLIST
+#define CONFIG_SPW_NETLIST 0
+#endif
+
+#ifndef CONFIG_SPW_FT
+#define CONFIG_SPW_FT 0
+#endif
+
+#if defined CONFIG_SPW_GRSPW1
+#define CONFIG_SPW_GRSPW 1
+#else
+#define CONFIG_SPW_GRSPW 2
+#endif
+

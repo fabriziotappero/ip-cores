@@ -1,0 +1,40 @@
+library verilog;
+use verilog.vl_types.all;
+entity ac97_rf is
+    port(
+        clk             : in     vl_logic;
+        rst             : in     vl_logic;
+        adr             : in     vl_logic_vector(3 downto 0);
+        rf_dout         : out    vl_logic_vector(31 downto 0);
+        rf_din          : in     vl_logic_vector(31 downto 0);
+        rf_we           : in     vl_logic;
+        rf_re           : in     vl_logic;
+        int             : out    vl_logic;
+        ac97_rst_force  : out    vl_logic;
+        resume_req      : out    vl_logic;
+        suspended       : in     vl_logic;
+        crac_we         : out    vl_logic;
+        crac_din        : in     vl_logic_vector(15 downto 0);
+        crac_out        : out    vl_logic_vector(31 downto 0);
+        crac_rd_done    : in     vl_logic;
+        crac_wr_done    : in     vl_logic;
+        oc0_cfg         : out    vl_logic_vector(7 downto 0);
+        oc1_cfg         : out    vl_logic_vector(7 downto 0);
+        oc2_cfg         : out    vl_logic_vector(7 downto 0);
+        oc3_cfg         : out    vl_logic_vector(7 downto 0);
+        oc4_cfg         : out    vl_logic_vector(7 downto 0);
+        oc5_cfg         : out    vl_logic_vector(7 downto 0);
+        ic0_cfg         : out    vl_logic_vector(7 downto 0);
+        ic1_cfg         : out    vl_logic_vector(7 downto 0);
+        ic2_cfg         : out    vl_logic_vector(7 downto 0);
+        oc0_int_set     : in     vl_logic_vector(2 downto 0);
+        oc1_int_set     : in     vl_logic_vector(2 downto 0);
+        oc2_int_set     : in     vl_logic_vector(2 downto 0);
+        oc3_int_set     : in     vl_logic_vector(2 downto 0);
+        oc4_int_set     : in     vl_logic_vector(2 downto 0);
+        oc5_int_set     : in     vl_logic_vector(2 downto 0);
+        ic0_int_set     : in     vl_logic_vector(2 downto 0);
+        ic1_int_set     : in     vl_logic_vector(2 downto 0);
+        ic2_int_set     : in     vl_logic_vector(2 downto 0)
+    );
+end ac97_rf;

@@ -1,0 +1,4 @@
+#ifndef CONFIG_MULTIIO_ENABLE
+#define CONFIG_MULTIIO_ENABLE 0
+#endif
+

@@ -1,0 +1,8 @@
+#ifndef CONFIG_SSCTRL
+#define CONFIG_SSCTRL 0
+#endif
+
+#ifndef CONFIG_SSCTRL_PROM16
+#define CONFIG_SSCTRL_PROM16 0
+#endif
+

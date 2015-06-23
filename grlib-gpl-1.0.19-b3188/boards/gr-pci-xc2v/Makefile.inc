@@ -1,0 +1,13 @@
+TECHNOLOGY=virtex2
+PART=xc2v3000
+PACKAGE=fg676
+SPEED=-4
+SYNFREQ=45
+PROMGENPAR=-x xcf04s xcf04s xcf04s -u 0 $(TOP).bit -p mcs -w -o gr-pci-xc2v
+#PROMGENPAR=-x xc18v04 xc18v04 xc18v04 -u 0 $(TOP).bit -p mcs -w -o gr-pci-xc2v
+
+MANUFACTURER=Xilinx
+MGCPART=2V3000$(PACKAGE)
+MGCTECHNOLOGY=VIRTEX-II
+MGCPACKAGE=$(PACKAGE)
+

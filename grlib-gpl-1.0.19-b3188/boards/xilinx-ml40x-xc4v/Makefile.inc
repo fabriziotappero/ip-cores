@@ -1,0 +1,23 @@
+TECHNOLOGY=virtex4
+PART=xc4vlx25
+ifeq ("$(CONFIG_BOARD_ML402)","y")
+PART=xc4vsx35
+endif
+ifeq ("$(CONFIG_BOARD_ML403)","y")
+PART=xc4vfx12
+endif
+PACKAGE=ff668
+SPEED=-10
+SYNFREQ=100
+PROMGENPAR=-x xcf32p -u 0 $(TOP).bit -p mcs -w -o xilinx-ml40x-xc4v
+
+MANUFACTURER=Xilinx
+MGCPART=4vlx25$(PACKAGE)
+ifeq ("$(CONFIG_BOARD_ML402)","y")
+MGCPART=4vsx35$(PACKAGE)
+endif
+ifeq ("$(CONFIG_BOARD_ML403)","y")
+MGCPART=4vfx12$(PACKAGE)
+endif
+MGCTECHNOLOGY=VIRTEX-4
+MGCPACKAGE=$(PACKAGE)

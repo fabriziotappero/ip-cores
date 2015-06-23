@@ -1,0 +1,4 @@
+#ifndef CONFIG_ADCDAC_ENABLE
+#define CONFIG_ADCDAC_ENABLE 0
+#endif
+

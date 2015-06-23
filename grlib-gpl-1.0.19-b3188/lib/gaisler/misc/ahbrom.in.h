@@ -1,0 +1,18 @@
+#ifndef CONFIG_AHBROM_ENABLE
+#define CONFIG_AHBROM_ENABLE 0
+#endif
+
+#ifndef CONFIG_AHBROM_START
+#define CONFIG_AHBROM_START 000
+#endif
+
+#ifndef CONFIG_AHBROM_PIPE
+#define CONFIG_AHBROM_PIPE 0
+#endif
+
+#if (CONFIG_AHBROM_START == 0) && (CONFIG_AHBROM_ENABLE == 1)
+#define CONFIG_ROM_START 100
+#else
+#define CONFIG_ROM_START 000
+#endif
+

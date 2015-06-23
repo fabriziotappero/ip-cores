@@ -1,0 +1,19 @@
+#ifndef CONFIG_GRCAN_ENABLE
+#define CONFIG_GRCAN_ENABLE 0
+#endif
+
+#ifndef CONFIG_GRCAN_NUM
+#define CONFIG_GRCAN_NUM 1
+#endif
+
+#ifndef CONFIG_GRCANIRQ
+#define CONFIG_GRCANIRQ 0
+#endif
+
+#ifndef CONFIG_GRCANSEP
+#define CONFIG_GRCANSEP 0
+#endif
+
+#ifndef CONFIG_GRCAN_SYNCRST
+#define CONFIG_GRCAN_SYNCRST 0
+#endif

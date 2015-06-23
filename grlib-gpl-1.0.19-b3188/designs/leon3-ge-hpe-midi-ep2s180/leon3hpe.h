@@ -1,0 +1,16 @@
+
+#ifndef CONFIG_EXTAHB_ENABLE
+#define CONFIG_EXTAHB_ENABLE 0
+#endif
+
+#ifndef CONFIG_EXTAHB_INT
+#define CONFIG_EXTAHB_INT 0
+#endif
+
+#ifndef CFG_SDRAM_SHIFT
+#define CFG_SDRAM_SHIFT 0
+#endif
+
+#ifndef CONFIG_EXTAHB_BASE
+#define CONFIG_EXTAHB_BASE 0
+#endif

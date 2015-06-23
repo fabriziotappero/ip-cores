@@ -1,0 +1,4 @@
+#ifndef CONFIG_SPI_OC_ENABLE
+#define CONFIG_SPI_OC_ENABLE 0
+#endif
+

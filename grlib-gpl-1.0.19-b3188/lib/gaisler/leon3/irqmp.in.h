@@ -1,0 +1,6 @@
+#ifndef CONFIG_IRQ3_ENABLE
+#define CONFIG_IRQ3_ENABLE 0
+#endif
+#ifndef CONFIG_IRQ3_NSEC
+#define CONFIG_IRQ3_NSEC 0
+#endif

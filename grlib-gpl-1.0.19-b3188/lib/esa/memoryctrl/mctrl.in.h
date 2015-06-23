@@ -1,0 +1,44 @@
+#ifndef CONFIG_MCTRL_LEON2
+#define CONFIG_MCTRL_LEON2 0
+#endif
+
+#ifndef CONFIG_MCTRL_SDRAM
+#define CONFIG_MCTRL_SDRAM 0
+#endif
+
+#ifndef CONFIG_MCTRL_SDRAM_SEPBUS
+#define CONFIG_MCTRL_SDRAM_SEPBUS 0
+#endif
+
+#ifndef CONFIG_MCTRL_SDRAM_INVCLK
+#define CONFIG_MCTRL_SDRAM_INVCLK 0
+#endif
+
+#ifndef CONFIG_MCTRL_SDRAM_BUS64
+#define CONFIG_MCTRL_SDRAM_BUS64 0
+#endif
+
+#ifndef CONFIG_MCTRL_8BIT
+#define CONFIG_MCTRL_8BIT 0
+#endif
+
+#ifndef CONFIG_MCTRL_16BIT
+#define CONFIG_MCTRL_16BIT 0
+#endif
+
+#ifndef CONFIG_MCTRL_5CS
+#define CONFIG_MCTRL_5CS 0
+#endif
+
+#ifndef CONFIG_MCTRL_EDAC
+#define CONFIG_MCTRL_EDAC 0
+#endif
+
+#ifndef CONFIG_MCTRL_PAGE
+#define CONFIG_MCTRL_PAGE 0
+#endif
+
+#ifndef CONFIG_MCTRL_PROGPAGE
+#define CONFIG_MCTRL_PROGPAGE 0
+#endif
+

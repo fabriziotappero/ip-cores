@@ -1,0 +1,27 @@
+#ifndef CONFIG_DDRMP
+#define CONFIG_DDRMP 0
+#endif
+
+#ifndef CONFIG_DDRMP_NCS
+#define CONFIG_DDRMP_NCS 1
+#endif
+
+#ifndef CONFIG_DDRMP_NDEV
+#define CONFIG_DDRMP_NDEV 2
+#endif
+
+#ifndef CONFIG_DDRMP_NBITS
+#define CONFIG_DDRMP_NBITS 16
+#endif
+
+#ifndef CONFIG_DDRMP_MBITS
+#define CONFIG_DDRMP_MBITS 64
+#endif
+
+#ifndef CONFIG_DDRMP_FREQ
+#define CONFIG_DDRMP_FREQ 100
+#endif
+
+#ifndef CONFIG_DDRMP_EN2P
+#define CONFIG_DDRMP_EN2P 0
+#endif

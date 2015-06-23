@@ -1,0 +1,4 @@
+#ifndef CONFIG_DAC_AHB_ENABLE
+#define CONFIG_DAC_AHB_ENABLE 0
+#endif
+

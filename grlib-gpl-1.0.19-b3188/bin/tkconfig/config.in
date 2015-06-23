@@ -1,0 +1,381 @@
+#
+# LEON configuration written in linux configuration language
+#
+# Written by Jiri Gaisler, Gaisler Research
+#
+# Comments and bug reports to jiri@gaisler.com
+#
+#
+
+define_bool CONFIG_PERI_LCONF y
+
+mainmenu_name "LEON Processor Configuration"
+
+mainmenu_option next_comment
+  comment 'Synthesis '
+  choice 'Target technology                           ' \
+	"Generic		CONFIG_SYN_GENERIC \
+	Atmel-ATC35		CONFIG_SYN_ATC35 \
+	Atmel-ATC25		CONFIG_SYN_ATC25 \
+	Atmel-ATC18		CONFIG_SYN_ATC18 \
+	UMC-FS90 		CONFIG_SYN_FS90 \
+	UMC-0.18 		CONFIG_SYN_UMC018 \
+	TSMC-0.25		CONFIG_SYN_TSMC025 \
+	Actel-Proasic		CONFIG_SYN_PROASIC \
+	Actel-Axcel  		CONFIG_SYN_AXCEL \
+	Xilinx-Virtex		CONFIG_SYN_VIRTEX \
+	Xilinx-Virtex2		CONFIG_SYN_VIRTEX2" Generic
+  if [ "$CONFIG_SYN_GENERIC" != "y" ]; then
+    bool 'Infer cache and trace buffer RAM' CONFIG_SYN_INFER_RAM
+    bool 'Infer register file' CONFIG_SYN_INFER_REGF
+    if [ "$CONFIG_SYN_VIRTEX" = "y" -o "$CONFIG_SYN_VIRTEX2" = "y"]; then
+      bool 'Infer ROM' CONFIG_SYN_INFER_ROM
+    fi
+    if [ "$CONFIG_SYN_VIRTEX" != "y" -a "$CONFIG_SYN_AXCEL" != "y" \
+         -a "$CONFIG_SYN_VIRTEX2" != "y" -a "$CONFIG_SYN_PROASIC" != "y" ]; then
+      bool 'Infer pads' CONFIG_SYN_INFER_PADS
+    fi
+    if [ "$CONFIG_SYN_AXCEL" != "y" -a "$CONFIG_SYN_PROASIC" != "y" ]; then
+      bool 'Infer PCI pads' CONFIG_SYN_INFER_PCI_PADS
+    fi
+  fi
+  bool 'Infer multiplier' CONFIG_SYN_INFER_MULT
+  if [ "$CONFIG_SYN_GENERIC" = "y" -o "$CONFIG_SYN_VIRTEX" = "y" \
+     -o "$CONFIG_SYN_AXCEL" = "y" -o "$CONFIG_SYN_ATC25" = "y" \
+     -o "$CONFIG_SYN_INFER_REGF" = "y" -o "$CONFIG_SYN_VIRTEX2" = "y"]; then
+    bool 'Improve register file write timing' CONFIG_SYN_RFTYPE
+  fi
+  if [ "$CONFIG_SYN_ATC25" = "y" -o "$CONFIG_SYN_VIRTEX" = "y" -o "$CONFIG_SYN_VIRTEX2" = "y"\
+       -o "$CONFIG_SYN_ATC18" = "y" -o "$CONFIG_SYN_TSMC025" = "y" ]; then
+    if [ "$CONFIG_SYN_INFER_RAM" != "y" ]; then
+      bool 'Use dual-port RAM for DSU trace buffer   ' \
+	CONFIG_SYN_TRACE_DPRAM $CONFIG_SYN_ATC25 $CONFIG_SYN_ATC18 \
+	$CONFIG_SYN_VIRTEX $CONFIG_SYN_TSMC025 $CONFIG_SYN_VIRTEX2
+    fi
+  fi
+endmenu
+
+  mainmenu_option next_comment
+    comment 'Clock generation'
+    if [ "$CONFIG_SYN_VIRTEX" = "y" -o "$CONFIG_SYN_VIRTEX2" = "y" ]; then
+      bool 'Use Virtex CLKDLL for clock generation' CONFIG_CLK_VIRTEX
+    fi
+    if [ "$CONFIG_SYN_VIRTEX2" = "y" -a "$CONFIG_CLK_VIRTEX" != "y"]; then
+      bool 'Use Virtex-II DCM for clock generation' CONFIG_CLK_VIRTEX2
+    fi
+    if [ "$CONFIG_CLK_VIRTEX" = "y"]; then
+      choice ' System clock multiplier (CLKDLL)' \
+	"1/2		CONFIG_CLKDLL_1_2 \
+	1		CONFIG_CLKDLL_1_1 \
+	2		CONFIG_CLKDLL_2_1" 1
+    fi
+    if [ "$CONFIG_CLK_VIRTEX2" = "y"]; then
+      choice ' System clock multiplier (DCM)' \
+	"2/3		CONFIG_DCM_2_3 \
+	3/4		CONFIG_DCM_3_4 \
+	4/5		CONFIG_DCM_4_5 \
+	1		CONFIG_DCM_1_1 \
+	5/4		CONFIG_DCM_5_4 \
+	4/3		CONFIG_DCM_4_3 \
+	3/2		CONFIG_DCM_3_2 \
+	5/3		CONFIG_DCM_5_3 \
+	2		CONFIG_DCM_2_1 \
+	3		CONFIG_DCM_3_1 \
+	4		CONFIG_DCM_4_1" 1
+    fi
+    if [ "$CONFIG_SYN_AXCEL" = "y" ]; then
+      bool 'Use global clock pad (Actel AX)' CONFIG_AXCEL_HCLKBUF
+    fi
+    if [ "$CONFIG_SYN_VIRTEX2" = "y" -o "$CONFIG_CLK_VIRTEX" = "y"]; then
+      bool 'Enable CLKDLL for PCI clock' CONFIG_PCI_DLL
+    fi
+    if [ "$CONFIG_PCI_DLL" != "y" ]; then
+      bool 'Use PCI clock as system clock' CONFIG_PCI_SYSCLK
+    fi
+  endmenu
+
+mainmenu_option next_comment
+  comment 'Processor            '
+  mainmenu_option next_comment
+  comment 'Integer unit                                           '
+  int 'SPARC register windows' CONFIG_IU_NWINDOWS 8
+  bool 'SPARC V8 MUL/DIV instructions' CONFIG_IU_V8MULDIV
+  if [ "$CONFIG_IU_V8MULDIV" = "y" ]; then
+    choice 'Hardware multiplier latency' \
+	"1-cycle		CONFIG_IU_MUL_LATENCY_1 \
+	2-cycles		CONFIG_IU_MUL_LATENCY_2 \
+	4-cycles		CONFIG_IU_MUL_LATENCY_4 \
+	5-cycles		CONFIG_IU_MUL_LATENCY_5 \
+	35-cycles		CONFIG_IU_MUL_LATENCY_35" 5-cycles
+  fi
+  dep_bool 'SPARC V8e SMAC/UMAC instructions     ' CONFIG_IU_MUL_MAC $CONFIG_IU_MUL_LATENCY_4 $CONFIG_IU_V8MULDIV
+  int 'Load delay' CONFIG_IU_LDELAY 1
+  bool 'Fast jump-address generation   ' CONFIG_IU_FASTJUMP
+  bool 'ICC interlock                  ' CONFIG_IU_ICCHOLD
+  bool 'Fast instruction decoding      ' CONFIG_IU_FASTDECODE
+  if [ "$CONFIG_SYN_TSMC025" = "y" -o "$CONFIG_SYN_UMC018" = "y" \
+    -o "$CONFIG_SYN_FS90" = "y" -o "$CONFIG_SYN_PROASIC" = "y" \
+    -o "$CONFIG_SYN_ATC18" = "y" \
+    -o "$CONFIG_SYN_AXCEL" = "y" -o "$CONFIG_SYN_ATC25" = "y" ]; then
+    bool 'Register file power-saving     ' CONFIG_IU_RFPOW
+  fi
+  int 'Hardware watchpoints' CONFIG_IU_WATCHPOINTS 0
+  endmenu
+  mainmenu_option next_comment
+  comment 'Floating-point unit'
+  bool 'Enable FPU                             ' CONFIG_FPU_ENABLE
+  if [ "$CONFIG_FPU_ENABLE" = "y" ]; then
+    choice 'FPU core' \
+	"GRFPU		CONFIG_FPU_GRFPU \
+	Meiko		CONFIG_FPU_MEIKO \
+	LTH		CONFIG_FPU_LTH" GRFPU
+    int 'FSR version ID' CONFIG_FPU_VER 0
+  fi
+  endmenu
+  mainmenu_option next_comment
+  comment 'Co-processor'
+  bool 'Enable co-processor       ' CONFIG_CP_ENABLE
+  if [ "$CONFIG_CP_ENABLE" = "y" ]; then
+    string 'Co-processor configuration' CONFIG_CP_CFG "cp_none"
+  fi
+  endmenu
+  mainmenu_option next_comment
+  comment 'Cache system              '
+  comment 'Instruction cache                              '
+  choice 'Associativity (sets)            ' \
+	"1		CONFIG_ICACHE_ASSO1 \
+	2		CONFIG_ICACHE_ASSO2 \
+	3		CONFIG_ICACHE_ASSO3 \
+	4		CONFIG_ICACHE_ASSO4" 1
+  choice 'Set size (kbytes/set)' \
+	"1		CONFIG_ICACHE_SZ1 \
+	2		CONFIG_ICACHE_SZ2 \
+	4		CONFIG_ICACHE_SZ4 \
+	8		CONFIG_ICACHE_SZ8 \
+	16		CONFIG_ICACHE_SZ16 \
+	32		CONFIG_ICACHE_SZ32 \
+	64		CONFIG_ICACHE_SZ64" 2
+  choice 'Line size (bytes/line)' \
+	"16		CONFIG_ICACHE_LZ16 \
+	32		CONFIG_ICACHE_LZ32" 16
+  if [ "$CONFIG_ICACHE_ASSO1" != "y" ]; then
+    choice 'Replacement alorithm' \
+	"Random		CONFIG_ICACHE_ALGORND \
+	LRR		CONFIG_ICACHE_ALGOLRR \
+	LRU		CONFIG_ICACHE_ALGOLRU" Random
+    bool 'Cache locking      ' CONFIG_ICACHE_LOCK
+  fi
+  comment 'Data cache'
+  choice 'Associativity (sets)' \
+	"1		CONFIG_DCACHE_ASSO1 \
+	2		CONFIG_DCACHE_ASSO2 \
+	3		CONFIG_DCACHE_ASSO3 \
+	4		CONFIG_DCACHE_ASSO4" 1
+  choice 'Set size (kbytes/set)' \
+	"1		CONFIG_DCACHE_SZ1 \
+	2		CONFIG_DCACHE_SZ2 \
+	4		CONFIG_DCACHE_SZ4 \
+	8		CONFIG_DCACHE_SZ8 \
+	16		CONFIG_DCACHE_SZ16 \
+	32		CONFIG_DCACHE_SZ32 \
+	64		CONFIG_DCACHE_SZ64" 2
+  choice 'Line size (bytes/line)' \
+	"16		CONFIG_DCACHE_LZ16 \
+	32		CONFIG_DCACHE_LZ32" 16
+  if [ "$CONFIG_DCACHE_ASSO1" != "y" ]; then
+    choice 'Replacement alorithm' \
+	"Random		CONFIG_DCACHE_ALGORND \
+	LRR		CONFIG_DCACHE_ALGOLRR \
+	LRU		CONFIG_DCACHE_ALGOLRU" Random
+    bool 'Cache locking      ' CONFIG_DCACHE_LOCK
+  fi
+  if [ "$CONFIG_SYN_ATC25" = "y" -o "$CONFIG_SYN_VIRTEX" = "y" -o "$CONFIG_SYN_VIRTEX2" = "y" \
+	-o "$CONFIG_SYN_ATC18" = "y" -o "$CONFIG_SYN_TSMC025" = "y" ]; then
+    if [ "$CONFIG_SYN_INFER_RAM" != "y" -a "$CONFIG_MMU_ENABLE" != "y" ]; then
+      bool 'AHB snooping       ' CONFIG_DCACHE_SNOOP
+    fi
+  fi
+  if [ "$CONFIG_DCACHE_SNOOP" = "y" ]; then
+  choice 'Snoop implementation' \
+	"Slow		CONFIG_DCACHE_SNOOP_SLOW \
+	Fast		CONFIG_DCACHE_SNOOP_FAST" Slow
+  fi
+  if [ "$CONFIG_DCACHE_ASSO1" != "y" ]; then
+      bool 'Fast read-data generation   ' CONFIG_DCACHE_RFAST
+  fi
+  if [ "$CONFIG_DCACHE_ASSO1" != "y" ]; then
+      bool 'Fast write-data generation   ' CONFIG_DCACHE_WFAST
+  fi
+  if [ "$CONFIG_MMU_ENABLE" != "y" ]; then
+    bool 'Enable local data RAM            ' CONFIG_DCACHE_LRAM
+  fi
+    if [ "$CONFIG_DCACHE_LRAM" = "y" ]; then
+      choice 'Local data RAM size (kbytes)' \
+	"1		CONFIG_DCACHE_LRAM_SZ1 \
+	2		CONFIG_DCACHE_LRAM_SZ2 \
+	4		CONFIG_DCACHE_LRAM_SZ4 \
+	8		CONFIG_DCACHE_LRAM_SZ8 \
+	16		CONFIG_DCACHE_LRAM_SZ16 \
+	32		CONFIG_DCACHE_LRAM_SZ32 \
+	64		CONFIG_DCACHE_LRAM_SZ64" 2
+      hex ' Local RAM start address (8 MSB) ' CONFIG_DCACHE_LRSTART 0x8f
+    fi
+endmenu
+  mainmenu_option next_comment
+  comment 'MMU'
+  bool 'Enable MMU       ' CONFIG_MMU_ENABLE
+  if [ "$CONFIG_MMU_ENABLE" = "y" ]; then
+    choice 'MMU type              ' \
+	"combined	CONFIG_MMU_COMBINED \
+	 split		CONFIG_MMU_SPLIT" combined
+    choice 'TLB replacement sheme              ' \
+	"LRU      	CONFIG_MMU_REPARRAY \
+	 Increment	CONFIG_MMU_REPINCREMENT" increment 
+       choice 'Instruction (or combined) TLB entries' \
+	"2		CONFIG_MMU_I2 \
+	4		CONFIG_MMU_I4 \
+	8		CONFIG_MMU_I8 \
+	16		CONFIG_MMU_I16 \
+	32		CONFIG_MMU_I32" 8
+    if [ "$CONFIG_MMU_SPLIT" = "y" ]; then
+       choice 'Data TLB entries' \
+	"2		CONFIG_MMU_D2 \
+	4		CONFIG_MMU_D4 \
+	8		CONFIG_MMU_D8 \
+	16		CONFIG_MMU_D16 \
+	32		CONFIG_MMU_D32" 8
+    fi         
+    bool 'Enable Diagnostic Access       ' CONFIG_MMU_DIAG
+  fi
+  endmenu
+
+mainmenu_option next_comment
+comment 'Debug support unit          '
+bool 'Debug support unit                       ' CONFIG_DSU_ENABLE
+  if [ "$CONFIG_DSU_ENABLE" = "y" ]; then
+    bool 'Trace buffer' CONFIG_DSU_TRACEBUF
+    if [ "$CONFIG_DSU_TRACEBUF" = "y" ]; then
+    bool 'Mixed instruction/AHB tracing' CONFIG_DSU_MIXED_TRACE
+      choice 'Trace buffer lines' \
+	"64		CONFIG_DSU_TRACESZ64 \
+	128		CONFIG_DSU_TRACESZ128 \
+	256		CONFIG_DSU_TRACESZ256 \
+	512		CONFIG_DSU_TRACESZ512 \
+	1024		CONFIG_DSU_TRACESZ1024" 128
+    fi
+  fi
+endmenu
+endmenu
+mainmenu_option next_comment
+comment 'AMBA configuration'
+  int 'Default AHB master' CONFIG_AHB_DEFMST 0
+  bool 'AHB split-transaction support             ' CONFIG_AHB_SPLIT
+endmenu
+
+mainmenu_option next_comment
+comment 'Memory controller'
+bool '8-bit PROM/SRAM bus support    ' CONFIG_MCTRL_8BIT
+bool '16-bit PROM/SRAM bus support    ' CONFIG_MCTRL_16BIT
+bool 'RAM write protection            ' CONFIG_PERI_WPROT
+bool 'Write strobe timing feedback            ' CONFIG_MCTRL_WFB
+bool '5th SRAM chip-select  ' CONFIG_MCTRL_5CS
+bool 'SDRAM controller       ' CONFIG_MCTRL_SDRAM
+  if [ "$CONFIG_MCTRL_SDRAM" = "y" ]; then
+    bool 'Inverted SDRAM clock' CONFIG_MCTRL_SDRAM_INVCLK
+    bool 'Separate address and data buses' CONFIG_MCTRL_SDRAM_SEPBUS
+  fi
+endmenu
+
+mainmenu_option next_comment
+comment 'Peripherals        '
+  bool 'LEON configuration register       ' CONFIG_PERI_LCONF
+  bool 'Secondary interrupt controller    ' CONFIG_PERI_IRQ2
+  if [ "$CONFIG_PERI_IRQ2" = "y" ]; then
+    string 'Sec. interrupt controller configuration       ' CONFIG_PERI_IRQ2_CFG "irq2none"
+  fi
+  bool 'Watchdog                            ' CONFIG_PERI_WDOG
+  bool 'AHB status register       ' CONFIG_PERI_AHBSTAT
+  bool 'On-chip AHB RAM                   ' CONFIG_AHBRAM_ENABLE
+  if [ "$CONFIG_AHBRAM_ENABLE" = "y" ]; then
+      choice 'AHB RAM size (Kbyte)' \
+	"1		CONFIG_AHBRAM_SZ1 \
+	2		CONFIG_AHBRAM_SZ2 \
+	4		CONFIG_AHBRAM_SZ4 \
+	8		CONFIG_AHBRAM_SZ8 \
+	16		CONFIG_AHBRAM_SZ16 \
+	32		CONFIG_AHBRAM_SZ32 \
+	64		CONFIG_AHBRAM_SZ64" 4
+  fi
+mainmenu_option next_comment
+comment 'Ethernet interface          '
+  bool 'Enable Ethernet interface                 ' CONFIG_ETH_ENABLE
+  if [ "$CONFIG_ETH_ENABLE" = "y" ]; then
+    int 'TX FIFO depth' CONFIG_ETH_TXFIFO 8
+    int 'RX FIFO depth' CONFIG_ETH_RXFIFO 8
+    int 'AHB burst length' CONFIG_ETH_BURST 4
+  fi
+endmenu
+
+mainmenu_option next_comment
+comment 'PCI interface          '
+  bool 'Enable PCI interface                 ' CONFIG_PCI_ENABLE
+  if [ "$CONFIG_PCI_ENABLE" = "y" ]; then
+    choice 'PCI core' \
+	"Simple-target		CONFIG_PCI_SIMPLE_TARGET" Simple-target
+    hex 'PCI vendor ID'   CONFIG_PCI_VENDORID 16E3
+    hex 'PCI device ID'   CONFIG_PCI_DEVICEID 0210
+    hex 'PCI revision ID'   CONFIG_PCI_REVID 1
+    if [ "$CONFIG_PCI_FAST_TARGET" = "y" -o "$CONFIG_PCI_MASTER_TARGET" = "y" ]; then
+      choice 'PCI FIFO depth' \
+	"8		CONFIG_PCI_FIFO8     \
+	16		CONFIG_PCI_FIFO16      \
+	32		CONFIG_PCI_FIFO32      \
+	64		CONFIG_PCI_FIFO64      \
+	128 		CONFIG_PCI_FIFO128" 8
+    fi
+    if [ "$CONFIG_PCI_TRACE" = "y" ]; then
+      choice 'PCI trace buffer depth' \
+	"256		CONFIG_PCI_TRACE256     \
+	512		CONFIG_PCI_TRACE512      \
+	1024		CONFIG_PCI_TRACE1024     \
+	2048		CONFIG_PCI_TRACE2048     \
+	4096 		CONFIG_PCI_TRACE4096" 256
+    fi
+    bool 'PCI reset affects complete processor' CONFIG_PCI_RESETALL
+    bool 'PCI arbiter                         ' CONFIG_PCI_ARBEN
+  fi
+endmenu
+
+endmenu
+
+mainmenu_option next_comment
+comment 'Boot options'
+  choice 'Boot selection            ' \
+	"Memory		CONFIG_BOOT_EXTPROM \
+	Internal-PROM		CONFIG_BOOT_INTPROM \
+	Both		CONFIG_BOOT_MIXPROM" Memory
+  if [ "$CONFIG_BOOT_EXTPROM" != "y" ]; then
+    int 'RAM read waitstates' CONFIG_BOOT_RWS 0
+    int 'RAM write waitstates' CONFIG_BOOT_WWS 0
+    int 'System clock frequency' CONFIG_BOOT_SYSCLK 25000000
+    int 'UART baud rate' CONFIG_BOOT_BAUDRATE 38400
+    bool 'Use external baud rate setting (PIO[7:0])    ' CONFIG_BOOT_EXTBAUD
+    int 'Internal boot PROM address bits' CONFIG_BOOT_PROMABITS 11
+  fi
+endmenu
+mainmenu_option next_comment
+comment 'VHDL Debugging        '
+  bool 'Accelerated UART tracing       ' CONFIG_DEBUG_UART
+  bool 'Integer unit register writes       ' CONFIG_DEBUG_IURF
+  dep_bool 'Floating-point unit register writes       ' CONFIG_DEBUG_FPURF $CONFIG_FPU_ENABLE
+  bool 'Continue on reset trap       ' CONFIG_DEBUG_NOHALT
+  bool '32-bit program counters       ' CONFIG_DEBUG_PC32
+  if [ "$CONFIG_FT_ENABLE" = "y" ]; then
+    if [ "$CONFIG_FT_RF_ENABLE" = "y" ]; then
+      bool 'Inject register-file errors    ' CONFIG_DEBUG_RFERR
+    fi
+    if [ "$CONFIG_FT_CACHEMEM_ENABLE" = "y" ]; then
+      bool 'Inject cache memory errors    ' CONFIG_DEBUG_CACHEMEMERR
+    fi
+  fi
+endmenu

@@ -1,0 +1,13 @@
+source setup_rhumc.tcl
+read_verilog -netlist bitfiles/leon3mp.v
+current_design leon3mp
+set_operating_conditions -library RH_UMC018_IOLIB_WCMIL WCMIL
+set_operating_conditions -library RH_UMC018_LVDSLIB_WCMIL WCMIL
+set_operating_conditions -library RadHardUMC18_CORE_STD_WCMIL WCMIL
+set_operating_conditions -library RadHardUMC18_CORE_HIT_WCMIL WCMIL
+set_wire_load_mode segmented
+set auto_wire_load_selection "true"
+set_wire_load_mode segmented
+
+
+

@@ -1,0 +1,4 @@
+#ifndef CONFIG_AC97_OC_ENABLE
+#define CONFIG_AC97_OC_ENABLE 0
+#endif
+

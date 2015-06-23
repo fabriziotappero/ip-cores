@@ -1,0 +1,102 @@
+/*******************************************/
+/* Script to compile leon with synopsys DC */
+/* Jiri Gaisler, Gaisler Research, 2004    */
+/*******************************************/
+
+search_path = {"." "/usr/local/synopsys/libraries/syn" "c:/Synopsys/libraries/syn"}
+target_library = "SClib-max+ind.db"
+link_library = "SClib-max+ind.db IO33lib-max+ind.db atc18mem.db PCIlib-max+ind.db"
+link_library = "*" + link_library
+symbol_library = "IO33lib-max+ind.sdb SClib-max+ind.sdb generic.sdb"
+allow_newer_db_files = "true";
+
+/* constraints - tailor to your own technology. An average 0.35 std-cell tech
+   should give you 80 - 100 MHz depending on ram access time. A 0.25 tech
+   should run at +150 MHz. Frequency in MHz, delays in ns ...  */
+
+frequency = 200
+clock_skew = 0.10
+input_setup = 2.0
+output_delay = 4.0
+
+/* don't touch anything from here unless you know what you are doing */
+
+include leon3mp.dc
+include atc18cond.dc
+
+ungroup find(cell, "*pad*") -flatten
+
+group find(cell, {"sr*", "sdc", "apb*", "uart*", "timer*", "irq*" \
+  "ahb*", "dsu0", "rst0", "dcom*" })  -design_name amod \
+  -cell_name amod0
+
+current_instance u0_0/p0
+ungroup -all -flatten 
+current_instance ../rf0
+ungroup -all -flatten 
+current_instance ../cmem0
+ungroup -all -flatten 
+current_instance ../../amod0
+ungroup -all -flatten 
+current_instance ..
+
+peri = 1000.0 / frequency
+input_delay = peri - input_setup
+tdelay = output_delay + 2
+create_clock -name "clk" -period peri -waveform { 0.0, peri / 2.0 } { "clk" } 
+set_wire_load_mode segmented
+
+set_clock_skew -plus_uncertainty clock_skew "clk"
+set_clock_skew -minus_uncertainty clock_skew "clk"
+
+/*
+set_input_delay input_delay -clock clk { \
+	 "pio[15]" "pio[14]" "pio[13]" \
+	 "pio[12]" "pio[11]" "pio[10]" "pio[9]" "pio[8]" "pio[7]" \
+	 "pio[6]" "pio[5]" "pio[4]" "pio[3]" "pio[2]" "pio[1]" "pio[0]" \
+	 "data[31]" "data[30]" "data[29]" "data[28]" "data[27]" "data[26]" \
+	 "data[25]" "data[24]" "data[23]" "data[22]" "data[21]" "data[20]" \
+	 "data[19]" "data[18]" "data[17]" "data[16]" "data[15]" "data[14]" \
+	 "data[13]" "data[12]" "data[11]" "data[10]" "data[9]" "data[8]" \
+	 "data[7]" "data[6]" "data[5]" "data[4]" "data[3]" "data[2]" \
+	 "data[1]" "data[0]" "brdyn" "bexcn" }
+
+set_max_delay tdelay -to { "errorn" "wdogn" \
+         "pio[15]" "pio[14]" "pio[13]" \
+	 "pio[12]" "pio[11]" "pio[10]" "pio[9]" "pio[8]" "pio[7]" \
+	 "pio[6]" "pio[5]" "pio[4]" "pio[3]" "pio[2]" "pio[1]" "pio[0]" \
+	 "data[31]" "data[30]" "data[29]" "data[28]" "data[27]" "data[26]" \
+	 "data[25]" "data[24]" "data[23]" "data[22]" "data[21]" "data[20]" \
+	 "data[19]" "data[18]" "data[17]" "data[16]" "data[15]" "data[14]" \
+	 "data[13]" "data[12]" "data[11]" "data[10]" "data[9]" "data[8]" \
+	 "data[7]" "data[6]" "data[5]" "data[4]" "data[3]" "data[2]" \
+	 "data[1]" "data[0]" }
+
+set_max_delay output_delay -to { \
+	 "writen" "romsn[1]" "romsn[0]" "read" "oen" \
+	 "iosn" "rwen[3]" "rwen[2]" "rwen[1]" "rwen[0]" "ramsn[3]" \
+	 "ramsn[2]" "ramsn[1]" "ramsn[0]" \
+	 "ramoen[3]" "ramoen[2]" "ramoen[1]" "ramoen[0]" \
+	 "sdcsn[1]" "sdcsn[0]" "sdwen" "sdrasn" "sdcasn" \
+	 "sddqm[3]" "sddqm[2]" "sddqm[1]" "sddqm[0]" \
+	 "address[27]" "address[26]" "address[25]" "address[24]" \
+	 "address[23]" "address[22]" "address[21]" "address[20]" \
+	 "address[19]" "address[18]" "address[17]" "address[16]" \
+	 "address[15]" "address[14]" "address[13]" "address[12]" \
+	 "address[11]" "address[10]" "address[9]" "address[8]" \
+	 "address[7]" "address[6]" "address[5]" "address[4]" \
+	 "address[3]" "address[2]" "address[1]" "address[0]"}
+
+*/
+set_max_area 0  
+set_max_transition 2.0 leon3mp  
+set_flatten false -design {"leon3mp.db:leon3mp"} 
+set_structure true -design {"leon3mp.db:leon3mp"} -boolean false -timing true
+
+
+compile -map_effort medium -boundary_optimization
+
+write -f db -hier leon3mp -output leon3mp.db
+
+report_timing
+report_area

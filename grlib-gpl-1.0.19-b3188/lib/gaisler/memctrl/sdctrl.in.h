@@ -1,0 +1,24 @@
+#ifndef CONFIG_SDCTRL
+#define CONFIG_SDCTRL 0
+#endif
+
+#ifndef CONFIG_SDCTRL_SEPBUS
+#define CONFIG_SDCTRL_SEPBUS 0
+#endif
+
+#ifndef CONFIG_SDCTRL_INVCLK
+#define CONFIG_SDCTRL_INVCLK 0
+#endif
+
+#ifndef CONFIG_SDCTRL_BUS64
+#define CONFIG_SDCTRL_BUS64 0
+#endif
+
+#ifndef CONFIG_SDCTRL_PAGE
+#define CONFIG_SDCTRL_PAGE 0
+#endif
+
+#ifndef CONFIG_SDCTRL_PROGPAGE
+#define CONFIG_SDCTRL_PROGPAGE 0
+#endif
+
