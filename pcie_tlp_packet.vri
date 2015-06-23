@@ -1,0 +1,465 @@
+// ===========================================================================
+// File    : pcie_tlp_packet.vri
+// Author  : cmagleby
+// Date    : Mon Dec 3 11:03:46 MST 2007
+// Project : TI PHY design
+//
+// Copyright (c) notice
+// This code adheres to the GNU public license
+//
+// ===========================================================================
+//
+// $Id: pcie_tlp_packet.vri,v 1.1.1.1 2007-12-05 18:37:06 cmagleby Exp $
+//
+// ===========================================================================
+//
+// $Log: not supported by cvs2svn $
+//
+// ===========================================================================
+// Function : This file is a class of pcie packet can be used for all TLP
+// packet types.
+//
+// ===========================================================================
+// ===========================================================================
+#include <vera_defines.vrh>
+
+class pcie_tlp_packet {
+  bit [15:0] sequence_num;
+  bit [4:0]  type;
+  bit [1:0]  fmt;
+  bit [9:0]  length;
+  bit [2:0]  tc;
+  bit [1:0]  attr;
+  bit        ep;
+  bit        td;
+  bit [63:0] address; //used for multiple purposes.
+  bit [15:0] req_id;
+  bit [7:0]  tag;
+  bit [3:0]  first_be;
+  bit [3:0]  last_be;
+  //completion fields
+  bit [15:0] completer_id;
+  bit [11:0] byte_count;
+  bit        bcm;
+  bit [2:0]  cmp_status;
+  bit [127:0] header; 
+  bit [31:0] lcrc;
+  bit [31:0] data [];
+
+  //methods
+  task new(
+    bit [11:0] ic_sequence_num = 12'b0,
+    bit [4:0]  ic_type        = 5'h0,
+    bit [1:0]  ic_fmt         = 2'h0,
+    bit [9:0]  ic_length      = 10'h0,
+    bit [2:0]  ic_tc          = 3'h0,
+    bit [1:0]  ic_attr        = 2'h0,
+    bit        ic_ep          = 1'h0,
+    bit        ic_td          = 1'h0,
+    bit [63:0] ic_address     = 64'h0,
+    bit [15:0] ic_req_id      = 16'h0,
+    bit [7:0]  ic_tag         = 8'h0,
+    bit [3:0]  ic_first_be    = 4'hf,
+    bit [3:0]  ic_last_be     = 4'hf,
+    //completion fields
+    bit [15:0] ic_completer_id = 16'h0,
+    bit [11:0] ic_byte_count   = 12'h0,
+    bit        ic_bcm          = 1'h0,
+    bit [2:0]  ic_cmp_status   = 3'h0,
+    bit [31:0] ic_config_data     = 32'b0) {
+
+    sequence_num    =     {4'b0,ic_sequence_num};
+    type            =     ic_type;          
+    fmt             =     ic_fmt;           
+    length          =     ic_length;        
+    tc              =     ic_tc;            
+    attr            =     ic_attr;          
+    ep              =     ic_ep;            
+    td              =     ic_td;            
+    address         =     ic_address;       
+    req_id          =     ic_req_id;        
+    tag             =     ic_tag;           
+    first_be        =     ic_first_be;      
+    last_be         =     ic_last_be;       
+    completer_id    =     ic_completer_id;  
+    byte_count      =     ic_byte_count;    
+    bcm             =     ic_bcm;           
+    cmp_status      =     ic_cmp_status;
+    data[0]         =     ic_config_data;       
+    printf ("new seq(%0h),type(%0h),fmt(%0h),length(%0h),tc(%0h),attr(%0h),ep(%0h),td(%0h),addr(%0h),req_id(%0h),tag(%0h),fbe(%0h),lbe(%0h),cmp_id(%0h),bc(%0h),bcm(%0h),cmp_stat(%0h),cfgwr data(%0h)\n",
+            ic_sequence_num,     
+            ic_type,             
+            ic_fmt,              
+            ic_length,           
+            ic_tc,               
+            ic_attr,             
+            ic_ep,               
+            ic_td,               
+            ic_address,          
+            ic_req_id,           
+            ic_tag,              
+            ic_first_be,         
+            ic_last_be,          
+            ic_completer_id,     
+            ic_byte_count,       
+            ic_bcm,              
+            ic_cmp_status,       
+            ic_config_data      
+            );
+  }
+
+  task build_packet (string pkt_type = "posted") {
+    integer reserved = 0;
+    integer i;
+    bit [5:0] register_num;
+    bit [3:0] ext_register_num;
+    bit [2:0] function_number;
+    bit [4:0] device_number;
+    bit [7:0] bus_number;
+    bit [6:0]  lower_addr = address[6:0];
+
+    bus_number = address[31:24];
+    function_number = address[23:19];
+    device_number = address[18:16];
+    ext_register_num = address[11:8];
+    register_num = address[7:2];
+    
+    if (pkt_type == "posted" || pkt_type == "nonposted") {
+      //dw1
+      header[4:0]     = type;
+      header[6:5]     = fmt;
+      header[7]       = reserved;
+      header[11:8]    = reserved;
+      header[14:12]   = tc;
+      header[15]      = reserved;
+      header[17:16]   = length[9:8];
+      header[19:18]   = reserved;
+      header[21:20]   = attr;
+      header[22]      = ep;
+      header[23]      = td;
+      header[31:24]   = length[7:0];
+      //dw2
+      header[39:32]   = req_id[15:8];
+      header[47:40]   = req_id[7:0];
+      header[55:48]   = tag;
+      header[59:56]   = first_be;
+      header[63:60]   = last_be;
+      //dw3&4
+      //configurations
+      if (type == 5'b00100 || type == 5'b00101) {
+        header[127:64] = {32'b0,
+                          register_num[5:0],2'b0,
+                          4'b0,ext_register_num[3:0],
+                          device_number[4:0],function_number[2:0],
+                          bus_number[7:0]};
+      }                          
+      else if (fmt[0] == 1'b1) {
+        header[127:64] = {address[7:2],2'b0,address[15:8],
+                          address[23:16],address[31:24],
+                          address[39:32],address[47:40],
+                          address[55:48],address[63:56]};
+      }
+      else {
+        header[127:64] = {32'b0,address[7:2],2'b0,address[15:8],
+                          address[23:16],address[31:24]};
+      }
+    }
+    else if (pkt_type == "completion") {
+      //dw1
+      header[4:0]     = type;
+      header[6:5]     = fmt;
+      header[7]       = reserved;
+      header[11:8]    = reserved;
+      header[14:12]   = tc;
+      header[15]      = reserved;
+      header[17:16]   = length[9:8];
+      header[19:18]   = reserved;
+      header[21:20]   = attr;
+      header[22]      = ep;
+      header[23]      = td;
+      header[31:24]   = length[7:0];
+      //dw 2
+      header[39:32]   = completer_id[15:8];
+      header[47:40]   = completer_id[7:0];
+      header[51:48]   = byte_count[11:8];
+      header[52]      = bcm;
+      header[55:53]   = cmp_status;
+      header[63:56]   = byte_count[7:0];
+      //dw3
+      header[71:64]   = req_id[15:8];
+      header[79:72]   = req_id[7:0];
+      header[87:80]   = tag;
+      header[95:88]   = {1'b0,lower_addr};
+      //dw4
+      header[127:96]  = 32'b0;
+    }
+    if (type[4:1] != 5'b0010 && fmt[1]) {
+      for (i=0;i<length;i++) {
+        data[i] = random();
+      }   
+    }
+    
+    	
+    lcrc =  lcrc32d32(sequence_num,header,data); 
+    printf ("lcrc(%0h)\n",lcrc);   
+  }
+
+  function bit [31:0] lcrc32d32 (bit [15:0] sequence_num, bit[127:0] header, bit [31:0] data[]) {
+    bit [31:0] crc;
+    bit[31:0] prev_crc;
+    bit [31:0] C;
+    integer packet_total_length;
+    integer hdr_dws;
+    integer i;
+    bit [31:0] d;
+    bit [31:0] digest;
+
+    //length + td + header size
+    printf("function for lcrc\n");
+    if (header[5]) {
+      hdr_dws = 4;
+      if (header[6]) {
+        packet_total_length = {header[17:16],header[31:24]} + header[23] + 4;
+      }
+      else packet_total_length = 4;
+    }
+    else {
+      hdr_dws = 3;
+      if (header[6]) {
+        packet_total_length = {header[17:16],header[31:24]} + header[23] + 3;
+      }
+      else packet_total_length = 3;
+    }
+
+    
+
+    for (i = 0; i<=packet_total_length;i++) {
+      if (i==0) {
+        C = 32'hffff_ffff;
+        d = {sequence_num[7:0],4'b0,sequence_num[11:8]};
+      }
+      else if (i == 1) {
+        d = header[31:0];
+        C = crc;
+      }
+      else if (i==2) {
+        d= header[63:32];
+        C = crc;
+      }
+      else if (i==3) {
+        d=header[95:64];
+        C=crc;
+      }
+      else if (i==4 & hdr_dws == 4) {
+        d = header[127:96];
+        C = crc;
+      }
+      else if (i == packet_total_length && header[23] == 1'b1) {
+        d = digest;
+        C = crc;
+      }
+      else {
+        d = data[i - hdr_dws - 1];
+        C = crc;
+      }
+      if (i == 0) {
+        printf ("16 crc d(%0h),C(%0h),",d,C);
+        crc[0] = d[3] ^ d[5] ^ d[6] ^ d[9] ^ d[15] ^ C[16] ^ C[22] ^ C[25] ^ C[26] 
+          ^ C[28];
+        crc[1] = d[2] ^ d[3] ^ d[4] ^ d[6] ^ d[8] ^ d[9] ^ d[14] ^ d[15] ^ C[16] ^ 
+          C[17] ^ C[22] ^ C[23] ^ C[25] ^ C[27] ^ C[28] ^ C[29];
+        crc[2] = d[1] ^ d[2] ^ d[6] ^ d[7] ^ d[8] ^ d[9] ^ d[13] ^ d[14] ^ d[15] ^ 
+          C[16] ^ C[17] ^ C[18] ^ C[22] ^ C[23] ^ C[24] ^ C[25] ^ C[29] ^ C[30];
+        crc[3] = d[0] ^ d[1] ^ d[5] ^ d[6] ^ d[7] ^ d[8] ^ d[12] ^ d[13] ^ d[14] ^ 
+          C[17] ^ C[18] ^ C[19] ^ C[23] ^ C[24] ^ C[25] ^ C[26] ^ C[30] ^ C[31];
+        crc[4] = d[0] ^ d[3] ^ d[4] ^ d[7] ^ d[9] ^ d[11] ^ d[12] ^ d[13] ^ d[15] ^ 
+          C[16] ^ C[18] ^ C[19] ^ C[20] ^ C[22] ^ C[24] ^ C[27] ^ C[28] ^ C[31];
+        crc[5] = d[2] ^ d[5] ^ d[8] ^ d[9] ^ d[10] ^ d[11] ^ d[12] ^ d[14] ^ d[15] 
+          ^ C[16] ^ C[17] ^ C[19] ^ C[20] ^ C[21] ^ C[22] ^ C[23] ^ C[26] ^ 
+          C[29];
+        crc[6] = d[1] ^ d[4] ^ d[7] ^ d[8] ^ d[9] ^ d[10] ^ d[11] ^ d[13] ^ d[14] ^ 
+          C[17] ^ C[18] ^ C[20] ^ C[21] ^ C[22] ^ C[23] ^ C[24] ^ C[27] ^ C[30];
+        crc[7] = d[0] ^ d[5] ^ d[7] ^ d[8] ^ d[10] ^ d[12] ^ d[13] ^ d[15] ^ C[16] 
+          ^ C[18] ^ C[19] ^ C[21] ^ C[23] ^ C[24] ^ C[26] ^ C[31];
+        crc[8] = d[3] ^ d[4] ^ d[5] ^ d[7] ^ d[11] ^ d[12] ^ d[14] ^ d[15] ^ C[16] 
+          ^ C[17] ^ C[ 19] ^ C[20] ^ C[24] ^ C[26] ^ C[27] ^ C[28];
+        crc[9] = d[2] ^ d[3] ^ d[4] ^ d[6] ^ d[10] ^ d[11] ^ d[13] ^ d[14] ^ C[17] 
+          ^ C[18] ^ C[20] ^ C[21] ^ C[25] ^ C[27] ^ C[28] ^ C[29];
+        crc[10] = d[1] ^ d[2] ^ d[6] ^ d[10] ^ d[12] ^ d[13] ^ d[15] ^ C[16] ^ C[18] 
+          ^ C[19] ^ C[21] ^ C[25] ^ C[29] ^ C[30];
+        crc[11] = d[0] ^ d[1] ^ d[3] ^ d[6] ^ d[11] ^ d[12] ^ d[14] ^ d[15] ^ C[16] 
+          ^ C[17] ^ C[19] ^ C[20] ^ C[25] ^ C[28] ^ C[30] ^ C[31];
+        crc[12] = d[0] ^ d[2] ^ d[3] ^ d[6] ^ d[9] ^ d[10] ^ d[11] ^ d[13] ^ d[14] ^ 
+          d[15] ^ C[16] ^ C[17] ^ C[18] ^ C[20] ^ C[21] ^ C[22] ^ C[25] ^ C[28] 
+          ^ C[29] ^ C[31];
+        crc[13] = d[1] ^ d[2] ^ d[5] ^ d[8] ^ d[9] ^ d[10] ^ d[12] ^ d[13] ^ d[14] ^ 
+          C[17] ^ C[18] ^ C[19] ^ C[21] ^ C[22] ^ C[23] ^ C[26] ^ C[29] ^ C[30];
+        crc[14] = d[0] ^ d[1] ^ d[4] ^ d[7] ^ d[8] ^ d[9] ^ d[11] ^ d[12] ^ d[13] ^ 
+          C[18] ^ C[19] ^ C[20] ^ C[22] ^ C[23] ^ C[24] ^ C[27] ^ C[30] ^ C[31];
+        crc[15] = d[0] ^ d[3] ^ d[6] ^ d[7] ^ d[8] ^ d[10] ^ d[11] ^ d[12] ^ C[19] ^ 
+          C[20] ^ C[21] ^ C[23] ^ C[24] ^ C[25] ^ C[28] ^ C[31];
+        crc[16] = d[2] ^ d[3] ^ d[7] ^ d[10] ^ d[11] ^ d[15] ^ C[0] ^ C[16] ^ C[20] 
+          ^ C[21] ^ C[24] ^ C[28] ^ C[29];
+        crc[17] = d[1] ^ d[2] ^ d[6] ^ d[9] ^ d[10] ^ d[14] ^ C[1] ^ C[17] ^ C[21] ^ 
+          C[22] ^ C[25] ^ C[29] ^ C[30];
+        crc[18] = d[0] ^ d[1] ^ d[5] ^ d[8] ^ d[9] ^ d[13] ^ C[2] ^ C[18] ^ C[22] ^ 
+          C[23] ^ C[26] ^ C[30] ^ C[31];
+        crc[19] = d[0] ^ d[4] ^ d[7] ^ d[8] ^ d[12] ^ C[3] ^ C[19] ^ C[23] ^ C[24] ^ 
+          C[27] ^ C[31];
+        crc[20] = d[3] ^ d[6] ^ d[7] ^ d[11] ^ C[4] ^ C[20] ^ C[24] ^ C[25] ^ C[28];
+        crc[21] = d[2] ^ d[5] ^ d[6] ^ d[10] ^ C[5] ^ C[21] ^ C[25] ^ C[26] ^ C[29];
+        crc[22] = d[1] ^ d[3] ^ d[4] ^ d[6] ^ d[15] ^ C[6] ^ C[16] ^ C[25] ^ C[27] ^ 
+          C[28] ^ C[30];
+        crc[23] = d[0] ^ d[2] ^ d[6] ^ d[9] ^ d[14] ^ d[15] ^ C[7] ^ C[16] ^ C[17] ^ 
+          C[22] ^ C[25] ^ C[29] ^ C[31];
+        crc[24] = d[1] ^ d[5] ^ d[8] ^ d[13] ^ d[14] ^ C[8] ^ C[17] ^ C[18] ^ C[23] 
+          ^ C[26] ^ C[30];
+        crc[25] = d[0] ^ d[4] ^ d[7] ^ d[12] ^ d[13] ^ C[9] ^ C[18] ^ C[19] ^ C[24] 
+          ^ C[27] ^ C[31];
+        crc[26] = d[5] ^ d[9] ^ d[11] ^ d[12] ^ d[15] ^ C[10] ^ C[16] ^ C[19] ^ C[20] 
+          ^ C[22] ^ C[26];
+        crc[27] = d[4] ^ d[8] ^ d[10] ^ d[11] ^ d[14] ^ C[11] ^ C[17] ^ C[20] ^ C[21] 
+          ^ C[23] ^ C[27];
+        crc[28] = d[3] ^ d[7] ^ d[9] ^ d[10] ^ d[13] ^ C[12] ^ C[18] ^ C[21] ^ C[22] 
+          ^ C[24] ^ C[28];
+        crc[29] = d[2] ^ d[6] ^ d[8] ^ d[9] ^ d[12] ^ C[13] ^ C[19] ^ C[22] ^ C[23] 
+          ^ C[25] ^ C[29];
+        crc[30] = d[1] ^ d[5] ^ d[7] ^ d[8] ^ d[11] ^ C[14] ^ C[20] ^ C[23] ^ C[24] 
+          ^ C[26] ^ C[30];
+        crc[31] = d[0] ^ d[4] ^ d[6] ^ d[7] ^ d[10] ^ C[15] ^ C[21] ^ C[24] ^ C[25] 
+          ^ C[27] ^ C[31];
+      }
+      else {
+        printf ("32 crc d(%0h),C(%0h),",d,C);
+        prev_crc = crc;
+        crc[0] = d[0] ^ d[1] ^ d[2] ^ d[3] ^ d[5] ^ d[6] ^ d[7] ^ d[15] ^ d[19] ^ d[21] 
+          ^ d[22] ^ d[25] ^ d[31] ^ prev_crc[0] ^ prev_crc[6] ^ prev_crc[9] ^ prev_crc[10] ^ prev_crc[12] ^ prev_crc[16] 
+          ^ prev_crc[24] ^ prev_crc[25] ^ prev_crc[26] ^ prev_crc[28] ^ prev_crc[29] ^ prev_crc[30] ^ prev_crc[31];
+        crc[1] = d[3] ^ d[4] ^ d[7] ^ d[14] ^ d[15] ^ d[18] ^ d[19] ^ d[20] ^ d[22] 
+          ^ d[24] ^ d[25] ^ d[30] ^ d[31] ^ prev_crc[0] ^ prev_crc[1] ^ prev_crc[6] ^ prev_crc[7] ^ prev_crc[9] 
+          ^ prev_crc[11] ^ prev_crc[12] ^ prev_crc[13] ^ prev_crc[16] ^ prev_crc[17] ^ prev_crc[24] ^ prev_crc[27] ^ prev_crc[28];
+        crc[2] = d[0] ^ d[1] ^ d[5] ^ d[7] ^ d[13] ^ d[14] ^ d[15] ^ d[17] ^ d[18] 
+          ^ d[22] ^ d[23] ^ d[24] ^ d[25] ^ d[29] ^ d[30] ^ d[31] ^ prev_crc[0] ^ prev_crc[1] 
+          ^ prev_crc[2] ^ prev_crc[6] ^ prev_crc[7] ^ prev_crc[8] ^ prev_crc[9] ^ prev_crc[13] ^ prev_crc[14] ^ prev_crc[16] ^ prev_crc[17] 
+          ^ prev_crc[18] ^ prev_crc[24] ^ prev_crc[26] ^ prev_crc[30] ^ prev_crc[31];
+        crc[3] = d[0] ^ d[4] ^ d[6] ^ d[12] ^ d[13] ^ d[14] ^ d[16] ^ d[17] ^ d[21] 
+          ^ d[22] ^ d[23] ^ d[24] ^ d[28] ^ d[29] ^ d[30] ^ prev_crc[1] ^ prev_crc[2] ^ prev_crc[3] 
+          ^ prev_crc[7] ^ prev_crc[8] ^ prev_crc[9] ^ prev_crc[10] ^ prev_crc[14] ^ prev_crc[15] ^ prev_crc[17] ^ prev_crc[18] ^ prev_crc[19] 
+          ^ prev_crc[25] ^ prev_crc[27] ^ prev_crc[31];
+        crc[4] = d[0] ^ d[1] ^ d[2] ^ d[6] ^ d[7] ^ d[11] ^ d[12] ^ d[13] ^ d[16] ^ 
+          d[19] ^ d[20] ^ d[23] ^ d[25] ^ d[27] ^ d[28] ^ d[29] ^ d[31] ^ prev_crc[0] 
+          ^ prev_crc[2] ^ prev_crc[3] ^ prev_crc[4] ^ prev_crc[6] ^ prev_crc[8] ^ prev_crc[11] ^ prev_crc[12] ^ prev_crc[15] ^ prev_crc[18] 
+          ^ prev_crc[19] ^ prev_crc[20] ^ prev_crc[24] ^ prev_crc[25] ^ prev_crc[29] ^ prev_crc[30] ^ prev_crc[31];
+        crc[5] = d[2] ^ d[3] ^ d[7] ^ d[10] ^ d[11] ^ d[12] ^ d[18] ^ d[21] ^ d[24] 
+          ^ d[25] ^ d[26] ^ d[27] ^ d[28] ^ d[30] ^ d[31] ^ prev_crc[0] ^ prev_crc[1] ^ prev_crc[3] 
+          ^ prev_crc[4] ^ prev_crc[5] ^ prev_crc[6] ^ prev_crc[7] ^ prev_crc[10] ^ prev_crc[13] ^ prev_crc[19] ^ prev_crc[20] ^ prev_crc[21] 
+          ^ prev_crc[24] ^ prev_crc[28] ^ prev_crc[29];
+        crc[6] = d[1] ^ d[2] ^ d[6] ^ d[9] ^ d[10] ^ d[11] ^ d[17] ^ d[20] ^ d[23] 
+          ^ d[24] ^ d[25] ^ d[26] ^ d[27] ^ d[29] ^ d[30] ^ prev_crc[1] ^ prev_crc[2] ^ prev_crc[4] 
+          ^ prev_crc[5] ^ prev_crc[6] ^ prev_crc[7] ^ prev_crc[8] ^ prev_crc[11] ^ prev_crc[14] ^ prev_crc[20] ^ prev_crc[21] ^ prev_crc[22] 
+          ^ prev_crc[25] ^ prev_crc[29] ^ prev_crc[30];
+        crc[7] = d[2] ^ d[3] ^ d[6] ^ d[7] ^ d[8] ^ d[9] ^ d[10] ^ d[15] ^ d[16] ^ 
+          d[21] ^ d[23] ^ d[24] ^ d[26] ^ d[28] ^ d[29] ^ d[31] ^ prev_crc[0] ^ prev_crc[2] 
+          ^ prev_crc[3] ^ prev_crc[5] ^ prev_crc[7] ^ prev_crc[8] ^ prev_crc[10] ^ prev_crc[15] ^ prev_crc[16] ^ prev_crc[21] ^ prev_crc[22] 
+          ^ prev_crc[23] ^ prev_crc[24] ^ prev_crc[25] ^ prev_crc[28] ^ prev_crc[29];
+        crc[8] = d[0] ^ d[3] ^ d[8] ^ d[9] ^ d[14] ^ d[19] ^ d[20] ^ d[21] ^ d[23] 
+          ^ d[27] ^ d[28] ^ d[30] ^ d[31] ^ prev_crc[0] ^ prev_crc[1] ^ prev_crc[3] ^ prev_crc[4] ^ prev_crc[8] 
+          ^ prev_crc[10] ^ prev_crc[11] ^ prev_crc[12] ^ prev_crc[17] ^ prev_crc[22] ^ prev_crc[23] ^ prev_crc[28] ^ prev_crc[31];
+        crc[9] = d[2] ^ d[7] ^ d[8] ^ d[13] ^ d[18] ^ d[19] ^ d[20] ^ d[22] ^ d[26] 
+          ^ d[27] ^ d[29] ^ d[30] ^ prev_crc[1] ^ prev_crc[2] ^ prev_crc[4] ^ prev_crc[5] ^ prev_crc[9] ^ prev_crc[11] 
+          ^ prev_crc[12] ^ prev_crc[13] ^ prev_crc[18] ^ prev_crc[23] ^ prev_crc[24] ^ prev_crc[29];
+        crc[10] = d[0] ^ d[2] ^ d[3] ^ d[5] ^ d[12] ^ d[15] ^ d[17] ^ d[18] ^ d[22] 
+          ^ d[26] ^ d[28] ^ d[29] ^ d[31] ^ prev_crc[0] ^ prev_crc[2] ^ prev_crc[3] ^ prev_crc[5] ^ prev_crc[9] 
+          ^ prev_crc[13] ^ prev_crc[14] ^ prev_crc[16] ^ prev_crc[19] ^ prev_crc[26] ^ prev_crc[28] ^ prev_crc[29] ^ prev_crc[31];
+        crc[11] = d[0] ^ d[3] ^ d[4] ^ d[5] ^ d[6] ^ d[7] ^ d[11] ^ d[14] ^ d[15] ^ 
+          d[16] ^ d[17] ^ d[19] ^ d[22] ^ d[27] ^ d[28] ^ d[30] ^ d[31] ^ prev_crc[0] 
+          ^ prev_crc[1] ^ prev_crc[3] ^ prev_crc[4] ^ prev_crc[9] ^ prev_crc[12] ^ prev_crc[14] ^ prev_crc[15] ^ prev_crc[16] ^ prev_crc[17] 
+          ^ prev_crc[20] ^ prev_crc[24] ^ prev_crc[25] ^ prev_crc[26] ^ prev_crc[27] ^ prev_crc[28] ^ prev_crc[31];
+        crc[12] = d[0] ^ d[1] ^ d[4] ^ d[7] ^ d[10] ^ d[13] ^ d[14] ^ d[16] ^ d[18] 
+          ^ d[19] ^ d[22] ^ d[25] ^ d[26] ^ d[27] ^ d[29] ^ d[30] ^ d[31] ^ 
+          prev_crc[0] ^ prev_crc[1] ^ prev_crc[2] ^ prev_crc[4] ^ prev_crc[5] ^ prev_crc[6] ^ prev_crc[9] ^ prev_crc[12] ^ prev_crc[13] ^ prev_crc[15] 
+          ^ prev_crc[17] ^ prev_crc[18] ^ prev_crc[21] ^ prev_crc[24] ^ prev_crc[27] ^ prev_crc[30] ^ prev_crc[31];
+        crc[13] = d[0] ^ d[3] ^ d[6] ^ d[9] ^ d[12] ^ d[13] ^ d[15] ^ d[17] ^ d[18] 
+          ^ d[21] ^ d[24] ^ d[25] ^ d[26] ^ d[28] ^ d[29] ^ d[30] ^ prev_crc[1] ^ prev_crc[2] 
+          ^ prev_crc[3] ^ prev_crc[5] ^ prev_crc[6] ^ prev_crc[7] ^ prev_crc[10] ^ prev_crc[13] ^ prev_crc[14] ^ prev_crc[16] ^ prev_crc[18] 
+          ^ prev_crc[19] ^ prev_crc[22] ^ prev_crc[25] ^ prev_crc[28] ^ prev_crc[31];
+        crc[14] = d[2] ^ d[5] ^ d[8] ^ d[11] ^ d[12] ^ d[14] ^ d[16] ^ d[17] ^ d[20] 
+          ^ d[23] ^ d[24] ^ d[25] ^ d[27] ^ d[28] ^ d[29] ^ prev_crc[2] ^ prev_crc[3] ^ prev_crc[4] 
+          ^ prev_crc[6] ^ prev_crc[7] ^ prev_crc[8] ^ prev_crc[11] ^ prev_crc[14] ^ prev_crc[15] ^ prev_crc[17] ^ prev_crc[19] ^ prev_crc[20] 
+          ^ prev_crc[23] ^ prev_crc[26] ^ prev_crc[29];
+        crc[15] = d[1] ^ d[4] ^ d[7] ^ d[10] ^ d[11] ^ d[13] ^ d[15] ^ d[16] ^ d[19] 
+          ^ d[22] ^ d[23] ^ d[24] ^ d[26] ^ d[27] ^ d[28] ^ prev_crc[3] ^ prev_crc[4] ^ prev_crc[5] 
+          ^ prev_crc[7] ^ prev_crc[8] ^ prev_crc[9] ^ prev_crc[12] ^ prev_crc[15] ^ prev_crc[16] ^ prev_crc[18] ^ prev_crc[20] ^ prev_crc[21] 
+          ^ prev_crc[24] ^ prev_crc[27] ^ prev_crc[30];
+        crc[16] = d[1] ^ d[2] ^ d[5] ^ d[7] ^ d[9] ^ d[10] ^ d[12] ^ d[14] ^ d[18] ^ 
+          d[19] ^ d[23] ^ d[26] ^ d[27] ^ d[31] ^ prev_crc[0] ^ prev_crc[4] ^ prev_crc[5] ^ prev_crc[8] 
+          ^ prev_crc[12] ^ prev_crc[13] ^ prev_crc[17] ^ prev_crc[19] ^ prev_crc[21] ^ prev_crc[22] ^ prev_crc[24] ^ prev_crc[26] ^ 
+          prev_crc[29] ^ prev_crc[30];
+        crc[17] = d[0] ^ d[1] ^ d[4] ^ d[6] ^ d[8] ^ d[9] ^ d[11] ^ d[13] ^ d[17] ^ 
+          d[18] ^ d[22] ^ d[25] ^ d[26] ^ d[30] ^ prev_crc[1] ^ prev_crc[5] ^ prev_crc[6] ^ prev_crc[9] 
+          ^ prev_crc[13] ^ prev_crc[14] ^ prev_crc[18] ^ prev_crc[20] ^ prev_crc[22] ^ prev_crc[23] ^ prev_crc[25] ^ prev_crc[27] ^ 
+          prev_crc[30] ^ prev_crc[31];
+        crc[18] = d[0] ^ d[3] ^ d[5] ^ d[7] ^ d[8] ^ d[10] ^ d[12] ^ d[16] ^ d[17] ^ 
+          d[21] ^ d[24] ^ d[25] ^ d[29] ^ prev_crc[2] ^ prev_crc[6] ^ prev_crc[7] ^ prev_crc[10] ^ prev_crc[14] 
+          ^ prev_crc[15] ^ prev_crc[19] ^ prev_crc[21] ^ prev_crc[23] ^ prev_crc[24] ^ prev_crc[26] ^ prev_crc[28] ^ prev_crc[31];
+        crc[19] = d[2] ^ d[4] ^ d[6] ^ d[7] ^ d[9] ^ d[11] ^ d[15] ^ d[16] ^ d[20] ^ 
+          d[23] ^ d[24] ^ d[28] ^ prev_crc[3] ^ prev_crc[7] ^ prev_crc[8] ^ prev_crc[11] ^ prev_crc[15] ^ prev_crc[16] 
+          ^ prev_crc[20] ^ prev_crc[22] ^ prev_crc[24] ^ prev_crc[25] ^ prev_crc[27] ^ prev_crc[29];
+        crc[20] = d[1] ^ d[3] ^ d[5] ^ d[6] ^ d[8] ^ d[10] ^ d[14] ^ d[15] ^ d[19] ^ 
+          d[22] ^ d[23] ^ d[27] ^ prev_crc[4] ^ prev_crc[8] ^ prev_crc[9] ^ prev_crc[12] ^ prev_crc[16] ^ prev_crc[17] 
+          ^ prev_crc[21] ^ prev_crc[23] ^ prev_crc[25] ^ prev_crc[26] ^ prev_crc[28] ^ prev_crc[30];
+        crc[21] = d[0] ^ d[2] ^ d[4] ^ d[5] ^ d[7] ^ d[9] ^ d[13] ^ d[14] ^ d[18] ^ 
+          d[21] ^ d[22] ^ d[26] ^ prev_crc[5] ^ prev_crc[9] ^ prev_crc[10] ^ prev_crc[13] ^ prev_crc[17] ^ prev_crc[18] 
+          ^ prev_crc[22] ^ prev_crc[24] ^ prev_crc[26] ^ prev_crc[27] ^ prev_crc[29] ^ prev_crc[31];
+        crc[22] = d[0] ^ d[2] ^ d[4] ^ d[5] ^ d[7] ^ d[8] ^ d[12] ^ d[13] ^ d[15] ^ 
+          d[17] ^ d[19] ^ d[20] ^ d[22] ^ d[31] ^ prev_crc[0] ^ prev_crc[9] ^ prev_crc[11] ^ prev_crc[12] 
+          ^ prev_crc[14] ^ prev_crc[16] ^ prev_crc[18] ^ prev_crc[19] ^ prev_crc[23] ^ prev_crc[24] ^ prev_crc[26] ^ prev_crc[27] ^ 
+          prev_crc[29] ^ prev_crc[31];
+        crc[23] = d[0] ^ d[2] ^ d[4] ^ d[5] ^ d[11] ^ d[12] ^ d[14] ^ d[15] ^ d[16] 
+          ^ d[18] ^ d[22] ^ d[25] ^ d[30] ^ d[31] ^ prev_crc[0] ^ prev_crc[1] ^ prev_crc[6] ^ prev_crc[9] 
+          ^ prev_crc[13] ^ prev_crc[15] ^ prev_crc[16] ^ prev_crc[17] ^ prev_crc[19] ^ prev_crc[20] ^ prev_crc[26] ^ prev_crc[27] ^ 
+          prev_crc[29] ^ prev_crc[31];
+        crc[24] = d[1] ^ d[3] ^ d[4] ^ d[10] ^ d[11] ^ d[13] ^ d[14] ^ d[15] ^ d[17] 
+          ^ d[21] ^ d[24] ^ d[29] ^ d[30] ^ prev_crc[1] ^ prev_crc[2] ^ prev_crc[7] ^ prev_crc[10] ^ prev_crc[14] 
+          ^ prev_crc[16] ^ prev_crc[17] ^ prev_crc[18] ^ prev_crc[20] ^ prev_crc[21] ^ prev_crc[27] ^ prev_crc[28] ^ prev_crc[30];
+        crc[25] = d[0] ^ d[2] ^ d[3] ^ d[9] ^ d[10] ^ d[12] ^ d[13] ^ d[14] ^ d[16] 
+          ^ d[20] ^ d[23] ^ d[28] ^ d[29] ^ prev_crc[2] ^ prev_crc[3] ^ prev_crc[8] ^ prev_crc[11] ^ prev_crc[15] 
+          ^ prev_crc[17] ^ prev_crc[18] ^ prev_crc[19] ^ prev_crc[21] ^ prev_crc[22] ^ prev_crc[28] ^ prev_crc[29] ^ prev_crc[31];
+        crc[26] = d[0] ^ d[3] ^ d[5] ^ d[6] ^ d[7] ^ d[8] ^ d[9] ^ d[11] ^ d[12] ^ d[13] 
+          ^ d[21] ^ d[25] ^ d[27] ^ d[28] ^ d[31] ^ prev_crc[0] ^ prev_crc[3] ^ prev_crc[4] ^ prev_crc[6] 
+          ^ prev_crc[10] ^ prev_crc[18] ^ prev_crc[19] ^ prev_crc[20] ^ prev_crc[22] ^ prev_crc[23] ^ prev_crc[24] ^ prev_crc[25] ^ 
+          prev_crc[26] ^ prev_crc[28] ^ prev_crc[31];
+        crc[27] = d[2] ^ d[4] ^ d[5] ^ d[6] ^ d[7] ^ d[8] ^ d[10] ^ d[11] ^ d[12] ^ 
+          d[20] ^ d[24] ^ d[26] ^ d[27] ^ d[30] ^ prev_crc[1] ^ prev_crc[4] ^ prev_crc[5] ^ prev_crc[7] 
+          ^ prev_crc[11] ^ prev_crc[19] ^ prev_crc[20] ^ prev_crc[21] ^ prev_crc[23] ^ prev_crc[24] ^ prev_crc[25] ^ prev_crc[26] ^ 
+          prev_crc[27] ^ prev_crc[29];
+        crc[28] = d[1] ^ d[3] ^ d[4] ^ d[5] ^ d[6] ^ d[7] ^ d[9] ^ d[10] ^ d[11] ^ d[19] 
+          ^ d[23] ^ d[25] ^ d[26] ^ d[29] ^ prev_crc[2] ^ prev_crc[5] ^ prev_crc[6] ^ prev_crc[8] ^ prev_crc[12] 
+          ^ prev_crc[20] ^ prev_crc[21] ^ prev_crc[22] ^ prev_crc[24] ^ prev_crc[25] ^ prev_crc[26] ^ prev_crc[27] ^ prev_crc[28] ^ 
+          prev_crc[30];
+        crc[29] = d[0] ^ d[2] ^ d[3] ^ d[4] ^ d[5] ^ d[6] ^ d[8] ^ d[9] ^ d[10] ^ d[18] 
+          ^ d[22] ^ d[24] ^ d[25] ^ d[28] ^ prev_crc[3] ^ prev_crc[6] ^ prev_crc[7] ^ prev_crc[9] ^ prev_crc[13] 
+          ^ prev_crc[21] ^ prev_crc[22] ^ prev_crc[23] ^ prev_crc[25] ^ prev_crc[26] ^ prev_crc[27] ^ prev_crc[28] ^ prev_crc[29] ^ 
+          prev_crc[31];
+        crc[30] = d[1] ^ d[2] ^ d[3] ^ d[4] ^ d[5] ^ d[7] ^ d[8] ^ d[9] ^ d[17] ^ d[21] 
+          ^ d[23] ^ d[24] ^ d[27] ^ prev_crc[4] ^ prev_crc[7] ^ prev_crc[8] ^ prev_crc[10] ^ prev_crc[14] ^ prev_crc[22] 
+          ^ prev_crc[23] ^ prev_crc[24] ^ prev_crc[26] ^ prev_crc[27] ^ prev_crc[28] ^ prev_crc[29] ^ prev_crc[30];
+        crc[31] = d[0] ^ d[1] ^ d[2] ^ d[3] ^ d[4] ^ d[6] ^ d[7] ^ d[8] ^ d[16] ^ d[20] 
+          ^ d[22] ^ d[23] ^ d[26] ^ prev_crc[5] ^ prev_crc[8] ^ prev_crc[9] ^ prev_crc[11] ^ prev_crc[15] ^ prev_crc[23] 
+          ^ prev_crc[24] ^ prev_crc[25] ^ prev_crc[27] ^ prev_crc[28] ^ prev_crc[29] ^ prev_crc[30] ^ prev_crc[31];
+      }
+      printf ("crc(%0h)\n",crc);      
+      packet_array[i] = d;
+      printf ("packet_array[%0d] = %0h\n",i,d);
+    }
+
+    lcrc32d32 = {~crc[0],~crc[1],~crc[2],~crc[3],~crc[4],~crc[5],~crc[6],~crc[7],
+                 ~crc[8],~crc[9],~crc[10],~crc[11],~crc[12],~crc[13],~crc[14],~crc[15],
+                 ~crc[16],~crc[17],~crc[18],~crc[19],~crc[20],~crc[21],~crc[22],~crc[23], 
+                 ~crc[24],~crc[25],~crc[26],~crc[27],~crc[28],~crc[29],~crc[30],~crc[31]};
+
+    return;
+  }
+}
+
+

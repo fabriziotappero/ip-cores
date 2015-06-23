@@ -1,0 +1,209 @@
+// ===========================================================================
+// File    : link_training.vri
+// Author  : cmagleby
+// Date    : Mon Dec 3 11:03:46 MST 2007
+// Project : TI PHY design
+//
+// Copyright (c) notice
+// This code adheres to the GNU public license
+//
+// ===========================================================================
+//
+// $Id: link_training.vri,v 1.1.1.1 2007-12-05 18:37:06 cmagleby Exp $
+//
+// ===========================================================================
+//
+// $Log: not supported by cvs2svn $
+//
+// ===========================================================================
+// Function :This file performs the link training and link and lane negotiation
+//
+// ===========================================================================
+// ===========================================================================
+#include <vera_defines.vrh>
+#define COM_s 8'hbc
+#define SKP_s 8'h1c
+#define IDLE_s 8'h7c
+#define FTS_s 8'h3c
+#define STP_s 8'hfb
+#define SDP_s 8'h5c
+#define EDB   8'hfe
+#define END_s 8'hfd
+
+task link_training () {
+  
+  fork
+    send_ts();
+    receive_ts();
+  join none
+}
+
+
+task send_ts( ) {
+  integer index;
+  string pkt_type;
+  pkt_type = "ts";
+  //ti_phy_top.t1_count == 9'hff;
+  ti_phy_top.rxvalid16 = 1'b1; 
+  wait_var(phy_rdy);
+                       
+  printf ("send_ts1 =  %d \n",send_ts1);
+  while (LINK_UP == 0) {
+    if (send_ts1 == 1) {
+      ts2_cycle_cnt = 1;
+      //printf ("number of ts dut sent %d \n",ti_phy_top.t1_count); 
+      printf ("ts #%0d ts 1's ",ts1_cycle_cnt++);  
+      pkt_type = "ts";
+      training_set = new(link,lane,*,*,*,*);
+      training_set.build_packet(pkt_type);
+      if (!semaphore_get(WAIT,my_semaphore,1))
+        error ("Semaphore_get returned 0\n");
+      for (index = 0; index < training_set.length; index ++) {
+        @ (posedge CLOCK);
+        //ti_phy_top.rxdatak16 = training_set.temp_packet[index][17:16];
+        //ti_phy_top.rxdata16  = training_set.temp_packet[index][15:0];
+        //adding mailbox
+        mailbox_put (rx_data_mailbox, {training_set.temp_packet[index][17:16],training_set.temp_packet[index][15:0]});
+      }
+      semaphore_put (my_semaphore, 1);
+    }
+    else if (send_ts2 == 1){
+      ts1_cycle_cnt = 1;
+      printf ("ts #%0d ts 2's ",ts2_cycle_cnt++);
+      pkt_type = "ts";
+      training_set = new(lane,link,*,*,*,'h45);
+      training_set.build_packet(pkt_type); 
+      for (index = 0; index < training_set.length; index ++) {
+        @ (posedge CLOCK);
+        //ti_phy_top.rxdatak16 = training_set.temp_packet[index][17:16];
+        //ti_phy_top.rxdata16  = training_set.temp_packet[index][15:0];
+        //adding mailbox
+        mailbox_put (rx_data_mailbox, {training_set.temp_packet[index][17:16],training_set.temp_packet[index][15:0]});
+      }   
+    }
+  }
+  
+  printf ("LINK UP(%0d) !!!!!!!!!!!\n",LINK_UP);
+  //ti_phy_top.rxdatak16 = 2'b00;
+  //ti_phy_top.rxdata16  = 1'b0;
+}
+
+task receive_ts () {
+  integer ret;
+  integer ts1_count=0;
+  integer ts2_count=0;
+  integer ts1_link_count = 0;
+  integer ts1_lane_count = 0;
+  integer ts2_lane_link_count = 0;
+  integer send_ts1_with_link, send_ts1_with_link_lane, send_ts2_with_link_lane;
+  bit [127:0] receive_phy_packet;
+
+  send_ts1  = 1;
+  send_ts2  = 0;
+  send_ts1_with_link = 0;
+  send_ts1_with_link_lane = 0;
+  send_ts2_with_link_lane = 0;
+  while (1) {
+    ret = mailbox_get (WAIT,phy_mailbox,receive_phy_packet,CHECK);
+    //printf ("Recieved PHY PACKET (%0h) added to phy mailbox\n",receive_phy_packet);
+    if (receive_phy_packet == 127'h454545454545454545450002f0f7f7bc) {
+      printf ("Recieved TS 2 PHY PACKET\n");
+      ts2_count++;
+    }
+    if (receive_phy_packet == 127'h4a4a4a4a4a4a4a4a4a4a0002f0f7f7bc){
+      printf ("Recieved TS 1 PHY PACKET\n");
+      ts1_count++;
+    }
+    if (receive_phy_packet == 127'h4a4a4a4a4a4a4a4a4a4a0002f0f701bc) {
+      printf ("Recieved TS 1 link accept PHY PACKET\n");
+      ts1_link_count++;
+    }
+    if (receive_phy_packet == 127'h4a4a4a4a4a4a4a4a4a4a0002f00101bc) {
+      printf ("Recieved TS 1 lane and link accept PHY PACKET\n");
+      ts1_lane_count++;
+    }
+    if (receive_phy_packet == 127'h454545454545454545450002f00101bc) {
+      printf ("Recieved TS 1 lane and link accept PHY PACKET\n");
+      ts2_lane_link_count++;
+    }
+    
+    //printf ("send_ts2_with_link_lane(%0d)send_ts1_with_link_lane(%0d)send_ts1_with_link(%0d)send_ts2(%0d)send_ts1(%0d)\n",
+    //        send_ts2_with_link_lane,send_ts1_with_link_lane,send_ts1_with_link,send_ts2,send_ts1 );
+    //printf ("ts2_lane_link_count(%0d)ts1_lane_count(%0d)ts1_link_count(%0d)ts1_count(%0d)ts2_count(%0d)\n",
+    //        ts2_lane_link_count,ts1_lane_count,ts1_link_count,ts1_count,ts2_count);
+    
+    if (send_ts2_with_link_lane && ts2_cycle_cnt > 16 && ts2_lane_link_count > 15) {
+      //clear all signals if we get a ts1 with pad
+      if (ts1_count > 0) {
+        send_ts1 = 1;
+        send_ts2 = 0;
+        send_ts2_with_link_lane = 0;
+        send_ts1_with_link_lane = 0;
+        send_ts1_with_link = 0;
+        LINK_UP = 0;
+        ts2_lane_link_count = 0;
+        ts1_lane_count = 0;
+        ts1_link_count = 0;
+        ts1_count = 0;
+        ts2_count = 0;
+      }
+      else {
+        send_ts1 = 0;
+        send_ts2 = 0;
+        LINK_UP  = 1;
+        ts1_lane_count = 0;
+        ts1_link_count = 0;
+        ts1_count = 0;
+        ts2_count = 0;
+        
+      }
+      
+    }
+    else if (send_ts1_with_link_lane){
+      if (ts1_cycle_cnt > 16 && ts1_lane_count >16 ) {
+        send_ts1 = 0;
+        send_ts2 = 1;
+        link = 8'b1;
+        lane = 8'b1;
+        send_ts2_with_link_lane = 1;
+        ts1_lane_count = 0;
+        ts1_link_count = 0;
+        ts1_count = 0;
+        ts2_count = 0;
+      }
+    }
+    else if (send_ts1_with_link) {
+      if (ts1_cycle_cnt > 16 && ts1_link_count > 16) {
+        send_ts1 = 1;
+        send_ts2 = 0;
+        link = 8'b1;
+        lane = 8'b1;
+        send_ts1_with_link_lane = 1;
+      }
+    }
+    //send at least 16 ts 2
+    else if (send_ts2) {
+      if (ts2_count > 16 && ts2_cycle_cnt > 16) {
+        send_ts1 = 1;
+        send_ts2 = 0;
+        send_ts1_with_link = 1;
+        link = 8'b1;
+        lane = 8'hf7;
+      }
+    }
+    //send at least 100 ts 1's
+    else if (ts2_count > 16 && ts1_cycle_cnt > 100) {
+      send_ts1 = 0;
+      send_ts2 = 1;
+      link = 'hf7;
+      lane = 'hf7;
+    }
+    else {
+      send_ts1 = 1;
+      send_ts2 = 0;
+      link = 'hf7;
+      lane = 'hf7;
+    }
+  }
+}
+  

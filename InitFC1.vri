@@ -1,0 +1,363 @@
+// ===========================================================================
+// File    : InitFC1.vri
+// Author  : cwinward
+// Date    : Mon Dec 3 11:03:46 MST 2007
+// Project : TI PHY design
+//
+// Copyright (c) notice
+// This code adheres to the GNU public license
+//
+// ===========================================================================
+//
+// $Id: InitFC1.vri,v 1.1.1.1 2007-12-05 18:37:07 cmagleby Exp $
+//
+// ===========================================================================
+//
+// $Log: not supported by cvs2svn $
+//
+// ===========================================================================
+// Function : This file performs the initial flow control sequence.
+//
+// ===========================================================================
+// ===========================================================================
+
+#include <vera_defines.vrh>
+
+task InitFC1(var bit [7:0] ph_cl, var bit [11:0] pd_cl, var bit [7:0] cplh_cl,var bit [11:0] cpld_cl,var bit [7:0] nph_cl,var bit [11:0] npd_cl,var bit INITFC_DONE){
+  integer index;
+  string dllp_type;
+  bit fc1_p_rcvd = 1'b0;
+  bit fc1_np_rcvd = 1'b0;       
+  bit fc1_cpl_rcvd = 1'b0;
+  bit fc2_p_rcvd = 1'b0;
+  bit fc2_np_rcvd = 1'b0;
+  bit fc2_cpl_rcvd = 1'b0;
+
+  bit fc1_completed = 1'b0;
+  bit fc2_completed = 1'b0;
+  
+  //****************************************************************************************
+  //new task to read out the dllp's
+  //
+
+  while(fc1_completed == 1'b0){
+    fc1_completed = fc1_p_rcvd & fc1_np_rcvd & fc1_cpl_rcvd;
+    printf("FC1_completed <= %d.\n",fc1_completed);
+    receive_fc1_dllp(fc1_p_rcvd,fc1_np_rcvd,fc1_cpl_rcvd,ph_cl,pd_cl,cplh_cl,cpld_cl,nph_cl,npd_cl);
+    dllp_type = "initfc1_p";
+    printf("Sending out an InitFC1_P packet.\n");
+    flowcntrl_1 = new(*,*,*,*);
+    flowcntrl_1.build_packet(dllp_type);
+    if (!semaphore_get(WAIT,my_semaphore,1))
+      error ("Semaphore_get returned 0\n");
+    for(index=0; index <= 3; index ++)
+    {
+      @ (posedge CLOCK);
+      if(index==0){
+        //ti_phy_top.rxdatak16 = 2'b01;
+        //ti_phy_top.rxdata16  = {flowcntrl_1.temp_packet[0][7:0],8'h5C};
+        //adding mailbox
+        mailbox_put (rx_data_mailbox, {2'b01,flowcntrl_1.temp_packet[0][7:0],8'h5C});
+        printf("DLLP bytes SDB & DLL_TYPE %h%h.\n",flowcntrl_1.temp_packet[0][7:0],8'h5C);
+      }
+      else if(index==1){
+        //ti_phy_top.rxdatak16 = 2'b00;
+        //ti_phy_top.rxdata16  = {flowcntrl_1.temp_packet[0][23:16],flowcntrl_1.temp_packet[0][15:8]};
+        //adding mailbox
+        mailbox_put (rx_data_mailbox, {2'b00,flowcntrl_1.temp_packet[0][23:16],flowcntrl_1.temp_packet[0][15:8]});
+        printf("DLLP bytes 2 & 1 %h%h.\n",flowcntrl_1.temp_packet[0][23:16],flowcntrl_1.temp_packet[0][15:8]);
+      }
+      else if(index==2){
+        //ti_phy_top.rxdatak16 = 2'b00;
+        //ti_phy_top.rxdata16  = {flowcntrl_1.temp_packet[1][7:0],flowcntrl_1.temp_packet[0][31:24]};
+        //adding mailbox
+        mailbox_put (rx_data_mailbox, {2'b00,flowcntrl_1.temp_packet[1][7:0],flowcntrl_1.temp_packet[0][31:24]});
+        printf("DLLP CRC and byte 3 %h%h.\n",flowcntrl_1.temp_packet[1][7:0],flowcntrl_1.temp_packet[0][31:24]);
+      }
+      else if(index==3){
+        //ti_phy_top.rxdatak16 = 2'b10;
+        //ti_phy_top.rxdata16  = {8'hFD,flowcntrl_1.temp_packet[1][15:8]};
+        //adding mailbox
+        mailbox_put (rx_data_mailbox, {2'b10,8'hFD,flowcntrl_1.temp_packet[1][15:8]});
+        printf("DLLP STP and CRC %h%h.\n",8'hFD,flowcntrl_1.temp_packet[1][15:8]);
+      }
+    }    
+
+    @ (posedge CLOCK);
+    //ti_phy_top.rxdatak16 = 2'b00;
+    //ti_phy_top.rxdata16  = 1'b0;
+    semaphore_put (my_semaphore, 1);
+    
+    dllp_type = "initfc1_np";
+    printf("Sending out an InitFC1_NP packet.\n");
+    flowcntrl_1 = new(8'h00,8'h00,8'h01,8'b01010000);
+    flowcntrl_1.build_packet(dllp_type);
+    if (!semaphore_get(WAIT,my_semaphore,1))
+      error ("Semaphore_get returned 0\n");
+    for(index=0; index <= 3; index ++)
+    {
+      @ (posedge CLOCK);
+      if(index==0){
+        //ti_phy_top.rxdatak16 = 2'b01;
+        //ti_phy_top.rxdata16  = {flowcntrl_1.temp_packet[0][7:0],8'h5C};
+        //adding mailbox
+        mailbox_put (rx_data_mailbox, {2'b01,flowcntrl_1.temp_packet[0][7:0],8'h5C});
+        printf("DLLP bytes SDB & DLL_TYPE %h%h.\n",flowcntrl_1.temp_packet[0][7:0],8'h5C);
+      }
+      else if(index==1){
+        //ti_phy_top.rxdatak16 = 2'b00;
+        //ti_phy_top.rxdata16  = {flowcntrl_1.temp_packet[0][23:16],flowcntrl_1.temp_packet[0][15:8]};
+        //adding mailbox
+        mailbox_put (rx_data_mailbox, {2'b00,flowcntrl_1.temp_packet[0][23:16],flowcntrl_1.temp_packet[0][15:8]});
+        printf("DLLP bytes 2 & 1 %h%h.\n",flowcntrl_1.temp_packet[0][23:16],flowcntrl_1.temp_packet[0][15:8]);
+      }
+      else if(index==2){
+        //ti_phy_top.rxdatak16 = 2'b00;
+        //ti_phy_top.rxdata16  = {flowcntrl_1.temp_packet[1][7:0],flowcntrl_1.temp_packet[0][31:24]};
+        //adding mailbox
+        mailbox_put (rx_data_mailbox, {2'b00,flowcntrl_1.temp_packet[1][7:0],flowcntrl_1.temp_packet[0][31:24]});
+        printf("DLLP CRC and byte 3 %h%h.\n",flowcntrl_1.temp_packet[1][7:0],flowcntrl_1.temp_packet[0][31:24]);
+      }
+      else if(index==3){
+        //ti_phy_top.rxdatak16 = 2'b10;
+        //ti_phy_top.rxdata16  = {8'hFD,flowcntrl_1.temp_packet[1][15:8]};
+        //adding mailbox
+        mailbox_put (rx_data_mailbox, {2'b10,8'hFD,flowcntrl_1.temp_packet[1][15:8]});
+        printf("DLLP STP and CRC %h%h.\n",8'hFD,flowcntrl_1.temp_packet[1][15:8]);
+      }
+    }    
+    
+    @ (posedge CLOCK);
+    //ti_phy_top.rxdatak16 = 2'b00;
+    //ti_phy_top.rxdata16  = 1'b0;
+    semaphore_put (my_semaphore, 1);
+    
+    dllp_type = "initfc1_cpl";
+    printf("Sending out an InitFC1_NP packet.\n");
+    flowcntrl_1 = new(8'h40,8'h00,8'h01,8'b01100000);
+    flowcntrl_1.build_packet(dllp_type);
+    if (!semaphore_get(WAIT,my_semaphore,1))
+      error ("Semaphore_get returned 0\n");
+    for(index=0; index <= 3; index ++)
+    {
+      @ (posedge CLOCK);
+      if(index==0){
+        //ti_phy_top.rxdatak16 = 2'b01;
+        //ti_phy_top.rxdata16  = {flowcntrl_1.temp_packet[0][7:0],8'h5C};
+        //adding mailbox
+        mailbox_put (rx_data_mailbox, {2'b01,flowcntrl_1.temp_packet[0][7:0],8'h5C});
+        printf("DLLP bytes SDB & DLL_TYPE %h%h.\n",flowcntrl_1.temp_packet[0][7:0],8'h5C);
+      }
+      else if(index==1){
+        //ti_phy_top.rxdatak16 = 2'b00;
+        //ti_phy_top.rxdata16  = {flowcntrl_1.temp_packet[0][23:16],flowcntrl_1.temp_packet[0][15:8]};
+        //adding mailbox
+        mailbox_put (rx_data_mailbox, {2'b00,flowcntrl_1.temp_packet[0][23:16],flowcntrl_1.temp_packet[0][15:8]});
+        printf("DLLP bytes 2 & 1 %h%h.\n",flowcntrl_1.temp_packet[0][23:16],flowcntrl_1.temp_packet[0][15:8]);
+      }
+      else if(index==2){
+        //ti_phy_top.rxdatak16 = 2'b00;
+        //ti_phy_top.rxdata16  = {flowcntrl_1.temp_packet[1][7:0],flowcntrl_1.temp_packet[0][31:24]};
+        //adding mailbox
+        mailbox_put (rx_data_mailbox, {2'b00,flowcntrl_1.temp_packet[1][7:0],flowcntrl_1.temp_packet[0][31:24]});
+        printf("DLLP CRC and byte 3 %h%h.\n",flowcntrl_1.temp_packet[1][7:0],flowcntrl_1.temp_packet[0][31:24]);
+      }
+      else if(index==3){
+        //ti_phy_top.rxdatak16 = 2'b10;
+        //ti_phy_top.rxdata16  = {8'hFD,flowcntrl_1.temp_packet[1][15:8]};
+        //adding mailbox
+        mailbox_put (rx_data_mailbox, {2'b10,8'hFD,flowcntrl_1.temp_packet[1][15:8]});
+        printf("DLLP STP and CRC %h%h.\n",8'hFD,flowcntrl_1.temp_packet[1][15:8]);
+      }
+    }
+    
+    @ (posedge CLOCK);
+    //ti_phy_top.rxdatak16 = 2'b00;
+    //ti_phy_top.rxdata16  = 1'b0;
+    semaphore_put (my_semaphore, 1);
+  }
+    
+  while(fc2_completed == 1'b0){
+    fc2_completed = fc2_p_rcvd | fc2_np_rcvd | fc2_cpl_rcvd;
+    printf("FC2_completed <= %d.\n",fc2_completed);
+    receive_fc2_dllp(fc2_p_rcvd,fc2_np_rcvd,fc2_cpl_rcvd);
+    dllp_type = "initfc1_p";
+    printf("Sending out an InitFC2_P packet.\n");
+    flowcntrl_1 = new(*,*,*,8'b11000000);
+    flowcntrl_1.build_packet(dllp_type);
+    if (!semaphore_get(WAIT,my_semaphore,1))
+      error ("Semaphore_get returned 0\n");
+    for(index=0; index <= 3; index ++)
+    {
+      @ (posedge CLOCK);
+      if(index==0){
+        //ti_phy_top.rxdatak16 = 2'b01;
+        //ti_phy_top.rxdata16  = {flowcntrl_1.temp_packet[0][7:0],8'h5C};
+        //adding mailbox
+        mailbox_put (rx_data_mailbox, {2'b01,flowcntrl_1.temp_packet[0][7:0],8'h5C});
+        printf("DLLP bytes SDB & DLL_TYPE %h%h.\n",flowcntrl_1.temp_packet[0][7:0],8'h5C);
+      }
+      else if(index==1){
+        //ti_phy_top.rxdatak16 = 2'b00;
+        //ti_phy_top.rxdata16  = {flowcntrl_1.temp_packet[0][23:16],flowcntrl_1.temp_packet[0][15:8]};
+        //adding mailbox
+        mailbox_put (rx_data_mailbox, {2'b00,flowcntrl_1.temp_packet[0][23:16],flowcntrl_1.temp_packet[0][15:8]});
+        printf("DLLP bytes 2 & 1 %h%h.\n",flowcntrl_1.temp_packet[0][23:16],flowcntrl_1.temp_packet[0][15:8]);
+      }
+      else if(index==2){
+        //ti_phy_top.rxdatak16 = 2'b00;
+        //ti_phy_top.rxdata16  = {flowcntrl_1.temp_packet[1][7:0],flowcntrl_1.temp_packet[0][31:24]};
+        //adding mailbox
+        mailbox_put (rx_data_mailbox, {2'b00,flowcntrl_1.temp_packet[1][7:0],flowcntrl_1.temp_packet[0][31:24]});
+        printf("DLLP CRC and byte 3 %h%h.\n",flowcntrl_1.temp_packet[1][7:0],flowcntrl_1.temp_packet[0][31:24]);
+      }
+      else if(index==3){
+        //ti_phy_top.rxdatak16 = 2'b10;
+        //ti_phy_top.rxdata16  = {8'hFD,flowcntrl_1.temp_packet[1][15:8]};
+        //adding mailbox
+        mailbox_put (rx_data_mailbox, {2'b10,8'hFD,flowcntrl_1.temp_packet[1][15:8]});
+        printf("DLLP STP and CRC %h%h.\n",8'hFD,flowcntrl_1.temp_packet[1][15:8]);
+      }
+    }    
+
+    @ (posedge CLOCK);
+    //ti_phy_top.rxdatak16 = 2'b00;
+    //ti_phy_top.rxdata16  = 1'b0;
+    semaphore_put (my_semaphore, 1);
+    
+    dllp_type = "initfc1_np";
+    printf("Sending out an InitFC2_NP packet.\n");
+    flowcntrl_1 = new(8'h00,8'h00,8'h01,8'b11010000);
+    flowcntrl_1.build_packet(dllp_type);
+    if (!semaphore_get(WAIT,my_semaphore,1))
+      error ("Semaphore_get returned 0\n");
+    for(index=0; index <= 3; index ++)
+    {
+      @ (posedge CLOCK);
+      if(index==0){
+        //ti_phy_top.rxdatak16 = 2'b01;
+        //ti_phy_top.rxdata16  = {flowcntrl_1.temp_packet[0][7:0],8'h5C};
+        //adding mailbox
+        mailbox_put (rx_data_mailbox, {2'b01,flowcntrl_1.temp_packet[0][7:0],8'h5C});
+        printf("DLLP bytes SDB & DLL_TYPE %h%h.\n",flowcntrl_1.temp_packet[0][7:0],8'h5C);
+      }
+      else if(index==1){
+        //ti_phy_top.rxdatak16 = 2'b00;
+        //ti_phy_top.rxdata16  = {flowcntrl_1.temp_packet[0][23:16],flowcntrl_1.temp_packet[0][15:8]};
+        //adding mailbox
+        mailbox_put (rx_data_mailbox, {2'b00,flowcntrl_1.temp_packet[0][23:16],flowcntrl_1.temp_packet[0][15:8]});
+        printf("DLLP bytes 2 & 1 %h%h.\n",flowcntrl_1.temp_packet[0][23:16],flowcntrl_1.temp_packet[0][15:8]);
+      }
+      else if(index==2){
+        //ti_phy_top.rxdatak16 = 2'b00;
+        //ti_phy_top.rxdata16  = {flowcntrl_1.temp_packet[1][7:0],flowcntrl_1.temp_packet[0][31:24]};
+        //adding mailbox
+        mailbox_put (rx_data_mailbox, {2'b00,flowcntrl_1.temp_packet[1][7:0],flowcntrl_1.temp_packet[0][31:24]});
+        printf("DLLP CRC and byte 3 %h%h.\n",flowcntrl_1.temp_packet[1][7:0],flowcntrl_1.temp_packet[0][31:24]);
+      }
+      else if(index==3){
+        //ti_phy_top.rxdatak16 = 2'b10;
+        //ti_phy_top.rxdata16  = {8'hFD,flowcntrl_1.temp_packet[1][15:8]};
+        //adding mailbox
+        mailbox_put (rx_data_mailbox, {2'b10,8'hFD,flowcntrl_1.temp_packet[1][15:8]});
+        printf("DLLP STP and CRC %h%h.\n",8'hFD,flowcntrl_1.temp_packet[1][15:8]);
+      }
+    }    
+    
+    @ (posedge CLOCK);
+    //ti_phy_top.rxdatak16 = 2'b00;
+    //ti_phy_top.rxdata16  = 1'b0;
+    semaphore_put (my_semaphore, 1);
+    
+    dllp_type = "initfc1_cpl";
+    printf("Sending out an InitFC2_NP packet.\n");
+    flowcntrl_1 = new(8'h40,8'h00,8'h01,8'b11100000);
+    flowcntrl_1.build_packet(dllp_type);
+    if (!semaphore_get(WAIT,my_semaphore,1))
+      error ("Semaphore_get returned 0\n");
+    for(index=0; index <= 3; index ++)
+    {
+      @ (posedge CLOCK);
+      if(index==0){
+        //ti_phy_top.rxdatak16 = 2'b01;
+        //ti_phy_top.rxdata16  = {flowcntrl_1.temp_packet[0][7:0],8'h5C};
+        //adding mailbox
+        mailbox_put (rx_data_mailbox, {2'b01,flowcntrl_1.temp_packet[0][7:0],8'h5C});
+        printf("DLLP bytes SDB & DLL_TYPE %h%h.\n",flowcntrl_1.temp_packet[0][7:0],8'h5C);
+      }
+      else if(index==1){
+        //ti_phy_top.rxdatak16 = 2'b00;
+        //ti_phy_top.rxdata16  = {flowcntrl_1.temp_packet[0][23:16],flowcntrl_1.temp_packet[0][15:8]};
+        //adding mailbox
+        mailbox_put (rx_data_mailbox, {2'b00,flowcntrl_1.temp_packet[0][23:16],flowcntrl_1.temp_packet[0][15:8]});
+        printf("DLLP bytes 2 & 1 %h%h.\n",flowcntrl_1.temp_packet[0][23:16],flowcntrl_1.temp_packet[0][15:8]);
+      }
+      else if(index==2){
+        //ti_phy_top.rxdatak16 = 2'b00;
+        //ti_phy_top.rxdata16  = {flowcntrl_1.temp_packet[1][7:0],flowcntrl_1.temp_packet[0][31:24]};
+        //adding mailbox
+        mailbox_put (rx_data_mailbox, {2'b00,flowcntrl_1.temp_packet[1][7:0],flowcntrl_1.temp_packet[0][31:24]});
+        printf("DLLP CRC and byte 3 %h%h.\n",flowcntrl_1.temp_packet[1][7:0],flowcntrl_1.temp_packet[0][31:24]);
+      }
+      else if(index==3){
+        //ti_phy_top.rxdatak16 = 2'b10;
+        //ti_phy_top.rxdata16  = {8'hFD,flowcntrl_1.temp_packet[1][15:8]};
+        //adding mailbox
+        mailbox_put (rx_data_mailbox, {2'b10,8'hFD,flowcntrl_1.temp_packet[1][15:8]});
+        printf("DLLP STP and CRC %h%h.\n",8'hFD,flowcntrl_1.temp_packet[1][15:8]);
+      }
+    }
+    
+    @ (posedge CLOCK);
+    INITFC_DONE = fc1_completed & fc2_completed;  
+    //ti_phy_top.rxdatak16 = 2'b00;
+    //ti_phy_top.rxdata16  = 1'b0;
+    semaphore_put (my_semaphore, 1);
+  }
+  
+}       
+
+task receive_fc1_dllp (var bit fc1_p_rcvd, var bit fc1_np_rcvd, var bit fc1_cpl_rcvd,var bit [7:0] ph_cl, var bit [11:0] pd_cl, var bit [7:0] cplh_cl,var bit [11:0] cpld_cl,var bit [7:0] nph_cl,var bit [11:0] npd_cl) {
+  integer ret;
+  bit [47:0] receive_dll_packet;
+  
+  while (~(fc1_p_rcvd & fc1_np_rcvd & fc1_cpl_rcvd)) {
+    ret = mailbox_get (WAIT,dllp_mailbox,receive_dll_packet,CHECK);
+    if(receive_dll_packet[7:0] == 8'h40){
+      fc1_p_rcvd = 1'b1;
+      ph_cl = {receive_dll_packet[13:8],receive_dll_packet[23:22]};
+      pd_cl = {receive_dll_packet[19:16],receive_dll_packet[31:24]};
+    }
+    else if(receive_dll_packet[7:0] == 8'h50){
+      fc1_np_rcvd = 1'b1;
+      nph_cl = {receive_dll_packet[13:8],receive_dll_packet[23:22]};
+      npd_cl = {receive_dll_packet[19:16],receive_dll_packet[31:24]};
+    }
+    else if(receive_dll_packet[7:0] == 8'h60){
+      fc1_cpl_rcvd = 1'b1;
+      cplh_cl = {receive_dll_packet[13:8],receive_dll_packet[23:22]};
+      cpld_cl = {receive_dll_packet[19:16],receive_dll_packet[31:24]};
+    }
+    printf ("InitFC1 DLL PACKET (%0h) taken out of dll mailbox\n",receive_dll_packet);
+  }
+}
+
+task receive_fc2_dllp (var bit fc2_p_rcvd, var bit fc2_np_rcvd, var bit fc2_cpl_rcvd) {
+  integer ret;
+  bit [47:0] receive_dll_packet;
+  
+  while (~(fc2_p_rcvd | fc2_np_rcvd | fc2_cpl_rcvd)) {
+    ret = mailbox_get (WAIT,dllp_mailbox,receive_dll_packet,CHECK);
+    if(receive_dll_packet[7:0] == 8'hC0){
+      fc2_p_rcvd = 1'b1;
+    }
+    else if(receive_dll_packet[7:0] == 8'hD0){
+      fc2_np_rcvd = 1'b1;
+    }
+    else if(receive_dll_packet[7:0] == 8'hE0){
+      fc2_cpl_rcvd = 1'b1;
+    }
+    printf ("InitFC2 DLL PACKET (%0h) taken out of dll mailbox\n",receive_dll_packet);
+  }
+}
+  

@@ -1,0 +1,64 @@
+// ===========================================================================
+// File    : skip_order_set.vri
+// Author  : cmagleby
+// Date    : Mon Dec 3 11:03:46 MST 2007
+// Project : TI PHY design
+//
+// Copyright (c) notice
+// This code adheres to the GNU public license
+//
+// ===========================================================================
+//
+// $Id: skip_order_set.vri,v 1.1.1.1 2007-12-05 18:37:07 cmagleby Exp $
+//
+// ===========================================================================
+//
+// $Log: not supported by cvs2svn $
+//
+// ===========================================================================
+// Function : this file generates skip order sets when the timer expires
+//
+// ===========================================================================
+// ===========================================================================
+#include <vera_defines.vrh>
+
+//task to send in skip order sets on a regular basis.
+task skip_order_set() {
+  integer time_limit_expire = 0;
+  integer index = 0;
+  wait_var(phy_rdy);  
+  while(1) {
+    time_limit_expire++;
+    @ (posedge CLOCK);      
+    ti_phy_top.rxdatak16 = 2'b00;
+    ti_phy_top.rxdata16  = 1'b0;
+    //1180 symbols clk is 2 symbols
+    if (time_limit_expire == 1180/2) {
+      if (!semaphore_get(WAIT,my_semaphore,1))
+        error ("Semaphore_get returned 0\n");
+      skip_set = new(*,*,*,*,*,*);    
+      skip_set.build_packet("skip");
+      for (index = 0; index < skip_set.length; index ++) {
+        @ (posedge CLOCK);
+        //ti_phy_top.rxdatak16 = skip_set.temp_packet[index][17:16];
+        //ti_phy_top.rxdata16  = skip_set.temp_packet[index][15:0];
+        //adding mailbox
+        mailbox_put (rx_data_mailbox, {skip_set.temp_packet[index][17:16],skip_set.temp_packet[index][15:0]});
+        time_limit_expire = 0;
+      }
+      semaphore_put (my_semaphore, 1);
+    }
+  }
+}
+
+
+task zero_fill(){
+
+  while(1) {
+    @ (posedge CLOCK);
+    if (!semaphore_get(WAIT,my_semaphore,1))
+      error ("Semaphore_get returned 0\n");
+    mailbox_put (rx_data_mailbox,18'b0);
+    semaphore_put(my_semaphore, 1);
+  }
+}

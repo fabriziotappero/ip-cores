@@ -1,0 +1,277 @@
+// ===========================================================================
+// File    : tlp_gen.vri
+// Author  : cmagleby
+// Date    : Mon Dec 3 11:03:46 MST 2007
+// Project : TI PHY design
+//
+// Copyright (c) notice
+// This code adheres to the GNU public license
+// Please contact www.gutzlogic.com for details.
+// cmagleby@gutzlogic.com; cwinward@gutzlogic.com
+// ===========================================================================
+//
+// $Id: tlp_gen.vri,v 1.2 2007-12-05 23:01:11 cmagleby Exp $
+//
+// ===========================================================================
+//
+// $Log: not supported by cvs2svn $
+// Revision 1.1.1.1  2007/12/05 18:37:07  cmagleby
+// importing tb files
+//
+//
+// ===========================================================================
+// Function : This file generates cfgrd/wr memrd/wr.
+//
+// ===========================================================================
+// ===========================================================================
+#include <vera_defines.vrh>
+#define STP_s 8'hfb
+#define EDB   8'hfe
+task tlp_gen() {
+
+  bit [15:0] req_id;
+  bit [7:0]  busnum;
+  bit [7:0]  reg_num;
+  bit [3:0]  first_be;
+  bit [3:0]  last_be;
+  bit [63:0] address;
+  bit [9:0]  length;
+  bit [31:0] data;
+  bit [7:0]  tag;
+  
+  sequence_id = 0; reg_num=0;first_be=4'hf;req_id=0101;tag=1;busnum=1;
+  printf ("read vendor id\n");
+  cfgrd(reg_num,first_be,req_id,tag,busnum);
+  
+  sequence_id++; reg_num='h5;first_be=4'hf;req_id=0101;tag++;busnum=1;
+  printf ("write base address 1 register\n");
+  cfgwr(reg_num,first_be,req_id,tag,busnum,32'hba120000);
+  sequence_id++;address = 64'hba120000;length=10'h5;first_be=4'hf;last_be=4'hf;req_id=16'h0100;tag++;
+  memwr(address,length,first_be,last_be,req_id,tag);
+  sequence_id++;
+  memrd(address,length,first_be,last_be,req_id,tag);
+}
+
+task cfgrd (bit [7:0] reg_num,
+            bit [3:0] first_be,
+            bit [15:0] req_id,
+            bit [7:0]  tag,
+            bit [7:0]  busnum) {
+
+  integer index;
+  integer    ret;
+  bit [127:0] return_pkt;
+  bit [31:0]  return_data;
+  bit [63:0] address = {32'b0,busnum,5'b1,3'b0,8'b0,reg_num,2'b0};
+  
+              tlp_packet = new(sequence_id,5'b00100,2'b0,10'h1,*,*,*,*,
+                               address,req_id,tag,first_be,4'b0,*,*,*,*,*);
+              tlp_packet.build_packet("nonposted");
+              printf ("header %0h \n",tlp_packet.header); 
+              if (!semaphore_get(WAIT,my_semaphore,1))
+                error ("Semaphore_get returned 0\n"); 
+              //sequence id
+              printf("%0h put into mailbox\n",{2'b01,packet_array[0][15:8],STP_s});
+              mailbox_put (rx_data_mailbox, {2'b01,packet_array[0][7:0],STP_s});
+              printf("%0h put into mailbox\n",{2'b00,packet_array[1][7:0],packet_array[0][7:0]});
+              mailbox_put (rx_data_mailbox, {2'b00,packet_array[1][7:0],packet_array[0][15:8]});
+              //loop for sending out packet
+              for (index=1;index<3;index++) {
+                printf("%0h put into mailbox index = %0d\n",{2'b00,packet_array[index][23:8]},index);
+                mailbox_put(rx_data_mailbox, {2'b00,packet_array[index][23:8]});
+                printf("%0h put into mailbox index+1 = %0d\n",{2'b00,packet_array[index+1][7:0],packet_array[index][31:24]},index+1);
+                mailbox_put(rx_data_mailbox, {2'b00,packet_array[index+1][7:0],packet_array[index][31:24]});
+              }
+              printf("%0h put into mailbox index = %0d\n",{2'b00,packet_array[index][23:8]},index);
+              mailbox_put(rx_data_mailbox, {2'b00,packet_array[index][23:8]});
+              printf("%0h put into mailbox index = %0d\n",{2'b00,tlp_packet.lcrc[7:0],packet_array[index][31:24]},index);
+              mailbox_put(rx_data_mailbox, {2'b00,tlp_packet.lcrc[7:0],packet_array[index][31:24]});
+              printf("%0h put into mailbox index = %0d\n",{2'b00,tlp_packet.lcrc[23:8]},index);
+              mailbox_put(rx_data_mailbox, {2'b00,tlp_packet.lcrc[23:8]});
+              printf("%0h put into mailbox\n",{2'b10,END_s,tlp_packet.lcrc[31:24]});
+              mailbox_put(rx_data_mailbox, {2'b10,END_s,tlp_packet.lcrc[31:24]});
+              semaphore_put (my_semaphore, 1);
+              
+              ret = mailbox_get (WAIT,tlp_header_mailbox,return_pkt,CHECK);
+              if (ret <= 0)        
+                error ("mailbox_get returned %0d\n",ret);
+              if (return_pkt[4:0] == 4'ha) {
+                if (return_pkt[6] == 1'b1) {
+                  ret = mailbox_get (WAIT,tlp_data_mailbox,return_data,CHECK);
+                  if (ret <= 0)        
+                    error ("mailbox_get returned %0d\n",ret);
+                  printf("returned header %0h and data %0h for tag %0h\n",return_pkt,return_data,tag);
+                }
+              }
+              else if ((return_pkt[4:0] == 4'ha) && (return_pkt[5] == 1'b0)) {
+                printf("comp without data returned header %0h and comp_stat of %0b\n",return_pkt,return_pkt[55:53]);
+              }
+}
+
+
+
+task cfgwr (bit [7:0] reg_num,
+            bit [3:0] first_be,
+            bit [15:0] req_id,
+            bit [7:0]  tag,
+            bit [7:0]  busnum,
+            bit [31:0] data) {
+
+  integer     index;
+  integer     ret;
+  bit [127:0] return_pkt;
+  //bus num,device num,function num,ext reg reg_num;
+  bit [63:0] address = {32'b0,busnum,5'b1,3'b0,8'b0,reg_num,2'b0};
+  printf ("cfgwr data = %0h\n",data);
+              tlp_packet = new(sequence_id,5'b00100,2'b10,10'h1,*,*,*,*,
+                               address,req_id,tag,first_be,4'b0,*,*,*,*,data);
+              tlp_packet.build_packet("nonposted");
+              printf ("header %0h \n",tlp_packet.header); 
+              if (!semaphore_get(WAIT,my_semaphore,1))
+                error ("Semaphore_get returned 0\n");
+              //sequence id
+              printf("%0h put into mailbox\n",{2'b01,packet_array[0][15:8],STP_s});
+              mailbox_put (rx_data_mailbox, {2'b01,packet_array[0][7:0],STP_s});
+              printf("%0h put into mailbox\n",{2'b00,packet_array[1][7:0],packet_array[0][7:0]});
+              mailbox_put (rx_data_mailbox, {2'b00,packet_array[1][7:0],packet_array[0][15:8]});
+              //loop for sending out packet
+              for (index=1;index<4;index++) {
+                printf("%0h put into mailbox index = %0d\n",{2'b00,packet_array[index][23:8]},index);
+                mailbox_put(rx_data_mailbox, {2'b00,packet_array[index][23:8]});
+                printf("%0h put into mailbox index+1 = %0d\n",{2'b00,packet_array[index+1][7:0],packet_array[index][31:24]},index+1);
+                mailbox_put(rx_data_mailbox, {2'b00,packet_array[index+1][7:0],packet_array[index][31:24]});
+              }
+              printf("%0h put into mailbox index = %0d\n",{2'b00,packet_array[index][23:8]},index);
+              mailbox_put(rx_data_mailbox, {2'b00,packet_array[index][23:8]});
+              printf("%0h put into mailbox index = %0d\n",{2'b00,tlp_packet.lcrc[7:0],packet_array[index][31:24]},index);
+              mailbox_put(rx_data_mailbox, {2'b00,tlp_packet.lcrc[7:0],packet_array[index][31:24]});
+              printf("%0h put into mailbox index = %0d\n",{2'b00,tlp_packet.lcrc[23:8]},index);
+              mailbox_put(rx_data_mailbox, {2'b00,tlp_packet.lcrc[23:8]});
+              printf("%0h put into mailbox\n",{2'b10,END_s,tlp_packet.lcrc[31:24]});
+              mailbox_put(rx_data_mailbox, {2'b10,END_s,tlp_packet.lcrc[31:24]});
+              semaphore_put (my_semaphore, 1);
+              ret = mailbox_get (WAIT,tlp_header_mailbox,return_pkt,CHECK);
+              if (ret <= 0)        
+                error ("mailbox_get returned %0d\n",ret);
+              
+              if ((return_pkt[4:0] == 4'ha) && (return_pkt[5] == 1'b0)) {
+                if (return_pkt[55:53] == 3'b000) printf("comp without data returned header %0h tag %0h and comp_stat of successful completion\n",return_pkt,tag);
+                else if (return_pkt[55:53] == 3'b001) printf("comp without data returned header %0h tag %0hand comp_stat of unsupported response\n",return_pkt,tag);
+                else if (return_pkt[55:53] == 3'b010) printf("comp without data returned header %0h tag %0hand comp_stat of completer abort\n",return_pkt,tag); 
+              }
+}
+
+
+task memwr (bit [63:0] address,
+            bit [9:0] length,
+            bit [3:0] first_be,
+            bit [3:0] last_be,
+            bit [15:0] req_id,
+            bit [7:0] tag){
+  integer index;
+  bit seq_header;
+  integer total_length;
+  bit[1:0] fmt;
+  integer hdr_dw;
+  fmt = |address[63:32] == 1 ? 2'b11 : 2'b10; 
+  hdr_dw = |address[63:32] == 1 ? 4 : 3; 
+  total_length = hdr_dw + length; //add td when ready
+  //bus num,device num,function num,ext reg reg_num;
+              tlp_packet = new(sequence_id,5'b00000,fmt,length,*,*,*,*,
+                               address,req_id,tag,first_be,last_be,*,*,*,*,*);
+              tlp_packet.build_packet("nonposted");
+              printf ("header %0h \n",tlp_packet.header); 
+              if (!semaphore_get(WAIT,my_semaphore,1))
+                error ("Semaphore_get returned 0\n");
+              //sequence id
+              printf("%0h put into mailbox\n",{2'b01,packet_array[0][15:8],STP_s});
+              mailbox_put (rx_data_mailbox, {2'b01,packet_array[0][7:0],STP_s});
+              printf("%0h put into mailbox\n",{2'b00,packet_array[1][7:0],packet_array[0][7:0]});
+              mailbox_put (rx_data_mailbox, {2'b00,packet_array[1][7:0],packet_array[0][15:8]});
+              //loop for sending out packet
+              for (index=1;index<total_length;index++) {
+                printf("%0h put into mailbox index = %0d\n",{2'b00,packet_array[index][23:8]},index);
+                mailbox_put(rx_data_mailbox, {2'b00,packet_array[index][23:8]});
+                printf("%0h put into mailbox index+1 = %0d\n",{2'b00,packet_array[index+1][7:0],packet_array[index][31:24]},index+1);
+                mailbox_put(rx_data_mailbox, {2'b00,packet_array[index+1][7:0],packet_array[index][31:24]});
+              }
+              printf("%0h put into mailbox index = %0d\n",{2'b00,packet_array[index][23:8]},index);
+              mailbox_put(rx_data_mailbox, {2'b00,packet_array[index][23:8]});
+              printf("%0h put into mailbox index = %0d\n",{2'b00,tlp_packet.lcrc[7:0],packet_array[index][31:24]},index);
+              mailbox_put(rx_data_mailbox, {2'b00,tlp_packet.lcrc[7:0],packet_array[index][31:24]});
+              printf("%0h put into mailbox index = %0d\n",{2'b00,tlp_packet.lcrc[23:8]},index);
+              mailbox_put(rx_data_mailbox, {2'b00,tlp_packet.lcrc[23:8]});
+              printf("%0h put into mailbox\n",{2'b10,END_s,tlp_packet.lcrc[31:24]});
+              mailbox_put(rx_data_mailbox, {2'b10,END_s,tlp_packet.lcrc[31:24]});
+              
+              semaphore_put (my_semaphore, 1);
+}
+
+task memrd (bit [63:0] address,
+            bit [9:0] length,
+            bit [3:0] first_be,
+            bit [3:0] last_be,
+            bit [15:0] req_id,
+            bit [7:0] tag){integer index;
+  bit seq_header;
+  integer total_length;
+  bit[1:0] fmt;
+  integer hdr_dw;
+  integer    ret;
+  bit [127:0] return_pkt;
+  bit [31:0]  return_data;
+  fmt = |address[63:32] == 1 ? 2'b01 : 2'b00; 
+  hdr_dw = |address[63:32] == 1 ? 4 : 3; 
+  total_length = hdr_dw; //add td when ready
+  //bus num,device num,function num,ext reg reg_num;
+              tlp_packet = new(sequence_id,5'b00000,fmt,length,*,*,*,*,
+                               address,req_id,tag,first_be,last_be,*,*,*,*,*);
+              tlp_packet.build_packet("nonposted");
+              printf ("header %0h \n",tlp_packet.header); 
+              if (!semaphore_get(WAIT,my_semaphore,1))
+                error ("Semaphore_get returned 0\n");
+              //sequence id
+              printf("%0h put into mailbox\n",{2'b01,packet_array[0][15:8],STP_s});
+              mailbox_put (rx_data_mailbox, {2'b01,packet_array[0][7:0],STP_s});
+              printf("%0h put into mailbox\n",{2'b00,packet_array[1][7:0],packet_array[0][7:0]});
+              mailbox_put (rx_data_mailbox, {2'b00,packet_array[1][7:0],packet_array[0][15:8]});
+              //loop for sending out packet
+              for (index=1;index<total_length;index++) {
+                printf("%0h put into mailbox index = %0d\n",{2'b00,packet_array[index][23:8]},index);
+                mailbox_put(rx_data_mailbox, {2'b00,packet_array[index][23:8]});
+                printf("%0h put into mailbox index+1 = %0d\n",{2'b00,packet_array[index+1][7:0],packet_array[index][31:24]},index+1);
+                mailbox_put(rx_data_mailbox, {2'b00,packet_array[index+1][7:0],packet_array[index][31:24]});
+              }
+              printf("%0h put into mailbox index = %0d\n",{2'b00,packet_array[index][23:8]},index);
+              mailbox_put(rx_data_mailbox, {2'b00,packet_array[index][23:8]});
+              printf("%0h put into mailbox index = %0d\n",{2'b00,tlp_packet.lcrc[7:0],packet_array[index][31:24]},index);
+              mailbox_put(rx_data_mailbox, {2'b00,tlp_packet.lcrc[7:0],packet_array[index][31:24]});
+              printf("%0h put into mailbox index = %0d\n",{2'b00,tlp_packet.lcrc[23:8]},index);
+              mailbox_put(rx_data_mailbox, {2'b00,tlp_packet.lcrc[23:8]});
+              printf("%0h put into mailbox\n",{2'b10,END_s,tlp_packet.lcrc[31:24]});
+              mailbox_put(rx_data_mailbox, {2'b10,END_s,tlp_packet.lcrc[31:24]});
+              
+              semaphore_put (my_semaphore, 1);
+              
+              ret = mailbox_get (WAIT,tlp_header_mailbox,return_pkt,CHECK);
+              if (ret <= 0)        
+                error ("mailbox_get returned %0d\n",ret);
+              if (return_pkt[4:0] == 4'ha) {
+                if (return_pkt[6] == 1'b1) {
+                  for (index = 0;index<{return_pkt[17:16],return_pkt[31:24]};index++){
+                    ret = mailbox_get (WAIT,tlp_data_mailbox,return_data,CHECK);
+                    if (ret <= 0)        
+                      error ("mailbox_get returned %0d\n",ret);
+                    printf("returned header %0h and data %0h for tag %0h\n",return_pkt,return_data,tag);
+                  }
+                }
+              }
+              else if ((return_pkt[4:0] == 4'ha) && (return_pkt[5] == 1'b0)) {
+                printf("comp without data returned header %0h and comp_stat of %0b\n",return_pkt,return_pkt[55:53]);
+              }
+}
+
+
+
+
+

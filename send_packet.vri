@@ -1,0 +1,109 @@
+// ===========================================================================
+// File    : send_packet.vri
+// Author  : cmagleby
+// Date    : Mon Dec 3 11:03:46 MST 2007
+// Project : TI PHY design
+//
+// Copyright (c) notice
+// This code adheres to the GNU public license
+//
+// ===========================================================================
+//
+// $Id: send_packet.vri,v 1.1.1.1 2007-12-05 18:37:07 cmagleby Exp $
+//
+// ===========================================================================
+//
+// $Log: not supported by cvs2svn $
+//
+// ===========================================================================
+// Function : This file sends all packets on the rx 16 bit data lines
+//
+// ===========================================================================
+// ===========================================================================
+#include <vera_defines.vrh>
+//#include "scramble8.vri"
+#define COM_s 8'hbc
+#define SKP_s 8'h1c
+#define IDLE_s 8'h7c
+#define FTS_s 8'h3c
+#define STP_s 8'hfb
+#define SDP_s 8'h5c
+#define EDB   8'hfe
+#define END_s 8'hfd
+
+task send_packet () {
+  bit [7:0]  rx_data[];
+  bit        rx_datak[];
+  
+  bit [17:0] rx_pkt;
+  bit [15:0] rx_data_out;
+  bit [1:0]  rx_datak_out;
+  integer    ret;
+  integer    i;
+  
+  bit [15:0]  lfsr = 16'hFFFF;
+  bit [7:0]   scramble_data[];
+  bit         skp_detect = 1'b0;
+  bit         com_detect = 1'b0;
+  bit         scram_bypass = 1'b0;
+  bit [3:0]   bypass_count = 4'b0;
+  
+  
+  ti_phy_top.rxdatak16 = 2'b0;
+  ti_phy_top.rxdata16  = 16'b0;
+  while (1) {    
+    @ (posedge CLOCK);
+    ti_phy_top.rxdatak16 = 2'b0;
+    ti_phy_top.rxdata16  = 16'b0;
+   
+    ret = mailbox_get (WAIT,rx_data_mailbox,rx_pkt,CHECK);
+    if (ret <= 0) 
+      error ("mailbox_get returned %0d\n",ret);
+    
+    rx_datak[1] = rx_pkt[17];
+    rx_datak[0] = rx_pkt[16];
+    rx_data[1] = rx_pkt[15:8];
+    rx_data[0] = rx_pkt[7:0];
+    
+    
+    for (i=0; i<2; i++) {
+
+      if(com_detect == 1'b1){
+        scram_bypass = 1'b1;
+      }
+      else if(((bypass_count == 4'b0011) & rx_datak[i] == 1'b1) | (bypass_count == 4'b1111)){
+        scram_bypass = 1'b0;
+      }
+      
+      if((com_detect == 1'b1) | scram_bypass){
+        bypass_count = bypass_count + 1'b1;
+      }
+      else if(((bypass_count == 4'b0011) & rx_datak[i] == 1'b1) | (bypass_count == 4'b1111)){
+        bypass_count = 4'b0000;
+      }
+      
+      
+      if({rx_datak[i],rx_data[i]} == {1'b1,SKP_s}){
+        skp_detect = 1'b1;
+      }
+      else{
+        skp_detect = 1'b0;
+      }
+      if({rx_datak[i],rx_data[i]} == {1'b1,COM_s}){
+        com_detect = 1'b1;
+      }
+      else{
+        com_detect = 1'b0;
+      }
+      
+      scramble8(rx_data[i],skp_detect,com_detect,(scram_bypass | rx_datak[i]),lfsr,scramble_data[i],lfsr);
+      //printf("K-Code = %h COM = %h SKP = %h bypass = %h unscramble_data = %h scramble_data = %h lfsr = %h bypass_cnt = %d\n",rx_datak[i],com_detect,skp_detect,scram_bypass,rx_data[i],scramble_data[i],lfsr,bypass_count);
+    }
+
+    
+    //printf("RX MAILBOX OUT datak(%0h) data(%0h) to be sent\n",rx_pkt[17:16],rx_pkt[15:0]);
+    ti_phy_top.rxdatak16  = {rx_datak[1],rx_datak[0]};
+    ti_phy_top.rxdata16   = {scramble_data[1],scramble_data[0]};
+  }
+  
+}       

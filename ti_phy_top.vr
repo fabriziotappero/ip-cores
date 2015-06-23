@@ -1,0 +1,209 @@
+// ===========================================================================
+// File    : ti_phy_top.vr
+// Author  : cmagleby
+// Date    : Mon Dec 3 11:03:46 MST 2007
+// Project : TI PHY design
+//
+// Copyright (c) notice
+// This code adheres to the GNU public license
+// Please contact www.gutzlogic.com for details.
+// cmagleby@gutzlogic.com; cwinward@gutzlogic.com
+// ===========================================================================
+//
+// $Id: ti_phy_top.vr,v 1.1.1.1 2007-12-05 18:37:07 cmagleby Exp $
+//
+// ===========================================================================
+//
+// $Log: not supported by cvs2svn $
+//
+// ===========================================================================
+// Function : This is the top level VERA file.  It call all tasks and brings
+// up the PHY.
+// ===========================================================================
+// ===========================================================================
+
+#define OUTPUT_EDGE  PHOLD
+#define OUTPUT_SKEW  #1
+#define INPUT_SKEW   #-1
+#define INPUT_EDGE   PSAMPLE
+#include <vera_defines.vrh>
+
+// define interfaces, and verilog_node here if necessary
+
+#include "ti_phy_top.if.vrh"
+#include "receive_packet.vri"
+#include "send_packet.vri"
+#include "pcie_phy_packet.vri"
+#include "link_training.vri"
+#include "skip_order_set.vri"
+#include "pcie_dllp_packet.vri"
+#include "InitFC1.vri"
+#include "pcie_tlp_packet.vri"
+#include "tlp_gen.vri"
+
+//kcode symbols
+#define COM_s 8'hbc
+#define SKP_s 8'h1c
+#define IDLE_s 8'h7c
+#define FTS_s 8'h3c
+#define STP_s 8'hfb
+#define SDP_s 8'h5c
+#define EDB   8'hfe
+#define END_s 8'hfd
+program ti_phy_top_test {
+  
+  pcie_phy_packet training_set;
+  pcie_phy_packet skip_set;
+  //********************************
+  //link training gobal variables
+  integer send_ts1 = 1;
+  integer send_ts2 = 0;
+  bit [11:0] sequence_id;
+  bit [31:0] packet_array [1040];
+  bit [7:0] link = 8'hf7;
+  bit [7:0] lane = 8'hf7;
+  integer ts1_cycle_cnt = 1;
+  integer ts2_cycle_cnt = 1;
+  integer LINK_UP = 0;
+  bit [7:0]  ph_cl   = 8'b0;
+  bit [11:0] pd_cl   = 12'b0;
+  bit [7:0]  cplh_cl = 8'b0;
+  bit [11:0] cpld_cl = 12'b0;
+  bit [7:0]  nph_cl  = 8'b0;
+  bit [11:0] npd_cl  = 12'b0;
+  bit        INITFC_DONE = 1'b0;
+  //********************************
+  pcie_dllp_packet flowcntrl_1;
+  pcie_dllp_packet ack_seq_num;
+  pcie_tlp_packet tlp_packet;
+  integer phy_rdy = 0;
+  integer my_semaphore;
+  bit [8:0]  tx_data_mailbox;
+  bit [15:0] tlp_header_mailbox;
+  bit [31:0] tlp_data_mailbox;
+  bit [47:0] dllp_mailbox;
+  bit [127:0] phy_mailbox;
+  bit [17:0]  rx_data_mailbox;
+
+  //create mailboxes for transmit and receive packets
+  tx_data_mailbox     = alloc(MAILBOX,0,1);
+  rx_data_mailbox     = alloc(MAILBOX,0,1);
+  
+  tlp_header_mailbox  = alloc(MAILBOX,0,1);
+  tlp_data_mailbox    = alloc(MAILBOX,0,1);
+  dllp_mailbox        = alloc(MAILBOX,0,1);
+  phy_mailbox         = alloc(MAILBOX,0,1);
+  
+  //create a packet arbiter for packet going out on the rx line.
+  my_semaphore = alloc(SEMAPHORE, 0, 1, 1);
+  if (!my_semaphore) error ("Semaphore could not be allocated\n");
+  
+  fork
+    clk_50mhz_gen();
+    phy_status();   
+    skip_order_set();
+    receive_packet();
+    send_packet();
+    wait_var(phy_rdy);
+    link_training();
+  join none
+  
+  init_ports ();
+  reset_sequence();
+  wait_var(LINK_UP);
+  fork
+    zero_fill();
+  join none
+  InitFC1(ph_cl,pd_cl,cplh_cl,cpld_cl,nph_cl,npd_cl,INITFC_DONE);        
+
+  printf("Posted Header credit %h\n",ph_cl);
+  printf("Posted Data credit %h\n",pd_cl);
+
+  printf("NonPosted Header credit %h\n",nph_cl);
+  printf("NonPosted Data credit %h\n",npd_cl);
+
+  printf("Completion Header credit %h\n",cplh_cl);
+  printf("Completion Data credit %h\n",cpld_cl);
+
+  printf("INITFC_DONE=%d\n.",INITFC_DONE);  
+  tlp_gen();
+  repeat (10000) @(posedge CLOCK);
+}  // end of program ti_phy_top_test
+
+// define tasks/classes/functions here if necessary
+
+task clk_50mhz_gen () {
+  ti_phy_top.clk_50mhz = 0;
+  @(posedge ti_phy_top.rxclk);  
+  while(1) {
+    @10 ti_phy_top.clk_50mhz = 1;
+    @10 ti_phy_top.clk_50mhz = 0;
+  }
+}
+
+task init_ports () {
+  printf("Task init_ports\n");
+  @(posedge ti_phy_top.rxclk);
+  ti_phy_top.FPGA_RESET_n = 1'b0;
+  ti_phy_top.rxdata16     = 16'b0;
+  ti_phy_top.rxdatak16    = 2'b0;
+  ti_phy_top.rxvalid16    = 1'b0;
+  ti_phy_top.rxidle16     = 1'b0;
+  ti_phy_top.rxstatus     = 1'b1;
+  ti_phy_top.phystatus    = 1'b1;
+}
+
+task reset_sequence() {
+  printf("Task phy bring up\n");
+  
+  @5 ti_phy_top.FPGA_RESET_n = 1'b0;     
+  @1 ti_phy_top.FPGA_RESET_n = 1'b1;
+}
+
+
+task phy_status () {
+  bit [1:0] prev_pwrdwn = 0;
+  integer loop_back_high;
+  integer phy_status_arb;
+  phy_status_arb = alloc(SEMAPHORE,0,1,1);
+  if (!phy_status_arb) error ("Semaphore could not be allocated\n");
+  printf("Look for power changes\n");
+  @50 ti_phy_top.rxidle16    = 1'b0;
+  @100 ti_phy_top.phystatus  = 1'b0;
+    while (1){
+      prev_pwrdwn = ti_phy_top.pwrdwn;
+      @(posedge CLOCK);
+      //receiver detect
+      if (ti_phy_top.rxdet_loopb == 1'b1 && ti_phy_top.pwrdwn == 2'b10) {
+        loop_back_high = 1;
+        if (!semaphore_get(WAIT,phy_status_arb,1))
+          error ("Semaphore_get returned 0\n");
+        //printf("GOT PHY ARB1 /n");
+        @10 ti_phy_top.rxstatus = 3'b11;
+        @10 ti_phy_top.phystatus = 1'b1;
+        while(loop_back_high) {
+          @(posedge CLOCK);
+          if (ti_phy_top.rxdet_loopb == 1'b0) {
+            loop_back_high = 1'b0;
+          }
+        }
+        @4 ti_phy_top.phystatus = 1'b0;
+        ti_phy_top.rxstatus = 3'b0;
+        semaphore_put (phy_status_arb, 1);        
+      }
+      if (ti_phy_top.pwrdwn != prev_pwrdwn){
+        if (!semaphore_get(WAIT,phy_status_arb,1))
+          error ("Semaphore_get returned 0\n");
+        //printf("GOT PHY ARB2 /n");
+        @1 ti_phy_top.rxstatus = 3'b100;
+        ti_phy_top.phystatus = 1'b1;
+        @1 ti_phy_top.phystatus = 1'b0;
+        if (ti_phy_top.pwrdwn == 2'b00) phy_rdy = 1;
+        semaphore_put (phy_status_arb, 1);
+        
+      }
+    }
+}
+
+
+

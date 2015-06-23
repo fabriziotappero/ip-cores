@@ -1,0 +1,306 @@
+// ===========================================================================
+// File    : receive_packet.vri
+// Author  : cmagleby
+// Date    : Mon Dec 3 11:03:46 MST 2007
+// Project : TI PHY design
+//
+// Copyright (c) notice
+// This code adheres to the GNU public license
+//
+// ===========================================================================
+//
+// $Id: receive_packet.vri,v 1.2 2007-12-07 20:16:29 cmagleby Exp $
+//
+// ===========================================================================
+//
+// $Log: not supported by cvs2svn $
+// Revision 1.1.1.1  2007/12/05 18:37:06  cmagleby
+// importing tb files
+//
+//
+// ===========================================================================
+// Function : This file processes all packets received from the 16 tx interface
+//
+// ===========================================================================
+// ===========================================================================
+#include <vera_defines.vrh>
+#include "scramble8.vri"
+#define COM_s 8'hbc
+#define SKP_s 8'h1c
+#define IDLE_s 8'h7c
+#define FTS_s 8'h3c
+#define STP_s 8'hfb
+#define SDP_s 8'h5c
+#define EDB   8'hfe
+#define END_s 8'hfd
+
+task receive_packet () {
+  bit [7:0] tx_data[];
+  bit       tx_datak[];
+  integer   ret,ret1,ret2,ret3,ret4;
+  integer   i = 0;
+  integer   m = 0;
+  bit[8:0]  tx_pkt;
+  event     phy_start, phy_done, tlp_start, tlp_done, dllp_start, dllp_done;
+  bit [7:0] phy_pkt[];
+  bit [7:0] dll_pkt[];
+  bit [7:0] tlp_pkt[];
+  integer   j,k,l;
+  bit [127:0] build_phy_pkt;
+  bit [47:0]  build_dll_pkt;
+  bit [127:0] build_tlp_header;
+  bit [31:0]  build_tlp_data;
+  bit [15:0]  expected_seq_id = 0;
+  bit [15:0]  recv_seq_id = 0;
+  bit [9:0]   recv_length = 0;
+  bit [11:0]  byte_length = 0;
+  bit [31:0]  recv_lcrc = 0;
+  bit         td = 0;
+  integer     kstart = 0;
+  integer     debug = 1;
+  bit [15:0]  lfsr = 16'hFFFF;
+  bit [7:0]   scramble_data[];
+  bit         skp_detect = 1'b0;
+  bit         com_detect = 1'b0;
+  bit         scram_bypass = 1'b0;
+  bit [3:0]   bypass_count = 4'b0;
+  
+  printf("Look for transmit packets\n"); 
+  wait_var(phy_rdy);
+  @ (posedge CLOCK);
+  fork
+    while (1) {
+      @ (posedge CLOCK);    
+      tx_data[0]  = ti_phy_top.txdata16[7:0];
+      tx_data[1]  = ti_phy_top.txdata16[15:8];
+      tx_datak[0] = ti_phy_top.txdatak16[0];
+      tx_datak[1] = ti_phy_top.txdatak16[1];
+      for (i=0; i<2; i++) {
+
+        if(com_detect == 1'b1){
+          scram_bypass = 1'b1;
+        }
+        else if(((bypass_count == 4'b0011) & tx_datak[i] == 1'b1) | (bypass_count == 4'b1111)){
+          scram_bypass = 1'b0;
+        }
+
+        if((com_detect == 1'b1) | scram_bypass){
+          bypass_count = bypass_count + 1'b1;
+        }
+        else if(((bypass_count == 4'b0011) & tx_datak[i] == 1'b1) | (bypass_count == 4'b1111)){
+          bypass_count = 4'b0000;
+        }
+        
+        
+        if({tx_datak[i],tx_data[i]} == {1'b1,SKP_s}){
+          skp_detect = 1'b1;
+        }
+        else{
+          skp_detect = 1'b0;
+        }
+        if({tx_datak[i],tx_data[i]} == {1'b1,COM_s}){
+          com_detect = 1'b1;
+        }
+        else{
+          com_detect = 1'b0;
+        }
+
+                  
+        //printf("K-Code = %h DATA = %h COM = %h SKP = %h bypass_count = %d scram_bypass = %h\n",tx_datak[i],tx_data[i],com_detect,skp_detect,bypass_count,scram_bypass);
+
+        //if({tx_datak[i],tx_data[i]} == {1'b1,STP_s}){
+        //  printf("Start of TLP packet.\n");
+        //}
+        
+        scramble8(tx_data[i],skp_detect,com_detect,(scram_bypass | tx_datak[i]),lfsr,scramble_data[i],lfsr);
+        //printf("K-Code = %h COM = %h SKP = %h bypass = %h scramble_data = %h unscramble_data = %h lfsr = %h bypass_cnt = %d\n",tx_datak[i],com_detect,skp_detect,scram_bypass,tx_data[i],scramble_data[i],lfsr,bypass_count);
+       
+        mailbox_put (tx_data_mailbox, {tx_datak[i],scramble_data[i]});
+        //printf("Add packet to tx_mailbox %0h\n",tx_data[i]); 
+        
+      }
+    }
+    while (1) {
+      ret = mailbox_get (WAIT,tx_data_mailbox,tx_pkt,CHECK);
+      if (ret <= 0)
+        error ("mailbox_get returned %0d\n",ret);
+      //printf ("got tx_pkt %0h\n",tx_pkt);
+      if (tx_pkt == {1'b1,COM_s}) {
+        trigger (ONE_BLAST,phy_start);
+        sync    (ALL,phy_done);
+      }
+      if (tx_pkt == {1'b1,STP_s}) {
+        trigger (ONE_BLAST,tlp_start);
+        sync    (ALL,tlp_done);
+      }
+      if (tx_pkt == {1'b1,SDP_s}) {
+        trigger (ONE_BLAST,dllp_start);
+        sync    (ALL,dllp_done);
+      }
+    }
+    //phy layer packets
+    while (1) {       
+      sync(ALL,phy_start);
+      //printf ("got past sync %0h\n",tx_pkt);
+      phy_pkt[0] = COM_s;
+      phy_pkt[4] = 0;
+      phy_pkt[5] = 0;
+      phy_pkt[6] = 0;
+      phy_pkt[7] = 0;
+      phy_pkt[8] = 0;
+      phy_pkt[9] = 0;
+      phy_pkt[10] = 0;
+      phy_pkt[11] = 0;
+      phy_pkt[12] = 0;
+      phy_pkt[13] = 0;
+      phy_pkt[14] = 0;
+      phy_pkt[15] = 0;
+      ret2 = mailbox_get (WAIT,tx_data_mailbox,tx_pkt,CHECK);
+      //printf ("got past mailbox get %0h\n",tx_pkt);
+      phy_pkt[1] = tx_pkt;
+      //training set
+      if ((tx_pkt == 'h1f7) || ~tx_pkt[8]) {
+        for (j = 2; j <16; j++) {
+          ret2 = mailbox_get (WAIT,tx_data_mailbox,tx_pkt,CHECK);
+          phy_pkt[j] = tx_pkt;
+        }
+      }
+      //skip fst idle
+      else {
+        for (j=2;j<4;j++) {
+          ret1 = mailbox_get (WAIT,tx_data_mailbox,tx_pkt,CHECK);
+          phy_pkt[j] = tx_pkt;
+          //printf ("skip loop got past %0h\n",tx_pkt);
+        }
+      }
+      build_phy_pkt = {phy_pkt[15],phy_pkt[14],phy_pkt[13],phy_pkt[12],phy_pkt[11],
+                       phy_pkt[10],phy_pkt[9],phy_pkt[8],phy_pkt[7],phy_pkt[6],
+                       phy_pkt[5],phy_pkt[4],phy_pkt[3],phy_pkt[2],phy_pkt[1],phy_pkt[0]};
+      mailbox_put (phy_mailbox, build_phy_pkt);
+      printf ("Recieved PHY PACKET (%0h) added to phy mailbox\n",build_phy_pkt);
+      trigger (ONE_BLAST,phy_done);  
+    }
+    //dll layer packets
+    while (1) {
+      sync    (ALL,dllp_start);       
+      //printf ("sync into dllp packet\n");     
+      for (k = 0; k < 6; k++) {     
+        ret3 = mailbox_get (WAIT,tx_data_mailbox,tx_pkt,CHECK);
+        dll_pkt[k] = tx_pkt;        
+        //printf ("dll_pkt(%0h)\n",dll_pkt[k]);
+      }        
+      ret3 = mailbox_get (WAIT,tx_data_mailbox,tx_pkt,CHECK);    
+      //printf ("dll this should be end(%0h)\n",tx_pkt);
+      if (tx_pkt == {1'b1,END_s}) {
+        build_dll_pkt = {dll_pkt[6],dll_pkt[5],dll_pkt[4],dll_pkt[3],
+                         dll_pkt[2],dll_pkt[1],dll_pkt[0]};
+        mailbox_put (dllp_mailbox, build_dll_pkt);
+        printf ("Recieved DLL PACKET (%0h) added to dllp mailbox\n",build_dll_pkt);
+      }
+      else
+        printf ("ERROR ->>>>>>> DLL malformed no END\n");          
+      
+      trigger (ONE_BLAST,dllp_done);
+    }
+    //tlp layer packets
+    while (1) {
+      sync    (ALL,tlp_start);
+      printf ("sync into tlp packet\n");
+      @(posedge CLOCK);
+      //3 dw header + seq.
+      for (k = 0; k < 14; k++) {
+        //printf("debug1 %0d\n",debug++);
+        ret4 = mailbox_get (WAIT,tx_data_mailbox,tx_pkt,CHECK);
+        tlp_pkt[k] = tx_pkt; 
+      }
+      //dword 4
+      if (tlp_pkt[2][5] == 1'b1) {
+        for (k=14;k<18;k++) {
+          ret4 = mailbox_get (WAIT,tx_data_mailbox,tx_pkt,CHECK);
+          tlp_pkt[k] = tx_pkt;
+        }
+      }
+          
+      //****************************************************************************************
+      //Check sequence ID and send ACK
+      recv_seq_id = {tlp_pkt[0],tlp_pkt[1]};
+      if (recv_seq_id != expected_seq_id) printf ("ERROR ->>>>>>> TLP BAD SEQUENCE ID of %0h\n",recv_seq_id);
+      else {
+        if (!semaphore_get(WAIT,my_semaphore,1))
+        error ("Semaphore_get returned 0\n");
+        ack_seq_num = new(recv_seq_id[7:0],{4'b0,recv_seq_id[11:8]},8'b0,8'b0);
+        ack_seq_num.build_packet("ack");      
+        printf("ACK PACKET Sequence Number (%0h)\n",recv_seq_id);
+        for(m=0; m <= 3; m ++) {
+          if(m==0){
+            mailbox_put (rx_data_mailbox, {2'b01,ack_seq_num.temp_packet[0][7:0],8'h5C});
+            printf("DLLP bytes SDB & DLL_TYPE %h%h.\n",ack_seq_num.temp_packet[0][7:0],8'h5C);
+          }
+          else if(m==1){
+            mailbox_put (rx_data_mailbox, {2'b00,ack_seq_num.temp_packet[0][23:16],ack_seq_num.temp_packet[0][15:8]});
+            printf("DLLP bytes 2 & 1 %h%h.\n",ack_seq_num.temp_packet[0][23:16],ack_seq_num.temp_packet[0][15:8]);
+          }
+          else if(m==2){
+            mailbox_put (rx_data_mailbox, {2'b00,ack_seq_num.temp_packet[1][7:0],ack_seq_num.temp_packet[0][31:24]});
+            printf("DLLP CRC and byte 3 %h%h.\n",ack_seq_num.temp_packet[1][7:0],ack_seq_num.temp_packet[0][31:24]);
+          }
+          else if(m==3){
+            mailbox_put (rx_data_mailbox, {2'b10,8'hFD,ack_seq_num.temp_packet[1][15:8]});
+            printf("DLLP STP and CRC %h%h.\n",8'hFD,ack_seq_num.temp_packet[1][15:8]);
+          }
+        }
+        semaphore_put (my_semaphore, 1);
+      }
+      expected_seq_id++;
+      //****************************************************************************************
+      //build tlp get all header information
+      build_tlp_header = {tlp_pkt[17],tlp_pkt[16],tlp_pkt[15],tlp_pkt[14],
+                          tlp_pkt[13],tlp_pkt[12],tlp_pkt[11],tlp_pkt[10],
+                          tlp_pkt[9],tlp_pkt[8],tlp_pkt[7],tlp_pkt[6],
+                          tlp_pkt[5],tlp_pkt[4],tlp_pkt[3],tlp_pkt[2]};
+      
+      if (build_tlp_header[5] == 1'b0) {
+        build_tlp_header[127:96] = 32'b0;
+      }
+      //****************************************************************************************
+      //put header in mailbox
+      mailbox_put (tlp_header_mailbox, build_tlp_header);
+      printf ("Recieved TLP PACKET (%0h) added to tlp header mailbox\n",build_tlp_header);
+      //****************************************************************************************
+      //check for data and put into mailbox
+      if (build_tlp_header[6] == 1) {
+        td          = build_tlp_header[23];
+        recv_length = {build_tlp_header[17:16],build_tlp_header[31:24]};
+        byte_length = (recv_length*4) + (td*4); 
+        printf ("TLP PACKET Receive Length dw(%0d) byte(%0d)\n",recv_length,byte_length);
+        for (k=1;k<=byte_length;k++) {
+          ret4 = mailbox_get (WAIT,tx_data_mailbox,tx_pkt,CHECK);
+          tlp_pkt[k] = tx_pkt;
+          if  (k%4 ==0) {            
+            mailbox_put (tlp_data_mailbox, {tlp_pkt[k],tlp_pkt[k-1],tlp_pkt[k-2],tlp_pkt[k-3]});
+            printf ("k = (%0d)\n",k);
+            printf ("Recieved TLP DATA (%0h) added to tlp data mailbox\n",{tlp_pkt[k],tlp_pkt[k-1],tlp_pkt[k-2],tlp_pkt[k-3]});
+          }
+          
+        }
+      }
+      //****************************************************************************************
+      //Read out the LCRC
+      for (k=0;k<=3;k++) {    
+        ret4 = mailbox_get (WAIT,tx_data_mailbox,tx_pkt,CHECK);
+        //printf("debug3 %0d\n",debug++);
+        tlp_pkt[k] = tx_pkt;
+      }
+      printf ("tlp lcrc value = %0h \n",{tlp_pkt[3],tlp_pkt[2],tlp_pkt[1],tlp_pkt[0]});
+    
+      //****************************************************************************************
+      //READ out the END VALUE
+      ret4 = mailbox_get (WAIT,tx_data_mailbox,tx_pkt,CHECK);
+      if (tx_pkt != {1'b1,END_s}) printf ("ERROR ->>>>>>> TLP malformed no END(%0h)\n",tx_pkt);      
+      
+      
+      trigger (ONE_BLAST,tlp_done);
+    }
+  join none
+}
+
