@@ -1,0 +1,37 @@
+#!/bin/bash
+
+if [ -z "$M1_ROOT" ]; then echo "***ERROR***: M1_ROOT variable is undefined, please set it and run 'source sourceme'."; exit 1; fi
+if ! [ -d "$M1_ROOT" ]; then echo "***ERROR***: directory '$M1_ROOT' does not exist, please check it and run 'source sourceme' again."; exit 1; fi
+
+# Make clean
+rm -rf $M1_ROOT/run/synth/xst
+mkdir -p $M1_ROOT/run/synth/xst
+cd $M1_ROOT/run/synth/xst
+
+# Set variables
+export DESIGN_TOP="spartan3esk_top"
+export FPGA_DEVICE="xc3s500e-fg320-4"
+export CMDFILE="command.xst"
+export LOGFILE="synth.log"
+
+# Create command file
+echo "run" > $CMDFILE
+echo "-ifn $FILELIST_XST" >> $CMDFILE
+echo "-ifmt MIXED" >> $CMDFILE
+echo "-ofn $DESIGN_TOP.ngc" >> $CMDFILE
+echo "-ofmt NGC" >> $CMDFILE
+echo "-top $DESIGN_TOP" >> $CMDFILE
+echo "-opt_mode SPEED" >> $CMDFILE
+echo "-opt_level 1" >> $CMDFILE
+echo "-p $FPGA_DEVICE" >> $CMDFILE
+
+# Run the complete Xilinx flow from synthesis to bitstream
+xst -ifn $CMDFILE -ofn $LOGFILE
+ngdbuild -p $FPGA_DEVICE -uc ${M1_ROOT}/hdl/rtl/${DESIGN_TOP}/${DESIGN_TOP}.ucf ${DESIGN_TOP}.ngc 2>&1 | tee --append ${LOGFILE}
+map -pr b -p $FPGA_DEVICE $DESIGN_TOP 2>&1 | tee --append $LOGFILE
+par -w -ol high $DESIGN_TOP ${DESIGN_TOP}_par.ncd 2>&1 | tee --append $LOGFILE
+trce -v 25 ${DESIGN_TOP}_par.ncd ${DESIGN_TOP}.pcf 2>&1 | tee --append $LOGFILE
+bitgen ${DESIGN_TOP}_par.ncd -l -w ${DESIGN_TOP}.bit 2>&1 | tee --append $LOGFILE
+
+# Now just use impact to program the device with the bit file... and have fun!!!
+
