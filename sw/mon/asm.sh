@@ -1,0 +1,1 @@
+m68k-elf-gcc -c -m68008 -mno-mac -mno-68881 -mno-68851 -mno-hwdiv --mri -o test.o test.s && m68k-elf-objdump -D test.o | tee test.asm && m68k-elf-objcopy -O binary test.o test.bin && hexdump -f dump.fmt test.bin > test.rom && rm -f test.o && ./splitrom test.bin && rm -f test.bin
