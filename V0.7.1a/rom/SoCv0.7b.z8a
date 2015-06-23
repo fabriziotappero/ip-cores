@@ -1,0 +1,396 @@
+;
+; Z80Soc V0.7 Demo ROM
+; Ronivon C. Costa
+; 2010 - 02 - 21
+;
+
+           ld          sp,BFFEH          ; Put Stack on top of memory
+inicio:
+           ld          a,(FFDFH)         ; Verify what is the development board
+           or          a
+           jr          z,de1
+           call        set_lcd           ;is Z80soc-s3e
+           jr          inic1
+de1:
+           ld          a,F0h
+           out         (01h),a
+           call        hexDisplay        ;is DE1, test 7 segment display
+inic1:
+           ld          a,0Fh
+           out         (01h),a
+           call        clear
+           call        defineNewA
+           ld          de,4034h
+           ld          hl,Text1
+           call        printmsg
+           ld          de,405Ch
+           ld          hl,Text2
+           call        printmsg
+           call        Border
+           ld          de,4146h
+           ld          hl,Text3
+           call        printmsg
+           ld          de,4196h
+           ld          hl,Text4
+           call        printmsg
+           ld          de,41E6h
+           ld          hl,Text5
+           call        printmsg
+           ld          de,4236h
+           ld          hl,Text6
+           call        printmsg
+           ld          de,425Eh
+           ld          hl,Text7
+           call        printmsg
+           ; check soz version
+           ld          hl,DE1_Version
+           ld          a,(FFDFh)
+           or          a
+           jr          z,print_v
+           ld          hl,S3E_Version
+print_v:
+           ld          de,4087h
+           call        printmsg
+setprint:
+           ld          de,42D6h
+           ld          bc,30
+loopprint:
+           push        bc
+           push        de
+           call        delay
+           call        rotate
+           ld          a,(FFDFh)
+           or          a
+           jr          z,looppr2
+           call        s3e_routine       ; Is Z80-S3E
+looppr2:
+           pop         de
+           pop         bc
+           call        read_kbd
+           or          a
+           jr          z,loopprint
+           cp          41h
+           jr          z,go_on
+           out         (01H),a
+           ld          l,a
+           ld          a,(FFDFh)           ; get z80soc version
+           or          a
+           jr          nz,looppr3
+           ld          a,l
+           out         (11h),a             ; Use HEX display if DE1
+looppr3:
+           ld          a,l
+           ld          (de),a
+           inc         de
+           dec         bc
+           ld          a,b
+           or          c
+           jr          z,setprint
+           jr          loopprint
+go_on:
+           ld          hl,6000h          ; RAM Address
+           ld          a,0               ; Value to store in memory
+loop1:
+           ld          (hl),a            ; Store A into Memory (HL)
+           inc         hl               ; Point to next memory location
+           inc         a                ; Add 1 to value to store in memory
+           jr          nz,loop1          ; If A not equal 0 continue loop1
+                                ; When A=FFh, and we make A=A+1 ...
+                                ; A becomes 100h
+                                ; But, A is an 8 bits register, and
+                                ; can only store the two last hex digits,
+                                ; that is, 8 bits.
+           call        read_key0       ; Wait until KEY0 is pressed
+                                ;
+           ld          hl,6000h          ; Get back the start RAM address
+loop2:
+           ld          a,(FFDFh)           ; get z80soc version
+           or          a
+           jr          nz,skip2_de1
+           ld          a,h
+           out         (11h),a
+           ld          a,l
+           out         (10h),a
+skip2_de1:
+           ld          a,(hl)             ; Read back the values stored in loop1
+           out         (01h),a            ; Send to Green Leds
+           call        delay              ; Call sub-routine to delay some time
+           inc         hl                 ; Add 1 to the memory location
+           ld          a,(hl)             ; Read the value in the memory
+           cp          FFh               ; check if equal 255
+           jr          nz,skip2_de1       ; If not equal 255, continue loop2
+           ; end of First execution
+           call         read_key0       ; Wait until KEY0 is pressed
+           jP           inicio            ; Restart program
+read_key0:
+loop3:
+           call         delay
+           in           a,(30h)           ; Read KEYs (all 4 KEYs)
+           cp           1               ; check if returns "00001110"
+           jr           nz,loop3          ; KEY0 not pressed, continue checking
+           ret                  
+iodelay:
+           in           a,(20h)           ; Read SW(7-0)
+           or           a
+           jr           nz,loop4
+           ld           a,1       ; Read the number of times to loop
+loop4:
+           dec          a                ; Start counting backwards
+           jr           nz,loop4          ; If A greather than 0, continue loop
+           ret                  ; return to calling program
+delay:
+           in           a,(20h)           ; Read SW(7-0)
+           or           a
+           jr           nz,loop5
+           ld           a,1
+loop5:
+           push  af
+           ld    bc,5000             ; Every delay has at least 255 loops
+loop6:
+           dec   bc                ; Start counting backwards
+           ld    a,b
+           or    c
+           jr    nz,loop6          ; If A greather than 0, continue loop
+           pop   af               ; Get multiplier back
+           dec   a                ;
+           jr    nz,loop5
+           ret                  ; return to calling program
+clear:
+        ld      a,0
+        out     (91h),a      ; video cursor x = 0
+        out     (92h),a      ; video cursor y = 0
+        ld      bc,1200
+clean_loop:
+        ld      a,20h
+        out     (90h),a      ; print character to video
+                             ; cursor x,y is automatically updated
+                             ; by hardware
+        dec     bc
+        ld      a,b
+        or      c
+        jr      nz,clean_loop
+        ret
+printmsg:
+
+ploop:
+
+           ld          a,(hl)
+           or          a
+           ret         z
+           ld          (de),a
+           inc         hl
+           inc         de
+           jr          ploop
+read_kbd:
+           in          a,(80h)
+           ret
+Border:
+           ld          hl,Lineu
+           ld          de,40F5H
+           call        printmsg
+           ld          de,411DH
+           ld          a,10
+brdloop:
+           ld          hl,Column
+           push        hl
+           push        af
+           push        de
+           call        printmsg
+           pop         de
+           pop         af
+           ld          hl,40
+           add         hl,de
+           ld          d,h
+           ld          e,l
+           pop         hl
+           dec         a
+           jr          nz,brdloop
+           ld          hl,Lined
+           call        printmsg
+           ret
+rotate:
+           ; save first line of box
+           ld          hl,411Eh
+           ld          de,B000h
+           ld          bc,30
+           ldir
+           ; move all lines up
+           ld          hl,4146h ; this is second line of box
+           ld          de,411Eh ; this is first line of box
+           ld          b,9
+loop_rotate:
+	   push        bc
+           push        hl
+           push        de
+	   ld          bc,30
+           ldir
+           pop         de
+           ld          hl,40
+           add         hl,de
+           ld          d,h
+           ld          e,l
+           pop         hl
+           ld          bc,40
+           add         hl,bc
+           pop         bc
+           djnz        loop_rotate
+           ; now get back the first line saved in 9000h
+           ; and put on the last line of box
+           ld          hl,B000h
+           ld          bc,30
+           ldir
+           ret
+s3e_routine:
+           ; print message in LCD display
+           ; Check of Rotary Knob is moving
+           call        read_rot
+           ; Is it rotating to the right ?
+           cp          1
+           jr          nz,check_left
+           call        roll_lcd_right
+           ld          a,1
+           jr          printlcd
+
+check_left:
+           ; Is it rotating to the left?
+           cp          2
+           jr          nz,dec_jump
+           call        roll_lcd_left
+           ld          a,128
+printlcd:
+           out         (01h),a
+           ld          de,FFE0h
+           ld          hl,9100h
+           call        printmsg
+dec_jump:
+           ret
+set_lcd:
+           ld          de,9100h
+           ld          hl,lcdtxt
+           ld          bc,33
+           ldir
+           ld          de,FFE0h
+           ld          hl,9100h
+           ld          bc,32
+           ldir
+           ret
+read_rot:
+           ;CALL        DELAY_MULT
+           ;LD          A,0
+           ;RET         NZ
+           IN          A,(70H)
+           RET
+
+DELAY_ROT:
+           LD          A,(9200H)
+           DEC         A
+           LD          (9200H),A
+           RET
+DELAY_MULT:
+           LD          A,(9201H)
+           DEC         A
+           JR          NZ,DLY_M1
+           LD          A,10H
+DLY_M1:
+           LD          (9201H),A
+           RET
+
+roll_lcd_left:
+           ; save the first char on the left, for every line
+           ld        a,(9100h)
+           ld        (9202H),a
+           ld        a,(9110h)
+           ld        (9203H),a
+           ld        HL,9101H
+           ld        de,9100h
+           ld        bc,31
+           ldir
+           ld        a,(9202h)
+           ld        (910Fh),a
+           ld        a,(9203h)
+           ld        (911Fh),a
+           ret
+roll_lcd_right:
+           ; save the first char on the left, for every line
+           ld        a,(910Fh)
+           ld        (9202H),a
+           ld        a,(911Fh)
+           ld        (9203H),a
+           ld        HL,911EH
+           ld        de,911Fh
+           ld        bc,31
+           lddr
+           ld        a,(9202h)
+           ld        (9100h),a
+           ld        a,(9203h)
+           ld        (9110h),a
+           ret
+defineNewA:
+           ld        hl,newCharA
+           ld        de,4E88h   ; this is the char ram addres of "A"
+                                ; which is "4C80h + 65 * 8"
+                                ; 4C80h = initial char ram address
+                                ; 65 = ASCCII of "A"
+                                ; 8  = 8 bytes for each char
+           ld        bc,8
+           ldir
+           ret
+hexDisplay:
+           ld	     a,20h
+           out	     (10h),a
+           ld        a,10h
+           out       (11h),a
+           ret
+           ;                    character set: lat9-08
+Text1:
+           db                   "Z80 SYSTEM ON CHIP"
+           db                   0
+Text2:
+           db                   "RONIVON COSTA 2010"
+           db                   0
+Text3:
+           db                   "  |!#$%&/()=?*`+´ç~^,.;:\<>"
+           db                   0
+Text4:
+           db                   "  ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+           db                   0
+Text5:
+           db                   "  abcdefghijklmnopqrstuvwxyz"
+           db                   0
+Text6:
+           db                   "         0123456789"
+           db                   0
+Text7:
+           db                   2,3,4,11,12,13,14,18,24,25,26,27,232,233,235,187,188,138,134,135,129,128,1,6,7,8,9,10,29,31
+           db                   0
+Lineu:
+           db                   150,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,156
+           db                   0
+Lined:
+           db                   147,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,154,153
+           db                   0
+
+Column:
+           db                   149
+           db                   "                              "
+           db                   149
+           db                   0
+lcdtxt:
+           db                   "   Z80 SYSTEM   "
+           db                   " RONIVON  COSTA "
+           db                   0
+DE1_Version:
+           db                   "DE1 Version"
+           db                   0
+S3E_Version:
+           db                   "S3E Version"
+           db                   0
+newCharA:
+           db                   FFh  ;11111111
+           db                   81h  ;10000001
+           db                   99h  ;10011001
+           db                   A5h  ;10100101
+           db                   BDh  ;10111101
+           db                   A5h  ;10100101
+           db                   81h  ;10000001
+           db                   FFh  ;11111111
