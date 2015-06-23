@@ -1,0 +1,65 @@
+/*
+ * User defines for synthesizing PTC IP core
+ *
+ */
+TOPLEVEL = ptc
+include select_tech.inc
+CLK = clk_i
+ECLK = ptc_ecgt
+RST = rst_i
+CLK_PERIOD = 5		/* 200 MHz */
+MAX_AREA = 0		/* Push hard */
+DO_UNGROUP = yes	/* yes, no */
+DO_VERIFY = yes		/* yes, no */
+
+/* Starting timestamp */
+sh date
+
+/* Set some basic variables related to environment */
+include set_env.inc
+STAGE = final
+
+/* Load libraries */
+include tech_ + TECH + .inc
+
+/* Load HDL source files */
+include read_design.inc		> LOG_PATH + read_design_ + TOPLEVEL + .log
+
+/* Set design top */
+current_design TOPLEVEL
+
+/* Link all blocks and uniquify them */
+link
+uniquify
+check_design			> LOG_PATH + check_design_ + TOPLEVEL + .log
+
+/* Apply constraints */
+if (TECH == "vs_umc18") {
+	include cons_vs_umc18.inc
+} else if (TECH == "art_umc18") {
+	include cons_art_umc18.inc
+} else {
+	echo "Error: Unsupported technology"
+	exit
+}
+
+/* Lets do basic synthesis */
+if (DO_UNGROUP == "yes") {
+	ungroup -all
+}
+compile -boundary_optimization -map_effort low
+
+/* Dump gate-level from incremental synthesis */
+include save_design.inc
+
+/* Generate reports for incremental synthesis */
+include reports.inc
+
+/* Verify design */
+if (DO_VERIFY == "yes") {
+	compile -no_map -verify		> LOG_PATH + verify_ + TOPLEVEL + .log
+}
+
+/* Finish */
+sh date
+exit
