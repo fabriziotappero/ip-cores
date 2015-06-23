@@ -1,0 +1,49 @@
+
+#!/bin/sh
+
+run_logic_synthesis_only=0 ;
+while getopts ":s i" options; do
+    case $options in
+        i ) run_logic_synthesis_only=0;;
+        s ) run_logic_synthesis_only=1;;
+        ? ) echo $usage
+            exit 1;;
+    esac
+done
+
+################################
+# set up the verilog filelists: 
+################################
+
+export date_of_run=`date +%Y.%m.%d_%H.%M.%S`
+mkdir run_$date_of_run
+rm -f run
+ln -s run_$date_of_run run
+
+cd run
+
+if [ $run_logic_synthesis_only -eq 1 ]; then
+    touch .LOGIC_SYNTHESIS_ONLY
+fi
+
+quartus_sh -t ../quartus.tcl
+if [[ $? != 0 ]]; then exit 1; fi
+
+quartus_map DE2 
+if [[ $? != 0 ]]; then exit 1; fi
+
+if [ $run_logic_synthesis_only -eq 1 ]; then
+    quartus_fit --early_timing_estimate=realistic DE2
+    if [[ $? != 0 ]]; then exit 1; fi
+else
+    quartus_fit DE2
+    if [[ $? != 0 ]]; then exit 1; fi
+fi
+
+quartus_sta --do_report_timing DE2
+if [[ $? != 0 ]]; then exit 1; fi
+quartus_asm DE2
+quartus_pgm -c USB-Blaster -m jtag  -o "p;DE2.sof"
+cd -
+exit 0
+

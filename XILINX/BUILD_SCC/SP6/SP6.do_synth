@@ -1,0 +1,53 @@
+#!/bin/sh
+
+run_logic_synthesis_only=0;
+while getopts ":s i" options; do
+    case $options in
+        i ) run_logic_synthesis_only=0;;
+        s ) run_logic_synthesis_only=1;;
+        ? ) echo $usage
+        exit 1;;
+    esac
+done
+
+export date_of_run=`date +%Y.%m.%d_%H.%M.%S`
+
+mkdir run_$date_of_run   
+rm -f run
+ln -s run_$date_of_run run
+
+mkdir run/synthesis
+
+if [ $run_logic_synthesis_only -eq 1 ] ; then
+    touch run/synthesis/.LOGIC_SYNTHESIS_ONLY
+fi
+
+synplify_premier_dp -batch synplify.tcl
+if [[ $? != 0 ]]; then exit 1; fi
+
+if [ $run_logic_synthesis_only -ne 1 ] ; then
+    
+    mkdir run/implementation
+    cd run/implementation
+    ngdbuild -uc ../../SP6.ucf -sd ../../../../coregen/ip_rtl/ -dd _ngo -nt timestamp -p xc6slx45t-fgg484-3 ../synthesis/DE2.edf DE2.ngd
+    if [[ $? != 0 ]]; then exit 1; fi
+    map -u -timing -p xc6slx45t-fgg484-3  -ol high -pr b -detail -o DE2_map.ncd DE2.ngd DE2.pcf
+    if [[ $? != 0 ]]; then exit 1; fi
+    par -ol high -w -nopad DE2_map.ncd DE2.ncd DE2.pcf
+    if [[ $? != 0 ]]; then exit 1; fi
+    trce -v 20 -u 64 -o DE2.twr DE2.ncd DE2.pcf
+    if [[ $? != 0 ]]; then exit 1; fi
+    bitgen -intstyle xflow -w -g DebugBitstream:No -g Binary:no -g CRC:Enable -g Reset_on_err:No -g ConfigRate:2 -g ProgPin:PullUp -g TckPin:PullUp -g TdiPin:PullUp -g TdoPin:PullUp -g TmsPin:PullUp -g UnusedPin:PullDown -g UserID:0xFFFFFFFF -g ExtMasterCclk_en:No -g SPI_buswidth:1 -g TIMER_CFG:0xFFFF -g multipin_wakeup:No -g StartUpClk:CClk -g DONE_cycle:4 -g GTS_cycle:5 -g GWE_cycle:6 -g LCK_cycle:NoWait -g Security:None -g DonePipe:Yes -g DriveDone:No -g en_sw_gsr:No -g drive_awake:No -g sw_clk:Startupclk -g sw_gwe_cycle:5 -g sw_gts_cycle:4 DE2.ncd -g INIT_9K:yes
+    #if [[ $? != 0 ]]; then exit 1; fi
+    #setMode -bs
+    #setCable -port auto
+    #Identify -inferir
+    #identifyMPM
+    #assignFile -p 2 -file"/tmp/BUILD_SCC/imp_connect/rtl_package/synth/synplify_fpga/run/implementation/DE2.bit"
+    #Program -p 2
+
+    if [[ $? != 0 ]]; then exit 1; fi
+    cd -
+
+fi
+exit 0
