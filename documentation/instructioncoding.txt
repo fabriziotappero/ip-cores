@@ -1,0 +1,173 @@
+====================================================
+   HiCoVec Processor Instruction Set & Coding
+====================================================
+
+www.opencores.org/projects/hicovec
+
+This document originates from Prof. Dr.-Ing. Gundolf Kiefer, teaching at the University of Applied Sciences in Augsburg. 
+It is the fundament of the HiCoVec processor. While being vital during the development of the processor, it
+now serves the purpose of providing detailed information about the instruction set and coding for people trying
+to write applications.
+
+
+General
+===========
+- Each intruction word consists of exactly 32 bit. This makes instruction decoding and execution pretty simple.
+- With a few exceptions, the first 12 bit define a scalar operation and the following 20 bit a vector operation. (VLIW/EPIC-Principle)
+- "000" encodes the NOP-command, thereby allowing the other unit (scalar/vector) to use the remaining bits.
+
+Harware components:
+- instruction register (32 Bit)
+- memory interface
+- scalar unit
+- vector unit
+
+Scalar unit
+==============
+Principle:
+- accumulator machine
+- load/store architecture
+- addressing modes: absolute, register indirect, register indirect with displacement
+  - address calculation using ALU (ADD-operation)
+
+Hardware components:
+- register: A, X, Y (each 32 bit)
+- flags: Carry, Zero
+- ALU
+- instruction counter
+- control unit
+- some multiplexers
+
+ALU commands:
+  01 oooo dd ss tt --------------------  respectivly
+  01 oooo dd ss 00 000-nnnnnnnnnnnnnnnn         <Op> d, s, t
+
+        d: destination register: 00 = none, 01 = A, 10 = X, 11 = Y
+        s: 1. source register:   00 = 0   , 01 = A, 10 = X, 11 = Y
+        t: 2. source register:   00 = n   , 01 = A, 10 = X, 11 = Y  
+
+        o: operation 
+                0000: ADD                       0001: ADC
+                0010: SUB                       0011: SBC
+                0100: INC
+                0110: DEC
+                1000: AND                       1001: OR
+                1010: XOR                       1011: MUL (optional) 
+                1100: LSL (insert 0)            1101: ROL (insert carry)
+                1110: LSR (insert 0)            1111: ROR (insert carry)
+
+load/store commands:
+  10 00-- dd ss tt --------------------  respectivly
+  10 00-- dd ss 00 000-nnnnnnnnnnnnnnnn         LD  d, s + t
+  10 10-- -- ss tt --------------------  respectivly
+  10 10-- -- ss 00 000-nnnnnnnnnnnnnnnn         ST  s + t, A
+
+Legwork for vector unit (here just scalar part, for full details look below):
+  10 01-- -- ss tt --------------------         VLD  ..., s + t      ; t != 00
+  10 1100 -- ss tt --------------------         VST  s + t, ...      ; t != 00
+  
+  10 1110 -- ss -- --------------------         MOV  r(...), s       ; t != 00
+  10 1111 dd -- -- --------------------         MOV  d, v(...)       ; t != 00
+  10 1101 -- ss -- --------------------         MOVA r, s            
+
+Jump commands:
+  00 0--- -- -- -- --------------------         NOP
+  00 1000 00 ss tt --------------------         JMP s+t
+  00 1000 dd ss tt --------------------         JAL A/X/Y, s+t  ; Jump-And-Link (useful for subprograms)
+  00 101- -- -- -- --------------------         HALT
+  00 1100 00 ss tt --------------------         JNC s+t
+  00 1101 00 ss tt --------------------         JC  s+t
+  00 1110 00 ss tt --------------------         JNZ s+t
+  00 1111 00 ss tt --------------------         JZ  s+t
+
+Other:
+  11 0000 -- ee ff --------------------         set/clear flags
+        ee: select flag (Z, C)		            CLC, CLZ, SEC, SEZ					
+        ff: new value
+  e.g.:
+  11 0000 -- 01 -0 --------------------         CLC (clear carry)
+
+
+Vector unit
+==============
+Principle:
+- N registers, each K * 32 bit wide
+- N, K are configurable
+- Direct access is only possible for R0 to R15. The other registers can be used as temporary storage using
+  the VMOV command. 
+- Wordlength of an operation can be specified (following Intel naming convention)
+    - QW = Quadword (64 bit)
+    - DW = Doubleword (32 bit)
+    - W  = Word (16 bit)
+    - B  = Byte (8 bit)
+
+- N, K can choosed freely. Instruction decoding is independant of selected values with the following
+  exceptions:
+  * K has to be dividable by 2 (otherweise the 64 bit mode would be silly)
+  * N can not exceed 16 in instruction words (the rest is adressable via VMOV command)
+  * VSHUF wordlength is K * 32 / 4
+
+Hardware components:
+- N register, each K * 32 bit wide  (N, K configurable)
+- K 32 bit ALUs
+- vector control unit
+- shuffle unit
+- select unit (used to select data for transfer to scalar unit)
+- vector ALU control unit
+- some multiplexers
+
+
+VALU commands:
+  ------------ 01 ww oooo rrrr vvvv wwww           <Op> (.B/.W/.DW/.QW) r, v, w 
+
+        w: wordlength: 00 = 8 Bit, 01 = 16 Bit, 10 = 32 Bit, 11 = 64 Bit 
+        r: destination vectorregister (R0...R7)
+        v: 1. source vectorregister   (R0...R7)
+        w: 2. source vektorregister   (R0...R7)
+
+        o: Operation 
+                0000: VADD 
+                0010: VSUB 
+                1000: VAND                       
+                1001: VOR
+                1010: VXOR
+                1011: VMUL (optional)
+                1100: VLSL
+                1110: VLSR
+                
+
+Transfer commands (in cooperation with scalar unit):
+  10 01-- -- ss tt 10 -- 0010 rrrr ---- ---- VLD  r, s + t         ; t != 00
+  10 1100 -- ss tt 10 -- 0011 ---  vvvv ---- VST  s + t, v         ; t != 00
+  10 1101 -- ss -- 10 -- 0110 rrrr ---- ---- MOVA r, s             ; 
+  10 1110 -- ss tt 10 -- 0100 rrrr ---- ---- MOV  r(t), s          ; t != 00
+  10 1111 dd -- tt 10 -- 0101 ---- vvvv ---- MOV  d, v(t)          ; t != 00
+  
+
+Shuffle command: (BITORDER REVERSED !!!)
+  000-nnnnnnnn 11 ww ssss rrrr vvvv wwww           VSHUF r,v,w,wwssssnnnnnnnn
+
+        VSHUF allows fast, parallel transfer of data inside of or between vector registers.
+        w defines a wordlength W <= 32*K/4. r[i], v[i] and w[i] are i-th partial words of or vector
+        register r, v and w.  n[i] defines the i-th bit group of n und s[i] the i-th bit von n.
+   
+        For i <= 3:
+          r[i] <- v[n[i]], if s[i] = 0
+          r[i] <- w[n[i]], if s[i] = 1
+        General:
+          r[i] <- v[n[i % 4] + i/4], if s[i % 4] = 0
+          r[i] <- w[n[i % 4] + i/4], if s[i % 4] = 1
+
+        Example:
+          Command:  VSHUF R2, 16, R3:2, R3:3, R5:1, R5:2
+          Coding:   nnnnnnnn = 10 11 01 10, ssss = 0011, vvvv = 3, wwww = 5
+          Effect:   R2(31:0) <- R3(63:32), R2(63:32) <- R5(47:16)
+
+Other:
+  ------------ 00 0- ---- ---- ---- ----           VNOP  
+  ------------ 00 1- 1000 rrrr vvvv ----           VMOL r,v        
+  ------------ 00 1- 1100 rrrr vvvv ----           VMOR r,v  
+  ------------ 00 1- 0001 rrrr vvvv ----           VMOV r, v     
+  000-nnnnnnnn 00 1- 0010 rrrr ---- ----           VMOV r, R<n>    
+  000-nnnnnnnn 00 1- 0011 ---- vvvv ----           VMOV R<n>, v
+

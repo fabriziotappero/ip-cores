@@ -1,0 +1,1645 @@
+; ************************************************************************
+; * CPU validation program                                               *
+; ************************************************************************
+; * Executes all possible commands of the target cpu to be sure that it  *
+; * works properly.                                                      *
+; *                                                                      *
+; * If an error occurs, the processor will run into a halt command.      *
+; * Otherwise it will continue execution to the finish symbol and loop   * 
+; * there infinety                                                       *
+; *                                                                      *
+; ************************************************************************
+; * Author:     Harald Manske, haraldmanske@gmx.de                       *
+; * Version:    1.0                                                      *
+; * Plattform:  HiCoVec (highly configurable vector processor)           *
+; ************************************************************************
+     
+; configuration of the program
+                EQU n 8             ;requires n >= 4
+                EQU k 20            ;requires k = 16
+                EQU use_shuffle 0   ;requires shuffle unit                
+                EQU use_mul 0       ;requires both, scalar and vector multiplicate
+                EQU use_vmolr 0     ;requires vmol and vmor commands (32 bit width)
+                
+                JMP 0+START
+                HALT
+
+                
+;test data
+                ORG $10             
+DATA_V:         DC $B2D463BC        ; vector input data (max k=32) 
+DATA_V2:        DC $AA67Df42
+                DC $A3B78EF3
+                DC $4E6AC974
+                DC $8FEE432E
+                DC $FF3AB876
+                DC $43B57621
+                DC $8E6AC974 ;8
+                DC $7FF3ACD3
+                DC $921BC4D1
+                DC $637DCF67
+                DC $7897AABD
+                DC $973EE234
+                DC $005C6E39
+                DC $A1BC7A35
+                DC $7FF8334E ;16
+                DC $A3486CDF
+                DC $94CA193B
+                DC $445E97C1
+                DC $8836D35E
+                DC $A9B2C45F
+                DC $97A36BFF
+                DC $79835987
+                DC $DCBEDFEA
+                DC $975CC213
+                DC $39DA322B
+                DC $8411DEA9
+                DC $FFFFFFFF
+                DC $129DE3AF
+                DC $7881D74A
+                DC $AA8D35A8
+                DC $5247877D            
+
+V_RES:          ORG $30             ; vector result data (max k=32)
+
+                ORG $50
+MASK_HW:        DC $FFFF0000        ; mask to get only high word
+CMP_VAL:        DC $ABCD            ; value to compare with immediate
+CMP_VAL2:       DC $FEDC            ; value to compare with immediate
+DATA_A:         DC $A3BF74E5        ; operand A
+DATA_B:         DC $03C7A483        ; operand B
+DATA_FF:        DC $FFFFFFFF        ; operand FF
+STORE_DEST:     DC $0               ; destination for store command
+
+;results
+AND_RES:        DC $3872481         ; result: A and B
+OR_RES:         DC $A3FFF4E7        ; result: A or B 
+XOR_RES:        DC $A078D066        ; result: A xor B
+ADD_RES:        DC $A7871968        ; result: A + B
+SUB_RES:        DC $9FF7D062        ; result: A - B
+INC_RES:        DC $A3BF74E6        ; result: A + 1
+DEC_RES:        DC $A3BF74E4        ; result: A - 1
+LSL_RES:        DC $477EE9CA        ; result: lsl A 
+LSR_RES:        DC $51DFBA72        ; result: lsr A
+MUL_RES:        DC $4B1E852F        ; result A * B (16bit * 16bit)
+
+ROL_RES:        DC $477EE9CA        ; result: rol A, carry not set
+ROL_RES_C:      DC $477EE9CB        ; result: rol A, carry set 
+
+ROR_RES:        DC $51DFBA72
+ROR_RES_C:      DC $D1DFBA72        ; result: ror A, carry set 
+
+RES_VSHUF_8L:   DC $8EF3AA67        ; result: shuffle vwidth=00 low word
+RES_VSHUF_8H:   DC $DF42B2D4        ; result: shuffle vwidth=00 high word
+        
+;program start
+START:          NOP          
+
+;test flag commands and conditional jumps
+TEST_ZERO:      SEZ
+                JZ 0+TEST_NOTZERO
+                HALT    
+TEST_NOTZERO:   CLZ
+                JZ 0+ERR_SCALAR
+                JNZ 0+TEST_CARRY
+                HALT
+TEST_CARRY:     SEC
+                JC 0+TEST_NOTCARRY
+                HALT
+TEST_NOTCARRY:  CLC
+                JC 0+ERR_SCALAR
+                JNC 0+TEST_FLAGS
+                HALT
+TEST_FLAGS:     SUB 0,0,1
+                JZ 0+ERR_SCALAR
+                JNC 0+ERR_SCALAR
+                JNZ 0+TEST_FLAGS2
+                HALT
+ TEST_FLAGS2:   ADD 0,0,0
+                JC 0+ERR_SCALAR
+                JZ 0+TEST_LD
+                HALT
+                
+;test load operation
+TEST_LD:        LD A,0+CMP_VAL     
+                JZ 0+ERR_SCALAR
+                SUB X,A,$ABCD       
+                JC 0+ERR_SCALAR
+                JZ 0+TEST_LD2
+                HALT
+ TEST_LD2:      OR Y,0,CMP_VAL
+                OR X,0,1
+                LD Y,Y+X
+                SUB 0,Y,$FEDC
+                JNZ 0+ERR_SCALAR
+                JZ 0+TEST_STORE
+                HALT
+
+;test store operation
+TEST_STORE:     LD X,0+DATA_A
+                LD Y,0+DATA_B
+                ADD A,X,Y
+                ST 0+STORE_DEST,A
+                LD X,0+ADD_RES
+                LD Y,0+STORE_DEST
+                SUB 0,X,Y
+                JZ 0+TEST_STORE2
+                HALT
+ TEST_STORE2:   OR A,0,$1234
+                OR X,0,1
+                OR Y,0,STORE_DEST
+                DEC Y,Y
+                ST X+Y,A
+                OR X,0,0
+                LD X,0+STORE_DEST
+                SUB Y,X,$1234
+                JNZ 0+ERR_SCALAR
+
+;test arithmetic and logic operations
+TEST_ADD:       LD X,0+DATA_A
+                LD Y,0+DATA_B
+                ADD A,X,Y
+                JC 0+ERR_SCALAR
+                JZ 0+ERR_SCALAR
+                LD Y,0+ADD_RES
+                SUB 0,A,Y
+                JNZ 0+ERR_SCALAR
+                JC 0+ERR_SCALAR
+                LD X, 0+DATA_FF
+                ADD A,X,2
+                JNC 0+ERR_SCALAR
+                JZ 0+ERR_SCALAR
+                SUB 0,A,1
+                JZ 0+TEST_ADC
+                HALT
+
+TEST_ADC:       LD A,0+DATA_A
+                LD X,0+DATA_B
+                CLC
+                ADC Y,A,X
+                JZ 0+ERR_SCALAR
+                JC 0+ERR_SCALAR
+                LD A,0+ADD_RES
+                SUB 0,A,Y
+                JNZ 0+ERR_SCALAR
+                
+                LD Y,0+DATA_A
+                LD X,0+DATA_B
+                SEC
+                ADC A,X,Y
+                JZ 0+ERR_SCALAR
+                JC 0+ERR_SCALAR
+                SUB A,A,1
+                LD Y,0+ADD_RES
+                SUB 0,A,Y
+                JNZ 0+ERR_SCALAR
+                JNC 0+TEST_SUB
+                HALT
+                
+TEST_SUB:       LD X,0+DATA_A
+                LD Y,0+DATA_B
+                SUB A,X,Y
+                JC 0+ERR_SCALAR
+                LD X,0+SUB_RES
+                SUB 0,A,X
+                JNZ 0+ERR_SCALAR
+                JC 0+ERR_SCALAR
+                LD X,0+DATA_A
+                SUB A,Y,X
+                JNC 0+ERR_SCALAR
+                JNZ 0+TEST_SBC
+                HALT
+
+TEST_SBC:       LD A,0+DATA_A
+                LD Y,0+DATA_B
+                CLC
+                SUB X,A,Y                
+                SBC A,A,Y
+                JZ 0+ERR_SCALAR
+                JC 0+ERR_SCALAR
+                SUB 0,X,A
+                JNZ 0+ERR_SCALAR
+                JC 0+ERR_SCALAR
+                LD A,0+DATA_A
+                SEC
+                SBC A,A,Y
+                JZ 0+ERR_SCALAR
+                JC 0+ERR_SCALAR
+                SUB X,X,1
+                SUB 0,A,X
+                JC 0+ERR_SCALAR
+                JZ 0+TEST_INC
+                HALT
+
+TEST_INC:       LD A,0+DATA_A
+                INC A,A                
+                LD X,0+INC_RES
+                LD Y,0+DATA_A
+                ADD Y,Y,1
+                SUB 0,A,X
+                JNZ 0+ERR_SCALAR
+                SUB 0,A,Y
+                JNZ 0+ERR_SCALAR
+                LD A,0+DATA_FF
+                INC A,A
+                JNC 0+ERR_SCALAR
+                JZ 0+TEST_DEC
+                HALT
+
+TEST_DEC:       OR A,0,0
+                DEC A,A
+                JNC 0+ERR_SCALAR
+                JZ 0+ERR_SCALAR
+                LD X,0+DATA_FF
+                SUB 0,A,X
+                JNZ 0+ERR_SCALAR
+                JC 0+ERR_SCALAR
+                LD A,0+DATA_A
+                DEC A,A
+                LD Y,0+DEC_RES
+                SUB 0,A,Y
+                JC 0+ERR_SCALAR
+                JZ 0+TEST_AND
+                HALT
+                
+TEST_AND:       LD A,0+DATA_A
+                LD X,0+DATA_B
+                AND Y,A,X
+                LD A,0+AND_RES
+                SUB 0,Y,A
+                JC 0+ERR_SCALAR
+                JNZ 0+ERR_SCALAR
+                LD A,0+DATA_FF
+                AND X,Y,A
+                SUB 0,Y,X
+                JNZ 0+ERR_SCALAR
+                OR Y,0,$3456
+                AND Y,Y,0
+                JZ 0+TEST_OR
+                HALT
+
+TEST_OR:        LD X,0+DATA_A
+                LD Y,0+DATA_B
+                OR A,X,Y
+                LD X,0+OR_RES
+                JZ 0+ERR_SCALAR
+                SUB 0,A,X
+                JNZ 0+ERR_SCALAR
+                JC 0+ERR_SCALAR
+                OR A,A,$FF
+                AND A,A,$FF
+                SUB 0,A,$FF
+                JC 0+ERR_SCALAR
+                JZ 0+TEST_XOR
+                HALT
+                
+TEST_XOR:       LD X,0+DATA_A
+                LD Y,0+DATA_B
+                XOR A,X,Y
+                LD X,0+XOR_RES
+                SUB 0,A,X
+                JC 0+ERR_SCALAR
+                JNZ 0+ERR_SCALAR
+                LD Y,0+ADD_RES
+                XOR A,A,Y
+                SUB 0,A,X
+                JZ 0+ERR_SCALAR
+                XOR A,A,Y
+                SUB 0,A,X
+                JZ 0+TEST_LSL
+                HALT
+
+TEST_LSL:       LD A,0+DATA_A
+                LSL A,A
+                JNC 0+ERR_SCALAR
+                LD X,0+LSL_RES
+                SUB 0,A,X
+                JC 0+ERR_SCALAR
+                JZ 0+TEST_LSR
+                HALT
+                
+                
+TEST_LSR:       LD A,0+DATA_A
+                LSR A,A
+                JNC 0+ERR_SCALAR
+                LD X,0+LSR_RES
+                SUB 0,X,A
+                JC 0+ERR_SCALAR
+                JZ 0+TEST_ROL
+                HALT
+
+TEST_ROL:       CLC
+                LD Y,0+DATA_A
+                ROL A,Y
+                JNC 0+ERR_SCALAR
+                LD X,0+ROL_RES
+                SUB 0,A,X
+                JC 0+ERR_SCALAR
+                JNZ 0+ERR_SCALAR                
+                SEC
+                LD Y,0+DATA_A
+                ROL A,Y
+                JNC 0+ERR_SCALAR
+                LD X,0+ROL_RES_C
+                SUB 0,A,X
+                JC 0+ERR_SCALAR
+                JZ 0+TEST_ROR
+                HALT
+                
+TEST_ROR:       CLC
+                LD Y,0+DATA_A
+                ROR A,Y
+                JNC 0+ERR_SCALAR
+                LD X,0+ROR_RES
+                SUB 0,A,X
+                JC 0+ERR_SCALAR
+                JNZ 0+ERR_SCALAR        
+                SEC
+                LD A,0+DATA_A
+                ROR A,A
+                JNC 0+ERR_SCALAR
+                LD X,0+ROR_RES_C
+                SUB 0,A,X
+                JC 0+ERR_SCALAR
+                JZ 0+TEST_JAL
+                HALT
+
+TEST_JAL:       JAL A,0+TEST_JAL2
+                HALT
+ TEST_JAL2:     SUB 0,A,TEST_JAL
+                JNZ 0+ERR_SCALAR
+                JZ 0+TEST_MUL
+                
+TEST_MUL:       OR A,0,use_mul
+                JZ 0+NO_MUL
+                LD X,0+DATA_A
+                LD Y,0+DATA_B
+                MUL A,X,Y
+                JC 0+ERR_SCALAR
+                JZ 0+ERR_SCALAR
+                LD Y,0+MUL_RES
+                SUB 0,A,Y
+                JNZ 0+ERR_SCALAR
+                JC 0+ERR_SCALAR
+ NO_MUL:        JMP 0+TEST_VLD_ST
+
+;test cooperative commands
+TEST_VLD_ST:    OR A,0,0
+                OR Y,0,0
+ VLD_ST_INIT:   ST 0+V_RES,A        ;init with 0
+                INC Y,Y
+                SUB 0,Y,k
+                JNZ 0+VLD_ST_INIT
+                                
+                OR A,0,DATA_V       ;load
+                VLD R0,0+A
+                
+                OR A,0,V_RES    
+                VST 0+A,R0          ;store
+                
+                OR Y,0,0        
+ VLD_ST_LOOP:   LD A,Y+V_RES        ;check
+                LD X,Y+DATA_V
+                SUB 0,A,X
+                JNZ 0+ERR_COOP
+                INC Y,Y
+                SUB 0,Y,k
+                JNZ 0+VLD_ST_LOOP
+                JMP 0+TEST_MOV
+                HALT
+                
+TEST_MOV:       OR A,0,0
+ MOV_LOOP:      LD Y,A+DATA_V
+                MOV R1(A),Y         ;scalar => vector
+                INC A,A
+                SUB 0,A,k
+                JNZ 0+MOV_LOOP
+                
+                OR A,0,0
+                OR X,0,0
+ MOV_LOOP2:     MOV X,R1(A)         ;vector => scalar
+                LD Y,A+DATA_V
+                SUB 0,Y,X
+                JNZ 0+ERR_COOP
+                INC A,A
+                SUB 0,A,k
+                JNZ 0+MOV_LOOP2
+                JZ 0+TEST_VMOV
+                HALT
+                
+;test vector commands
+TEST_VMOV:      VMOV R0,R1
+                VMOV R<2>,R0
+                VMOV R3,R<2>
+                
+                OR A,0,0
+ VMOV_LOOP:     LD Y,A+DATA_V
+                
+                MOV X,R0(A)
+                SUB 0,Y,X
+                JNZ 0+ERR_VECTOR
+                
+                MOV X,R2(A)
+                SUB 0,Y,X
+                JNZ 0+ERR_VECTOR
+                
+                MOV X,R3(A)
+                SUB 0,Y,X
+                JNZ 0+ERR_VECTOR
+                
+                INC A,A
+                SUB 0,A,k
+                JNZ 0+VMOV_LOOP
+
+TEST_MOVA:      LD A,0+DATA_A
+                MOVA R0,A
+                OR X,0,V_RES
+                VST 0+X,R0
+                
+                OR X,0,0
+ MOVA_LOOP:     LD Y,X+V_RES
+                SUB 0,Y,A
+                JNZ 0+ERR_COOP
+                INC X,X
+                SUB 0,X,k
+                JNZ 0+MOVA_LOOP
+                
+;test vector alu commands                
+                OR A,0,DATA_V
+                VLD R0,0+A
+                OR A,0,DATA_V2
+                VLD R1,0+A
+
+TEST_VAND:      VAND.DW R2,R0,R1
+                OR A,0,V_RES
+                VST 0+A,R2
+                
+                OR A,0,0
+ VAND_LOOP:     LD X,A+DATA_V
+                LD Y,A+DATA_V2
+                AND X,X,Y
+                LD Y,A+V_RES
+                SUB 0,X,Y
+                JNZ 0+ERR_VALU
+                INC A,A
+                SUB 0,A,k
+                JNZ 0+VAND_LOOP            
+
+TEST_VOR:       VOR.DW R2,R0,R1
+                OR A,0,V_RES
+                VST 0+A,R2
+                
+                OR A,0,0
+ VOR_LOOP:      LD X,A+DATA_V
+                LD Y,A+DATA_V2
+                OR X,X,Y
+                LD Y,A+V_RES
+                SUB 0,X,Y
+                JNZ 0+ERR_VALU
+                INC A,A
+                SUB 0,A,k
+                JNZ 0+VOR_LOOP
+
+TEST_VXOR:      VXOR.DW R2,R0,R1
+                OR A,0,V_RES
+                VST 0+A,R2
+                
+                OR A,0,0
+ VXOR_LOOP:     LD X,A+DATA_V
+                LD Y,A+DATA_V2
+                XOR X,X,Y
+                LD Y,A+V_RES
+                SUB 0,X,Y
+                JNZ 0+ERR_VALU
+                INC A,A
+                SUB 0,A,k
+                JNZ 0+VXOR_LOOP
+
+TEST_VADD:      VADD.DW R2,R0,R1
+                OR A,0,V_RES
+                VST 0+A,R2
+                
+                ;32 bit 
+                OR A,0,0
+ VADD_LOOP_DW:  LD X,A+DATA_V
+                LD Y,A+DATA_V2
+                ADD X,X,Y
+                LD Y,A+V_RES
+                SUB 0,X,Y
+                JNZ 0+ERR_VALU
+                INC A,A
+                SUB 0,A,k
+                JNZ 0+VADD_LOOP_DW
+          
+                ;64 bit
+                VADD.QW R2,R0,R1
+                OR A,0,V_RES
+                VST 0+A,R2
+                                
+                OR A,0,0
+ VADD_LOOP_QW:  ST 0+AKKU,A         ;reset carry
+                OR A,0,0
+                ST 0+CARRY,A
+                LD A,0+AKKU
+                
+                LD X,A+DATA_V
+                LD Y,A+DATA_V2
+                ADD X,X,Y
+                
+                JNC 0+VADD_QW_NC    ; save carry               
+                ST 0+AKKU,A
+                OR A,0,1
+                ST 0+CARRY,A
+                LD A,0+AKKU
+                
+  VADD_QW_NC:   LD Y,A+V_RES
+                SUB 0,X,Y
+                JNZ 0+ERR_VALU
+                INC A,A
+
+                LD X,A+DATA_V
+                LD Y,A+DATA_V2
+                ADD X,X,Y
+                LD Y,0+CARRY
+                ADD X,X,Y
+                LD Y,A+V_RES
+                
+                SUB 0,X,Y
+                JNZ 0+ERR_VALU
+                INC A,A
+            
+                SUB 0,A,k
+                JNZ 0+VADD_LOOP_QW
+ 
+                ;16bit
+                VADD.W R2,R0,R1
+                OR A,0,V_RES
+                VST 0+A,R2
+                
+                OR A,0,0
+  VADD_LOOP_W:  LD X,A+DATA_V           ;low word
+                LD Y,A+DATA_V2
+                ADD X,X,Y
+                LD Y,A+V_RES
+                AND X,X,$FFFF
+                AND Y,Y,$FFFF
+                SUB 0,X,Y
+                JNZ 0+ERR_VALU
+                
+                LD X,A+DATA_V           ;high word
+                LD Y,0+MASK_HW
+                AND X,X,Y
+                
+                LD Y,A+DATA_V2
+                ST 0+AKKU,A
+                LD A,0+MASK_HW
+                
+                AND Y,Y,A
+                
+                LD A,0+AKKU
+                                
+                ADD X,X,Y
+                LD Y,A+V_RES
+                
+                ST 0+AKKU,A
+                OR A,0,0
+                
+  VADD_LOOP_W2: LSR X,X
+                LSR Y,Y
+                INC A,A
+                SUB 0,A,16
+                JNZ 0+VADD_LOOP_W2
+                
+                LD A,0+AKKU
+                AND X,X,$FFFF
+                AND Y,Y,$FFFF
+                SUB 0,X,Y
+                JNZ 0+ERR_VALU
+                
+                INC A,A
+                SUB 0,A,k
+                JNZ 0+VADD_LOOP_W
+                
+                ;8 bit
+                VADD.B R2,R0,R1
+                OR A,0,V_RES
+                VST 0+A,R2
+                
+                OR A,0,0
+ VADD_LOOP_B:   OR X,A,0
+                ST 0+AKKU,A
+                LD A,X+DATA_V
+                ST 0+A_REG,A
+                LD A,X+DATA_V2
+                ST 0+B_REG,A
+                LD A,X+V_RES
+                ST 0+RES_REG,A
+                OR A,0,0
+ 
+ VADD_LOOP_B2:  ST 0+I,A
+                
+                LD X,0+A_REG
+                LD Y,0+B_REG
+                LD A,0+RES_REG
+                
+                ADD X,X,Y
+                AND X,X,$FF
+                AND A,A,$FF
+                
+                SUB 0,X,A
+                JNZ 0+ERR_VALU
+                
+                LD X,0+A_REG
+                LD Y,0+B_REG
+                LD A,0+RES_REG
+                
+                LSR X,X
+                LSR Y,Y
+                LSR A,A
+                
+                LSR X,X
+                LSR Y,Y
+                LSR A,A
+                
+                LSR X,X
+                LSR Y,Y
+                LSR A,A
+                
+                LSR X,X
+                LSR Y,Y
+                LSR A,A
+                
+                LSR X,X
+                LSR Y,Y
+                LSR A,A
+                
+                LSR X,X
+                LSR Y,Y
+                LSR A,A
+                
+                LSR X,X
+                LSR Y,Y
+                LSR A,A
+                
+                LSR X,X
+                LSR Y,Y
+                LSR A,A
+                 
+                ST 0+RES_REG,A
+                OR A,0,X
+                ST 0+A_REG,A
+                OR A,0,Y
+                ST 0+B_REG,A
+                
+                LD A,0+I
+                INC A,A
+                SUB 0,A,4
+                JNZ 0+VADD_LOOP_B2
+                
+                LD A,0+AKKU
+                INC A,A
+                SUB 0,A,k
+                JNZ 0+VADD_LOOP_B               
+
+TEST_VSUB:      VSUB.DW R2,R0,R1
+                OR A,0,V_RES
+                VST 0+A,R2
+                
+                ;32 bit 
+                OR A,0,0
+ VSUB_LOOP_DW:  LD X,A+DATA_V
+                LD Y,A+DATA_V2
+                SUB X,X,Y
+                LD Y,A+V_RES
+                SUB 0,X,Y
+                JNZ 0+ERR_VALU
+                INC A,A
+                SUB 0,A,k
+                JNZ 0+VSUB_LOOP_DW
+          
+                ;64 bit
+                VSUB.QW R2,R0,R1
+                OR A,0,V_RES
+                VST 0+A,R2
+                                
+                OR A,0,0
+ VSUB_LOOP_QW:  ST 0+AKKU,A         ;reset carry
+                OR A,0,0
+                ST 0+CARRY,A
+                LD A,0+AKKU
+                
+                LD X,A+DATA_V
+                LD Y,A+DATA_V2
+                SUB X,X,Y
+                
+                JNC 0+VSUB_QW_NC    ; save carry               
+                ST 0+AKKU,A
+                OR A,0,1
+                ST 0+CARRY,A
+                LD A,0+AKKU
+                
+  VSUB_QW_NC:   LD Y,A+V_RES
+                SUB 0,X,Y
+                JNZ 0+ERR_VALU
+                INC A,A
+
+                LD X,A+DATA_V
+                LD Y,A+DATA_V2
+                SUB X,X,Y
+                LD Y,0+CARRY
+                SUB X,X,Y
+                LD Y,A+V_RES
+                
+                SUB 0,X,Y
+                JNZ 0+ERR_VALU
+                INC A,A
+            
+                SUB 0,A,k
+                JNZ 0+VSUB_LOOP_QW
+ 
+                ;16bit
+                VSUB.W R2,R0,R1
+                OR A,0,V_RES
+                VST 0+A,R2
+                
+                OR A,0,0
+  VSUB_LOOP_W:  LD X,A+DATA_V           ;low word
+                LD Y,A+DATA_V2
+                SUB X,X,Y
+                LD Y,A+V_RES
+                AND X,X,$FFFF
+                AND Y,Y,$FFFF
+                SUB 0,X,Y
+                JNZ 0+ERR_VALU
+                
+                LD X,A+DATA_V           ;high word
+                LD Y,0+MASK_HW
+                AND X,X,Y
+                
+                LD Y,A+DATA_V2
+                ST 0+AKKU,A
+                LD A,0+MASK_HW
+                
+                AND Y,Y,A
+                
+                LD A,0+AKKU
+                                
+                SUB X,X,Y
+                LD Y,A+V_RES
+                
+                ST 0+AKKU,A
+                OR A,0,0
+                
+  VSUB_LOOP_W2: LSR X,X
+                LSR Y,Y
+                INC A,A
+                SUB 0,A,16
+                JNZ 0+VSUB_LOOP_W2
+                
+                LD A,0+AKKU
+                AND X,X,$FFFF
+                AND Y,Y,$FFFF
+                SUB 0,X,Y
+                JNZ 0+ERR_VALU
+                
+                INC A,A
+                SUB 0,A,k
+                JNZ 0+VSUB_LOOP_W
+                
+                ;8 bit
+                VSUB.B R2,R0,R1
+                OR A,0,V_RES
+                VST 0+A,R2
+                
+                OR A,0,0
+ VSUB_LOOP_B:   OR X,A,0
+                ST 0+AKKU,A
+                LD A,X+DATA_V
+                ST 0+A_REG,A
+                LD A,X+DATA_V2
+                ST 0+B_REG,A
+                LD A,X+V_RES
+                ST 0+RES_REG,A
+                OR A,0,0
+ 
+ VSUB_LOOP_B2:  ST 0+I,A
+                
+                LD X,0+A_REG
+                LD Y,0+B_REG
+                LD A,0+RES_REG
+                
+                SUB X,X,Y
+                AND X,X,$FF
+                AND A,A,$FF
+                
+                SUB 0,X,A
+                JNZ 0+ERR_VALU
+                
+                LD X,0+A_REG
+                LD Y,0+B_REG
+                LD A,0+RES_REG
+                
+                LSR X,X
+                LSR Y,Y
+                LSR A,A
+                
+                LSR X,X
+                LSR Y,Y
+                LSR A,A
+                
+                LSR X,X
+                LSR Y,Y
+                LSR A,A
+                
+                LSR X,X
+                LSR Y,Y
+                LSR A,A
+                
+                LSR X,X
+                LSR Y,Y
+                LSR A,A
+                
+                LSR X,X
+                LSR Y,Y
+                LSR A,A
+                
+                LSR X,X
+                LSR Y,Y
+                LSR A,A
+                
+                LSR X,X
+                LSR Y,Y
+                LSR A,A
+                 
+                ST 0+RES_REG,A
+                OR A,0,X
+                ST 0+A_REG,A
+                OR A,0,Y
+                ST 0+B_REG,A
+                
+                LD A,0+I
+                INC A,A
+                SUB 0,A,4
+                JNZ 0+VSUB_LOOP_B2
+                
+                LD A,0+AKKU
+                INC A,A
+                SUB 0,A,k
+                JNZ 0+VSUB_LOOP_B 
+
+TEST_VLSL:      VLSL.DW R2,R0
+                OR A,0,V_RES
+                VST 0+A,R2
+                
+                ;32 bit 
+                OR A,0,0
+ VLSL_LOOP_DW:  LD X,A+DATA_V
+                LSL X,X
+                LD Y,A+V_RES
+                SUB 0,X,Y
+                JNZ 0+ERR_VALU
+                INC A,A
+                SUB 0,A,k
+                JNZ 0+VLSL_LOOP_DW
+          
+                ;64 bit
+                VLSL.QW R2,R0
+                OR A,0,V_RES
+                VST 0+A,R2
+                                
+                OR A,0,0
+ VLSL_LOOP_QW:  ST 0+AKKU,A         ;reset carry
+                OR A,0,0
+                ST 0+CARRY,A
+                LD A,0+AKKU
+                
+                LD X,A+DATA_V
+                LSL X,X
+                
+                JNC 0+VLSL_QW_NC    ; save carry               
+                ST 0+AKKU,A
+                OR A,0,1
+                ST 0+CARRY,A
+                LD A,0+AKKU
+                
+  VLSL_QW_NC:   LD Y,A+V_RES
+                SUB 0,X,Y
+                JNZ 0+ERR_VALU
+                INC A,A
+
+                LD X,A+DATA_V
+                LD Y,0+CARRY
+                LSR Y,Y
+                ROL X,X
+           
+                LD Y,A+V_RES
+             
+                SUB 0,X,Y
+                JNZ 0+ERR_VALU
+                INC A,A
+            
+                SUB 0,A,k
+                JNZ 0+VLSL_LOOP_QW
+ 
+                ;16bit
+                VLSL.W R2,R0
+                OR A,0,V_RES
+                VST 0+A,R2
+                
+                OR A,0,0
+  VLSL_LOOP_W:  LD X,A+DATA_V           ;low word
+                LSL X,X
+                LD Y,A+V_RES
+                AND X,X,$FFFF
+                AND Y,Y,$FFFF
+                SUB 0,X,Y
+                JNZ 0+ERR_VALU
+                
+                LD X,A+DATA_V           ;high word
+                LD Y,0+MASK_HW
+                AND X,X,Y
+                                
+                LSL X,X
+                LD Y,A+V_RES
+                
+                ST 0+AKKU,A
+                OR A,0,0
+                
+  VLSL_LOOP_W2: LSR X,X
+                LSR Y,Y
+                INC A,A
+                SUB 0,A,16
+                JNZ 0+VLSL_LOOP_W2
+                
+                LD A,0+AKKU
+                AND X,X,$FFFF
+                AND Y,Y,$FFFF
+                SUB 0,X,Y
+                JNZ 0+ERR_VALU
+                
+                INC A,A
+                SUB 0,A,k
+                JNZ 0+VLSL_LOOP_W
+                
+                ;8 bit
+                VLSL.B R2,R0
+                OR A,0,V_RES
+                VST 0+A,R2
+                
+                OR A,0,0
+ VLSL_LOOP_B:   OR X,A,0
+                ST 0+AKKU,A
+                LD A,X+DATA_V
+                ST 0+A_REG,A
+                LD A,X+V_RES
+                ST 0+RES_REG,A
+                OR A,0,0
+ 
+ VLSL_LOOP_B2:  ST 0+I,A
+                
+                LD X,0+A_REG
+
+                LD A,0+RES_REG
+                
+                LSL X,X
+                AND X,X,$FF
+                AND A,A,$FF
+                
+                SUB 0,X,A
+                JNZ 0+ERR_VALU
+                
+                LD X,0+A_REG
+                LD A,0+RES_REG
+                
+                LSR X,X
+                LSR A,A
+                
+                LSR X,X
+                LSR A,A
+                
+                LSR X,X
+                LSR A,A
+                
+                LSR X,X
+                LSR A,A
+                
+                LSR X,X
+                LSR A,A
+                
+                LSR X,X
+                LSR A,A
+                
+                LSR X,X
+                LSR A,A
+                
+                LSR X,X
+                LSR A,A
+                 
+                ST 0+RES_REG,A
+                OR A,0,X
+                ST 0+A_REG,A
+                
+                LD A,0+I
+                INC A,A
+                SUB 0,A,4
+                JNZ 0+VLSL_LOOP_B2
+                
+                LD A,0+AKKU
+                INC A,A
+                SUB 0,A,k
+                JNZ 0+VLSL_LOOP_B 
+
+TEST_VLSR:      VLSR.DW R2,R0
+                OR A,0,V_RES
+                VST 0+A,R2
+                
+                ;32 bit 
+                OR A,0,0
+ VLSR_LOOP_DW:  LD X,A+DATA_V
+                LSR X,X
+                LD Y,A+V_RES
+                SUB 0,X,Y
+                JNZ 0+ERR_VALU
+                INC A,A
+                SUB 0,A,k
+                JNZ 0+VLSR_LOOP_DW
+
+                ;64 bit
+                VLSR.QW R2,R0
+                OR A,0,V_RES
+                VST 0+A,R2
+                                
+                OR A,0,0
+ VLSR_LOOP_QW:  ST 0+AKKU,A         ;reset carry
+                OR A,0,0
+                ST 0+CARRY,A
+                LD A,0+AKKU
+                
+                INC A,A
+                LD X,A+DATA_V
+                LSR X,X
+                
+                JNC 0+VLSR_QW_NC    ; save carry               
+                ST 0+AKKU,A
+                OR A,0,1
+                ST 0+CARRY,A
+                LD A,0+AKKU
+                
+  VLSR_QW_NC:   LD Y,A+V_RES
+                SUB 0,X,Y
+                JNZ 0+ERR_VALU
+                DEC A,A
+
+                LD X,A+DATA_V
+                LD Y,0+CARRY
+                LSR Y,Y
+                ROR X,X
+           
+                LD Y,A+V_RES
+             
+                SUB 0,X,Y
+                JNZ 0+ERR_VALU
+                INC A,A
+                INC A,A
+            
+                SUB 0,A,k
+                JNZ 0+VLSR_LOOP_QW
+                
+                ;16bit
+                VLSR.W R2,R0
+                OR A,0,V_RES
+                VST 0+A,R2
+                
+                OR A,0,0
+  VLSR_LOOP_W:  LD X,A+DATA_V           ;low word
+                AND X,X,$FFFF
+                LSR X,X
+                LD Y,A+V_RES
+                AND Y,Y,$FFFF
+                
+                SUB 0,X,Y
+                JNZ 0+ERR_VALU
+                
+                LD X,A+DATA_V           ;high word
+                LD Y,0+MASK_HW
+                AND X,X,Y
+                                
+                LSR X,X
+                LD Y,A+V_RES
+                
+                ST 0+AKKU,A
+                OR A,0,0
+                
+  VLSR_LOOP_W2: LSR X,X
+                LSR Y,Y
+                INC A,A
+                SUB 0,A,16
+                JNZ 0+VLSR_LOOP_W2
+                
+                LD A,0+AKKU
+                AND X,X,$FFFF
+                AND Y,Y,$FFFF
+                SUB 0,X,Y
+                JNZ 0+ERR_VALU
+                
+                INC A,A
+                SUB 0,A,k
+                JNZ 0+VLSR_LOOP_W
+                
+                ;8 bit
+                VLSR.B R2,R0
+                OR A,0,V_RES
+                VST 0+A,R2
+                
+                OR A,0,0
+ VLSR_LOOP_B:   OR X,A,0
+                ST 0+AKKU,A
+                LD A,X+DATA_V
+                ST 0+A_REG,A
+                LD A,X+V_RES
+                ST 0+RES_REG,A
+                OR A,0,0
+ 
+ VLSR_LOOP_B2:  ST 0+I,A
+                
+                LD X,0+A_REG
+                LD A,0+RES_REG
+                
+                AND X,X,$FF
+                LSR X,X
+                AND A,A,$FF
+                
+                SUB 0,X,A
+                JNZ 0+ERR_VALU
+                
+                LD X,0+A_REG
+                LD A,0+RES_REG
+                
+                LSR X,X
+                LSR A,A
+                
+                LSR X,X
+                LSR A,A
+                
+                LSR X,X
+                LSR A,A
+                
+                LSR X,X
+                LSR A,A
+                
+                LSR X,X
+                LSR A,A
+                
+                LSR X,X
+                LSR A,A
+                
+                LSR X,X
+                LSR A,A
+                
+                LSR X,X
+                LSR A,A
+                 
+                ST 0+RES_REG,A
+                OR A,0,X
+                ST 0+A_REG,A
+                
+                LD A,0+I
+                INC A,A
+                SUB 0,A,4
+                JNZ 0+VLSR_LOOP_B2
+                
+                LD A,0+AKKU
+                INC A,A
+                SUB 0,A,k
+                JNZ 0+VLSR_LOOP_B
+                
+
+                ;vector and scalar commands simultaneous
+TEST_SIMUL:     OR A,0,DATA_V
+                VLD R0,0+A
+                OR A,0,DATA_V2
+                VLD R1,0+A
+                
+                LD X,0+DATA_A
+                LD Y,0+DATA_B
+                OR A,0,0
+                VADD.DW R2,R0,R1               
+                VADD.DW R3,R0,R1 | ADD A,X,Y
+                VSUB.DW R3,R3,R2
+                
+                OR Y,0,V_RES
+                VST 0+Y,R3
+                
+                LD X,0+ADD_RES
+                SUB 0,X,A
+                JNZ 0+ERR_SIMUL
+                
+                OR A,0,0
+ SIMUL_LOOP1:   LD X,A+V_RES
+                JNZ 0+ERR_SIMUL
+                INC A,A
+                SUB 0,A,k
+                JNZ 0+SIMUL_LOOP1
+                
+                LD X,0+DATA_A
+                LD Y,0+DATA_B
+                OR A,0,0
+                VXOR.DW R2,R0,R1               
+                VXOR.DW R3,R0,R1 | SUB A,X,Y
+                VSUB.DW R3,R3,R2
+                
+                OR Y,0,V_RES
+                VST 0+Y,R3
+                
+                LD X,0+SUB_RES
+                SUB 0,X,A
+                JNZ 0+ERR_SIMUL
+                
+                OR A,0,0
+ SIMUL_LOOP2:   LD X,A+V_RES
+                JNZ 0+ERR_SIMUL
+                INC A,A
+                SUB 0,A,k
+                JNZ 0+SIMUL_LOOP2
+                
+                
+                LD X,0+DATA_A
+                LD Y,0+DATA_B
+                OR A,0,0
+                VMOV R2,R0               
+                VMOV R3,R0 | AND A,X,Y
+                VSUB.DW R3,R3,R2
+                
+                OR Y,0,V_RES
+                VST 0+Y,R3
+                
+                LD X,0+AND_RES
+                SUB 0,X,A
+                JNZ 0+ERR_SIMUL
+                
+                OR A,0,0
+ SIMUL_LOOP3:   LD X,A+V_RES
+                JNZ 0+ERR_SIMUL
+                INC A,A
+                SUB 0,A,k
+                JNZ 0+SIMUL_LOOP3
+                
+TEST_VSHUF:     OR A,0,use_shuffle
+                JZ 0+NO_SHUFFLE
+                OR A,0,DATA_V
+                VLD R0,0+A
+                OR A,0,DATA_V2
+                VLD R1,0+A
+ 
+ TEST_VSHUF1:   VSHUF R2,R0,R1,00101000011011 ;vwidth + ssss + vn
+                OR A,0,V_RES
+                VST 0+A,R2
+                
+                LD X,A+0
+                LD A,0+RES_VSHUF_8L
+                SUB 0,A,X
+                JNZ 0+ERR_VSHUF
+                
+                OR A,0,V_RES
+                LD Y,A+1
+                LD A,0+RES_VSHUF_8H
+                SUB 0,A,Y
+                JNZ 0+ERR_VSHUF
+ 
+ TEST_VSHUF2:   VSHUF R2,R0,R1,01110010110001 ;vwidth + ssss + vn
+                OR A,0,V_RES
+                VST 0+A,R2
+                
+                OR A,0,0
+                LD X,A+V_RES
+                OR A,0,1
+                LD Y,A+DATA_V
+                SUB 0,X,Y
+                JNZ 0+ERR_VSHUF
+                
+                OR A,0,1
+                LD X,A+V_RES
+                OR A,0,0
+                LD Y,A+DATA_V
+                SUB 0,X,Y
+                JNZ 0+ERR_VSHUF
+                
+                OR A,0,2
+                LD X,A+V_RES
+                OR A,0,4
+                LD Y,A+DATA_V
+                SUB 0,X,Y
+                JNZ 0+ERR_VSHUF
+                
+                OR A,0,3
+                LD X,A+V_RES
+                OR A,0,3
+                LD Y,A+DATA_V
+                SUB 0,X,Y
+                JNZ 0+ERR_VSHUF
+                
+ TEST_VSHUF3:   VSHUF R2,R0,R1,10001101110010 ;vwidth + ssss + vn
+                OR A,0,V_RES
+                VST 0+A,R2
+                
+                OR A,0,0
+                LD X,A+V_RES
+                OR A,0,5
+                LD Y,A+DATA_V
+                SUB 0,X,Y
+                JNZ 0+ERR_VSHUF
+                
+                OR A,0,1
+                LD X,A+V_RES
+                OR A,0,6
+                LD Y,A+DATA_V
+                SUB 0,X,Y
+                JNZ 0+ERR_VSHUF
+                
+                OR A,0,2
+                LD X,A+V_RES
+                OR A,0,1
+                LD Y,A+DATA_V
+                SUB 0,X,Y
+                JNZ 0+ERR_VSHUF
+                
+                OR A,0,3
+                LD X,A+V_RES
+                OR A,0,2
+                LD Y,A+DATA_V
+                SUB 0,X,Y
+                JNZ 0+ERR_VSHUF
+                
+                OR A,0,4
+                LD X,A+V_RES
+                OR A,0,6
+                LD Y,A+DATA_V
+                SUB 0,X,Y
+                JNZ 0+ERR_VSHUF
+                
+                OR A,0,5
+                LD X,A+V_RES
+                OR A,0,7
+                LD Y,A+DATA_V
+                SUB 0,X,Y
+                JNZ 0+ERR_VSHUF
+                
+                OR A,0,6
+                LD X,A+V_RES
+                OR A,0,2
+                LD Y,A+DATA_V
+                SUB 0,X,Y
+                JNZ 0+ERR_VSHUF
+                
+                OR A,0,7
+                LD X,A+V_RES
+                OR A,0,3
+                LD Y,A+DATA_V
+                SUB 0,X,Y
+                JNZ 0+ERR_VSHUF
+                
+ TEST_VSHUF4:   VSHUF R2,R0,R1,11010100100111 ;vwidth + ssss + vn
+                OR A,0,V_RES
+                VST 0+A,R2
+                
+                OR A,0,0
+                LD X,A+V_RES
+                OR A,0,13
+                LD Y,A+DATA_V
+                SUB 0,X,Y
+                JNZ 0+ERR_VSHUF
+                
+                OR A,0,1
+                LD X,A+V_RES
+                OR A,0,14
+                LD Y,A+DATA_V
+                SUB 0,X,Y
+                JNZ 0+ERR_VSHUF
+                
+                OR A,0,2
+                LD X,A+V_RES
+                OR A,0,15
+                LD Y,A+DATA_V
+                SUB 0,X,Y
+                JNZ 0+ERR_VSHUF
+                
+                OR A,0,3
+                LD X,A+V_RES
+                OR A,0,16
+                LD Y,A+DATA_V
+                SUB 0,X,Y
+                JNZ 0+ERR_VSHUF
+                
+                ;--------------
+                
+                OR A,0,4
+                LD X,A+V_RES
+                OR A,0,4
+                LD Y,A+DATA_V
+                SUB 0,X,Y
+                JNZ 0+ERR_VSHUF
+                
+                OR A,0,5
+                LD X,A+V_RES
+                OR A,0,5
+                LD Y,A+DATA_V
+                SUB 0,X,Y
+                JNZ 0+ERR_VSHUF
+                
+                OR A,0,6
+                LD X,A+V_RES
+                OR A,0,6
+                LD Y,A+DATA_V
+                SUB 0,X,Y
+                JNZ 0+ERR_VSHUF
+                
+                OR A,0,7
+                LD X,A+V_RES
+                OR A,0,7
+                LD Y,A+DATA_V
+                SUB 0,X,Y
+                JNZ 0+ERR_VSHUF
+                
+                ;--------------
+                
+                OR A,0,8
+                LD X,A+V_RES
+                OR A,0,9
+                LD Y,A+DATA_V
+                SUB 0,X,Y
+                JNZ 0+ERR_VSHUF
+                
+                OR A,0,9
+                LD X,A+V_RES
+                OR A,0,10
+                LD Y,A+DATA_V
+                SUB 0,X,Y
+                JNZ 0+ERR_VSHUF
+                
+                OR A,0,10
+                LD X,A+V_RES
+                OR A,0,11
+                LD Y,A+DATA_V
+                SUB 0,X,Y
+                JNZ 0+ERR_VSHUF
+                
+                OR A,0,11
+                LD X,A+V_RES
+                OR A,0,12
+                LD Y,A+DATA_V
+                SUB 0,X,Y
+                JNZ 0+ERR_VSHUF
+                
+                ;--------------
+                
+                OR A,0,12
+                LD X,A+V_RES
+                OR A,0,0
+                LD Y,A+DATA_V
+                SUB 0,X,Y
+                JNZ 0+ERR_VSHUF
+                
+                OR A,0,13
+                LD X,A+V_RES
+                OR A,0,1
+                LD Y,A+DATA_V
+                SUB 0,X,Y
+                JNZ 0+ERR_VSHUF
+                
+                OR A,0,14
+                LD X,A+V_RES
+                OR A,0,2
+                LD Y,A+DATA_V
+                SUB 0,X,Y
+                JNZ 0+ERR_VSHUF
+                
+                OR A,0,15
+                LD X,A+V_RES
+                OR A,0,3
+                LD Y,A+DATA_V
+                SUB 0,X,Y
+                JNZ 0+ERR_VSHUF
+           
+ NO_SHUFFLE:     NOP
+
+TEST_VMUL:      OR A,0,use_mul
+                JZ 0+NO_VMUL
+                
+                ;16 bit
+                VMUL.W R2,R0,R1
+                OR A,0,V_RES
+                VST 0+A,R2
+                
+                OR A,0,0
+ VMUL_LOOP_W:   LD X,A+DATA_V
+                LD Y,A+DATA_V2
+                MUL X,X,Y
+                LD Y,A+V_RES
+                SUB 0,X,Y
+                JNZ 0+ERR_VALU
+                INC A,A
+                SUB 0,A,k
+                JNZ 0+VMUL_LOOP_W 
+
+                ;8 bit
+                VMUL.B R2,R0,R1
+                OR A,0,V_RES
+                VST 0+A,R2
+                
+                OR A,0,0
+ VMUL_LOOP_B:   LD X,A+DATA_V   ;high word
+                LD Y,A+DATA_V2
+                AND X,X,$FF
+                AND Y,Y,$FF
+                MUL X,X,Y                
+                LD Y,A+V_RES
+                AND Y,Y,$FFFF
+                SUB 0,X,Y
+                JNZ 0+ERR_VALU
+                
+                LD X,A+DATA_V               ;low word
+                LD Y,A+DATA_V2
+                
+                ST 0+AKKU,A
+                OR A,0,0
+ VMUL_LOOP_B2:  LSR X,X
+                LSR Y,Y
+                INC A,A
+                SUB 0,A,16
+                JNZ 0+VMUL_LOOP_B2
+                AND X,X,$FF
+                AND Y,Y,$FF
+                MUL X,X,Y
+                
+                LD A,0+AKKU
+                LD Y,A+V_RES
+                
+                OR A,0,0
+ VMUL_LOOP_B3:  LSR Y,Y
+                INC A,A
+                SUB 0,A,16
+                JNZ 0+VMUL_LOOP_B3
+                
+                SUB 0,X,Y
+                JNZ 0+ERR_VALU
+                
+                LD A,0+AKKU
+                INC A,A
+                SUB 0,A,k
+                JNZ 0+VMUL_LOOP_B
+ NO_VMUL:       NOP
+ 
+TEST_VMOLR:     OR A,0,use_mul
+                JZ 0+NO_VMOLR
+                
+                OR A,0,DATA_V
+                VLD R0,0+A
+                OR A,0,DATA_V2
+                VLD R1,0+A
+                
+                VMOL R2,R0
+                OR A,0,V_RES
+                VST 0+A,R2
+ 
+                OR A,0,0
+ VMOL_LOOP:     LD X,A+V_RES
+                LD Y,A+DATA_V2
+                SUB 0,X,Y
+                JNZ 0+ERR_VMOLR
+                SUB 0,A,k
+                JNZ 0+VMOL_LOOP
+                
+                VMOR R2,R1
+                OR A,0,V_RES
+                VST 0+A,R2
+                
+                OR A,0,0
+ VMOR_LOOP:     LD X,A+V_RES
+                LD Y,A+DATA_V
+                SUB 0,X,Y
+                JNZ 0+ERR_VMOLR
+                SUB 0,A,k
+                JNZ 0+VMOR_LOOP
+                
+ NO_VMOLR:      NOP
+ 
+FINISH:         JMP 0+FINISH       
+        
+ERR_SCALAR:     HALT
+ERR_COOP:       HALT
+ERR_VECTOR:     HALT
+ERR_VALU:       HALT
+ERR_SIMUL:      HALT
+ERR_VSHUF:      HALT
+ERR_VMOLR:      HALT
+
+AKKU:           DC 0
+CARRY:          DC 0 
+X_REG:          DC 0
+Y_REG:          DC 0
+I:              DC 0
+
+A_REG:          DC 0
+B_REG:          DC 0
+RES_REG:        DC 0
+        
