@@ -1,0 +1,142 @@
+###############################################################################
+#
+# Actual Synthesis Script
+#
+# This script does the actual synthesis
+#
+# Author: Rudolf Usselmann
+#         rudi@asics.ws
+#
+# Revision:
+# 3/7/01 RU Initial Sript
+#
+#
+###############################################################################
+
+# ==============================================
+# Setup Design Parameters
+source ../bin/design_spec.dc
+
+# ==============================================
+# Setup Libraries
+source ../bin/lib_spec.dc
+
+# ==============================================
+# Setup IO Files
+
+append log_file			../log/$active_design "_cmp.log"
+append pre_comp_db_file		../out/$design_name "_pre.db"
+append post_comp_db_file	../out/$design_name ".db"
+append post_syn_verilog_file	../out/$design_name "_ps.v"
+set junk_file /dev/null
+
+sh rm -f $log_file
+
+# ==============================================
+# Setup Misc Variables
+
+set hdlin_enable_vpp true       ;# Important - this enables 'ifdefs
+
+# ==============================================
+# Read Design
+
+echo "+++++++++ Reading Design ..."                             >> $log_file
+read_file $pre_comp_db_file                                     >> $log_file
+
+# ==============================================
+# Operating conditions
+
+echo "+++++++++ Setting up Operation Conditions ..."            >> $log_file
+current_design $design_name
+set_operating_conditions WORST                                  >> $log_file
+
+# ==============================================
+# Setup Clocks and Resets
+
+echo "+++++++++ Setting up Clocks ..."                           >> $log_file
+
+set_drive 0 [find port {clk}]
+ 
+# !!! Clock !!!
+set clock_period 2.5
+create_clock -period $clock_period clk
+set_clock_skew -uncertainty 0.1 clk
+set_clock_transition 0.2 clk
+set_dont_touch_network clk
+ 
+# ==============================================
+# Setup IOs
+
+echo "+++++++++ Setting up IOs ..."                             >> $log_file
+
+# Need to spell out external IOs
+
+set_driving_cell -cell NAND2D2 -pin Z [all_inputs]              >> $junk_file
+set_load 0.2 [all_outputs]
+
+set_input_delay -max 1 -clock clk [all_inputs]
+set_output_delay -max 1 -clock clk [all_outputs]
+
+# ==============================================
+# Setup Area Constrains
+set_max_area 0.0
+
+# ==============================================
+# Force Ultra
+set_ultra_optimization -f
+set compile_new_optimization true
+
+# ==============================================
+# Compile Design
+
+echo ""								>> $log_file
+echo "++++++++++++++++++++++++++++++++++++++++++++++"		>> $log_file
+echo "+++++++++ Timing Loops Report        +++++++++"		>> $log_file
+echo "++++++++++++++++++++++++++++++++++++++++++++++"		>> $log_file
+echo ""								>> $log_file
+report_timing -loops -max_path 20				>> $log_file
+
+echo ""								>> $log_file
+echo "++++++++++++++++++++++++++++++++++++++++++++++"		>> $log_file
+echo "+++++++++ Starting Compile           +++++++++"		>> $log_file
+echo "++++++++++++++++++++++++++++++++++++++++++++++"		>> $log_file
+echo ""								>> $log_file
+
+set_wire_load_model -name suggested_160K [find design *]
+set_balance_registers true
+compile -boundary_optimization -ungroup_all
+optimize_registers -period 0
+compile -incremental_mapping -map_effort high -area_effort high -boundary_optimization -ungroup_all
+
+# ==============================================
+# Write Out the optimized design
+
+echo ""								>> $log_file
+echo "++++++++++++++++++++++++++++++++++++++++++++++"		>> $log_file
+echo "+++++++++ Saving Optimized Design    +++++++++"		>> $log_file
+echo "++++++++++++++++++++++++++++++++++++++++++++++"		>> $log_file
+echo ""								>> $log_file
+write_file -hierarchy -format verilog	-output $post_syn_verilog_file
+write_file -hierarchy -format db	-output $post_comp_db_file
+
+# ==============================================
+# Create Some Basic Reports
+
+echo ""								>> $log_file
+echo "++++++++++++++++++++++++++++++++++++++++++++++"		>> $log_file
+echo "+++++++++ Reporting Final Results    +++++++++"		>> $log_file
+echo "++++++++++++++++++++++++++++++++++++++++++++++"		>> $log_file
+echo ""								>> $log_file
+report_timing   -path full_clock -nworst 10 -nets               \
+                -transition_time -capacitance -attributes       \
+                -sort_by slack                                  >> $log_file
+
+echo ""								>> $log_file
+echo "++++++++++++++++++++++++++++++++++++++++++++++"		>> $log_file
+echo "+++++++++ Area Report                +++++++++"		>> $log_file
+echo "++++++++++++++++++++++++++++++++++++++++++++++"		>> $log_file
+echo ""								>> $log_file
+
+report_area                                                     >> $log_file
+quit
+
