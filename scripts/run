@@ -1,0 +1,72 @@
+#!/usr/bin/env python
+# Copyright (c) 2004 Guy Hutchison (ghutchis@opencores.org)
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included
+# in all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+# EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+# MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+# IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+# CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+# TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+import sys, os, getopt
+
+def print_help ():
+    print "Usage: run [-th] [-d ###] <testname>"
+    print "  -t : instruction decode (trace)"
+    print "  -d : enable dumping start at time ###"
+    print "  -c : enable code coverage"
+    print "  -h : option help (this list)"
+    sys.exit(0)
+
+# parse command line options
+# t : instruction trace
+# d : dump starting at
+# h : help
+(options, args) = getopt.getopt (sys.argv[1:], "thcd:")
+if len(args) == 0:
+    print_help()
+testname = args[0]
+
+#simulator = "vcs +v2k -full64 -R -I +define+VCS=1 "
+simulator = "iverilog "
+
+#filelist = " -f env/tb.vf"
+filelist = " -f env/tb_zmem.vf"
+#testdef  = " +incdir+env -l logs/%s.log +define+DUMPFILE_NAME=\\\"logs/%s.dump\\\" +define+PROGRAM_FILE=\\\"tests/%s.vmem\\\"" % (testname, testname, testname)
+testdef  = " +incdir+env -D DUMPFILE_NAME=\\\"logs/%s.dump\\\" -D PROGRAM_FILE=\\\"tests/%s.vmem\\\"" % (testname, testname)
+
+for option in options:
+    if option[0] == "-t":
+        print "Adding TV80_INSTRUCTION_DECODE"
+        testdef += " +define+TV80_INSTRUCTION_DECODE=1"
+    elif option[0] == "-d":
+        testdef += " +define+DUMP_START=%s" % option[1]
+    elif option[0] == "-c":
+        # enable VCS code coverage
+        testdef += " -cm line+branch -cm_dir cov/"+testname+" -cm_hier env/cov.vf"
+    elif option[0] == "-h":
+        print_help()
+    else:
+        print_help()
+
+os.chdir ("tests")
+os.system ("make %s.vmem" % testname)
+os.chdir ("..")
+
+command = simulator + filelist + testdef
+
+print "command:",command
+os.system (command)
+os.system ("./a.out")
+

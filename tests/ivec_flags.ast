@@ -1,0 +1,147 @@
+; test of interrupt vector flags
+;
+; initializes a memory region and then transfers that region
+; to an accumulator
+
+    .module otir
+
+;--------------------------------------------------------
+; special function registers
+;--------------------------------------------------------
+_sim_ctl_port	=	0x0080
+_msg_port	=	0x0081
+_timeout_port	=	0x0082
+_max_timeout_low	=	0x0083
+_max_timeout_high	=	0x0084
+_intr_cntdwn	=	0x0090
+_cksum_value    =       0x0091
+_cksum_accum    =       0x0092
+_inc_on_read    =       0x0093
+
+    .area INIT (ABS)
+    .org  0
+
+    jp      init
+
+
+init:
+    ld      sp, #0xffff
+
+    ;--------------------------------------------------
+    ; test S flag
+
+    ; test for s set on negative values
+    ld      a, #0xff
+    ld      i, a
+    ld      a, i   ; S should be set
+    jp      p, test_fail
+
+    ld	    a, #0xff
+    ld	    r, a
+    ld      a, r   ; S should be set
+    jp      p, test_fail
+
+    ; test for s clear on positive values
+    ld      a, #0x20
+    ld      i, a
+    ld      a, i   ; S should be clear
+    jp      m, test_fail
+
+    ; test for s clear on positive values
+    ld      a, #0x20
+    ld      r, a
+    ld      a, r   ; S should be clear
+    jp      m, test_fail
+
+    
+    ;--------------------------------------------------
+    ; test Z flag
+
+    ; test for z set on zero values
+    ld      a, #0
+    ld      i, a
+    ld      a, i   ; S should be set
+    jp      nz, test_fail
+
+    ld	    a, #0
+    ld	    r, a
+    ld      a, r   ; S should be set
+    jp      nz, test_fail
+
+    ; test for s clear on positive values
+    ld      a, #0x20
+    ld      i, a
+    ld      a, i   ; S should be clear
+    jp      z, test_fail
+
+    ; test for s clear on positive values
+    ld      a, #0x20
+    ld      r, a
+    ld      a, r   ; S should be clear
+    jp      z, test_fail
+
+    ;--------------------------------------------------
+    ; test H flag
+
+    ; by spec the H flag is not in the flags register,
+    ; so this bit is difficult to test
+    
+    ;--------------------------------------------------
+    ; test P/V flag
+
+    ; TBD
+
+    ;--------------------------------------------------
+    ; test N flag
+
+    neg	              ; sets the N flag
+    ld      a, i      ; clears N flag
+    push    af
+    pop	    bc        ; N should be bit 4 of C
+    ld	    a, c
+    and	    #0x10
+    jp	    nz, test_fail
+
+    neg	              ; sets the N flag
+    ld      a, r      ; clears N flag
+    push    af
+    pop	    bc        ; N should be bit 4 of C
+    ld	    a, c
+    and	    #0x10
+    jp	    nz, test_fail
+
+    ;--------------------------------------------------
+    ; test C flag
+    ; should not be affected by this op
+
+    scf
+    ld	    a, i
+    ld      a, r
+    jp	    nc, test_fail
+
+    ccf
+    ld	    a, i
+    ld      a, r
+    jp	    c, test_fail
+
+test_pass:
+    ;; finish simulation with test passed
+    ld      a, #1
+    out     (_sim_ctl_port), a
+    halt
+
+test_fail:
+    ld      a, #2
+    out     (_sim_ctl_port), a
+    ret
+
+reset_timeout:
+    ld      a, #2
+    out     (_timeout_port), a
+    ret
+    
+    .org    0x8000
+
+dbuf:
+    .ds     256
+

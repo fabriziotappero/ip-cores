@@ -1,0 +1,1168 @@
+; Test of load opcodes
+;
+; Goes through most varieties of load opcode and tests for
+; correct behavior.
+
+    .module load_optest
+
+;--------------------------------------------------------
+; special function registers
+;--------------------------------------------------------
+_sim_ctl_port	=	0x0080
+_msg_port	=	0x0081
+_timeout_port	=	0x0082
+_max_timeout_low	=	0x0083
+_max_timeout_high	=	0x0084
+_intr_cntdwn	=	0x0090
+_cksum_value    =       0x0091
+_cksum_accum    =       0x0092
+_inc_on_read    =       0x0093
+stack_end       =       0xFFFF
+
+    .area INIT (ABS)
+    .org  0
+
+    jp      init
+
+
+init:
+    ld      sp, #stack_end
+    jp      start
+
+
+passed:
+                ld      a, #0x1
+                out     (_sim_ctl_port), a
+                halt
+
+failed:
+                ld      a, #0x2
+                out     (_sim_ctl_port), a
+		halt
+
+
+
+
+	;; subroutine to print a message
+	;; called from within the "print" macro
+	;; expects address to be printed in hl
+	;; preserves all other registers
+print_sub:
+	push	bc
+	ld	b, a
+
+print_sub_loop:	
+	ld	a, (hl)
+	cp	#0x0
+	jp	z, print_sub_exit
+	out	(_msg_port), a
+	inc	hl
+	jp	print_sub_loop
+	
+print_sub_exit:
+	ld	a, b
+	pop	bc
+	ret
+
+	;; print a hex number between 0-255, stored in the A register
+print_number:
+	push	bc
+	ld	b, a		; store number to be printed in b
+
+	and	#0xf0
+	sra	a
+	sra	a
+	sra	a
+	sra	a
+	cp	a, #10
+	jp	p, alpha_0
+	add	#48		; ordinal value of '0'
+	out	(_msg_port), a
+	jp	second_digit
+alpha_0:
+	add	#55              ; 'A' - 10
+	out	(_msg_port), a
+
+second_digit:	
+	ld	a, b
+	and	#0x0f
+	
+	cp	a, #10
+	jp	p, alpha_1
+	add	#48
+	out	(_msg_port), a
+	jp	print_number_exit
+
+alpha_1:
+	add	#55              ; 'A' - 10
+	out	(_msg_port), a
+
+print_number_exit:	
+	pop	bc
+	ret
+
+fail_text: .ascii   "Test failed at checkpoint #"
+	.db	#0x00
+
+; expects failing message number in B
+fail_routine:
+	ld	hl, #fail_text
+	call	print_sub	; print out boilerplate text
+        ld      a, b
+
+	call	print_number	; print out error number
+
+	ld	a, #0x0a		; print carriage return
+	out	(_msg_port), a
+	jp      failed
+	
+
+
+starting_test:  .ascii "Starting test"
+	.db 0x0A
+        .db 0x00
+
+error_cnt:
+        .db     0
+
+	;; Ordering of segments for the linker.
+	.area	_HOME
+	.area	_CODE
+        .area   _GSINIT
+        .area   _GSFINAL
+        
+	.area	_DATA
+        .area   _BSS
+        .area   _HEAP
+
+        .area   _CODE
+
+;------------------------------------------------------------
+;   Beginning of test
+;------------------------------------------------------------
+
+start:
+
+		ld      hl, #starting_test
+                call    print_sub
+
+	        ld      a, #1
+		ld	hl,#error_cnt
+		ld	(hl),a			;clear error count
+nop_1:		nop
+		nop
+		;print "Starting ld tests"
+ld_167:		ld	a,#0x55
+		cp	#0x55
+		jr	z,ld_1
+	ld	b, #167
+	jp	fail_routine
+		
+ld_1:		ld	b,#0x7F
+		ld	a,#0x7F
+		cp	b
+		jr	z,ld_2
+	ld	b, #1
+	jp	fail_routine
+ld_2:		ld	c,#0x80
+		ld	a,#0x80
+		cp	c
+		jr	z,ld_3
+	ld	b, #2
+	jp	fail_routine
+ld_3:		ld	d,#0xAA
+		ld	a,#0xAA
+		cp	d
+		jr	z,ld_4
+	ld	b, #3
+	jp	fail_routine
+ld_4:		ld	e,#0x55
+		ld	a,#0x55
+		cp	e
+		jr	z,ld_5
+	ld	b, #4
+	jp	fail_routine
+ld_5:		ld	h,#0x7F
+		ld	a,#0x7F
+		cp	h
+		jr	z,ld_6
+	ld	b, #5
+	jp	fail_routine
+ld_6:		ld	l,#0x80
+		ld	a,#0x80
+		cp	l
+		jr	z,ld_7
+	ld	b, #6
+	jp	fail_routine
+ld_7:		ld	a,#0x55
+		ld	b,a
+		cp	b
+		jr	z,ld_8
+	ld	b, #7
+	jp	fail_routine
+ld_8:		ld	c,b
+		cp	c
+		jr	z,ld_9
+	ld	b, #8
+	jp	fail_routine
+ld_9:		ld	d,c
+		cp	d
+		jr	z,ld_10
+	ld	b, #9
+	jp	fail_routine
+ld_10:		ld	e,d
+		cp	e
+		jr	z,ld_11
+	ld	b, #10
+	jp	fail_routine
+ld_11:		ld	h,e
+		cp	h
+		jr	z,ld_12
+	ld	b, #11
+	jp	fail_routine
+ld_12:		ld	l,h
+		cp	l
+		jr	z,ld_13
+	ld	b, #12
+	jp	fail_routine
+ld_13:		ld	l,#0x80
+		ld	a,l
+		cp	l
+		jr	z,ld_14
+	ld	b, #13
+	jp	fail_routine
+ld_14:		ld	h,l
+		cp	h
+		jr	z,ld_15
+	ld	b, #14
+	jp	fail_routine
+ld_15:		ld	e,h
+		cp	e
+		jr	z,ld_16
+	ld	b, #15
+	jp	fail_routine
+ld_16:		ld	d,e
+		cp	d
+		jr	z,ld_17
+	ld	b, #16
+	jp	fail_routine
+ld_17:		ld	c,d
+		cp	c
+		jr	z,ld_18
+	ld	b, #17
+	jp	fail_routine
+ld_18:		ld	b,c
+		cp	b
+		jr	z,ld_19
+	ld	b, #18
+	jp	fail_routine
+ld_19:		ld	hl,#var1
+		ld	a,(hl)
+		cp	#0xFF
+		jr	z,ld_20
+	ld	b, #19
+	jp	fail_routine
+ld_20:		ld	hl,#var2
+		ld	a,#0x55
+		ld	b,(hl)
+		cp	b
+		jr	z,ld_21
+                ld      a, #20
+                jp      fail_routine
+	ld	b, #20
+	jp	fail_routine
+ld_21:		ld	hl,#var1
+		ld	c,(hl)
+		ld	a,(hl)
+		cp	c
+		jr	z,ld_22
+	ld	b, #21
+	jp	fail_routine
+ld_22:		ld	hl,#var2
+		ld	d,(hl)
+		ld	a,(hl)
+		cp	d
+		jr	z,ld_23
+	ld	b, #22
+	jp	fail_routine
+ld_23:		ld	hl,#var1
+		ld	e,(hl)
+		ld	a,(hl)
+		cp	e
+		jr	z,ld_24
+	ld	b, #23
+	jp	fail_routine
+ld_24:		ld	hl,#var2
+		ld	a,(hl)
+		ld	h,(hl)
+		cp	h
+		jr	z,ld_25
+	ld	b, #24
+	jp	fail_routine
+ld_25:		ld	hl,#var1
+		ld	a,(hl)
+		ld	l,(hl)
+		cp	l
+		jr	z,ld_26
+	ld	b, #25
+	jp	fail_routine
+ld_26:		ld	ix,#var3
+		ld	a,-2(ix)
+		cp	#0xFF
+		jr	z,ld_27
+	ld	b, #26
+	jp	fail_routine
+ld_27:		ld	a,2(ix)
+		cp	#0x7F
+		jr	z,ld_28
+	ld	b, #27
+	jp	fail_routine
+ld_28:		ld	a,-1(ix)
+		ld	b,-1(ix)
+		cp	b
+		jr	z,ld_29
+	ld	b, #28
+	jp	fail_routine
+ld_29:		cp	#0x55
+		jr	z,ld_30
+	ld	b, #29
+	jp	fail_routine
+ld_30:		ld	a,1(ix)
+		ld	c,1(ix)
+		cp	c
+		jr	z,ld_31
+	ld	b, #30
+	jp	fail_routine
+ld_31:		cp	#0xAA
+		jr	z,ld_32
+	ld	b, #31
+	jp	fail_routine
+ld_32:		ld	d,-2(ix)
+		ld	a,-2(ix)
+		cp	d
+		jr	z,ld_33
+	ld	b, #32
+	jp	fail_routine
+ld_33:		cp	#0xFF
+		jr	z,ld_34
+	ld	b, #33
+	jp	fail_routine
+ld_34:		ld	e,2(ix)
+		ld	a,2(ix)
+		cp	e
+		jr	z,ld_35
+	ld	b, #34
+	jp	fail_routine
+ld_35:		cp	#0x7F
+		jr	z,ld_36
+	ld	b, #35
+	jp	fail_routine
+ld_36:		ld	h,(ix)
+		ld	a,(ix)
+		cp	h
+		jr	z,ld_37
+	ld	b, #36
+	jp	fail_routine
+ld_37:		cp	#0x80
+		jr	z,ld_38
+	ld	b, #37
+	jp	fail_routine
+ld_38:		ld	l,-1(ix)
+		ld	a,-1(ix)
+		cp	l
+		jr	z,ld_39
+	ld	b, #38
+	jp	fail_routine
+ld_39:		cp	#0x55
+		jr	z,ld_40
+	ld	b, #39
+	jp	fail_routine
+ld_40:		ld	iy,#var3
+		ld	a,-2(iy)
+		cp	#0xFF
+		jr	z,ld_41
+	ld	b, #40
+	jp	fail_routine
+ld_41:		ld	a,2(iy)
+		cp	#0x7F
+		jr	z,ld_42
+	ld	b, #41
+	jp	fail_routine
+ld_42:		ld	b,-1(iy)
+		ld	a,-1(iy)
+		cp	b
+		jr	z,ld_43
+	ld	b, #42
+	jp	fail_routine
+ld_43:		cp	#0x55
+		jr	z,ld_44
+	ld	b, #43
+	jp	fail_routine
+ld_44:		ld	c,1(iy)
+		ld	a,1(iy)
+		cp	c
+		jr	z,ld_45
+	ld	b, #44
+	jp	fail_routine
+ld_45:		cp	#0xAA
+		jr	z,ld_46
+	ld	b, #45
+	jp	fail_routine
+ld_46:		ld	d,-2(iy)
+		ld	a,-2(iy)
+		cp	d
+		jr	z,ld_47
+	ld	b, #46
+	jp	fail_routine
+ld_47:		cp	#0xFF
+		jr	z,ld_48
+	ld	b, #47
+	jp	fail_routine
+ld_48:		ld	e,2(iy)
+		ld	a,2(iy)
+		cp	e
+		jr	z,ld_49
+	ld	b, #48
+	jp	fail_routine
+ld_49:		cp	#0x7F
+		jr	z,ld_50
+	ld	b, #49
+	jp	fail_routine
+ld_50:
+                ld	h,(iy)
+		ld	a,(iy)
+		cp	h
+		jr	z,ld_51
+	ld	b, #50
+	jp	fail_routine
+ld_51:		cp	#0x80
+		jr	z,ld_52
+	ld	b, #51
+	jp	fail_routine
+ld_52:		ld	l,-2(iy)
+		ld	a,-2(iy)
+		cp	l
+		jr	z,ld_53
+	ld	b, #52
+	jp	fail_routine
+ld_53:		cp	#0xFF
+		jr	z,ld_54
+	ld	b, #53
+	jp	fail_routine
+ld_54:		ld	hl,#t_var1
+		ld	a,#0xAA+1
+		ld	(hl),a
+		ld	b,(hl)
+		cp	b
+		jr	z,ld_55
+	ld	b, #54
+	jp	fail_routine
+ld_55:		cp	#0xAA+1
+		jr	z,ld_56
+	ld	b, #55
+	jp	fail_routine
+ld_56:		ld	b,#0x80+1
+		ld	(hl),b
+		ld	a,(hl)
+		cp	b
+		jr	z,ld_57
+	ld	b, #56
+	jp	fail_routine
+ld_57:		cp	#0x80+1
+		jr	z,ld_58
+	ld	b, #57
+	jp	fail_routine
+ld_58:		ld	c,#0x55-1
+		ld	(hl),c
+		ld	a,(hl)
+		cp	c
+		jr	z,ld_59
+	ld	b, #58
+	jp	fail_routine
+ld_59:		cp	#0x55-1
+		jr	z,ld_60
+	ld	b, #59
+	jp	fail_routine
+ld_60:		ld	d,#0xFF-1
+		ld	(hl),d
+		ld	a,(hl)
+		cp	d
+		jr	z,ld_61
+	ld	b, #60
+	jp	fail_routine
+ld_61:		cp	#0xFF-1
+		jr	z,ld_62
+	ld	b, #61
+	jp	fail_routine
+ld_62:		ld	e,#0x55+1
+		ld	(hl),e
+		ld	a,(hl)
+		cp	e
+		jr	z,ld_63
+	ld	b, #62
+	jp	fail_routine
+ld_63:		cp	#0x55+1
+		jr	z,ld_64
+	ld	b, #63
+	jp	fail_routine
+ld_64:		ld	(hl),h
+		ld	a,(hl)
+		cp	h
+		jr	z,ld_65
+	ld	b, #64
+	jp	fail_routine
+ld_65:		cp	#0x80		;bjp  guess  >t_#var1
+		jr	z,ld_66
+	ld	b, #65
+	jp	fail_routine
+ld_66:		ld	(hl),l
+		ld	a,(hl)
+		cp	l
+		jr	z,ld_67
+	ld	b, #66
+	jp	fail_routine
+ld_67:		cp	a, #0x00		;bjp  guess <t_#var1
+		jr	z,ld_68
+	ld	b, #67
+	jp	fail_routine
+ld_68:		ld	ix,#t_var3
+		ld	a,#0x55
+		ld	-2(ix),a
+		ld	a,#0
+		ld	a,-2(ix)
+		cp	#0x55
+		jr	z,ld_69
+	ld	b, #68
+	jp	fail_routine
+ld_69:		ld	a,#0x80
+		ld	2(ix),a
+		ld	a,#0
+		ld	a,2(ix)
+		cp	#0x80
+		jr	z,ld_70
+	ld	b, #69
+	jp	fail_routine
+ld_70:		ld	b,#0x7F
+		ld	-1(ix),b
+		ld	a,-1(ix)
+		cp	b
+		jr	z,ld_71
+	ld	b, #70
+	jp	fail_routine
+ld_71:		cp	#0x7F
+		jr	z,ld_72
+	ld	b, #71
+	jp	fail_routine
+ld_72:		ld	c,#0xAA
+		ld	1(ix),c
+		ld	a,1(ix)
+		cp	c
+		jr	z,ld_73
+	ld	b, #72
+	jp	fail_routine
+ld_73:		cp	#0xAA
+		jr	z,ld_74
+	ld	b, #73
+	jp	fail_routine
+ld_74:		ld	d,#0x80
+		ld	(ix),d
+		ld	a,(ix)
+		cp	d
+		jr	z,ld_75
+	ld	b, #74
+	jp	fail_routine
+ld_75:		cp	#0x80
+		jr	z,ld_76
+	ld	b, #75
+	jp	fail_routine
+ld_76:		ld	e,#0x55+2
+		ld	-2(ix),e
+		ld	a,-2(ix)
+		cp	e
+		jr	z,ld_77
+	ld	b, #76
+	jp	fail_routine
+ld_77:		cp	#0x55+2
+		jr	z,ld_78
+	ld	b, #77
+	jp	fail_routine
+ld_78:		ld	h,#0xAA-2
+		ld	2(ix),h
+		ld	a,2(ix)
+		cp	h
+		jr	z,ld_79
+	ld	b, #78
+	jp	fail_routine
+ld_79:		cp	#0xAA-2
+		jr	z,ld_80
+	ld	b, #79
+	jp	fail_routine
+ld_80:		ld	l,#0xAA+2
+		ld	-1(ix),l
+		ld	a,-1(ix)
+		cp	l
+		jr	z,ld_81
+	ld	b, #80
+	jp	fail_routine
+ld_81:		cp	#0xAA+2
+		jr	z,ld_82
+	ld	b, #81
+	jp	fail_routine
+ld_82:		ld	iy,#t_var3
+		ld	a,#0xFF
+		ld	-2(iy),a
+		ld	a,#0
+		ld	a,-2(iy)
+		cp	#0xFF
+		jr	z,ld_83
+	ld	b, #82
+	jp	fail_routine
+ld_83:		ld	a,#0x7F
+		ld	2(iy),a
+		ld	a,#0
+		ld	a,2(iy)
+		cp	#0x7F
+		jr	z,ld_84
+	ld	b, #83
+	jp	fail_routine
+ld_84:		ld	b,#0x55
+		ld	-1(iy),b
+		ld	a,-1(iy)
+		cp	b
+		jr	z,ld_85
+	ld	b, #84
+	jp	fail_routine
+ld_85:		cp	#0x55
+		jr	z,ld_86
+	ld	b, #85
+	jp	fail_routine
+ld_86:		ld	c,#0xAA
+		ld	1(iy),c
+		ld	a,1(iy)
+		cp	c
+		jr	z,ld_87
+	ld	b, #86
+	jp	fail_routine
+ld_87:		cp	#0xAA
+		jr	z,ld_88
+	ld	b, #87
+	jp	fail_routine
+ld_88:		ld	d,#0x80
+		ld	(iy),d
+		ld	a,(iy)
+		cp	d
+		jr	z,ld_89
+	ld	b, #88
+	jp	fail_routine
+ld_89:		cp	#0x80
+		jr	z,ld_90
+	ld	b, #89
+	jp	fail_routine
+ld_90:		ld	e,#0xFF-2
+		ld	-2(iy),e
+		ld	a,-2(iy)
+		cp	e
+		jr	z,ld_91
+	ld	b, #90
+	jp	fail_routine
+ld_91:		cp	#0xFF-2
+		jr	z,ld_92
+	ld	b, #91
+	jp	fail_routine
+ld_92:		ld	h,#0x7F-3
+		ld	2(iy),h
+		ld	a,2(iy)
+		cp	h
+		jr	z,ld_93
+	ld	b, #92
+	jp	fail_routine
+ld_93:		cp	#0x7F-3
+		jr	z,ld_94
+	ld	b, #93
+	jp	fail_routine
+ld_94:		ld	l,#0x55-5
+		ld	-1(iy),l
+		ld	a,-1(iy)
+		cp	l
+		jr	z,ld_95
+	ld	b, #94
+	jp	fail_routine
+ld_95:		cp	#0x55-5
+		jr	z,ld_96
+	ld	b, #95
+	jp	fail_routine
+ld_96:		ld	hl,#t_var1
+		ld	(hl),#0x80+10
+		ld	a,(hl)
+		cp	#0x80+10
+		jr	z,ld_97
+	ld	b, #96
+	jp	fail_routine
+ld_97:		ld	ix,#t_var3
+		ld	-2(ix),#0x55-10
+		ld	a,-2(ix)
+		cp	#0x55-10
+		jr	z,ld_98
+	ld	b, #97
+	jp	fail_routine
+ld_98:		ld	2(ix),#0x55+10
+		ld	a,2(ix)
+		cp	#0x55+10
+		jr	z,ld_99
+	ld	b, #98
+	jp	fail_routine
+ld_99:		ld	iy,#t_var2
+		ld	-1(iy),#0x80+17
+		ld	a,-1(iy)
+		cp	#0x80+17
+		jr	z,ld_100
+	ld	b, #99
+	jp	fail_routine
+ld_100:
+                ld	1(iy),#0x80-17
+		ld	a,1(iy)
+		cp	#0x80-17
+		jr	z,ld_101
+	ld	b, #100
+	jp	fail_routine
+ld_101:		ld	hl,#t_var5
+		ld	bc,#t_var5
+		ld	(hl),#0xAA-10
+		ld	a,(bc)
+		cp	#0xAA-10
+		jr	z,ld_102
+	ld	b, #101
+	jp	fail_routine
+ld_102:		ld	hl,#t_var3
+		ld	de,#t_var3
+		ld	(hl),#0xAA+10
+		ld	a,(de)
+		cp	#0xAA+10
+		jr	z,ld_103
+	ld	b, #102
+	jp	fail_routine
+ld_103:		ld	hl,#t_var2
+		ld	(hl),#0x7F-25
+		ld	a,(t_var2)
+		cp	#0x7F-25
+		jr	z,ld_104
+	ld	b, #103
+	jp	fail_routine
+ld_104:		ld	hl,#t_var4
+		ld	bc,#t_var4
+		ld	a,#0x55-20
+		ld	(bc),a
+		ld	b,(hl)
+		cp	b
+		jr	z,ld_105
+	ld	b, #104
+	jp	fail_routine
+ld_105:		ld	a,b
+		cp	#0x55-20
+		jr	z,ld_106
+	ld	b, #105
+	jp	fail_routine
+ld_106:		ld	hl,#t_var5
+		ld	de,#t_var5
+		ld	a,#0x55+20
+		ld	(de),a
+		ld	c,(hl)
+		cp	c
+		jr	z,ld_107
+	ld	b, #106
+	jp	fail_routine
+ld_107:		ld	a,c
+		cp	#0x55+20
+		jr	z,ld_108
+	ld	b, #107
+	jp	fail_routine
+ld_108:		ld	hl,#t_var4
+		ld	a,#0xFF-24
+		ld	(t_var4),a
+		ld	e,(hl)
+		cp	e
+		jr	z,ld_109
+	ld	b, #108
+	jp	fail_routine
+ld_109:		ld	a,e
+		cp	#0xFF-24
+		jr	z,ld_110
+	ld	b, #109
+	jp	fail_routine
+
+; commented out ld_110 so test can continue
+; may depend on side-effect in original Z80
+ld_110:         ld      a, #0x55
+                jp      ld_125
+;ld_110:		ld	a,#0x55
+;		ld	i,a
+;		ld	a,#0
+;		ld	a,i
+;		jr	nz,ld_111
+	ld	b, #110
+	jp	fail_routine
+;ld_111:		jp	p,ld_112
+	ld	b, #111
+	jp	fail_routine
+;ld_112:		cp	#0x55
+;		jr	z,ld_113
+	ld	b, #112
+	jp	fail_routine
+;ld_113:		ld	a,#0x80
+;		ld	i,a
+;		ld	a,#0
+;		ld	a,i
+;		jr	nz,ld_114
+	ld	b, #113
+	jp	fail_routine
+;ld_114:		jp	m,ld_115
+	ld	b, #114
+	jp	fail_routine
+;ld_115:		cp	#0x80
+;		jr	z,ld_116
+	ld	b, #115
+	jp	fail_routine
+;ld_116:		ld	a,#0
+;		ld	i,a
+;		ld	a,#0x55
+;		ld	a,i
+;		jr	z,ld_125
+	ld	b, #116
+	jp	fail_routine
+;   refresh register not implemented    
+;   test for ie ?  
+;ld_117:		ld	a,#0x55
+;		ld	r,a
+;		ld	a,#0
+;		ld	a,r
+;		jp	p,ld_118
+;		inc_error_cnt
+;ld_118:		jr	nz,ld_119
+;		inc_error_cnt
+;ld_119:		ld	a,#0xFF
+;		ld	r,a
+;		ld	a,#0
+;		ld	a,r
+;		jp	m,ld_120
+;		inc_error_cnt
+;ld_120:		ld	a,4			;totally sequence dependent
+;		ld	r,a
+;		ld	a,#0x55
+;		ld	a,r
+;		jr	z,ld_121
+;		inc_error_cnt
+;ld_121:		ei				;set iff2
+;		ld	a,i
+;		jp	pe,ld_122		;iff2 was set
+;		inc_error_cnt
+;ld_122:		di				;clear iff2
+;		ld	a,i
+;		jp	po,ld_123		;iff2 was cleared
+;		inc_error_cnt
+;ld_123:		ei				;set iff2
+;		ld	a,r
+;		jp	pe,ld_124		;iff2 was set
+;		inc_error_cnt
+;ld_124:		di				;clear iff2
+;		ld	a,r
+;		jp	po,ld_125		;iff2 was cleared
+;		inc_error_cnt
+;
+ld_125:		ld	bc,#0x1234
+		ld	a, #0x12			;bjp  guess >data_1234
+		cp	b
+		jr	z,ld_126
+	ld	b, #125
+	jp	fail_routine
+ld_126:		ld	a, #0x34			;bjp  guess  <data_1234
+		cp	c
+		jr	z,ld_127
+	ld	b, #126
+	jp	fail_routine
+ld_127:		ld	de,#0x55aa
+		ld	a,#0x55
+		cp	d
+		jr	z,ld_128
+	ld	b, #127
+	jp	fail_routine
+ld_128:		ld	a,#0xAA
+		cp	e
+		jr	z,ld_129
+	ld	b, #128
+	jp	fail_routine
+ld_129:		ld	hl,#0x7Fff
+		ld	a,#0x7F
+		cp	h
+		jr	z,ld_130
+	ld	b, #129
+	jp	fail_routine
+ld_130:		ld	a,#0xFF
+		cp	l
+		jr	z,ld_131
+	ld	b, #130
+	jp	fail_routine
+ld_131:		ld	sp,#0xAA55
+		ld	hl,#0
+		add	hl,sp
+		ld	a,#0xAA
+		cp	h
+		jr	z,ld_132
+	ld	b, #131
+	jp	fail_routine
+ld_132:		ld	a,#0x55
+		cp	l
+		jr	z,ld_133
+	ld	b, #132
+	jp	fail_routine
+ld_133:		ld	ix,#0xFFff
+		ld	hl,#0
+		ld	sp,ix
+		add	hl,sp
+		ld	a,#0xFF
+		cp	h
+		jr	z,ld_134
+	ld	b, #133
+	jp	fail_routine
+ld_134:		cp	l
+		jr	z,ld_135
+	ld	b, #134
+	jp	fail_routine
+ld_135:		ld	iy,#0x1234
+		ld	hl,#0
+		ld	sp,iy
+		add	hl,sp
+		ld	a,#0x12      ;bjp was >data_1234
+		cp	h
+		jr	z,ld_136
+	ld	b, #135
+	jp	fail_routine
+ld_136:		ld	a,#0x34      ;bjp was >data_1234
+		cp	l
+		jr	z,ld_137
+	ld	b, #136
+	jp	fail_routine
+ld_137:		ld	hl,(#w_var2)   ;gth changed from ,(w_var2)
+		ld	a,#0x55
+		cp	h
+		jr	z,ld_138
+	ld	b, #137
+	jp	fail_routine
+ld_138:		ld	a,#0xAA
+		cp	l
+		jr	z,ld_139
+	ld	b, #138
+	jp	fail_routine
+ld_139:		ld	bc,(#w_var1)   ;gth changed from ,(w_var1)
+		ld	a,#0x12      ;bjp was >data_1234
+		cp	b
+		jr	z,ld_140
+	ld	b, #139
+	jp	fail_routine
+ld_140:		ld	a,#0x34      ;bjp was >data_1234
+		cp	c
+		jr	z,ld_141
+	ld	b, #140
+	jp	fail_routine
+ld_141:		ld	de,(w_var3)
+		ld	a,#0x7F
+		cp	d
+		jr	z,ld_142
+	ld	b, #141
+	jp	fail_routine
+ld_142:		ld	a,#0xFF
+		cp	e
+		jr	z,ld_143
+	ld	b, #142
+	jp	fail_routine
+ld_143:		ld	hl,(w_var4)
+		ld	a,#0x80
+		cp	h
+		jr	z,ld_144
+	ld	b, #143
+	jp	fail_routine
+ld_144:		ld	a,#0
+		cp	l
+		jr	z,ld_145
+	ld	b, #144
+	jp	fail_routine
+ld_145:		ld	sp,(w_var5)
+		ld	hl,#0
+		add	hl,sp
+		ld	a,#0xAA
+		cp	h
+		jr	z,ld_146
+	ld	b, #145
+	jp	fail_routine
+ld_146:		ld	a,#0x55
+		cp	l
+		jr	z,ld_147
+	ld	b, #146
+	jp	fail_routine
+ld_147:		ld	ix,(w_var6)
+		ld	hl,#0
+		ld	sp,ix
+		add	hl,sp
+		ld	a,#0xFF
+		cp	h
+		jr	z,ld_148
+	ld	b, #147
+	jp	fail_routine
+ld_148:		cp	l
+		jr	z,ld_149
+	ld	b, #148
+	jp	fail_routine
+ld_149:		ld	iy,(#w_var1)
+		ld	hl,#0
+		ld	sp,iy
+		add	hl,sp
+		ld	a,#0x12      ;bjp was >data_1234
+		cp	h
+		jr	z,ld_150
+	ld	b, #149
+	jp	fail_routine
+ld_150:		
+                ld      sp, #stack_end ; reset stack pointer to EOM
+                ld	a,#0x34      ;bjp was >data_1234
+		cp	l
+		jr	z,ld_151
+	ld	b, #150
+	jp	fail_routine
+ld_151:		ld	hl,#0x1234
+		ld	(#tw_var1),hl
+		ld	bc,(#tw_var1)
+		ld	a,#0x12      ;bjp was >data_1234
+		cp	b
+		jr	z,ld_152
+	ld	b, #151
+	jp	fail_routine
+ld_152:		ld	a,#0x34      ;bjp was >data_1234
+		cp	c
+		jr	z,ld_153
+	ld	b, #152
+	jp	fail_routine
+ld_153:		ld	bc,#0x55aa
+		ld	(#tw_var2),bc
+		ld	hl,(#tw_var2)
+		ld	a,#0x55
+		cp	h
+		jr	z,ld_154
+	ld	b, #153
+	jp	fail_routine
+ld_154:		ld	a,#0xAA
+		cp	l
+		jr	z,ld_155
+	ld	b, #154
+	jp	fail_routine
+ld_155:		ld	de,#0x7Fff
+		ld	(tw_var3),de
+		ld	hl,(tw_var3)
+		ld	a,#0x7F
+		cp	h
+		jr	z,ld_156
+	ld	b, #155
+	jp	fail_routine
+ld_156:		ld	a,#0xFF
+		cp	l
+		jr	z,ld_157
+	ld	b, #156
+	jp	fail_routine
+ld_157:		ld	hl,#0x8000
+		ld	(tw_var4),hl
+		ld	bc,(tw_var4)
+		ld	a,#0x80
+		cp	b
+		jr	z,ld_158
+	ld	b, #157
+	jp	fail_routine
+ld_158:		ld	a,#0
+		cp	c
+		jr	z,ld_159
+	ld	b, #158
+	jp	fail_routine
+ld_159:		ld	sp,#0xAA55
+		ld	(tw_var5),sp
+		ld	hl,(tw_var5)
+		ld	a,#0xAA
+		cp	h
+		jr	z,ld_160
+	ld	b, #159
+	jp	fail_routine
+ld_160:		ld	a,#0x55
+		cp	l
+		jr	z,ld_161
+	ld	b, #160
+	jp	fail_routine
+ld_161:		ld	ix,#0xFFff
+		ld	(tw_var6),ix
+		ld	hl,(tw_var6)
+		ld	a,#0xFF
+		cp	h
+		jr	z,ld_162
+	ld	b, #161
+	jp	fail_routine
+ld_162:		cp	l
+		jr	z,ld_163
+	ld	b, #162
+	jp	fail_routine
+ld_163:		ld	iy,#0x1234
+		ld	(tw_var7),iy
+		ld	hl,(tw_var7)
+		ld	a,#0x12      ;bjp was >data_1234
+		cp	h
+		jr	z,ld_164
+	ld	b, #163
+	jp	fail_routine
+ld_164:		ld	a,#0x34      ;bjp was >data_1234
+		cp	l
+		jr	z,ld_165
+	ld	b, #164
+	jp	fail_routine
+ld_165:		ld	hl,#0x55aa
+		ld	sp,hl
+		ld	hl,#0
+		add	hl,sp
+		ld	a,#0x55
+		cp	h
+		jr	z,ld_166
+	ld	b, #165
+	jp	fail_routine
+ld_166:		ld	a,#0xAA
+		cp	l
+		jr	z,end_of_test
+	ld	b, #166
+	jp	fail_routine
+end_of_test:
+
+        jp      passed
+
+
+var1:		.db	#0xFF
+var2:		.db	#0x55
+var3:		.db	#0x80
+var4:		.db	#0xAA
+var5:		.db	#0x7F
+
+w_var1:		.dw	#0x1234
+w_var2:		.dw	#0x55aa
+w_var3:		.dw	#0x7fff
+w_var4:		.dw	#0x8000
+w_var5:		.dw	#0xaa55
+w_var6:		.dw	#0xffff
+
+.area    _DATA
+
+
+t_var1:		.db	0
+t_var2:		.db	0
+t_var3:		.db	0
+t_var4:		.db	0
+t_var5:		.db	0
+
+
+tw_var1:	.dw	0
+tw_var2:	.dw	0
+tw_var3:	.dw	0
+tw_var4:	.dw	0
+tw_var5:	.dw	0
+tw_var6:	.dw	0
+tw_var7:	.dw	0
