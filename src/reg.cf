@@ -1,0 +1,43 @@
+(*
+     Single write port, dual read port register file
+
+     Copyright 2004 Ken Rose
+     All rights reserved
+*)
+
+-T
+is
+component T
+  +WritePort +WriteAddr +WriteEnable +ReadAddr1 +ReadAddr2
+  -ReadPort1 -ReadPort2
+with
+  Mkregs WriteEnables Registers RegWidth
+is
+  if width WriteAddr != width ReadAddr1 {error "Register address widths differ"} end
+  if width WriteAddr != width ReadAddr2 {error "Register address widths differ"} end
+  RegWidth <- width WritePort
+
+  component Mkregs +WE -Regs is
+    if width WE == 0
+       Regs <- []
+    else
+      local R Write is
+        Write <- 'lsb' WE
+        R <- {reg RegWidth WritePort}
+        {enable Write R}
+        Regs <- R.out :: {Mkregs ('msbs' WE) $}
+      end
+    end
+  end
+
+  WriteEnables <- {decoder WriteEnable WriteAddr $}
+  Registers <- {Mkregs WriteEnables $}
+  ReadPort1 <- ((WriteAddr '==' ReadAddr1) '&' WriteEnable) 'then' WritePort 'else' {mux ReadAddr1 Registers $}
+  ReadPort2 <- ((WriteAddr '==' ReadAddr2) '&' WriteEnable) 'then' WritePort 'else' {mux ReadAddr2 Registers $}
+
+{display '1' ({vector_of_string "Reg read addr1 is " $} '++' {bin_of_vector ReadAddr1 $} '++' {vector_of_string ", data1 is " $} '++' {hex_of_vector ReadPort1 $})}
+{display '1' ({vector_of_string "Reg read addr2 is " $} '++' {bin_of_vector ReadAddr2 $} '++' {vector_of_string ", data2 is " $} '++' {hex_of_vector ReadPort2 $})}
+{display WriteEnable ({vector_of_string "Reg write addr is " $} '++' {bin_of_vector WriteAddr $} '++' {vector_of_string ", data is " $} '++' {hex_of_vector WritePort $})}
+
+end
+

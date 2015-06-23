@@ -1,0 +1,462 @@
+(*
+     Pipeline for OpenRisc1200
+
+     Copyright 2004 Ken Rose
+     All rights reserved
+*)
+
+-T
+
+is
+
+component T
+  +IMem +DMem
+  +BusError +TimerIRQ +ExternIRQ +ITLBmiss +DTLBmiss
+  -Iaddr -Daddr -WriteData -WriteEnable -ReadEnable
+with
+  (* Pipeline components *)
+  ID_c EX_c MEM_c WB_c RegFile
+
+  (* Pipeline registers *)
+  IF_ID_PC
+  IF_ID_WriteLink
+  ID_EX
+  ID_IR
+  ID_EX_RA
+  ID_EX_RB
+  ID_EX_IR
+  ID_EX_MemOffset
+  ID_EX_ALUctl
+  ID_EX_CalcFlag
+  ID_EX_IM
+  ID_EX_UseIMM
+  ID_MEM_WriteEnable
+  ID_EX_WB_write_what
+  ID_EX_WB_write_enable
+  ID_EX_WB_Dest
+  ID_EX_SPROffset
+  ID_EX_LatchSPR
+  ID_EX_PC
+  C V A_fwd B_fwd
+
+  Flag
+  FlagOut
+
+  MEM_WB_ALU
+  MEM_WB_IR
+  MEM_WB_write_what
+  MEM_WB_write_enable
+  MEM_WB_Dest
+  MEM_WB_MemAddr
+  MEM_WB_SPR
+  MEM_WB_PC
+  MEM_WB_LatchSPR
+  MEM_WB_B
+
+  MemInteresting ALUinteresting HIinteresting SPRinteresting A B
+
+  WriteLink
+  FetchWasStalled
+
+  (* Instruction buffer for stalls *)
+  IRbuf
+  IRaddr
+  IR
+
+  (* Stage results *)
+  ID EX MEM WB
+
+  (* Register file results *)
+  Regs
+
+  (* SPRs *)
+  EPCR0
+  EEAR0
+  ESR0
+  SR
+  EX_WB_SPRindex
+  SPR
+  SPRindex
+  RFE
+
+is
+  (* Get the stages *)
+  ID_c  <- import "id.cf"
+  EX_c  <- import "ex.cf"
+  MEM_c <- import "mem.cf"
+  WB_c  <- import "wb.cf"
+
+  (* And the register file *)
+  RegFile <- import "reg.cf"
+
+  local TakeBranch BranchTarget StallForFlag StallForBranchDest Stall StallForMem is
+    (* Instruction Fetch *)
+    local NewPC PC Exception ExceptionAddr ExceptionRetPC InSlot is
+      {enable (ID.RunFetch '&' ('~' Stall)) {reg 32 NewPC PC}}
+      
+      Iaddr <- PC
+      {display '0' ({vector_of_string "Iaddr is "$} '++' {hex_of_vector Iaddr $})}
+      {display '0' ({vector_of_string "IRaddr is "$} '++' {hex_of_vector IRaddr.out $})}
+      {display '0' ({vector_of_string "IF_ID_PC is "$} '++' {hex_of_vector IF_ID_PC $})}
+      {display '0' ({vector_of_string "ID_EX_PC is "$} '++' {hex_of_vector ID_EX_PC $})}
+      {display '0' ({vector_of_string "MEM_WB_PC is "$} '++' {hex_of_vector MEM_WB_PC $})}
+      {display '0' ({vector_of_string "Exception is "$} '++' {bin_of_vector Exception $})}
+      {display '0' ({vector_of_string "BusError is "$} '++' {bin_of_vector BusError $})}
+      {display '0' ({vector_of_string "TimerIRQ is "$} '++' {bin_of_vector TimerIRQ $})}
+      {display '0' ({vector_of_string "ExternIRQ is "$} '++' {bin_of_vector ExternIRQ $})}
+      {display '0' ({vector_of_string "ITLBmiss is "$} '++' {bin_of_vector ITLBmiss $})}
+      {display '0' ({vector_of_string "DTLBmiss is "$} '++' {bin_of_vector DTLBmiss $})}
+      {display '0' ({vector_of_string "ID.IllInstr is "$} '++' {bin_of_vector ID.IllInstr $})}
+      {display '0' ({vector_of_string "ID.SysCall is "$} '++' {bin_of_vector ID.SysCall $})}
+      Exception <- BusError '|'
+                   TimerIRQ '|'
+		   ExternIRQ '|'
+		   ITLBmiss '|'
+		   DTLBmiss '|'
+		   ID.IllInstr '|'
+		   ID.SysCall
+      ExceptionAddr <- ITLBmiss    'then' '0x00000a00'
+                   'else' BusError    'then' '0x00000200'   (* FIXME distinguish I & D accesses *)
+		   'else' ID.IllInstr 'then' '0x00000700'
+		   'else' DTLBmiss    'then' '0x00000900'
+		   'else' ID.SysCall  'then' '0x00000c00'
+		   'else' TimerIRQ    'then' '0x00000500'
+		   'else' ExternIRQ   'then' '0x00000800'
+		   'else' '0x00000000'  (* Should never happen *)
+      InSlot <- '0'
+      ExceptionRetPC <- ITLBmiss    'then' InSlot 'then' '0x00000a00' 'else' '0x00000a00' 
+                    'else' BusError    'then' InSlot 'then' '0x00000200' 'else' '0x00000200'  (* FIXME distinguish I & D accesses *)
+		    'else' ID.IllInstr 'then' InSlot 'then' '0x00000700' 'else' '0x00000700'
+		    'else' DTLBmiss    'then' InSlot 'then' '0x00000900' 'else' '0x00000900'
+		    'else' ID.SysCall  'then' InSlot 'then' ID_EX_PC     'else' IRaddr.out    (* FIXME is this right? *)
+		    'else' TimerIRQ    'then' InSlot 'then' '0x00000500' 'else' '0x00000500'
+		    'else' ExternIRQ   'then' InSlot 'then' '0x00000800' 'else' '0x00000800'
+		    'else' '0x00000000'  (* Should never happen *)
+      NewPC <- {mux (TakeBranch '++' Exception) [(PC '+' '0x00000004')
+                                                 ExceptionAddr
+                                                 BranchTarget
+		                                 ExceptionAddr
+				       ] $}
+
+      local WriteSR WriteEPCR0 WriteESR0 is
+        WriteEPCR0 <- EX_WB_SPRindex '==' '0x0020' '&' MEM_WB_LatchSPR
+        WriteESR0 <- EX_WB_SPRindex '==' '0x0040' '&' MEM_WB_LatchSPR
+        {reg 32 (Exception 'then' ExceptionRetPC 'else' WriteEPCR0 'then' MEM_WB_B 'else' EPCR0) EPCR0}
+        {display ('0' '&' {regs 1 1 (Exception '|' WriteEPCR0) $}) ({vector_of_string "New EPCR0 is " $} '++' {hex_of_vector EPCR0 $})}
+        {reg 32 (Exception 'then' SR 'else' WriteESR0 'then' MEM_WB_B 'else' ESR0) ESR0}
+        SR <-   '0000'         (* context *)
+           '++' '00000000000'  (* reserved *)
+           '++' '0'            (* 16 SUMRA *)
+           '++' '1'            (* 15 fixed one *)
+           '++' '0'            (* 14 EPH *)
+           '++' '0'            (* 13 DSX *)
+           '++' '0'            (* 12 OVE *)
+           '++' V              (* 11 OV *)
+           '++' C              (* 10 CY *)
+           '++' Flag           (*  9 F *)
+           '++' '0'            (*  8 CE *)
+           '++' '0'            (*  7 LEE *)
+           '++' '0'            (*  6 IME *)
+           '++' '0'            (*  5 DME *)
+           '++' '0'            (*  4 ICE *)
+           '++' '0'            (*  3 DCE *)
+           '++' '0'            (*  2 IEE *)
+           '++' '0'            (*  1 TEE *)
+           '++' '0'            (*  0 supervisor mode *)
+        C <- {reg 1 (EX.Clatch 'then' EX.Cnew
+                           'else' WriteSR 'then' MEM_WB_SPR'[1]
+                           'else' RFE 'then' ESR0'[1]
+                           'else' C) $}
+        V <- {reg 1 (EX.Vlatch 'then' EX.Vnew
+                           'else' WriteSR 'then' MEM_WB_SPR'[2]
+                           'else' RFE 'then' ESR0'[2]
+                           'else' V) $}
+        WriteSR <- EX_WB_SPRindex '==' '0x0011' '&' MEM_WB_LatchSPR
+        EEAR0 <- '0x00000000'
+      end
+
+      (* Buffer the IMem result for stall handling *)
+      local WasException is
+        IRbuf <- {reg 32 IMem}
+        {enable ('~'FetchWasStalled) IRbuf}
+        IRaddr <- {reg 32 Iaddr}
+        {enable ('~'FetchWasStalled) IRaddr}
+
+        (* If we're just coming out of a stall, use the buffered instruction,
+           else just use the memory data *)
+        FetchWasStalled <- {reg 1 (('~'ID.RunFetch) '|' Stall) $}
+        WasException <- {reg 1 Exception $}
+        IR <- Exception '|' WasException 'then' '0x15000000' 'else' FetchWasStalled 'then' IRbuf.out 'else' IMem
+        {display '0' ({vector_of_string "IR is " $} '++' {hex_of_vector IR $})}
+        {display '0' ({vector_of_string "ID_IR is " $} '++' {hex_of_vector ID_IR $})}
+        {display '0' ({vector_of_string "ID_EX_IR is " $} '++' {hex_of_vector ID_EX_IR $})}
+        {display '0' ({vector_of_string "MEM_WB_IR is " $} '++' {hex_of_vector MEM_WB_IR $})}
+        {display '0' ({vector_of_string "FetchWasStalled is " $} '++' {bin_of_vector FetchWasStalled $})}
+      end
+    end
+
+    (* Branch handling *)
+    local
+      BranchOffset NewFlag BranchOp
+      IDMemInteresting IDALUinteresting IDHIinteresting IDSPRinteresting
+    is
+      BranchOffset <- ((IR'[25]) '#' 4) '++' IR'[25:0] '++' '00'
+      WriteLink <-   (IR'[31:26] '==' '000001')
+                 '|' (IR'[31:26] '==' '010010')
+
+      NewFlag <- ID.LatchFlag 'then' FlagOut 'else' Flag
+  {display ('0' '&' TakeBranch) ({vector_of_string "Branching, Flag is " $} '++' {bin_of_vector Flag $})}
+  {display ('0' '&' ID.LatchFlag) ({vector_of_string "Flag is " $} '++' {bin_of_vector Flag $})}
+  {display ('0' '&' ID.LatchFlag) ({vector_of_string "NewFlag is " $} '++' {bin_of_vector NewFlag $})}
+  {display ('0' '&' ID.LatchFlag) ({vector_of_string "FlagOut is " $} '++' {bin_of_vector FlagOut $})}
+  {display '0' ({vector_of_string "StallForBranchDest is " $} '++' {bin_of_vector StallForBranchDest $})}
+      TakeBranch <- (IR'[31:26] '==' '000011') '&' ('~' NewFlag)
+                '|' (IR'[31:26] '==' '000100') '&' NewFlag
+                '|' (IR'[31:26] '==' '000000')
+                '|' (IR'[31:26] '==' '000001')
+                '|' (IR'[31:26] '==' '010001')
+                '|' (IR'[31:26] '==' '010010')
+                '|' RFE
+      BranchOp <- (TakeBranch) 'then' IR'[31:28] 'else' {reg 4 (TakeBranch 'then' IR'[31:28] 'else' BranchOp) $}
+
+  {display '0' ({vector_of_string "Stall is " $} '++' {bin_of_vector (Stall '++' StallForFlag '++' StallForBranchDest '++' StallForMem) $})}
+      Stall <- StallForBranchDest '|' StallForFlag '|' StallForMem
+      StallForMem <-  (IR'[20:16] '==' ID_EX_IR'[25:21] '&' IDMemInteresting)
+		  '|' (IR'[15:11] '==' ID_EX_IR'[25:21] '&' IDMemInteresting)
+
+      (* If ID wants to write memory data & IR sets F and ID_IR's dest is IR's source *)
+      StallForFlag <- (ID.WB_write_what '!=' '0000') '&'
+			         (ID.WB_write_what '!=' '0111') '&'
+				 ID.WB_write_enable '&'
+				 ((ID_IR'[31:29] '==' '100') '&' (ID_IR'[31:26] '!=' '100111')) '&'
+                                 (IR'[31:26] '==' '111001') '&'
+				 ((ID_IR'[25:21] '==' IR'[20:16]) '|' (ID_IR'[25:21] '==' IR'[15:11]))
+      StallForBranchDest <- (TakeBranch 
+                              '&' (ID.WB_write_enable
+			        '&' (    IR'[20:16] '==' ID_IR'[25:21]  (* FIXME probably not needed *)
+			             '|' IR'[15:11] '==' ID_IR'[25:21]))
+			      '|' (IR'[31:28] '==' '0100') '&' '~'FetchWasStalled)
+			    (* If IR is a conditional branch & ID_IR changes F *)
+                            '|' ((IR'[31:26] '==' '000100' '|' IR'[31:26] '==' '000011')
+                                '&' (ID_IR'[31:26] '==' '110000' '|' ID_IR'[31:26] '==' '111001'))
+
+      IDMemInteresting <- (ID_EX_WB_write_what '!=' '0000') '&' (ID_EX_WB_write_what '!=' '0111') '&' ID_EX_WB_write_enable
+      IDALUinteresting <- (ID_EX_WB_write_what '==' '0000') '&' ID_EX_WB_write_enable
+      IDSPRinteresting <- (ID_EX_WB_write_what '==' '1000') '&' ID_EX_WB_write_enable
+      IDHIinteresting <- (ID_EX_WB_write_what '==' '0111') '&' ID_EX_WB_write_enable
+      local DM is
+        DM <- {WB_c.T DMem
+                      MEM_WB_ALU
+                      MEM_WB_IR
+                      MEM_WB_write_what
+                      MEM_WB_MemAddr
+                      MEM_WB_SPR
+                      $}
+        A_fwd <-  ID_IR'[20:16] '==' ID_EX_IR'[25:21] '&' IDALUinteresting 'then' EX.ALU
+          'else' ID_IR'[20:16] '==' ID_EX_IR'[25:21] '&' IDSPRinteresting 'then' MEM_WB_SPR
+          'else' ID_IR'[20:16] '==' ID_EX_IR'[25:21] '&' IDMemInteresting 'then' DM
+          'else' ID_IR'[20:16] '==' ID_EX_IR'[25:21] '&' IDHIinteresting 'then' (ID_EX_IR'[15:0] '++' ('0' '#' 16))
+          'else' ID_IR'[20:16] '==' MEM_WB_IR'[25:21] '&' ALUinteresting 'then' MEM_WB_ALU
+          'else' ID_IR'[20:16] '==' MEM_WB_IR'[25:21] '&' SPRinteresting 'then' MEM_WB_SPR
+          'else' ID_IR'[20:16] '==' MEM_WB_IR'[25:21] '&' MemInteresting 'then' WB.WD
+          'else' ID_IR'[20:16] '==' MEM_WB_IR'[25:21] '&' HIinteresting 'then' (MEM_WB_IR'[15:0] '++' ('0' '#' 16))
+          'else' Regs.ReadPort1
+        B_fwd <-  ID_IR'[15:11] '==' ID_EX_IR'[25:21] '&' IDALUinteresting 'then' EX.ALU
+          'else' ID_IR'[15:11] '==' ID_EX_IR'[25:21] '&' IDSPRinteresting 'then' MEM_WB_SPR
+          'else' ID_IR'[15:11] '==' ID_EX_IR'[25:21] '&' IDMemInteresting 'then' DM
+          'else' ID_IR'[15:11] '==' ID_EX_IR'[25:21] '&' IDHIinteresting 'then' (ID_EX_IR'[15:0] '++' ('0' '#' 16))
+          'else' ID_IR'[15:11] '==' MEM_WB_IR'[25:21] '&' ALUinteresting 'then' MEM_WB_ALU
+          'else' ID_IR'[15:11] '==' MEM_WB_IR'[25:21] '&' SPRinteresting 'then' MEM_WB_SPR
+          'else' ID_IR'[15:11] '==' MEM_WB_IR'[25:21] '&' MemInteresting 'then' WB.WD
+          'else' ID_IR'[15:11] '==' MEM_WB_IR'[25:21] '&' HIinteresting 'then' (MEM_WB_IR'[15:0] '++' ('0' '#' 16))
+          'else' Regs.ReadPort2
+      end
+
+      RFE <- (IR'[31:26] '==' '001001')
+      BranchTarget <- RFE '&' (SPRindex '==' '0x0020') '&' ID_EX_LatchSPR 'then' SPR
+                  'else' RFE 'then' EPCR0
+                  'else' (BranchOp '==' '0100') 'then' B_fwd
+  	          'else'                            (FetchWasStalled 'then' IF_ID_PC 'else' IRaddr.out) '+' BranchOffset
+
+      {display '0' ({vector_of_string "IDMemInteresting is " $} '++' {bin_of_vector IDMemInteresting $})}
+      {display '0' ({vector_of_string "IDALUinteresting is " $} '++' {bin_of_vector IDALUinteresting $})}
+      {display '0' ({vector_of_string "IDHIinteresting is " $} '++' {bin_of_vector IDHIinteresting $})}
+      {display '0' ({vector_of_string "MemInteresting is " $} '++' {bin_of_vector MemInteresting $})}
+      {display '0' ({vector_of_string "ALUinteresting is " $} '++' {bin_of_vector ALUinteresting $})}
+      {display '0' ({vector_of_string "HIinteresting is " $} '++' {bin_of_vector HIinteresting $})}
+      {display '0' ({vector_of_string "ID_IR'[15:11] is " $} '++' {bin_of_vector ID_IR'[15:11] $})}
+      {display '0' ({vector_of_string "ID_EX_IR'[25:21] is " $} '++' {bin_of_vector ID_EX_IR'[25:21] $})}
+      {display '0' ({vector_of_string "MEM_WB_IR'[25:21] is " $} '++' {bin_of_vector MEM_WB_IR'[25:21] $})}
+      {display '0' ({vector_of_string "B_fwd is " $} '++' {hex_of_vector B_fwd $})}
+      {display '0' ({vector_of_string "A_fwd is " $} '++' {hex_of_vector A_fwd $})}
+
+      (* Fetch/Decode pipe registers *)
+      {regs 32 1 IRaddr.out IF_ID_PC}
+      {regs 1 1 WriteLink IF_ID_WriteLink}
+
+      (* If we're stalled, force a NOP into the pipe.
+         If we're setting the link reg, force a phony l.add instruction into the pipe.  We'll patch in the PC later
+	 Otherwise, move IR down the pipe *)
+      ID_IR <- {reg 32 (
+	    {regs 32 0 (StallForFlag '|' StallForMem) $} 'then' IR 'else' 
+	    {regs 1 1 (('~'ID.RunFetch) '|' StallForBranchDest '|' StallForMem) $} 'then' '0x15000000' 'else'
+	    (WriteLink '&' '~'FetchWasStalled) 'then' ('0xe120' '++' IR'[15:11] '++' '00000000000') 'else'
+	    IR) $}
+      Flag <- {reg 1 (ID.LatchFlag 'then' FlagOut 'else' Flag) $}
+
+      FlagOut <- {mux ID.CalcFlag [ 
+        (* 0000  l.sfeq  *)  (A_fwd '==' B_fwd)
+        (* 0001  l.sfne  *)  (A_fwd '!=' B_fwd)
+        (* 0010  l.sfgtu *)  (A_fwd '>' B_fwd)
+        (* 0011  l.sfgeu *)  (A_fwd '>=' B_fwd)
+        (* 0100  l.sfltu *)  (A_fwd '<' B_fwd)
+        (* 0101  l.sfleu *)  (A_fwd '<=' B_fwd)
+        (* 0110          *)  '0'
+        (* 0111          *)  '0'
+        (* 1000          *)  '0'
+        (* 1001          *)  '0'
+        (* 1010  l.sfgts *)  (A_fwd '>+' B_fwd)
+        (* 1011  l.sfges *)  (A_fwd '>=+' B_fwd)
+        (* 1100  l.sflts *)  (A_fwd '<+' B_fwd)
+        (* 1101  l.sfles *)  (A_fwd '<=+' B_fwd)
+        (* 1110          *)  '0'
+        (* 1111          *)  '0'
+    			 ]   $}
+    end
+  end
+
+  (* Instruction Decode *)
+  ID <- {ID_c.T ID_IR }
+
+  (* the register file *)
+  local RegA RegB is
+    RegA <- FetchWasStalled 'then' IR'[20:16] 'else' ID_IR'[20:16]
+    RegB <- FetchWasStalled 'then' IR'[15:11] 'else' ID_IR'[15:11]
+    Regs <- {RegFile.T WB.WD MEM_WB_Dest MEM_WB_write_enable RegA RegB}
+  end
+
+  (* Execute *)
+  component ID_EX is
+    ID_EX_RA <- {reg 32 (IF_ID_WriteLink 'then' ({regs 1 2 FetchWasStalled $} 'then' MEM_WB_PC 'else' IF_ID_PC) 'else' Regs.ReadPort1) $}
+      {display '0' ({vector_of_string "ID_EX_RA " $} '++' {hex_of_vector ID_EX_RA $})}
+    ID_EX_RB <- {reg 32 (IF_ID_WriteLink 'then''0x00000008' 'else' Regs.ReadPort2) $}
+      {display '0' ({vector_of_string "ID_EX_RB " $} '++' {hex_of_vector ID_EX_RB $})}
+    ID_EX_IM <- {reg 32 ID.IM $}
+    ID_EX_UseIMM <- {reg 1 ID.UseIMM $}
+    ID_EX_IR <- {regs 32 1 ID_IR $}
+    ID_EX_MemOffset <- {reg 32 ID.MemOffset $}
+    ID_EX_ALUctl <- {regs (width ID.ALUctl) 1 ID.ALUctl $}
+    ID_EX_CalcFlag <- {regs (width ID.CalcFlag) 1 ID.CalcFlag $}
+    ID_MEM_WriteEnable <- {regs 2 1 ID.MEMWriteEnable $}
+    ID_EX_WB_write_what <- {regs (width ID.WB_write_what) 1 ID.WB_write_what $}
+    ID_EX_WB_write_enable <- {regs 1 1 ID.WB_write_enable $}
+    ID_EX_WB_Dest <- {regs 5 1 ID.WB_Dest $}
+    ID_EX_SPROffset <- {regs (width ID.SPROffset) 1 ID.SPROffset $}
+    ID_EX_LatchSPR <- {regs 1 1 ID.LatchSPR $}
+    ID_EX_PC <- {regs 32 1 IF_ID_PC $}
+  end
+  {enable '1' {ID_EX}}
+
+  MemInteresting <- (MEM_WB_write_what '!=' '0000') '&' (MEM_WB_write_what '!=' '0111') '&' MEM_WB_write_enable
+  SPRinteresting <- (MEM_WB_write_what '==' '1000') '&' MEM_WB_write_enable
+  ALUinteresting <- (MEM_WB_write_what '==' '0000') '&' MEM_WB_write_enable
+  HIinteresting <- (MEM_WB_write_what '==' '0111') '&' MEM_WB_write_enable
+  A <-  ID_EX_IR'[20:16] '==' MEM_WB_IR'[25:21] '&' ALUinteresting 'then' MEM_WB_ALU
+    'else' ID_EX_IR'[20:16] '==' MEM_WB_IR'[25:21] '&' SPRinteresting 'then' MEM_WB_SPR
+    'else' ID_EX_IR'[20:16] '==' MEM_WB_IR'[25:21] '&' MemInteresting 'then' WB.WD
+    'else' ID_EX_IR'[20:16] '==' MEM_WB_IR'[25:21] '&' HIinteresting 'then' (MEM_WB_IR'[15:0] '++' ('0' '#' 16))
+    'else' ID_EX_RA
+  B <-  ID_EX_IR'[15:11] '==' MEM_WB_IR'[25:21] '&' ALUinteresting 'then' MEM_WB_ALU
+    'else' ID_EX_IR'[15:11] '==' MEM_WB_IR'[25:21] '&' SPRinteresting 'then' MEM_WB_SPR
+    'else' ID_EX_IR'[15:11] '==' MEM_WB_IR'[25:21] '&' MemInteresting 'then' WB.WD
+    'else' ID_EX_IR'[15:11] '==' MEM_WB_IR'[25:21] '&' HIinteresting 'then' (MEM_WB_IR'[15:0] '++' ('0' '#' 16))
+    'else' ID_EX_RB
+  EX <- {EX_c.T ID_EX_ALUctl
+      	   ID_EX_IR
+      	   A
+      	   (ID_EX_UseIMM 'then' ID_EX_IM 'else' B)
+           C
+      	   }
+
+  (* Memory Access *)
+  MEM <- {MEM_c.T B
+                   ID_MEM_WriteEnable
+                   (ID_EX_MemOffset '+' A)
+                   }
+
+  local SPRreg SPRgroup is
+    SPRindex <- A'[15:0] '|' ID_EX_SPROffset
+    SPRreg <- SPRindex'[11:0]
+    SPRgroup <- SPRindex'[15:12]
+(*
+0	32	0020	EPCR0	-	r/w	Exception PC
+0	48	0030	EEAR0	-	r/w	Exception EA
+0	64	0040	ESR0	-	r/w	Exception SR
+*)
+(*
+0	0	0000	VR	-	r	version reg.
+0	1	0001	UPR	-	r	unit present
+0	2	0002	CPUCFGR	-	r	CPU configuration
+0	3	0003	DMMUCFGR -	r	Data MMU configuration
+0	4	0004	IMMUCFGR -	r	Instruction MMU config,
+0	5	0005	DCCFGR	-	r	Data cache configuration
+0	6	0006	ICCFGR	-	r	Instruction cache config
+0	7	0007	DCFGR	-	r	Debug configuration
+0	8	0008	PCCFGR	-	r	Performance counter config
+0	16	0010	NPC	-	r/w	PC mapped to SPR space (next PC)
+0	17	0011	SR	-	r/w	Supervision reg.
+0	18	0012	PPC	-	r/w	PC mapped to SPR space (prev PC)
+0	32	0020	EPCR0	-	r/w	Exception PC
+0	48	0030	EEAR0	-	r/w	Exception EA
+0	64	0040	ESR0	-	r/w	Exception SR
+*)
+    SPR <- SPRindex '==' '0x0000' 'then' '0x12cf0000'  (* VR *)
+       'else' SPRindex '==' '0x0001' 'then' '0x00000001'  (* UPR, for now *)
+       'else' SPRindex '==' '0x0002' 'then' '0x00000020'  (* CPUCFGR *)
+       'else' SPRindex '==' '0x0003' 'then' '0x00000000'  (* DMMUCFGR *)
+       'else' SPRindex '==' '0x0004' 'then' '0x00000000'  (* IMMUCFGR *)
+       'else' SPRindex '==' '0x0005' 'then' '0x00000000'  (* DCCFGR *)
+       'else' SPRindex '==' '0x0006' 'then' '0x00000000'  (* ICCFGR *)
+       'else' SPRindex '==' '0x0007' 'then' '0x00000000'  (* DCFGR *)
+       'else' SPRindex '==' '0x0008' 'then' '0x00000000'  (* PCCFGR *)
+       'else' SPRindex '==' '0x0010' 'then' IF_ID_PC      (* NPC *)
+       'else' SPRindex '==' '0x0011' 'then' SR            (* SR *)
+       'else' SPRindex '==' '0x0012' 'then' MEM_WB_PC     (* PPC *)
+       'else' SPRindex '==' '0x0020' 'then' EPCR0         (* EPCR0 *)
+       'else' SPRindex '==' '0x0030' 'then' EEAR0         (* EEAR0 *)
+       'else' SPRindex '==' '0x0040' 'then' ESR0          (* ESR0 *)
+       'else' '0x00000000'  (* all others *)
+
+    MEM_WB_SPR <- {reg 32 SPR $}
+    MEM_WB_B <- {reg 32 B $}
+    EX_WB_SPRindex <- {reg 16 SPRindex $}
+  end
+
+  (* Exports from the core to the memory system *)
+  Daddr <- MEM.Addr'[31:2] '++' '00'
+  WriteData <- MEM.Data
+  WriteEnable <- MEM.WriteEnable
+  (* We actually care about the memory data only
+   * if the writeback mux will select it *)
+  ReadEnable <- '~'(ID_EX_WB_write_what '==' '0000'
+                   '|' ID_EX_WB_write_what '==' '0111'
+                   '|' ID_EX_WB_write_what '==' '1000')
+
+  (* Final stage latches (EX/WB) *)
+  MEM_WB_ALU <- {reg 32 EX.ALU $}
+  MEM_WB_IR  <- {reg 32 ID_EX_IR $}
+  MEM_WB_write_what <- {regs (width ID_EX_WB_write_what) 1 ID_EX_WB_write_what $}
+  MEM_WB_write_enable <- {reg 1 ID_EX_WB_write_enable $}
+  MEM_WB_Dest <- {reg 5 ID_EX_WB_Dest $}
+  MEM_WB_MemAddr <- {reg 32 MEM.Addr $}
+  MEM_WB_PC <- {regs 32 1 ID_EX_PC $}
+  MEM_WB_LatchSPR <- {regs 1 1 ID_EX_LatchSPR $}
+
+  (* Register Writeback *)
+  WB <- {WB_c.T DMem
+                 MEM_WB_ALU
+		 MEM_WB_IR
+		 MEM_WB_write_what
+		 MEM_WB_MemAddr
+		 MEM_WB_SPR}
+end

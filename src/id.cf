@@ -1,0 +1,114 @@
+(*
+     Instruction decoder for OpenRisc 1200
+
+     Copyright 2004 Ken Rose
+     All rights reserved
+*)
+
+-T
+is
+
+component T
+  +IR
+  -WB_write_what -WB_write_enable -WB_Dest -ALUctl
+  -MEMWriteEnable -LatchFlag -CalcFlag -MemOffset -UseIMM -IM
+  -RunFetch -SysCall -IllInstr -SPROffset -LatchSPR
+with
+  MulStall
+is
+
+  IM <- ((IR'[15]) '#' 17) '++' (IR'[14:0])
+
+  MEMWriteEnable <- (IR'[31:26] '==' '110101') 'then' '01' (* write word *)
+                'else' (IR'[31:26] '==' '110110') 'then' '10' (* write byte *)
+                'else' (IR'[31:26] '==' '110111') 'then' '11' (* write half *)
+		'else'                                '00' (* Don't write *)
+
+  (* Control for writeback mux.  Must match writeback
+       "0000"   ALU output
+       "0001"   Zero-extended memory word
+       "0010"   Sign-extended memory word
+       "0011"   Zero-extended memory byte
+       "0100"   Sign-extended memory byte
+       "0101"   Zero-extended memory halfword
+       "0110"   Sign-extended memory halfword
+       "0111"   Immediate data in high half
+       "1000"   Data from SPR
+  *)
+  WB_write_what <-  IR'[31:26] '==' '100111' 'then' '0000'      (* l.addi *)
+                'else' IR'[31:29] '==' '100'    'then' '0' '++' IR'[28:26] (* loads *)
+                'else' IR'[31:26] '==' '000110' 'then' '0111'      (* l.movhi *)
+		'else' IR'[31:26] '==' '101101' 'then' '1000'      (* l.mfspr *)
+                'else'                              '0000'
+
+  (* Next is reg file write enable *)
+  WB_write_enable <-   IR'[31:26] '==' '000110'  (* movhi *)
+                   '|' IR'[31:26] '==' '101101'  (* mfspr *)
+	           '|' IR'[31:30] '==' '10'     (* loads & immediate ALU *)
+		   '|' IR'[31:26] '==' '111000' (* register ALU *)
+
+
+  (* Select an immediate operand *)
+  UseIMM <- IR'[31:29] '==' '101' '|' IR'[31:26] '==' '100111'
+
+  (* Send the memory offset to the MEM unit *)
+  MemOffset <- IR'[31:29] '==' '110' 'then' ((IR'[25]) '#' 17) '++' (IR'[24:21 10:0])
+                                     'else' ((IR'[15]) '#' 17) '++' (IR'[14:0])
+
+  (* Send the SPR offset to the SPR code *)
+  LatchSPR <- IR'[31:26] '==' '110000'
+  SPROffset <- LatchSPR 'then' IR'[25:21 10:0] 'else' IR'[15:0]
+
+  (* Control ALU *)
+  local RRctl RIctl is
+    RRctl <- IR'[9:6 3:0] '==' '00001000' 'then' '0000'   (* sll *)
+         'else' IR'[9:6 3:0] '==' '00011000' 'then' '0001'   (* srl *)
+         'else' IR'[9:6 3:0] '==' '00011000' 'then' '0010'   (* sra *)
+         'else' IR'[9:8 3:0] '==' '000000'   'then' '0011'   (* add *)
+         'else' IR'[9:8 3:0] '==' '000001'   'then' '0100'   (* addc *)
+         'else' IR'[9:8 3:0] '==' '000010'   'then' '0101'   (* sub *)
+         'else' IR'[9:8 3:0] '==' '000011'   'then' '0110'   (* and *)
+         'else' IR'[9:8 3:0] '==' '000100'   'then' '0111'   (* or *)
+         'else' IR'[9:8 3:0] '==' '000101'   'then' '1000'   (* xor *)
+         'else' IR'[9:8 3:0] '==' '110110'   'then' '1001'   (* mul *)
+         'else' IR'[9:8 3:0] '==' '111011'   'then' '1010'   (* mulu *)
+	 'else'                                  '0011'   (* default add *)
+
+    RIctl <- IR'[31:26]     '==' '100111'   'then' '0011'   (* addi *)
+         'else' IR'[31:26]     '==' '101001'   'then' '0110'   (* andi *)
+         'else' IR'[31:26]     '==' '101010'   'then' '0111'   (* ori *)
+         'else' IR'[31:26]     '==' '101011'   'then' '1000'   (* xori *)
+         'else' IR'[31:26]     '==' '101100'   'then' '1001'   (* muli *)
+         'else' IR'[31:26 7 6] '==' '10111000' 'then' '0000'   (* slli *)
+         'else' IR'[31:26 7 6] '==' '10111001' 'then' '0001'   (* srli *)
+         'else' IR'[31:26 7 6] '==' '10111010' 'then' '0010'   (* srai *)
+         'else' IR'[31:26 7 6] '==' '10111011' 'then' '1011'   (* rori *)
+	 'else'                                    '0011'   (* default add *)
+
+    ALUctl <- IR'[31:26] '==' '111000' 'then' RRctl 'else' RIctl
+  end
+  MulStall <- ALUctl '==' '1001' '|' ALUctl '==' '1010'
+  (*
+  {StateMachine [
+                  [ "0" 0 0 "1" ]
+                  [ "1" 0 1 "0" ]
+                  [ "-" 1 2 "0" ]
+                  [ "-" 2 0 "1" ]
+                 ] MulStall RunFetch}
+    *) RunFetch <- '1'
+
+  (* Control the flag bit *)
+  LatchFlag <- IR'[31:26] '==' '111001'
+  CalcFlag <- IR'[24:21]
+
+  (* Illegal Instruction *)
+  IllInstr <- '0'
+
+  (* System call instruction *)
+  SysCall <- IR'[31:16] '==' '0x2000'
+
+  (* If there's a register writeback, the register number is here. *)
+  WB_Dest <- IR'[25:21]
+
+end
+
