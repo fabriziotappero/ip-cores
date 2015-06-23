@@ -1,0 +1,86 @@
+#!/bin/bash
+#/**********************************************************************
+#axasm Copyright 2006, 2007, 2008, 2009 
+#by Al Williams (alw@al-williams.com).
+#
+#
+#This file is part of axasm.
+#
+#axasm is free software: you can redistribute it and/or modify it
+#under the terms of the GNU General Public Licenses as published
+#by the Free Software Foundation, either version 3 of the License, or
+#(at your option) any later version.
+#
+#axasm is distributed in the hope that it will be useful, but
+#WITHOUT ANY WARRANTY: without even the implied warranty of 
+#MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the 
+#GNU General Public License for more details.
+#
+#You should have received a copy of the GNU General Public License
+#along with axasm (see LICENSE.TXT). 
+#If not, see http://www.gnu.org/licenses/.
+#
+#If a non-GPL license is desired, contact the author.
+#
+#This is the assembler driver script
+#
+#***********************************************************************/
+
+PROC=soloasm 
+LIB=`dirname $0`
+
+
+
+function usage {
+  cat >&2 <<EOF
+  Usage: axasm [-p processor] [ -H | -i | -b | -v | -x ] [-D define] [-o file] inputfile
+         processor = processor.inc file to use (default=soloasm)
+         -D = Set C-style preprocessor define (multiple allowed)
+         -H = Raw hex output
+         -i = Intel hex output
+         -v = Verilog output
+         -x = Xilinx COE format
+         -b = Binary raw (32-bit only)
+         -o = Set output file (stdout default)
+
+  axasm and soloasm by Al Williams al.williams@awce.com
+EOF
+exit 1
+}
+
+
+
+POSTOP=""   # output arguments sent to compiled program
+DEFOP=""    # -D options to compiler
+while getopts  "vHhbixp:D:o:" flag
+do
+  case $flag in 
+  p )  PROC=$OPTARG ;;
+  v )  POSTOP="$POSTOP -v" ;;
+  H )  POSTOP="$POSTOP -h" ;;
+  i )  POSTOP="$POSTOP -i" ;;
+  x )  POSTOP="$POSTOP -x" ;;
+  b )  POSTOP="$POSTOP -b" ;;
+  D )  DEFOP="$DEFOP -D $OPTARG"  ;;
+  o )  POSTOP="$POSTOP -o $OPTARG" ;;
+  h )  usage ;; 
+  ? )  usage ;;
+  esac
+done
+shift `expr $OPTIND - 1`
+
+# test for $# >= 1
+if [ $# -lt 1 ]
+then usage
+fi
+
+LFILE=`mktemp`
+CFILE=`mktemp`
+XFILE=`mktemp`
+rm -f $CFILE
+awk -f $LIB/soloinc.awk $1 | awk -f $LIB/solopre.awk -v PROC=$PROC -v LFILE=$LFILE  >$CFILE
+if gcc -I$LIB -x c -std=c99 $DEFOP -o $XFILE $LIB/soloasm.c $CFILE 
+then
+ $XFILE $POSTOP
+fi
+#echo $CFILE  # debug
