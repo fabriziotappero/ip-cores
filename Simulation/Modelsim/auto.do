@@ -1,0 +1,33 @@
+file delete $path_project_files/$path_log_files/auto/esoc_control_auto_log.txt
+do run.do 110 0 0 0
+do run.do 110 0 0 1
+do run.do 110 0 0 2
+do run.do 110 0 0 3
+do run.do 110 0 0 4
+do run.do 120 0 0 5
+do run.do 110 0 0 6
+do run.do 110 0 0 7
+do run.do 110 0 0 8
+do run.do 110 0 0 9
+do run.do 110 0 0 10
+do run.do 150 0 0 11
+do run.do 150 0 0 12
+do run.do 150 0 0 13
+do run.do 500 0 0 14
+do run.do 500 0 0 15
+do run.do 500 0 0 16
+do run.do 550 0 0 17
+do run.do 450 0 0 18
+do run.do 450 0 0 19
+do run.do 1000 0 0 20
+do run.do 1000 0 1 21
+do run.do 1000 0 2 22
+do run.do 1000 0 3 23
+do run.do 1000 0 4 24
+do run.do 1000 0 5 25
+do run.do 1000 0 6 26
+do run.do 100 0 0 27
+do run.do 100 0 0 28
+do run.do 100 0 0 29
+do run.do 2000 0 0 31
+quit -sim
