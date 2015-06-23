@@ -1,0 +1,117 @@
+Manchester Wireless Core
+
+================================= Overview ====================================
+
+This core was created to serve as a decoder for incoming Manchester encoded
+data. This project was developed using an ASK A315 transmitter/receiver pair
+obtained from Sparkfun.com. The transmitter was driven by an Atmel AVR
+microcontroller. The receiver's output was was plugged into a Xilinx Spartan-3
+starter board obtained from Digilent.
+
+The ASK equipment is convenient in that when the input of the transmitter is
+driven high, the output will also go high, and when the input goes low, the
+output goes low. There is a caveat, however. The receiver's input must make
+high/low transitions at a certain minimum frequency to prevent the receiver
+from outputting random garbage. Furthermore, there is a maximum frequency at
+which these transmitter/receiver pair will operate.
+
+In brief, the Manchester encoding is trivial: 0 is converted to 10 and 1 is
+converted to 01, where 0 and 1 refer to sending the data line of the ASK
+transmitter low (0) or high (1) for one bit length. When programming the
+microcontroller it was easiest to shift the bits of the message off to the
+right and encode/transmit one bit at a time. Take the binary string 1000, for
+example. The first zero is shifted off, and 10 is sent. Likewise, the other two
+zeros are shifted off and sent. Finally the 1 is sent as 01. This gives a
+transmission of 10101001. Note the encoded bits are are in reverse order of the
+original; when the Manchester Wireless Core decodes the bits, it will present
+them in the correct order as 1000. 
+
+Because of the asynchronous nature of the input, the challenge is in the
+receiving side. To send a message, then, this core defines a protocol that must
+be adhered to. First, the transmitter sends four high bits. Then the
+transmitter sends one low bit. Then the data stream begins. Finally a few "end
+transmission" bits are sent. Continuing the example above, the total message
+would be :
+    
+11110                 10101001             0101
+start signal begin    data stream begin    end transmission
+
+Note that the spaces between the 0's and 1's are added for readability.
+
+
+
+================================= User's Guide ====================================
+
+The file globals.vhd has the constants which must be configured by the user.
+
+Those constants are
+
+WORD_LENGTH : The number of data bits before encoding. In the overview, above,
+the WORD_LENGTH was four bits.
+
+INTERVAL_MIN/MAX_SINGLE, INTERVAL_MIN/MAX_DOUBLE : The number of FGPA clock
+cycles that must pass before the algorithm classifies a single/double/quadruple
+one/zero. For example if the transmitter bit length is 1 ms and the FPGA clock
+is 50 MHz, then the nominal number of FPGA cycles required to classify a bit as
+being a single is 1 ms / (1/50E6 cycles/second) = .001/2E-8 cycles = 50000
+cycles. The transmission, for whatever reasons, will not be exactly 1 ms, which
+is the reason for having a MIN and MAX interval for the single/double and
+quadruple constants. Some experimentation may be necessary to get the best
+performance from this core. It is recommended that you synthesize the 
+singleDouble.vhd module, which classifies single/double zeros/ones and see 
+which windows will provide the best performance.
+
+INTERVAL_QUADRUPLE : The series of ones at the beginning of the transmission
+must be at least INTERVAL_QUADRUPLE cycles. To get this constant, multiply the
+nominal single bit length by four and add some padding.
+
+Out of the box, the manchesterWireless core will decode one message, then set
+the ready_o flag, then stop. The core must be reset to start waiting for the
+next message. See synthTest.vhd for an example of how to use this core.
+synthTest.vhd is used to create a simple counter which waits for and displays
+the digits 0 to 9 on the LEDs of the Spartan-3 board.
+
+
+
+================================= Design ====================================
+
+manchesterWireless is composed of three modules which flow from the top down:
+
+1)waitForStart : Waits for the data_i to go high for INTERVAL_QUADRUPLE 
+cycles then sets ready_o to 1. One process is in wait for start. When data_i 
+goes high, a counter will measure how long it stays high. If data_i stays high
+for longer than INTERVAL_QUADRUPLE clocks then the ready_o flag is set and
+remains set until the core is reset; the 'lock' variable keeps the flag set
+after the window is reached. If data_i drops to zero before the ready_o flag is
+set, then the counter will be set to zero. 
+
+2)singleDouble : Once waitForStart is finished, singleDouble classifies
+single/double zeros/ones which it outputs on q_o. q_o is a four bit vector
+with the following mapping
+
+q_o(0) <= single_one;
+q_o(1) <= double_one;
+q_o(2) <= single_zero;
+q_o(3) <= double_zero;
+
+
+The constants set in globals.vhd are such that there is never an overlap
+between what is classified as a single or a double.
+
+TODO: The transition process infers a clock from transition_i. This should 
+probably be eliminated by polling transition_i on a clock edge.
+
+3)decode : Takes serial input from singleDouble and provides a decoded parallel
+output. The controller process counts how many bits have been decoded and
+stops when all of the message has been encoded. The next_state_decode and
+output_decode processes keep track of the bits coming from singleDouble and
+decodes them. The challenge is that we receive a single_one followed by a
+double_zero, that is 100, we will decode a 0 from the 10 and place the last 
+zero in 100 in the left most place of the insert buffer "0_". At this point,
+as can be seen by inspecting the next_state_decode process, only a single
+or double one is possible.
+
+TODO: The next_state_decode process will reset when an unexpected next_state
+is provided. For example, from the state one_0, the only possible valid
+next state is one_1. Any other next_state will send the FSM to reset. It 
+would be good to reset the entire circuit at this point.
