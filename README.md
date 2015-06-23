@@ -3,15 +3,15 @@
 
 This branch contains the following VHDL/Verilog IP Code:
 
-    Project name: psg16-adsr_prog._sound_gen.
+    Project name: fpga_mmc-card_config.
     Project category: other
-    Project branch: other_psg16-adsr_prog._sound_gen.
+    Project branch: other_fpga_mmc-card_config.
 
 This whole github repository is huge and, since IP cores are stored in separate
 branches, it is a good idea to just download the branch that you are interested
 in. This branch can be downloaded with the git command.
 
-    git clone -b other_psg16-adsr_prog._sound_gen. --single-branch https://github.com/fabriziotappero/ip-cores.git
+    git clone -b other_fpga_mmc-card_config. --single-branch https://github.com/fabriziotappero/ip-cores.git
 
 A cool searchable index of the whole repo is available from www.freerangefactory.org.
 
