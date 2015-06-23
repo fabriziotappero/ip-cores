@@ -1,0 +1,2 @@
+add wave *
+radix hex
