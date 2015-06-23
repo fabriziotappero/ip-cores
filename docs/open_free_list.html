@@ -1,0 +1,246 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=windows-1255">
+<title>Open FreeList Readme</title>
+</head>
+<body>
+<h1>General Description</h1>
+<p>
+	The Open FreeList module is used to manage a set of variable sized packets inside a fixed memory block.
+	The memory block is partitioned into fixed sized chunks and each packet uses one or more chunks.
+	The module offers three possible actions:
+	<ol>
+		<li>Write a packet into memory</li>
+		<li>Read a packet from memory</li>
+		<li>Release a packet</li>
+	</ol>
+</p>
+<h1>Using the Module</h1>
+	<h2>Parameters</h2>
+	<table border="1">
+		<col align="left"/>
+		<col align="left"/>
+		<col align="center"/>
+		<col align="center"/>
+		<tr>
+			<th>Name</th>
+			<th>Description</th>
+			<th>Unit</th>
+			<th>Default Value</th>
+		</tr>
+		<tr>
+			<td>RAM_W</td>
+			<td>Memory block width</td>
+			<td>bits</td>
+			<td>128</td>
+		</tr>
+		<tr>
+			<td>RAM_E</td>
+			<td>Memory block extra data</td>
+			<td>bits</td>
+			<td>0</td>
+		</tr>
+		<tr>
+			<td>RAM_S</td>
+			<td>Memory block size</td>
+			<td>KBytes</td>
+			<td>64</td>
+		</tr>
+		<tr>
+			<td>CHK_S</td>
+			<td>Chunk size</td>
+			<td>Bytes</td>
+			<td>128</td>
+		</tr>
+		<tr>
+			<td>RAM_TYPE</td>
+			<td>Memory block type</td>
+			<td>string</td>
+			<td>"MRAM"</td>
+		</tr>
+		<tr>
+			<td>FL_AEMPTY_LVL</td>
+			<td>FreeList almost empty level</td>
+			<td>#</td>
+			<td>2</td>
+		</tr>
+	</table>
+	<h2>Interface</h2>
+	<table border="1">
+		<col align="left"/>
+		<col align="center"/>
+		<col align="center"/>
+		<col align="left"/>
+		<tr>
+			<th>Name</th>
+			<th>Direction</th>
+			<th>Width</th>
+			<th>Description</th>
+		</tr>
+		<tr>
+			<td colspan="4" align="center"><b>global signals</b></td>
+		</tr>
+		<tr>
+			<td>reset_n</td>
+			<td>input</td>
+			<td>1</td>
+			<td>async reset (active low)</td>
+		</tr>
+		<tr>
+			<td>clk</td>
+			<td>input</td>
+			<td>1</td>
+			<td>clock</td>
+			</tr>
+		<tr>
+			<td colspan="4" align="center"><b>write interface</b></td>
+		</tr>
+		<tr>
+			<td>fl_q</td>
+			<td>output</td>
+			<td>clog(#_of_chunks)</td>
+			<td>first chunk number for a new packet.<br />capture this value and use it to read/release the packet</td>
+		</tr>
+		<tr>
+			<td>fl_aempty</td>
+			<td>output</td>
+			<td>1</td>
+			<td>indicates that the number of chunks reached the almost empty level</td>
+		</tr>
+		<tr>
+			<td>fl_empty</td>
+			<td>output</td>
+			<td>1</td>
+			<td>no more chunks available. do not write any more</td>
+		</tr>
+		<tr>
+			<td>wren</td>
+			<td>input</td>
+			<td>1</td>
+			<td>write pulse. writes the data on din into the memory block</td>
+		</tr>
+		<tr>
+			<td>din</td>
+			<td>input</td>
+			<td>RAM_W+RAM_E</td>
+			<td>data to write into memory block</td>
+		</tr>
+		<tr>
+			<td>eop</td>
+			<td>input</td>
+			<td>1</td>
+			<td>end-of-packet indication. assert on last write of packet</td>
+		</tr>
+		<tr>
+			<td colspan="4" align="center"><b>read interface</b></td>
+		</tr>
+		<tr>
+			<td>chunk_num</td>
+			<td>input</td>
+			<td>clog(#_of_chunks)</td>
+			<td>first chunk in a packet to be read or released</td>
+		</tr>
+		<tr>
+			<td>load_req</td>
+			<td>input</td>
+			<td>1</td>
+			<td>request to read a packet starting at chunk number 'chunk_num'</td>
+		</tr>
+		<tr>
+			<td>rel_req</td>
+			<td>input</td>
+			<td>1</td>
+			<td>request to release a packet starting at chunk number 'chunk_num'.<br />also required after a packet is read</td>
+		</tr>
+		<tr>
+			<td>load_rel_ack</td>
+			<td>output</td>
+			<td>1</td>
+			<td>acknowledge a read or release request</td>
+		</tr>
+		<tr>
+			<td>rden</td>
+			<td>input</td>
+			<td>1</td>
+			<td>read request. data on 'dout' is valid one clock later</td>
+		</tr>
+		<tr>
+			<td>dout</td>
+			<td>output</td>
+			<td>RAM_W+RAM_E</td>
+			<td>data read from memory block</td>
+		</tr>
+	</table>
+	<h2>Operations</h2>
+	<h3>Write</h3>
+	<p>
+	To write a packet, do the following:
+	<ul>
+		<li>make sure 'fl_empty' is de-asserted</li>
+		<li>capture the value on 'fl_q'. it will be used later to reference this packet</li>
+		<li>while 'fl_empty' is not asserted do:</li>
+		<ul>
+			<li>write the next data line in 'din'</li>
+			<li>assert 'wren'</li>
+			<li>on the last line of the packet, assert 'eop' as well</li>
+		</ul>
+	</ul>
+	</p>
+	<h3>Read</h3>
+	<p>
+	To read a packet that was previously written, do the following:
+	<ul>
+		<li>set 'chunk_num' to the value of the first chunk in the packet.<br />
+		this value was obtained from 'fl_q' when the packet was written</li>
+		<li>assert 'load_req'</li>
+		<li>when 'load_rel_ack' is asserted, for each line of data do:</li>
+		<ul>
+			<li>assert 'rden'</li>
+			<li>capture 'dout' one cycle later</li>
+		</ul>
+	</ul>
+	To determine the last line of data, you could:
+	<ul>
+		<li>store the packet length in an external structure</li>
+		<li>use the extra bits in the memory block to hold an indication such as end-of-packet</li>
+	</ul>
+	</p>
+	<p>
+	Note that the 'eop' indication that is written in the write operation is not available on a read operation.
+	</p>
+	<p>
+	<i>Important:</i> after a read is complete, a release operation must be explicitly performed.
+	There is no need to set the 'chunk_num' value after a read operation.
+	The chunks are released when the packet is read, but the last chunk requires an explicit release operation.  
+	</p>
+	<h3>Release</h3>
+	<p>A packet can be released under two circumstances:
+	<ol>
+		<li>when a read is complete, a release must be issued</li>
+		<li>if a packet is not needed, it can be released without reading it</li>
+	</ol>
+	To release a packet, do the following:
+	<ul>
+		<li>set 'chunk_num' to the first chunk of the packet (not required after a read)</li>
+		<li>assert 'rel_req'</li>
+		<li>when 'load_rel_ack' is asserted, you are done</li>
+	</ul>
+	</p>
+	<h2>Memories</h2>
+	<p>
+	Three memories are used in this module:
+	<ol>
+		<li>ram - dual port memory. two cycles to read</li>
+		<li>free_list - single clock lookahead FIFO</li>
+		<li>link_list - dual port memory. two cycles to read</li>
+	</ol>
+	The target architecture is Altera Sratix. There should be matching memory blocks in other architectures.
+	</p>
+	<p><br /><br /></p>
+	<p>
+	Code: Alex Manash - Crescendo Networks<br />
+	Docs: Amit Fridman - Crescendo Networks 
+	</p>
+</body>
+</html>
