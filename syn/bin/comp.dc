@@ -1,0 +1,134 @@
+###############################################################################
+#
+# Actual Synthesis Script
+#
+# This script does the actual synthesis
+#
+# Author: Rudolf Usselmann
+#         rudi@asics.ws
+#
+# Revision:
+# 3/7/01 RU Initial Sript
+#
+#
+###############################################################################
+
+# ==============================================
+# Setup Design Parameters
+source ../bin/design_spec.dc
+
+# ==============================================
+# Setup Libraries
+source ../bin/lib_spec.dc
+
+# ==============================================
+# Setup IO Files
+
+append log_file			../log/$active_design "_cmp.log"
+append pre_comp_db_file		../out/$design_name "_pre.db"
+append post_comp_db_file	../out/$design_name ".db"
+append post_syn_verilog_file	../out/$design_name "_ps.v"
+set junk_file /dev/null
+
+sh rm -f $log_file
+
+# ==============================================
+# Setup Misc Variables
+
+set hdlin_enable_vpp true       ;# Important - this enables 'ifdefs
+
+# ==============================================
+# Read Design
+
+echo "+++++++++ Reading Design ..."                             >> $log_file
+read_file $pre_comp_db_file                                     >> $log_file
+
+# ==============================================
+# Operating conditions
+
+echo "+++++++++ Setting up Operation Conditions ..."            >> $log_file
+current_design $design_name
+set_operating_conditions WORST                                  >> $log_file
+
+# Turn off automatic wire load selection, as this
+# always (WHY ???) defaults to "zero_load"
+#set auto_wire_load_selection false
+#set_wire_load_mode enclosed                                     >> $log_file
+#set_wire_load_mode top                                          >> $log_file
+#set_wire_load_model -name suggested_40K                         >> $log_file
+
+# ==============================================
+# Setup Clocks and Resets
+
+echo "+++++++++ Setting up Clocks ..."                           >> $log_file
+
+set_drive 0 wb_clk_i
+set_drive 0 clk_pclk_i
+ 
+# !!! WISHBONE Clock !!!
+set clock_period 5
+create_clock -period $clock_period wb_clk_i
+set_clock_skew -uncertainty 0.1 wb_clk_i
+set_clock_transition 0.5 wb_clk_i
+set_dont_touch_network wb_clk_i
+ 
+# !!! Pixel Clock !!!
+set clock_period2 20
+create_clock -period $clock_period2 clk_pclk_i
+set_clock_skew -uncertainty 0.5 clk_pclk_i
+set_clock_transition 0.9 clk_pclk_i
+set_dont_touch_network clk_pclk_i
+ 
+# !!! Reset !!!
+set_drive 0 wb_rst_i
+set_dont_touch_network wb_rst_i
+set_drive 0 rst_nreset_i
+set_dont_touch_network rst_nreset_i
+
+# ==============================================
+# Setup IOs
+
+echo "+++++++++ Setting up IOs ..."                             >> $log_file
+
+# Need to spell out external IOs
+
+set_driving_cell -cell NAND2D2 -pin Z [all_inputs]              >> $junk_file
+set_load 0.2 [all_outputs]
+
+set_input_delay -max 2 -clock wb_clk_i [all_inputs]
+set_output_delay -max 2 -clock wb_clk_i [all_outputs]
+
+set_input_delay -max 2 -clock clk_pclk_i [all_inputs]
+set_output_delay -max 2 -clock clk_pclk_i [all_outputs]
+
+# ==============================================
+# Setup Area Constrains
+set_max_area 0.0
+set compile_sequential_area_recovery true
+
+# ==============================================
+# Force Ultra
+set_ultra_optimization -f
+
+# ==============================================
+# Compile Design
+
+echo "+++++++++ Starting Compile ..."                           >> $log_file
+#compile -map_effort low -area_effort low                       >> $log_file
+compile -map_effort high -area_effort high -boundary_optimization -auto_ungroup	>> $log_file
+
+# ==============================================
+# Write Out the optimized design
+
+echo "+++++++++ Saving Optimized Design ..."                    >> $log_file
+write_file -hierarchy -format verilog -output $post_syn_verilog_file
+write_file -hierarchy -format db      -output $post_comp_db_file
+
+# ==============================================
+# Create Some Basic Reports
+
+echo "+++++++++ Reporting Final Results ..."                    >> $log_file
+report_timing -nworst 10                                        >> $log_file
+report_area                                                     >> $log_file
+
+
