@@ -1,0 +1,117 @@
+XDIR = /cygdrive/c/Xilinx92i
+
+############################################################################
+# Some nice targets
+############################################################################
+
+#install: $(PROJECT).bit
+#	ljp $< /dev/parport0
+
+floorplan: $(PROJECT).ngd $(PROJECT).par.ncd
+	$(FLOORPLAN) $^
+
+report:
+	cat *.srp
+
+clean::
+	rm -f *.work *.xst
+	rm -f *.ngc *.ngd *.bld *.srp *.lso *.prj
+	rm -f *.map.mrp *.map.ncd *.map.ngm *.mcs *.par.ncd *.par.pad
+	rm -f *.pcf *.prm *.bgn *.drc
+	rm -f *.par_pad.csv *.par_pad.txt *.par.par *.par.xpi
+	rm -f *.bit
+	rm -f *.vcd *.vvp
+	rm -f verilog.dump verilog.log
+	rm -rf _ngo/
+	rm -rf xst/
+
+
+############################################################################
+# Simulation using cver and gtkwave
+############################################################################
+
+#CVER       = cver
+#GTKWAVE    = ~/bin/gtkwave
+#CVERFLAGS  = $(XDIR)/verilog/src/glbl.v
+#CVERFLAGS += -y $(TOPDIR)/Unisims
+#CVERFLAGS += +libext+.v+ -q
+#CVERFLAGS += +define+SIMULATION
+
+#.PRECIOUS: %.vcd
+
+#sim_%:	%.vcd
+#	$(GTKWAVE) $^ $@.save
+
+#%.vcd: sim_%.v $(SOURCES)
+#	@rm -f $@.vcd
+#	$(CVER) $^ $(CVERFLAGS)
+#	@rm -f verilog.log
+
+
+############################################################################
+# Xilinx tools and wine
+############################################################################
+
+XST_DEFAULT_OPT_MODE = Speed
+XST_DEFAULT_OPT_LEVEL = 1
+
+XBIN = $(XDIR)/bin/nt
+XST=$(XBIN)/xst
+NGDBUILD=$(XBIN)/ngdbuild
+MAP=$(XBIN)/map
+PAR=$(XBIN)/par
+BITGEN=$(XBIN)/bitgen
+PROMGEN=$(XBIN)/promgen
+FLOORPLAN=$(XBIN)/floorplanner
+
+XSTWORK   = $(PROJECT).work
+XSTSCRIPT = $(PROJECT).xst
+
+.PRECIOUS: %.ngc %.ngc %.ngd %.map.ncd %.bit %.par.ncd
+
+ifndef XST_OPT_MODE
+XST_OPT_MODE = $(XST_DEFAULT_OPT_MODE)
+endif
+ifndef XST_OPT_LEVEL
+XST_OPT_LEVEL = $(XST_DEFAULT_OPT_LEVEL)
+endif
+ifndef ARCH
+ARCH = $(DEFAULT_ARCH)
+endif
+ifndef PART
+PART = $(DEFAULT_PART)
+endif
+
+#compile: $(PROJECT).xst
+#	$(XST)
+
+$(XSTWORK): $(SOURCES)
+	> $@
+	for a in $(SOURCES); do echo "vhdl work $$a" >> $@; done
+
+$(XSTSCRIPT): $(XSTWORK)
+	> $@
+	echo -n "run -ifn $(XSTWORK) -ifmt mixed -top $(TOP) -ofn $(PROJECT).ngc" >> $@
+	echo " -ofmt NGC -p $(PART) -iob false -iobuf no -opt_mode $(XST_OPT_MODE) -opt_level $(XST_OPT_LEVEL)" >> $@
+
+%.ngc: $(XSTSCRIPT)
+	$(XST) -ifn $<
+
+%.ngd: %.ngc $(PROJECT).ucf
+	$(NGDBUILD) -intstyle ise -dd _ngo -uc $(PROJECT).ucf -p $(PART) $*.ngc $*.ngd
+
+%.map.ncd: %.ngd
+	$(MAP) -o $@ $< $*.pcf
+
+%.par.ncd: %.map.ncd
+	$(PAR) -w -ol high $< $@ $*.pcf
+
+%.bit: %.par.ncd
+	$(BITGEN) -w -g UnusedPin:PullNone $< $@ $*.pcf
+
+%.prm: %.bit
+	$(PROMGEN) -o $@ -w -u 0  $<
+
+############################################################################
+# End
+############################################################################

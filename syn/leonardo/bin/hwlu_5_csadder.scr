@@ -1,0 +1,45 @@
+# Leonardo synthesis script
+# Author: Nikolaos Kavvadias <nkavv@skiathos.physics.auth.gr>
+# Details:
+# Uses a carry-select implementation for the index incrementer
+# This is the public release of the carry-select adder 
+# (not using tachnology-specific cells and optimizations)
+# Only applicable for DW = 8
+
+# Loading Target Technology
+load_library tsmc018   
+
+# Setting operating conditions
+set temp 80
+set process typical
+set voltage 1.8                 
+
+# Setting Design Rule Conditions
+set max_fanout_load 16
+set max_cap_load 4
+set max_transition 0.0                 
+
+# Set global timing constraints
+set input2register 2.5
+set register2register 2.5
+set register2output 2.5
+set input2output 2.5
+
+# Read complete design
+read -technology "tsmc018" { ../../../rtl/vhdl/fa.vhd ../../../rtl/vhdl/mux2_1.vhd ../../../rtl/vhdl/csa8.vhd ../../../rtl/vhdl/reg_dw.vhd ../../../rtl/vhdl/cmpeq.vhd ../../../rtl/vhdl/index_inc.vhd ../../../rtl/vhdl/prenc_loops5.vhd ../../../rtl/vhdl/hw_loops5_top.vhd }
+elaborate hw_looping -architecture structural -single_level -generic {DW=8 NLP=5}
+
+# Set timing constraints
+clock_cycle 2.5 clk
+
+# Design optimizations
+set asic_auto_dissolve_limit 600
+pre_optimize -common_logic -unused_logic -boundary -xor_comparator_optimize 
+optimize .work.hw_looping.structural -target tsmc018 -macro -area -effort quick -hierarchy auto
+report_area -cell_usage -all_leafs > hwlu_5_csadder_area.rpt
+set report_delay_slack_threshold 0
+report_delay -num_paths 1 -critical_paths -clock_frequency > hwlu_5_csadder_delay.rpt
+
+#Save design
+write hwlu_5_csadder.xdb
+write -format VHDL hwlu_5_csadder_net.vhd
