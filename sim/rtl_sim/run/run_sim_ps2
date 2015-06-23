@@ -1,0 +1,99 @@
+#!/bin/csh -f
+
+set current_par = 0
+set output_waveform = 0
+while ( $current_par < $# )
+    @ current_par = $current_par + 1
+    case wave:
+        @ output_waveform = 1
+        breaksw
+    default:
+        echo 'Unknown option "'$argv[$current_par]'"!'
+        exit
+        breaksw
+    endsw
+end
+
+echo "-CDSLIB ../bin/cds.lib"          > ncvlog.args
+echo "-HDLVAR ../bin/hdl.var"         >> ncvlog.args
+echo "-MESSAGES"                      >> ncvlog.args
+echo "-INCDIR ../../../bench/verilog" >> ncvlog.args
+echo "-INCDIR ../../../rtl/verilog"   >> ncvlog.args
+echo "-NOCOPYRIGHT"                   >> ncvlog.args
+echo "-LOGFILE ../log/ncvlog.log"     >> ncvlog.args
+echo '-DEFINE "PS2_NUM_OF_NORMAL_SCANCODES 85"' >> ./ncvlog.args
+echo '-DEFINE "PS2_NUM_OF_EXTENDED_SCANCODES 38"' >> ./ncvlog.args
+echo '-DEFINE "SIM"' >> ./ncvlog.args
+
+
+foreach filename ( `cat ../bin/rtl_file_list` )
+    echo "../../../rtl/verilog/"$filename >> ncvlog.args
+end
+
+foreach filename ( `cat ../bin/sim_file_list` )
+    echo "../../../bench/verilog/"$filename >> ncvlog.args
+end
+
+ncvlog -f ncvlog.args
+
+echo "-MESSAGES"                             > ncelab.args
+echo "-NOCOPYRIGHT"                         >> ncelab.args
+echo "-CDSLIB ../bin/cds.lib"               >> ncelab.args
+echo "-HDLVAR ../bin/hdl.var"               >> ncelab.args
+echo "-LOGFILE ../log/ncelab.log"           >> ncelab.args
+echo "-TIMESCALE 1ns/100ps"                 >> ncelab.args
+echo "-SNAPSHOT worklib.ps2_test_bench:rtl" >> ncelab.args
+echo "-NO_TCHK_MSG"                         >> ncelab.args
+echo "-ACCESS +RWC"                         >> ncelab.args
+echo "worklib.ps2_test_bench"               >> ncelab.args
+
+ncelab -f ncelab.args
+
+echo "-MESSAGES"                   > ncsim.args
+echo "-NOCOPYRIGHT"               >> ncsim.args
+echo "-CDSLIB ../bin/cds.lib"     >> ncsim.args
+echo "-HDLVAR ../bin/hdl.var"     >> ncsim.args
+echo "-INPUT ncsim.tcl"           >> ncsim.args
+echo "-LOGFILE ../log/ncsim.log"  >> ncsim.args
+echo "worklib.ps2_test_bench:rtl" >> ncsim.args
+
+if ( $output_waveform ) then
+    echo "database -open waves -shm -into ../out/waves.shm"             > ./ncsim.tcl
+    echo "probe -create -database waves ps2_test_bench -shm -all -depth all" >> ./ncsim.tcl
+    echo "run"                                                         >> ./ncsim.tcl
+else
+    echo "run"  > ./ncsim.tcl
+endif
+
+echo "quit" >> ncsim.tcl
+
+ncsim -LICQUEUE -f ./ncsim.args
+
+set exit_line_nb = `sed -n '/exit/=' < ../log/ncsim.log`
+
+#echo "$exit_line_nb"
+
+set dead_line_nb = 0
+
+if ( $exit_line_nb ) then
+
+  @ dead_line_nb = $exit_line_nb - 1
+  set exit_line=`sed -n $exit_line_nb's/exit/&/gp' < ../log/ncsim.log`
+  set dead_line=`sed -n $dead_line_nb's/report/&/gp' < ../log/ncsim.log`
+
+  echo "$dead_line"
+  echo "$exit_line"
+
+  echo "TEST: ps2"
+  if ( "$dead_line" == "report (deaddead)" ) then
+    if ( "$exit_line" == "exit (00000000)"   ) then
+      echo "STATUS: passed"  #|tee -a ../log/run_sim.log 2>&1
+    else
+      echo "STATUS: failed"  #|tee -a ../log/run_sim.log 2>&1
+    endif
+  else
+    echo "STATUS: failed"
+  endif
+
+endif
+
