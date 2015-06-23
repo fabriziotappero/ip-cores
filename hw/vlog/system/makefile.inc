@@ -1,0 +1,16 @@
+INCDIR += +$(IPVLOG)/system
+SRC += $(IPVLOG)/system/boot_mem32.v
+SRC += $(IPVLOG)/system/boot_mem128.v
+SRC += $(IPVLOG)/system/clocks_resets.v
+SRC += $(IPVLOG)/system/ethmac_wb.v
+SRC += $(IPVLOG)/system/interrupt_controller.v
+SRC += $(IPVLOG)/system/main_mem.v
+SRC += $(IPVLOG)/system/system.v
+SRC += $(IPVLOG)/system/test_module.v
+SRC += $(IPVLOG)/system/timer_module.v
+SRC += $(IPVLOG)/system/uart.v
+SRC += $(IPVLOG)/system/wishbone_arbiter.v
+DEP += $(IPVLOG)/system/memory_configuration.vh
+DEP += $(IPVLOG)/system/register_addresses.vh
+DEP += $(IPVLOG)/system/system_config_defines.vh
+DEP += $(IPVLOG)/system/system_functions.vh
