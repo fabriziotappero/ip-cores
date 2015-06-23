@@ -1,0 +1,959 @@
+<head>
+<link rel="stylesheet" href="../../style.css" type="text/css">
+</head>
+<a href="javascript:history.go(-1)" onMouseOver="self.status=document.referrer;return true">Go Back</a>
+<p align='right'><a href='ezusb_io.tar.gz'>Source code</a></p>
+<body>
+<div class="main">
+ <div class="mid" id="dm">
+  <div class="content" id="dmc">
+   <h2>
+    Details
+   </h2>
+   <p>
+    Name: ezusb_io
+    <br/>
+    Created: Jul 23, 2014
+    <br/>
+    Updated: Jul 29, 2014
+    <br/>
+    SVN Updated: Jul 29, 2014
+    
+    
+    
+    
+    
+    
+   </p>
+   <h2>
+    Other project properties
+   </h2>
+   <p>
+    Category:
+    
+     Communication controller
+    
+    <br/>
+    Language:
+    
+     Verilog
+    
+    <br/>
+    Development status:
+    
+     Stable
+    
+    <br/>
+    Additional info:
+    <br/>
+    WishBone Compliant: No
+    <br/>
+    License: GPL
+   </p>
+   <div id="d_Description">
+    <h2>
+     
+     
+     Description
+    </h2>
+    <p id="p_Description">
+     It's a general purpose Cypress EZUSB communication core which was developed for
+     
+      ZTEX FPGA Boards
+     
+     and supports the following features:
+     <ul>
+      <li>
+       EZ-USB slave FIFO input
+      </li>
+      <li>
+       EZ-USB slave FIFO output
+      </li>
+      <li>
+       buffering and filtering of the interface clock from the EZ-USB
+      </li>
+      <li>
+       Scheduler if both directions are active
+      </li>
+      <li>
+       Automatic committing 'PKTEND' after timeout
+      </li>
+     </ul>
+    </p>
+   </div>
+   <div id="d_Interface">
+    <h2>
+     
+     
+     Interface
+    </h2>
+    <p id="p_Interface">
+     The usage of this core is best described by a commented port definition:
+     <pre>
+     </pre>
+     <pre>
+      module ezusb_io
+      <span>
+       #
+      </span>
+      <span>
+       (
+      </span>
+      parameter CLKBUF_TYPE
+      <span>
+       =
+      </span>
+      <span>
+       "
+      </span>
+      <span>
+       "
+      </span>
+      <span>
+       ,
+      </span>
+      <span>
+       // selects the clock preparation method (buffering, filtering, ...)
+      </span>
+      <span>
+       // "SPARTAN6" for Xilinx Spartan 6,
+      </span>
+      <span>
+       // "SERIES7" for Xilinx Series 7,
+      </span>
+      <span>
+       // all other values: no clock preparation
+      </span>
+      parameter OUTEP
+      <span>
+       =
+      </span>
+      <span>
+       2
+      </span>
+      <span>
+       ,
+      </span>
+      <span>
+       // EP for FPGA -&gt; EZ-USB transfers
+      </span>
+      parameter INEP
+      <span>
+       =
+      </span>
+      <span>
+       6
+      </span>
+      <span>
+       // EP for EZ-USB -&gt; FPGA transfers
+      </span>
+      <span>
+       )
+      </span>
+      <span>
+       (
+      </span>
+      output ifclk
+      <span>
+       ,
+      </span>
+      <span>
+       // buffered output of the interface clock
+      </span>
+      <span>
+       // this is the clock for the user logic
+      </span>
+      input reset
+      <span>
+       ,
+      </span>
+      <span>
+       // asynchronous reset input
+      </span>
+      output reset_out
+      <span>
+       ,
+      </span>
+      <span>
+       // synchronous reset output
+      </span>
+      <span>
+       // FPGA pins that are connected directly to EZ-USB.
+      </span>
+      input ifclk_in
+      <span>
+       ,
+      </span>
+      <span>
+       // interface clock IFCLK
+      </span>
+      inout
+      <span>
+       [
+      </span>
+      <span>
+       15
+      </span>
+      <span>
+       :
+      </span>
+      <span>
+       0
+      </span>
+      <span>
+       ]
+      </span>
+      fd
+      <span>
+       ,
+      </span>
+      <span>
+       // 16 bit data bus
+      </span>
+      output reg SLWR
+      <span>
+       ,
+      </span>
+      PKTEND
+      <span>
+       ,
+      </span>
+      <span>
+       // SLWR (slave write) and PKTEND (packet end) flags
+      </span>
+      output SLRD
+      <span>
+       ,
+      </span>
+      SLOE
+      <span>
+       ,
+      </span>
+      <span>
+       // SLRD (slave read) and SLOE (slave output enable) flags
+      </span>
+      output
+      <span>
+       [
+      </span>
+      <span>
+       1
+      </span>
+      <span>
+       :
+      </span>
+      <span>
+       0
+      </span>
+      <span>
+       ]
+      </span>
+      FIFOADDR
+      <span>
+       ,
+      </span>
+      <span>
+       // FIFOADDR pins select the endpoint
+      </span>
+      input EMPTY_FLAG
+      <span>
+       ,
+      </span>
+      FULL_FLAG
+      <span>
+       ,
+      </span>
+      <span>
+       // EMPTY and FULL flag of the slave FIFO interface
+      </span>
+      <span>
+       // Signals for FPGA -&gt; EZ-USB transfer. The are controlled by user logic.
+      </span>
+      input
+      <span>
+       [
+      </span>
+      <span>
+       15
+      </span>
+      <span>
+       :
+      </span>
+      <span>
+       0
+      </span>
+      <span>
+       ]
+      </span>
+      DI
+      <span>
+       ,
+      </span>
+      <span>
+       // data written to EZ-USB
+      </span>
+      input DI_valid
+      <span>
+       ,
+      </span>
+      <span>
+       // 1 indicates valid data; DI and DI_valid must be hold if DI_ready is 0
+      </span>
+      output DI_ready
+      <span>
+       ,
+      </span>
+      <span>
+       // 1 if new data are accepted
+      </span>
+      input DI_enable
+      <span>
+       ,
+      </span>
+      <span>
+       // setting to 0 disables FPGA -&gt; EZ-USB transfers
+      </span>
+      input
+      <span>
+       [
+      </span>
+      <span>
+       15
+      </span>
+      <span>
+       :
+      </span>
+      <span>
+       0
+      </span>
+      <span>
+       ]
+      </span>
+      pktend_timeout
+      <span>
+       ,
+      </span>
+      <span>
+       // timeout in multiples of 65536 clocks before a short packet committed
+      </span>
+      <span>
+       // setting to 0 disables this feature
+      </span>
+      <span>
+       // Signals for EZ-USB -&gt; FPGA transfer. They are controlled by user logic.
+      </span>
+      output reg
+      <span>
+       [
+      </span>
+      <span>
+       15
+      </span>
+      <span>
+       :
+      </span>
+      <span>
+       0
+      </span>
+      <span>
+       ]
+      </span>
+      DO
+      <span>
+       ,
+      </span>
+      <span>
+       // data read from EZ-USB
+      </span>
+      output reg DO_valid
+      <span>
+       ,
+      </span>
+      <span>
+       // 1 indicates valid data
+      </span>
+      input DO_ready
+      <span>
+       ,
+      </span>
+      <span>
+       // setting to 1 enables writing new data to DO in next clock
+      </span>
+      <span>
+       // DO and DO_valid are hold if DO_ready is 0
+      </span>
+      <span>
+       // set to 0 to disable data reads
+      </span>
+      <span>
+       // debug output
+      </span>
+      output
+      <span>
+       [
+      </span>
+      <span>
+       3
+      </span>
+      <span>
+       :
+      </span>
+      <span>
+       0
+      </span>
+      <span>
+       ]
+      </span>
+      status
+      <span>
+       )
+      </span>
+      <span>
+       ;
+      </span>
+     </pre>
+    </p>
+   </div>
+   <div id="d_Verilog instantiation example">
+    <h2>
+     
+     
+     Verilog instantiation example
+    </h2>
+    <p id="p_Verilog instantiation example">
+     This is an example instantiation in Verilog:
+     <pre>
+     </pre>
+     <pre>
+      ezusb_io
+      <span>
+       #
+      </span>
+      <span>
+       (
+      </span>
+      <span>
+       .
+      </span>
+      OUTEP
+      <span>
+       (
+      </span>
+      <span>
+       2
+      </span>
+      <span>
+       )
+      </span>
+      <span>
+       ,
+      </span>
+      <span>
+       // EP2 for FPGA -&gt; EZ-USB transfers
+      </span>
+      <span>
+       .
+      </span>
+      INEP
+      <span>
+       (
+      </span>
+      <span>
+       6
+      </span>
+      <span>
+       )
+      </span>
+      <span>
+       ,
+      </span>
+      <span>
+       // EP6 for EZ-USB -&gt; FPGA transfers
+      </span>
+      <span>
+       .
+      </span>
+      CLKBUF_TYPE
+      <span>
+       (
+      </span>
+      <span>
+       "
+      </span>
+      <span>
+       SERIES7
+      </span>
+      <span>
+       "
+      </span>
+      <span>
+       )
+      </span>
+      <span>
+       // selects the clock preparation method (buffering, filtering, ...)
+      </span>
+      <span>
+       // "SPARTAN6" for Xilinx Spartan 6,
+      </span>
+      <span>
+       // "SERIES7" for Xilinx Series 7,
+      </span>
+      <span>
+       // all other values: no clock preparation
+      </span>
+      <span>
+       )
+      </span>
+      ezusb_io_inst
+      <span>
+       (
+      </span>
+      <span>
+       .
+      </span>
+      ifclk
+      <span>
+       (
+      </span>
+      ifclk
+      <span>
+       )
+      </span>
+      <span>
+       ,
+      </span>
+      <span>
+       .
+      </span>
+      reset
+      <span>
+       (
+      </span>
+      reset
+      <span>
+       )
+      </span>
+      <span>
+       ,
+      </span>
+      <span>
+       .
+      </span>
+      reset_out
+      <span>
+       (
+      </span>
+      reset_usb
+      <span>
+       )
+      </span>
+      <span>
+       ,
+      </span>
+      <span>
+       // pins
+      </span>
+      <span>
+       .
+      </span>
+      ifclk_in
+      <span>
+       (
+      </span>
+      ifclk_in
+      <span>
+       )
+      </span>
+      <span>
+       ,
+      </span>
+      <span>
+       .
+      </span>
+      fd
+      <span>
+       (
+      </span>
+      fd
+      <span>
+       )
+      </span>
+      <span>
+       ,
+      </span>
+      <span>
+       .
+      </span>
+      SLWR
+      <span>
+       (
+      </span>
+      SLWR
+      <span>
+       )
+      </span>
+      <span>
+       ,
+      </span>
+      <span>
+       .
+      </span>
+      SLRD
+      <span>
+       (
+      </span>
+      SLRD
+      <span>
+       )
+      </span>
+      <span>
+       ,
+      </span>
+      <span>
+       .
+      </span>
+      SLOE
+      <span>
+       (
+      </span>
+      SLOE
+      <span>
+       )
+      </span>
+      <span>
+       ,
+      </span>
+      <span>
+       .
+      </span>
+      PKTEND
+      <span>
+       (
+      </span>
+      PKTEND
+      <span>
+       )
+      </span>
+      <span>
+       ,
+      </span>
+      <span>
+       .
+      </span>
+      FIFOADDR
+      <span>
+       (
+      </span>
+      <span>
+       {
+      </span>
+      FIFOADDR1
+      <span>
+       ,
+      </span>
+      FIFOADDR0
+      <span>
+       }
+      </span>
+      <span>
+       )
+      </span>
+      <span>
+       ,
+      </span>
+      <span>
+       .
+      </span>
+      EMPTY_FLAG
+      <span>
+       (
+      </span>
+      FLAGA
+      <span>
+       )
+      </span>
+      <span>
+       ,
+      </span>
+      <span>
+       .
+      </span>
+      FULL_FLAG
+      <span>
+       (
+      </span>
+      FLAGB
+      <span>
+       )
+      </span>
+      <span>
+       ,
+      </span>
+      <span>
+       // signals for FPGA -&gt; EZ-USB transfer
+      </span>
+      <span>
+       .
+      </span>
+      DI
+      <span>
+       (
+      </span>
+      rd_buf
+      <span>
+       [
+      </span>
+      <span>
+       15
+      </span>
+      <span>
+       :
+      </span>
+      <span>
+       0
+      </span>
+      <span>
+       ]
+      </span>
+      <span>
+       )
+      </span>
+      <span>
+       ,
+      </span>
+      <span>
+       .
+      </span>
+      DI_valid
+      <span>
+       (
+      </span>
+      USB_DI_valid
+      <span>
+       )
+      </span>
+      <span>
+       ,
+      </span>
+      <span>
+       .
+      </span>
+      DI_ready
+      <span>
+       (
+      </span>
+      USB_DI_ready
+      <span>
+       )
+      </span>
+      <span>
+       ,
+      </span>
+      <span>
+       .
+      </span>
+      DI_enable
+      <span>
+       (
+      </span>
+      <span>
+       1
+      </span>
+      'b1
+      <span>
+       )
+      </span>
+      <span>
+       ,
+      </span>
+      <span>
+       .
+      </span>
+      pktend_timeout
+      <span>
+       (
+      </span>
+      <span>
+       16
+      </span>
+      'd73
+      <span>
+       )
+      </span>
+      <span>
+       ,
+      </span>
+      <span>
+       // timeout in multiples of 65536 clocks (approx. 0.1s @ 48 MHz) before a short packet committed
+      </span>
+      <span>
+       // signals for EZ-USB -&gt; FPGA transfer
+      </span>
+      <span>
+       .
+      </span>
+      DO
+      <span>
+       (
+      </span>
+      USB_DO
+      <span>
+       )
+      </span>
+      <span>
+       ,
+      </span>
+      <span>
+       .
+      </span>
+      DO_valid
+      <span>
+       (
+      </span>
+      USB_DO_valid
+      <span>
+       )
+      </span>
+      <span>
+       ,
+      </span>
+      <span>
+       .
+      </span>
+      DO_ready
+      <span>
+       (
+      </span>
+      <span>
+       (
+      </span>
+      mode_buf
+      <span>
+       =
+      </span>
+      <span>
+       =
+      </span>
+      <span>
+       2
+      </span>
+      'd0
+      <span>
+       )
+      </span>
+      <span>
+       &amp;
+      </span>
+      <span>
+       &amp;
+      </span>
+      <span>
+       !
+      </span>
+      reset_ifclk
+      <span>
+       &amp;
+      </span>
+      <span>
+       &amp;
+      </span>
+      <span>
+       !
+      </span>
+      FULL
+      <span>
+       )
+      </span>
+      <span>
+       ,
+      </span>
+      <span>
+       // debug output
+      </span>
+      <span>
+       .
+      </span>
+      status
+      <span>
+       (
+      </span>
+      if_status
+      <span>
+       )
+      </span>
+      <span>
+       )
+      </span>
+      <span>
+       ;
+      </span>
+     </pre>
+    </p>
+   </div>
+   <div id="d_VHDL instantiation example">
+    <h2>
+     
+     
+     VHDL instantiation example
+    </h2>
+    <p id="p_VHDL instantiation example">
+     A component declaration of the module can be found in file
+     <tt>
+      
+       ezusb_io_component.vhdl
+      
+     </tt>
+     This is the VHDL variant of the instantiation from above.
+     <pre>
+      -- ...
+signal reset2      : std_logic;
+signal DO_ready    : std_logic;
+
+begin
+
+   ezusb_io_inst : ezusb_io 
+    generic map (
+	OUTEP =&gt; 2,		        -- EP for FPGA -&gt; EZ-USB transfers
+	INEP  =&gt; 6 		        -- EP for EZ-USB -&gt; FPGA transfers 
+    ) 
+    port map (
+	ifclk     =&gt; ifclk,
+        reset     =&gt; reset,   		-- asynchronous reset input
+        reset_out =&gt; reset_usb,		-- synchronous reset output
+        -- pins
+        ifclk_in   =&gt; ifclk_in,
+        fd	   =&gt; fd,
+	SLWR	   =&gt; SLWR,
+	SLRD       =&gt; SLRD,
+	SLOE       =&gt; SLOE, 
+	PKTEND     =&gt; PKTEND,
+	FIFOADDR(0)=&gt; FIFOADDR0, 
+	FIFOADDR(1)=&gt; FIFOADDR1, 
+	EMPTY_FLAG =&gt; FLAGA,
+	FULL_FLAG  =&gt; FLAGB,
+	-- signals for FPGA -&gt; EZ-USB transfer
+	DI	       =&gt; rd_buf(15 downto 0),	-- data written to EZ-USB
+	DI_valid       =&gt; USB_DI_valid,		-- 1 indicates data valid; DI and DI_valid must be hold if DI_ready is 0
+	DI_ready       =&gt; USB_DI_ready,		-- 1 if new data are accepted
+	DI_enable      =&gt; '1',			-- setting to 0 disables FPGA -&gt; EZ-USB transfers
+        pktend_timeout =&gt; conv_std_logic_vector(90,16),		-- timeout in multiples of 65536 clocks (approx. 0.1s @ 48 MHz) before a short packet committed
+    						-- setting to 0 disables this feature
+	-- signals for EZ-USB -&gt; FPGA transfer
+	DO       =&gt; USB_DO,			-- data read from EZ-USB
+	DO_valid =&gt; USB_DO_valid,		-- 1 indicated valid data
+	DO_ready =&gt; DO_ready,			-- setting to 1 enables writing new data to DO in next clock; DO and DO_valid are hold if DO_ready is 0
+        -- debug output
+	status	 =&gt; if_status
+    );
+
+    reset2
+     </pre>
+    </p>
+   </div>
+  </div>
+  <div style="clear:both;margin-left:200px;">
+  </div>
+ </div>
+</div>
+</body>
+<p id='foot'>Database updated on 12 June 2015</p>
