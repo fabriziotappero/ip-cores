@@ -1,0 +1,245 @@
+\documentclass[10pt, twoside, a4paper]{article}
+\usepackage{longtable}
+
+\newcommand{\shl}{\ensuremath{<\!\!<}}
+\newcommand{\shr}{\ensuremath{>\!\!>\!\!>}}
+\newcommand{\sar}{\ensuremath{>\!\!>}}
+\newcommand{\at}{\ensuremath{\!\!:\!\!}}
+
+\title{marca - McAdam's RISC Computer Architecture\\Instruction Set Architecture}
+\author{Kenan Bilic, Roland Kammerer, Wolfgang Puffitsch}
+
+\begin{document}
+
+  \maketitle
+
+  \section{General}
+
+  \begin{itemize}
+  \item 16 16-bit registers, r0 \ldots r15
+  \item any register as return address
+  \item flags: Z, C, V, N
+    \begin{itemize}
+    \item Z: all bits of the last result are zero
+    \item C: ``17$^{th}$ bit'' of the last result
+    \item N: 16$^{th}$ bit of the last result
+    \item V: overflow, after sub/cmp it is $r1 \at 15 \oplus r2 \at 15
+      \oplus N \oplus C$, the latter two according to the result,
+      other operations accordingly
+    \item I: allow interrupts
+    \item P: parity of the last result
+    \end{itemize}
+    Flags are written where meaningful: P and Z are computed whenever
+    a register is written, arithmetic operations may change C, N and
+    V, interrupts clear I upon entry.
+  \item flags are stored and restored upon interrupt entry and exit
+    to/from ``shflags'' (shadow flags)
+  \item separate registers for interrupt vectors - read and written
+    through ``ldvec'' / ``stvec''
+  \item Some parts come from the Alpha architecture. The handling of
+    branches is inspired by the Intel x86.
+  \item External hardware modules shall be mapped to the highest
+    memory locations.
+  \end{itemize}
+
+  The processor uses a Harvard architecture; although it has not
+  prevailed in mainstream-architectures, it is still used in embedded
+  processors such as the Atmel AVR. The separation of code- and
+  data-memory is not flexible enough for mainstream systems, but with
+  small embedded processors the program code tends to be fixed
+  anyway. A Harvard architecture enables the processor to make use of
+  more memory (which is an issue when the address space is limited to
+  64k), and the program code can be read from a ROM directly. A
+  transient failure thus cannot destroy the program by overwriting its
+  code section.
+
+  \clearpage
+
+  \section{Instruction Set}
+
+  {\small
+  \begin{longtable}{llp{.62\textwidth}}
+    Instruction       & Opcode                & Semantics \\
+    add r1, r2, r3    & \texttt{0000}         & $r1 + r2 \rightarrow r3$ \\
+    sub r1, r2, r3    & \texttt{0001}         & $r1 - r2 \rightarrow r3$ \\
+    addc r1, r2, r3   & \texttt{0010}         & $r1 + r2 + C \rightarrow r3$ \\
+    subc r1, r2, r3   & \texttt{0011}         & $r1 - r2 - C \rightarrow r3$ \\
+    and r1, r2, r3    & \texttt{0100}         & $r1 \wedge r2 \rightarrow r3$ \\
+    or r1, r2, r3     & \texttt{0101}         & $r1 \vee r2 \rightarrow r3$ \\
+    xor r1, r2, r3    & \texttt{0110}         & $r1 \oplus r2 \rightarrow r3$ \\
+    mul r1, r2, r3    & \texttt{0111}         & $r1 * r2 \rightarrow r3$ \\
+    div r1, r2, r3    & \texttt{1000}         & $r1 \div r2 \rightarrow r3$ \\
+    udiv r1, r2, r3   & \texttt{1001}         & $r1 \div r2 \rightarrow r3, \textnormal{unsigned} $ \\
+    ldil r1, n8       & \texttt{1010}         & $(r1 \wedge \texttt{0xff00}) \vee n8 \rightarrow r1, -128 \leq n8 \leq 255 $ \\
+    ldih r1, n8       & \texttt{1011}         & $(r1 \wedge \texttt{0x00ff}) \vee (n8 \shl 8) \rightarrow r1, -128 \leq n8 \leq 255 $ \\
+    ldib r1, n8       & \texttt{1100}         & $n8 \rightarrow r1, -128 \leq n8 \leq 127$ \\
+  \hline
+    mov r1, r2        & \texttt{11010000}     & $r2 \rightarrow r1$ \\
+    mod r1, r2        & \texttt{11010001}     & $r1\ \textnormal{mod}\ r2 \rightarrow r1$ \\
+    umod r1, r2       & \texttt{11010010}     & $r1\ \textnormal{mod}\ r2 \rightarrow r1, \textnormal{unsigned} $ \\
+    not r1, r2        & \texttt{11010011}     & $\lnot r2 \rightarrow r1$ \\
+    neg r1, r2        & \texttt{11010100}     & $-r1 \rightarrow r2$ \\
+    cmp r1, r2        & \texttt{11010101}     & $r1 - r2, \textnormal{sets flags}$ \\
+    addi r1, n4       & \texttt{11010110}     & $r1 + n4 \rightarrow r1, -8 \leq n4 \leq 7$ \\
+    cmpi r1, n4       & \texttt{11010111}     & $r1 - n4, \textnormal{sets flags}, -8 \leq n4 \leq 7$ \\
+    shl r1, r2        & \texttt{11011000}     & $r1 \shl r2 \rightarrow r1$ \\
+    shr r1, r2        & \texttt{11011001}     & $r1 \shr r2 \rightarrow r1$ \\
+    sar r1, r2        & \texttt{11011010}     & $r1 \sar r2 \rightarrow r1$ \\
+    rolc r1, r2       & \texttt{11011011}     & $(r1 \shl r2) \vee (C \shl (r2-1)) \vee (r1 \shr (16-r2-1))$ \\
+    rorc r1, r2       & \texttt{11011100}     & $(r1 \shr r2) \vee (C \shl (16-r2)) \vee (r1 \shl (16-r2-1))$ \\
+    bset r1, n4       & \texttt{11011101}     & $r1 \vee (1 \shl n4) \rightarrow r1, 0 \leq n4 \leq 15$ \\
+    bclr r1, n4       & \texttt{11011110}     & $r1 \wedge \lnot (1 \shl n4) \rightarrow r1, 0 \leq n4 \leq 15$ \\
+    btest r1, n4      & \texttt{11011111}     & $(r1 \shr n4) \wedge 1 \rightarrow Z, 0 \leq n4 \leq 15$ \\
+  \hline
+    load r1, r2       & \texttt{11100000}     & $[r2] \at [r2+1] \rightarrow r1$ \\
+    store r1, r2      & \texttt{11100001}     & $r1 \rightarrow [r2] \at [r2+1]$ \\
+    loadl r1, r2      & \texttt{11100010}     & $(r1 \wedge \texttt{0xff00}) \vee [r2] \rightarrow r1$ \\
+    loadh r1, r2      & \texttt{11100011}     & $(r1 \wedge \texttt{0x00ff}) \vee ([r2] \shl 8) \rightarrow r1$ \\
+    loadb r1, r2      & \texttt{11100100}     & $[r2] \rightarrow r1, \textnormal{signed}$ \\
+    storel r1, r2     & \texttt{11100101}     & $(r1 \wedge \texttt{0x00ff}) \rightarrow [r2]$ \\
+    storeh r1, r2     & \texttt{11100110}     & $(r1 \shr 8) \rightarrow [r2]$ \\
+    call r1, r2       & \texttt{11101000}     & $r1 \rightarrow pc, pc \rightarrow r2$ \\
+  \hline
+    br n8             & \texttt{11110000}     & $pc + n8 \rightarrow pc, -128 \leq n8 \leq 127$ \\
+    brz n8            & \texttt{11110001}     & $Z = 1 \Rightarrow pc + n8 \rightarrow pc, -128 \leq n8 \leq 127$ \\
+    brnz n8           & \texttt{11110010}     & $Z = 0 \Rightarrow pc + n8 \rightarrow pc, -128 \leq n8 \leq 127$ \\
+    brle n8           & \texttt{11110011}     & $(Z = 1) \vee (N \not = V) \Rightarrow pc + n8 \rightarrow pc, -128 \leq n8 \leq 127$ \\
+    brlt n8           & \texttt{11110100}     & $(Z = 0) \wedge (N \not = V) \Rightarrow pc + n8 \rightarrow pc, -128 \leq n8 \leq 127$ \\
+    brge n8           & \texttt{11110101}     & $(Z = 1) \vee (N = V) \Rightarrow pc + n8 \rightarrow pc, -128 \leq n8 \leq 127$ \\
+    brgt n8           & \texttt{11110110}     & $(Z = 0) \wedge (N = V) \Rightarrow pc + n8 \rightarrow pc, -128 \leq n8 \leq 127$ \\
+    brule n8          & \texttt{11110111}     & $(Z = 1) \vee (C = 1) \Rightarrow pc + n8 \rightarrow pc, -128 \leq n8 \leq 127$ \\
+    brult n8          & \texttt{11111000}     & $(Z = 0) \wedge (C = 1) \Rightarrow pc + n8 \rightarrow pc, -128 \leq n8 \leq 127$ \\
+    bruge n8          & \texttt{11111001}     & $(Z = 1) \vee (C = 0) \Rightarrow pc + n8 \rightarrow pc, -128 \leq n8 \leq 127$ \\
+    brugt n8          & \texttt{11111010}     & $(Z = 0) \wedge (C = 0) \Rightarrow pc + n8 \rightarrow pc, -128 \leq n8 \leq 127$ \\
+    sext r1, r2       & \texttt{11111011}     & $(r1 \shl 8) \sar 8 \rightarrow r2$ \\
+    ldvec r1, n4      & \texttt{11111100}     & $\textnormal{interrupt vector}\ n4 \rightarrow r1, 0 \leq n4 \leq 15$ \\
+    stvec r1, n4      & \texttt{11111101}     & $r1 \rightarrow \textnormal{interrupt vector}\ n4, 0 \leq n4 \leq 15$ \\
+  \hline
+    jmp r1            & \texttt{111111100000} & $r1 \rightarrow pc$ \\
+    jmpz r1           & \texttt{111111100001} & $Z = 1 \Rightarrow r1 \rightarrow pc$ \\
+    jmpnz r1          & \texttt{111111100010} & $Z = 0 \Rightarrow r1 \rightarrow pc$ \\
+    jmple r1          & \texttt{111111100011} & $(Z = 1) \vee (N \not = V) \Rightarrow r1 \rightarrow pc$ \\
+    jmplt r1          & \texttt{111111100100} & $(Z = 0) \wedge (N \not = V) \Rightarrow r1 \rightarrow pc$ \\
+    jmpge r1          & \texttt{111111100101} & $(Z = 1) \vee (N = V) \Rightarrow r1 \rightarrow pc$ \\
+    jmpgt r1          & \texttt{111111100110} & $(Z = 0) \wedge (N = V) \Rightarrow r1 \rightarrow pc$ \\
+    jmpule r1         & \texttt{111111100111} & $(Z = 1) \vee (C = 1) \Rightarrow r1 \rightarrow pc$ \\
+    jmpult r1         & \texttt{111111101000} & $(Z = 0) \wedge (C = 1) \Rightarrow r1 \rightarrow pc$ \\
+    jmpuge r1         & \texttt{111111101001} & $(Z = 1) \vee (C = 0) \Rightarrow r1 \rightarrow pc$ \\
+    jmpugt r1         & \texttt{111111101010} & $(Z = 0) \wedge (C = 0) \Rightarrow r1 \rightarrow pc$ \\
+    intr n4           & \texttt{111111101011} & $\textnormal{interrupt vector}\ n4 \rightarrow pc, pc \rightarrow ira, flags \rightarrow shflags, 0 \leq n4 \leq 15$ \\
+    getira r1         & \texttt{111111101100} & $ira \rightarrow r1$ \\
+    setira r1         & \texttt{111111101101} & $r1 \rightarrow ira$ \\
+    getfl r1          & \texttt{111111101110} & $flags \rightarrow r1$ \\
+    setfl r1          & \texttt{111111101111} & $r1 \rightarrow flags$ \\
+    getshfl r1        & \texttt{111111110000} & $shflags \rightarrow r1$ \\
+    setshfl r1        & \texttt{111111110001} & $r1 \rightarrow shflags$ \\
+  \hline
+    reti              & \texttt{1111111111110000} & $ira \rightarrow pc, shflags \rightarrow flags$ \\
+    nop               & \texttt{1111111111110001} & $\textnormal{do nothing}$ \\
+    sei               & \texttt{1111111111110010} & $1 \rightarrow I$ \\
+    cli               & \texttt{1111111111110011} & $0 \rightarrow I$ \\
+    error             & \texttt{1111111111111111} & $\textnormal{invalid operation}$ \\
+  \end{longtable}}
+
+  \subsection{NOTES}
+  \begin{itemize}
+  \item Apart from the standard operators, the following notation is
+    used in the table above:
+    \begin{itemize}
+    \item \shl, \shr, \sar are shifting operators, with semantics as in Java
+    \item $[x]$ means accessing memory location $x$, 8 bits wide
+    \item $x \at y$ means concatenating $x$ and $y$, in the sense of
+      forming a 16-bit value from two 8-bit values
+    \end{itemize}
+  \item Modulo does not follow the patterns for ``div'' and ``udiv'',
+    because there was not enough room for two more 3-operand
+    operations. The assembler accepts the mnemonic with 3 registers as
+    operands and substitute it with the according ``mov'' and ``mod''
+    instructions.
+  \end{itemize}
+
+  \clearpage
+
+  \subsection{Instruction formats}
+
+  The following formats for instructions are to be used:
+
+  \begin{center}
+    \begin{tabular}{|p{1in}|p{1in}|p{1in}|p{1in}|}
+      \hline
+      Bits 15 \ldots 12 & Bits 11 \ldots 8 & Bits 7 \ldots 4 & Bits 3 \ldots 0 \\
+      \hline
+      Opcode                & r3   & r2 & r1 \\
+      \hline
+      Opcode                & \multicolumn{2}{|l|}{n8} & r1 \\
+      \hline
+      \multicolumn{2}{|l|}{Opcode} & r2 & r1 \\
+      \hline
+      \multicolumn{2}{|l|}{Opcode} & n4 & r1 \\
+      \hline
+      \multicolumn{2}{|l|}{Opcode} & \multicolumn{2}{|l|}{n8} \\
+      \hline
+      \multicolumn{3}{|l|}{Opcode} & r1 \\
+      \hline
+      \multicolumn{3}{|l|}{Opcode} & n4 \\
+      \hline
+      \multicolumn{4}{|l|}{Opcode} \\
+      \hline
+    \end{tabular}
+  \end{center}
+
+  \section{Versions Of This Document}
+  
+  2006-10-04: Draft version \textbf{0.1}
+
+  \noindent
+  2006-10-05: Draft version \textbf{0.2}
+  \begin{itemize}
+    \item rearrangement of some ops
+  \end{itemize}
+
+  \noindent
+  2006-10-11: Draft version \textbf{0.3}
+  \begin{itemize}
+    \item replaced ``ror''/``rol'' with ``mod''/``umod''
+    \item refined considerations of direction flag
+    \item proposal for priorities of implementation
+  \end{itemize}
+
+  \noindent
+  2006-10-28: Draft version \textbf{0.4}
+  \begin{itemize}
+    \item settled to singed loads
+    \item settled to shifts by registers
+    \item dropped ``push''/``pop''; the secondary result would cause a
+      considerable overhead
+    \item specified pipelining
+  \end{itemize}
+
+  \noindent
+  2006-10-30: Draft version \textbf{0.5}
+  \begin{itemize}
+    \item added shflags to ease interrupt (and stack) handling
+    \item a few refinements
+  \end{itemize}
+
+  \noindent
+  2006-12-02: Draft version \textbf{0.6}
+  \begin{itemize}
+    \item the first register is the target with ``mov'' and ``not'' now.
+    \item now the second register is always the address when accessing memory
+    \item reversed order with immediate loads
+    \item ``ldvec'' and ``stvec'' use the same order now
+    \item fixed instruction format for immediate loads
+  \end{itemize}
+
+  \noindent
+  2006-12-14: Draft version \textbf{0.7}
+  \begin{itemize}
+  \item dropped ``ldpgm'' in favor of a ROM which is mapped to the
+    ordinary memory space
+  \item moved section about pipelinign to the implementation document
+  \item removed note about interrupts; they are implemented already
+  \end{itemize}
+
+\end{document}
