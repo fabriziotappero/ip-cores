@@ -1,0 +1,653 @@
+0a1
+> `timescale 1ns / 1ps
+67,84d67
+< //  Modifications, commented by 'CNS' below, NOV-12-2006 Chris N. Strahm      //
+< //	(1)	Fixed warnings due to bit width truncations, assignment sizes.        //
+< //  (2) Changed tristate data bus to din,dout. Better for internal FPGA use.  // 
+< //  (3) Removed waitr line, hard assigned to 0.  Not much use in FPGA's.      //
+< //  (4) Implemented INTR hardware vectoring.  Orig 8080 external INT vector   //
+< //      scheme not useful for FPGAs with other soft core perfs. Added inputs: //
+< //      INTR[1] - Vector/Reset to 0008H                                       // 
+< //      INTR[2] - Vector/Reset to 0010H                                       // 
+< //      INTR[3] - Vector/Reset to 0018H                                       //
+< //      INTR[4] - Vector/Reset to 0020H                                       //
+< //      INTR[5] - Vector/Reset to 0028H                                       //
+< //      INTR[6] - Vector/Reset to 0030H                                       //
+< //      INTR[7] - Vector/Reset to 0038H                                       //
+< //  Note: Unused intr lines can just be assigned/wired to 0.                  //
+< //  Note: inta is still provided as a common ack to any intr.                 //
+< //  Note: Program execution origin at 0H should now jump to >= 0040H to begin //
+< //        main code to skip over the interrupt vector locations.              //
+< //                                                                            //
+87,88d69
+< `timescale 1ns / 1ps
+< 
+127a109,113
+> `define cpus_call     6'h23 // CALL completion
+> `define cpus_ret      6'h24 // RET completion
+> `define cpus_movtalua 6'h25 // move to alu a
+> `define cpus_movtalub 6'h26 // move to alu b
+> `define cpus_indm     6'h27 // inc/dec m
+165,191c151,167
+< `define mac_readbmtr   14 // read byte and move to register
+< `define mac_sta        16 // STA
+< `define mac_lda        20 // LDA
+< `define mac_shld       25 // SHLD
+< `define mac_lhld       30 // LHLD
+< `define mac_writedbyte 36 // write double byte
+< `define mac_pop        38 // POP
+< `define mac_xthl       40 // XTHL
+< `define mac_accimm     44 // accumulator immediate
+< `define mac_jmp        45 // JMP
+< `define mac_call       47 // CALL
+< `define mac_in         51 // IN
+< `define mac_out        52 // OUT
+< `define mac_rst        53 // RST
+< 
+< //
+< // Reset/Int Opcodes  (CNS)
+< //
+< `define opcode_reset_0 8'b11000111 // reset int vector to 0000H
+< `define opcode_reset_1 8'b11001111 // reset int vector to 0008H
+< `define opcode_reset_2 8'b11010111 // reset int vector to 0010H
+< `define opcode_reset_3 8'b11011111 // reset int vector to 0018H
+< `define opcode_reset_4 8'b11100111 // reset int vector to 0020H
+< `define opcode_reset_5 8'b11101111 // reset int vector to 0028H
+< `define opcode_reset_6 8'b11110111 // reset int vector to 0030H
+< `define opcode_reset_7 8'b11111111 // reset int vector to 0038H
+< 
+---
+> `define mac_readbmtr   15 // read byte and move to register
+> `define mac_sta        17 // STA
+> `define mac_lda        21 // LDA
+> `define mac_shld       26 // SHLD
+> `define mac_lhld       31 // LHLD
+> `define mac_writedbyte 37 // write double byte
+> `define mac_pop        39 // POP
+> `define mac_xthl       41 // XTHL
+> `define mac_accimm     45 // accumulator immediate
+> `define mac_jmp        46 // JMP
+> `define mac_call       48 // CALL
+> `define mac_in         52 // IN
+> `define mac_out        53 // OUT
+> `define mac_rst        54 // RST
+> `define mac_ret        56 // RET
+> `define mac_alum       58 // op a,m
+> `define mac_indm       60 // inc/dec m
+193,195c169,170
+< module M8080  (addr,     // Address out
+<                dout,     // Data Output bus
+<                din,      // Data Input  bus
+---
+> module cpu8080(addr,     // Address out
+>                data,     // Data bus
+200,201c175,177
+<                intr,     // Interrupt request bus, hard wire vector select [7:1] CNS
+<                inta,     // Interrupt acknowledge, common to any intr 
+---
+>                intr,     // Interrupt request 
+>                inta,     // Interrupt request 
+>                waitr,    // Wait request
+203,205c179
+< //               waitr,    // Wait request  CNS
+<                clock	 // Clock
+<                );   // System clock
+---
+>                clock);   // System clock
+208,209c182
+<    input  [7:0] din;
+<    output [7:0] dout;
+---
+>    inout  [7:0] data;
+214c187
+<    input  [7:1] intr; // CNS
+---
+>    input  intr;
+216c189
+< //   input  waitr;   CNS
+---
+>    input  waitr;
+218,220c191
+<    input  clock; // synthesis clock 
+<     
+<    wire   waitr = 1'b0;		// no extra wait states, lock low, CNS
+---
+>    input  clock;
+238c209
+< //   reg           dataeno;     // Enable output data CNS
+---
+>    reg           dataeno;     // Enable output data
+276,277d246
+<    wire 		 aluzout; // CNS
+<    wire			 alusout; // CNS   
+281c250,251
+<    alu alu(alures, aluopra, aluoprb, alucin, alucout, aluzout, alusout, alupar, aluaxc, alusel);
+---
+>    alu alu(alures, aluopra, aluoprb, alucin, alucout, aluzout, alusout, alupar,
+>            aluaxc, alusel);
+288c258
+< //      dataeno <= 0; // get off the data bus CNS
+---
+>       dataeno <= 0; // get off the data bus
+302,304c272,273
+<          // if any interrupt request is on, enter interrupt cycle, else exit it now
+<          if (ei&&(intr[1]||intr[2]||intr[3]||intr[4]||intr[5]||intr[6]||intr[7])) begin	// CNS
+< //         if (intr&&ei) begin
+---
+>          // if interrupt request is on, enter interrupt cycle, else exit it now
+>          if (intr&&ei) begin
+334,346c303
+< 			// CNS: If we have an intr, then force the opcode to rst#
+< 			// else read the op code from the data input as usual. 
+< 			if (intcyc) begin		// for an int cycle
+< 				if (intr[1]) opcode <= `opcode_reset_1;	// int vector to 0008H
+< 				if (intr[2]) opcode <= `opcode_reset_2;	// int vector to 0010H
+< 				if (intr[3]) opcode <= `opcode_reset_3;	// int vector to 0018H
+< 				if (intr[4]) opcode <= `opcode_reset_4;	// int vector to 0020H
+< 				if (intr[5]) opcode <= `opcode_reset_5;	// int vector to 0028H
+< 				if (intr[6]) opcode <= `opcode_reset_6;	// int vector to 0030H
+< 				if (intr[7]) opcode <= `opcode_reset_7;	// int vector to 0038H
+<                 intcyc <= 0; 		// we will kill the intcyc here, don't need it further
+< 			end else opcode <= din;	// latch/read opcode CNS
+< 
+---
+>             opcode <= data; // latch opcode
+348c305
+<             inta <= 0; 				// Deactivate interrupt acknowledge
+---
+>             inta <= 0; // and interrupt acknowledge
+371c328
+<                      pc <= pc+1'b1; // Next instruction byte  CNS
+---
+>                      pc <= pc+1'b1; // Next instruction byte
+379c336
+<                      pc <= pc+1'b1; // Next instruction byte CNS
+---
+>                      pc <= pc+1'b1; // Next instruction byte
+387c344
+<                      pc <= pc+1'b1; // Next instruction byte CNS
+---
+>                      pc <= pc+1'b1; // Next instruction byte
+395c352
+<                      pc <= pc+1'b1; // Next instruction byte CNS
+---
+>                      pc <= pc+1'b1; // Next instruction byte
+404,409c361,362
+<                      if (regfil[`reg_a][3:0] > 9 || auxcar) begin
+< 
+<                         { carry, regfil[`reg_a] } <= regfil[`reg_a]+ 3'b110;  // CNS 6
+<                         auxcar <= ((regfil[`reg_a][3:0]+6 >> 4) & 1'b1) ? 1'b1:1'b0; // cns
+< 
+<                      end
+---
+>                      if (regfil[`reg_a][3:0] > 9 || auxcar)
+>                         { auxcar, regfil[`reg_a] } <= regfil[`reg_a]+4'b0110;
+425c378,384
+<                      state <= `cpus_indcb; // go inr/dcr cycleback
+---
+>                      if (opcode[5:3] == `reg_m) begin
+> 
+>                         raddrhold <= regfil[`reg_h]<<8|regfil[`reg_l];
+>                         statesel <= `mac_indm; // inc/dec m
+>                         state <= `cpus_read; // read byte
+> 
+>                      end else state <= `cpus_indcb; // go inr/dcr cycleback
+434c393
+<                         waddrhold <= regfil[`reg_d]<<8|regfil[`reg_d];
+---
+>                         waddrhold <= regfil[`reg_d]<<8|regfil[`reg_e];
+447c406
+<                         raddrhold <= regfil[`reg_d]<<8|regfil[`reg_d];
+---
+>                         raddrhold <= regfil[`reg_d]<<8|regfil[`reg_e];
+588c547
+<                         (((regfil[`reg_b] << 8)+regfil[`reg_c]) - 8'b1)>>8;
+---
+>                         (((regfil[`reg_b] << 8)+regfil[`reg_c])-1)>>8;
+590c549
+<                         ((regfil[`reg_b] << 8)+regfil[`reg_c])- 8'b1;
+---
+>                         ((regfil[`reg_b] << 8)+regfil[`reg_c])-1;
+600c559
+<                         (((regfil[`reg_d] << 8)+regfil[`reg_e]) - 8'b1)>>8;
+---
+>                         (((regfil[`reg_d] << 8)+regfil[`reg_e])-1)>>8;
+602c561
+<                         ((regfil[`reg_d] << 8)+regfil[`reg_e])- 8'd11;	// cns 11
+---
+>                         ((regfil[`reg_d] << 8)+regfil[`reg_e])-1;
+612c571
+<                         (((regfil[`reg_h] << 8)+regfil[`reg_l])- 8'b1)>>8;
+---
+>                         (((regfil[`reg_h] << 8)+regfil[`reg_l])-1)>>8;
+614c573
+<                         ((regfil[`reg_h] << 8)+regfil[`reg_l]) - 8'b1;
+---
+>                         ((regfil[`reg_h] << 8)+regfil[`reg_l])-1;
+623c582
+<                      sp <= sp - 16'b1;
+---
+>                      sp <= sp-1;
+631c590
+<                      raddrhold <= pc+1'b1; // pick up after instruction
+---
+>                      raddrhold <= pc+1; // pick up after instruction
+640c599
+<                      raddrhold <= pc+1'b1; // pick up after instruction
+---
+>                      raddrhold <= pc+1; // pick up after instruction
+649c608
+<                      raddrhold <= pc+1'b1; // pick up after instruction
+---
+>                      raddrhold <= pc+1; // pick up after instruction
+658,659c617
+<                      raddrhold <= pc+1'b1; // pick up after instruction
+<                      pc <= pc + 16'h3; // skip
+---
+>                      raddrhold <= pc+1; // pick up after instruction
+671c629
+<                      raddrhold <= pc+1'b1; // set pickup address
+---
+>                      raddrhold <= pc+1; // set pickup address
+689c647
+<                      raddrhold <= pc+1'b1; // set read address
+---
+>                      raddrhold <= pc+1; // set read address
+698c656
+<                      raddrhold <= pc+1'b1; // set read address
+---
+>                      raddrhold <= pc+1; // set read address
+710c668
+<                      raddrhold <= pc+1'b1; // set read address
+---
+>                      raddrhold <= pc+1; // set read address
+713c671
+<                      pc <= pc + 16'h3; // next
+---
+>                      pc <= pc + 16'h3; // skip
+719c677
+<                      raddrhold <= pc+1'b1; // set read address
+---
+>                      raddrhold <= pc+1; // set read address
+722c680
+<                      pc <= pc + 16'h3; // next
+---
+>                      pc <= pc + 16'h3; // skip
+760c718
+<                   end else if (regd == `reg_m) begin
+---
+>                   end else if (opcode[5:3] == `reg_m) begin
+792,794c750,751
+<                   regd <= `reg_a; // set destination always a
+<                   statesel <= `mac_readbtoreg; // read byte to register
+<                   state <= `cpus_read;
+---
+>                   statesel <= `mac_alum; // alu from m
+>                   state <= `cpus_read; // read byte
+808,809c765,766
+<                      waddrhold <= sp - 16'h2; // write to stack
+<                      sp <= sp - 16'h2; // pushdown stack
+---
+>                      waddrhold <= sp-2; // write to stack
+>                      sp <= sp-2; // pushdown stack
+833c790
+<                      sp <= sp + 16'h2; // pushup stack
+---
+>                      sp <= sp+2; // pushup stack
+878c835
+<                      raddrhold <= pc + 1'b1; // read at PC
+---
+>                      raddrhold <= pc+1; // read at PC
+894c851
+<                      raddrhold <= pc+1'b1; // pick up jump address
+---
+>                      raddrhold <= pc+1; // pick up jump address
+938d894
+<                      sp <= sp - 16'h2; // pushdown stack
+949,950c905,906
+<                      { wdatahold2, wdatahold } <= pc + 16'h3; // of address after call
+<                      sp <= sp - 16'h2; // pushdown stack
+---
+>                      // of address after call
+>                      { wdatahold2, wdatahold } <= pc + 16'h3;
+980,981c936
+<                      sp <= sp + 16'h2; // pushup stack
+<                      statesel <= `mac_jmp; // finish JMP
+---
+>                      statesel <= `mac_ret; // finish RET
+990,991c945
+<                      sp <= sp + 16'h2; // pushup stack
+<                      statesel <= `mac_jmp; // finish JMP
+---
+>                      statesel <= `mac_ret; // finish JMP
+1025,1026c979,980
+<                      else { wdatahold2, wdatahold } <= pc + 16'h3; // cns 
+<                      { wdatahold2, wdatahold } <= pc + 1'b1; // of address after call CNS
+---
+>                      else { wdatahold2, wdatahold } <= pc + 16'h3;
+>                      { wdatahold2, wdatahold } <= pc + 1'b1; // of address after call
+1051,1052c1005,1006
+<                      raddrhold <= pc+1'b1; // pick up byte I/O address
+<                      pc <= pc + 2'b10; // next
+---
+>                      raddrhold <= pc+1; // pick up byte I/O address
+>                      pc <= pc+2; // next
+1055c1009
+<                      pc <= pc + 2'b10; // Next instruction byte
+---
+>                      pc <= pc + 16'h2; // advance over byte
+1061,1062c1015,1016
+<                      raddrhold <= pc+1'b1; // pick up byte I/O address
+<                      pc <= pc + 2'b10; // next
+---
+>                      raddrhold <= pc+1; // pick up byte I/O address
+>                      pc <= pc+2; // next
+1065c1019
+<                      pc <= pc + 2'b10; // Next instruction byte
+---
+>                      pc <= pc + 16'h2; // advance over byte
+1075c1029
+<                      pc <= pc + 2'b10; // Next instruction byte, cns 2
+---
+>                      pc <= pc+1'b1; // Next instruction byte
+1097c1051
+<          waddrhold <= waddrhold + 1'b1; // next address
+---
+>          waddrhold <= waddrhold+1; // next address
+1100c1054
+< //         dataeno <= 1; // enable output data CNS
+---
+>          dataeno <= 1; // enable output data
+1125c1079
+< //         dataeno <= 0; // disable output data CNS
+---
+>          dataeno <= 0; // disable output data
+1127c1081
+<          statesel <= statesel+1'b1; // and index next in macro 
+---
+>          statesel <= statesel+1; // and index next in macro 
+1138c1092
+<          raddrhold <= raddrhold + 1'b1; // next address
+---
+>          raddrhold <= raddrhold+1; // next address
+1157c1111
+<             rdatahold <= din; // read new data CNS
+---
+>             rdatahold <= data; // read new data
+1161c1115
+<             statesel <= statesel+1'b1; // and index next in macro 
+---
+>             statesel <= statesel+1; // and index next in macro 
+1180,1184c1134,1138
+<                sign   <= ((rdatahold2 >> 7)& 1'b1) ? 1'b1:1'b0;
+<                zero   <= ((rdatahold2 >> 6)& 1'b1) ? 1'b1:1'b0;
+<                auxcar <= ((rdatahold2 >> 4)& 1'b1) ? 1'b1:1'b0;
+<                parity <= ((rdatahold2 >> 2)& 1'b1) ? 1'b1:1'b0;
+<                carry  <= ((rdatahold2 >> 1)& 1'b1) ? 1'b1:1'b0;
+---
+>                sign <= rdatahold2 >> 7&1;
+>                zero <= rdatahold2 >> 6&1;
+>                auxcar <= rdatahold2 >> 4&1;
+>                parity <= rdatahold2 >> 2&1;
+>                carry <= rdatahold2 >> 0&1;
+1199a1154,1169
+>       `cpus_call: begin // call address
+> 
+>          sp <= sp-2; // pushdown stack
+>          state <= `cpus_fetchi; // and return to instruction fetch
+>          pc <= { rdatahold, rdatahold2 };
+> 
+>       end
+> 
+>       `cpus_ret: begin // return from call
+> 
+>          sp <= sp+2; // pushup stack
+>          state <= `cpus_fetchi; // and return to instruction fetch
+>          pc <= { rdatahold, rdatahold2 };
+> 
+>       end
+> 
+1219c1189
+<             regfil[`reg_a] <= din; // place input data CNS
+---
+>             regfil[`reg_a] <= data; // place input data
+1231c1201
+< //         dataeno <= 1; // enable output data CNS
+---
+>          dataeno <= 1; // enable output data
+1256c1226
+< //         dataeno <= 0; // disable output data CNS
+---
+>          dataeno <= 0; // disable output data
+1265,1266c1235
+<          if (ei&&(intr[1]||intr[2]||intr[3]||intr[4]||intr[5]||intr[6]||intr[7])) state <= `cpus_fetchi; // Fetch next instruction	// CNS
+< //         if (intr&&ei) state <= `cpus_fetchi; // Fetch next instruction
+---
+>          if (intr&&ei) state <= `cpus_fetchi; // Fetch next instruction
+1269d1237
+< 
+1276c1244,1260
+<          statesel <= statesel+1'b1; // and index next in macro 
+---
+>          statesel <= statesel+1; // and index next in macro 
+> 
+>       end
+> 
+>       `cpus_movtalua: begin // move to alu a
+> 
+>          aluopra <= rdatahold; // place data
+>          state <= nextstate; // get next macro state
+>          statesel <= statesel+1; // and index next in macro 
+> 
+>       end
+> 
+>       `cpus_movtalub: begin // move to alu b
+> 
+>          aluoprb <= rdatahold; // place data
+>          state <= nextstate; // get next macro state
+>          statesel <= statesel+1; // and index next in macro 
+1302a1287,1299
+>       `cpus_indm: begin // inr/dcr cycleback to m
+> 
+>          waddrhold <= regfil[`reg_h]<<8|regfil[`reg_l]; // place address
+>          wdatahold <= alures; // place data to write
+>          sign <= alures[7]; // place sign
+>          zero <= aluzout; // place zero
+>          parity <= alupar; // place parity
+>          auxcar <= aluaxc; // place auxiliary carry
+>          state <= nextstate; // get next macro state
+>          statesel <= statesel+1; // and index next in macro 
+> 
+>       end
+> 
+1338c1335
+<          statesel <= statesel+1'b1; // and index next in macro cns
+---
+>          statesel <= statesel+1; // and index next in macro 
+1346c1343
+<          statesel <= statesel+1'b1; // and index next in macro cns
+---
+>          statesel <= statesel+1; // and index next in macro 
+1354c1351
+<          statesel <= statesel+1'b1; // and index next in macro cns
+---
+>          statesel <= statesel+1; // and index next in macro 
+1363c1360
+<          statesel <= statesel+1'b1; // and index next in macro CNS
+---
+>          statesel <= statesel+1; // and index next in macro 
+1376,1377c1373
+<          if (regfil[`reg_a][7:4] > 9 || carry) begin
+< 
+---
+>          if (regfil[`reg_a][7:4] > 9 || carry)
+1379,1380d1374
+< 
+<          end
+1390c1384
+<    assign dout = datao; // CNS
+---
+>    assign data = dataeno ? datao: 8'bz;
+1433c1427,1428
+<       13: nextstate = `cpus_fetchi; // Fetch next instruction
+---
+>       13: nextstate = `cpus_write; // write to destination
+>       14: nextstate = `cpus_fetchi; // Fetch next instruction
+1437,1438c1432,1433
+<       14: nextstate = `cpus_movtr; // place in register
+<       15: nextstate = `cpus_fetchi; // Fetch next instruction
+---
+>       15: nextstate = `cpus_movtr; // place in register
+>       16: nextstate = `cpus_fetchi; // Fetch next instruction
+1442,1445c1437,1440
+<       16: nextstate = `cpus_read; // read high byte
+<       17: nextstate = `cpus_movrtwa; // move read to write address
+<       18: nextstate = `cpus_write; // write to destination
+<       19: nextstate = `cpus_fetchi; // Fetch next instruction
+---
+>       17: nextstate = `cpus_read; // read high byte
+>       18: nextstate = `cpus_movrtwa; // move read to write address
+>       19: nextstate = `cpus_write; // write to destination
+>       20: nextstate = `cpus_fetchi; // Fetch next instruction
+1449,1453c1444,1448
+<       20: nextstate = `cpus_read; // read high byte
+<       21: nextstate = `cpus_movrtra; // move read to write address
+<       22: nextstate = `cpus_read; // read byte
+<       23: nextstate = `cpus_movtr; // move to register
+<       24: nextstate = `cpus_fetchi; // Fetch next instruction
+---
+>       21: nextstate = `cpus_read; // read high byte
+>       22: nextstate = `cpus_movrtra; // move read to write address
+>       23: nextstate = `cpus_read; // read byte
+>       24: nextstate = `cpus_movtr; // move to register
+>       25: nextstate = `cpus_fetchi; // Fetch next instruction
+1457,1461c1452,1456
+<       25: nextstate = `cpus_read; // read high byte
+<       26: nextstate = `cpus_movrtwa; // move read to write address
+<       27: nextstate = `cpus_write; // write to destination low
+<       28: nextstate = `cpus_write; // write to destination high
+<       29: nextstate = `cpus_fetchi; // Fetch next instruction
+---
+>       26: nextstate = `cpus_read; // read high byte
+>       27: nextstate = `cpus_movrtwa; // move read to write address
+>       28: nextstate = `cpus_write; // write to destination low
+>       29: nextstate = `cpus_write; // write to destination high
+>       30: nextstate = `cpus_fetchi; // Fetch next instruction
+1465,1470c1460,1465
+<       30: nextstate = `cpus_read; // read high byte
+<       31: nextstate = `cpus_movrtra; // move read to write address
+<       32: nextstate = `cpus_read; // read byte low
+<       33: nextstate = `cpus_read; // read byte high
+<       34: nextstate = `cpus_lhld; // move to register
+<       35: nextstate = `cpus_fetchi; // Fetch next instruction
+---
+>       31: nextstate = `cpus_read; // read high byte
+>       32: nextstate = `cpus_movrtra; // move read to write address
+>       33: nextstate = `cpus_read; // read byte low
+>       34: nextstate = `cpus_read; // read byte high
+>       35: nextstate = `cpus_lhld; // move to register
+>       36: nextstate = `cpus_fetchi; // Fetch next instruction
+1474,1475c1469,1470
+<       36: nextstate = `cpus_write; // double write
+<       37: nextstate = `cpus_fetchi; // then fetch
+---
+>       37: nextstate = `cpus_write; // double write
+>       38: nextstate = `cpus_fetchi; // then fetch
+1479,1480c1474,1475
+<       38: nextstate = `cpus_read; // double it
+<       39: nextstate = `cpus_pop; // then finish
+---
+>       39: nextstate = `cpus_read; // double it
+>       40: nextstate = `cpus_pop; // then finish
+1484,1487c1479,1482
+<       40: nextstate = `cpus_read; // double it
+<       41: nextstate = `cpus_write; // then write
+<       42: nextstate = `cpus_write; // double it
+<       43: nextstate = `cpus_movmthl; // place word in hl
+---
+>       41: nextstate = `cpus_read; // double it
+>       42: nextstate = `cpus_write; // then write
+>       43: nextstate = `cpus_write; // double it
+>       44: nextstate = `cpus_movmthl; // place word in hl
+1491c1486
+<       44: nextstate = `cpus_accimm; // finish
+---
+>       45: nextstate = `cpus_accimm; // finish
+1495,1496c1490,1491
+<       45: nextstate = `cpus_read; // double read
+<       46: nextstate = `cpus_jmp; // then go pc
+---
+>       46: nextstate = `cpus_read; // double read
+>       47: nextstate = `cpus_jmp; // then go pc
+1500,1503c1495,1498
+<       47: nextstate = `cpus_read; // double read
+<       48: nextstate = `cpus_write; // then write
+<       49: nextstate = `cpus_write; // double write
+<       50: nextstate = `cpus_jmp; // then go to that
+---
+>       48: nextstate = `cpus_read; // double read
+>       49: nextstate = `cpus_write; // then write
+>       50: nextstate = `cpus_write; // double write
+>       51: nextstate = `cpus_call; // then go to that
+1507c1502
+<       51: nextstate = `cpus_in; // go to IN after getting that
+---
+>       52: nextstate = `cpus_in; // go to IN after getting that
+1511c1506
+<       52: nextstate = `cpus_out; // go to OUT after getting that
+---
+>       53: nextstate = `cpus_out; // go to OUT after getting that
+1515,1516c1510,1528
+<       53: nextstate = `cpus_write; // double write
+<       54: nextstate = `cpus_jmp; // then go to that
+---
+>       54: nextstate = `cpus_write; // double write
+>       55: nextstate = `cpus_jmp; // then go to that
+> 
+>       // mac_ret: RET
+> 
+>       56: nextstate = `cpus_read; // double read
+>       57: nextstate = `cpus_ret; // then go to that
+> 
+>       // mac_alum: op a,m
+> 
+>       58: nextstate = `cpus_movtalub; // go move to alu a
+>       59: nextstate = `cpus_alucb; // cycle back to acc
+> 
+>       // mac_idm: inc/dec m
+> 
+>       60: nextstate = `cpus_movtalua; // go move to alu b
+>       61: nextstate = `cpus_indm; // set up alu result
+>       62: nextstate = `cpus_write; // write it
+>       63: nextstate = `cpus_fetchi; // Fetch next instruction
+1560,1563c1572
+< //            auxcar = ((opra[3:0]+oprb[3:0]) >> 4) & 1'b1; // find auxiliary carry
+< //			if ((opra[3:0]+oprb[3:0])>>4) auxcar=1'b1; else auxcar=1'b0;
+<             auxcar = (((opra[3:0]+oprb[3:0]) >> 4) & 1'b1) ? 1'b1 : 1'b0 ; // find auxiliary carry
+< 
+---
+>             auxcar = (opra[3:0]+oprb[3:0]) >> 4 & 1; // find auxiliary carry
+1569c1578
+<             auxcar = (((opra[3:0]+oprb[3:0]+cin) >> 4) & 1'b1) ? 1'b1 : 1'b0; // find auxiliary carry
+---
+>             auxcar = (opra[3:0]+oprb[3:0]+cin) >> 4 & 1; // find auxiliary carry
+1575c1584
+<             auxcar = (((opra[3:0]-oprb[3:0]) >> 4) & 1'b1) ? 1'b1 : 1'b0; // find auxiliary borrow
+---
+>             auxcar = (opra[3:0]-oprb[3:0]) >> 4 & 1; // find auxiliary borrow
+1581c1590
+<             auxcar = (((opra[3:0]-oprb[3:0]-cin >> 4)) & 1'b1) ? 1'b1 : 1'b0; // find auxiliary borrow 
+---
+>             auxcar = (opra[3:0]-oprb[3:0]-cin >> 4) & 1; // find auxiliary borrow
+1587c1596
+<             auxcar = 1'b0; // clear auxillary carry
+---
+>             auxcar = 0; // clear auxillary carry
+1593c1602
+<             auxcar = 1'b0; // clear auxillary carry
+---
+>             auxcar = 0; // clear auxillary carry
+1599c1608
+<             auxcar = 1'b0; // clear auxillary carry
+---
+>             auxcar = 0; // clear auxillary carry

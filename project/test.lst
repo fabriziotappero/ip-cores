@@ -1,0 +1,881 @@
+
+
+                                                                 test                                                           Page 1
+
+
+      Program  Variable Code              C Line Source
+      -----------------------------------------------------------------------------------------------------------------------------------
+      00000000 00000000                        1 !***********************************************************************
+      00000000 00000000                        2 ! MICROCOSM ASSOCIATES  8080/8085 CPU DIAGNOSTIC VERSION 1.0  (C) 1980
+      00000000 00000000                        3 !***********************************************************************
+      00000000 00000000                        4 !
+      00000000 00000000                        5 !DONATED TO THE "SIG/M" CP/M USER'S GROUP BY:
+      00000000 00000000                        6 !KELLY SMITH, MICROCOSM ASSOCIATES
+      00000000 00000000                        7 !3055 WACO AVENUE
+      00000000 00000000                        8 !SIMI VALLEY, CALIFORNIA, 93065
+      00000000 00000000                        9 !(805) 527-9321 (MODEM, CP/M-NET (TM))
+      00000000 00000000                       10 !(805) 527-0518 (VERBAL)
+      00000000 00000000                       11 !
+      00000000 00000000                       12 !***********************************************************************
+      00000000 00000000                       13 ! Modified 2001/02/28 by Richard Cini for use in the Altair32 Emulator
+      00000000 00000000                       14 !       Project
+      00000000 00000000                       15 !
+      00000000 00000000                       16 ! Need to somehow connect this code to Windows so that failure messages
+      00000000 00000000                       17 !       can be posted to Windows. Maybe just store error code in
+      00000000 00000000                       18 !       Mem[0xffff]. Maybe trap NOP in the emulator code?
+      00000000 00000000                       19 !
+      00000000 00000000                       20 !***********************************************************************
+      00000000 00000000                       21 ! Modified 2006/11/16 by Scott Moore to work on CPU8080 FPGA core
+      00000000 00000000                       22 !
+      00000000 00000000                       23 !***********************************************************************
+      00000000 00000000                       24 
+      00000000 00000000                       25 !
+      00000000 00000000                       26 ! Select controller defines
+      00000000 00000000                       27 ! 
+      00000000 00000000                       28 selmain: equ    $00             ! offset of main control register
+      00000000 00000000                       29 sel1msk: equ    $02             ! offset of select 1 mask
+      00000000 00000000                       30 sel1cmp: equ    $03             ! offset of select 1 compare
+      00000000 00000000                       31 sel2msk: equ    $04             ! offset of select 1 mask
+      00000000 00000000                       32 sel2cmp: equ    $05             ! offset of select 1 compare
+      00000000 00000000                       33 sel3msk: equ    $06             ! offset of select 1 mask
+      00000000 00000000                       34 sel3cmp: equ    $07             ! offset of select 1 compare
+      00000000 00000000                       35 sel4msk: equ    $08             ! offset of select 1 mask
+      00000000 00000000                       36 sel4cmp: equ    $09             ! offset of select 1 compare
+      00000000 00000000                       37 !
+      00000000 00000000                       38 ! bits
+      00000000 00000000                       39 !
+      00000000 00000000                       40 selenb:  equ    $01             ! enable select
+      00000000 00000000                       41 selio:   equ    $02             ! I/O address or memory
+      00000000 00000000                       42 
+      00000000 00000000                       43 !
+      00000000 00000000                       44 ! Note: select 1 is ROM, 2, is RAM, 3 is interrupt controller, 4 is serial I/O.
+      00000000 00000000                       45 !
+      00000000 00000000                       46 
+      00000000 00000000                       47 !
+      00000000 00000000                       48 ! Where to place ROM and RAM for this test
+      00000000 00000000                       49 !
+      00000000 00000000                       50 rombas: equ     $0000
+      00000000 00000000                       51 rambas: equ     rombas+4*1024
+      00000000 00000000                       52 !
+      00000000 00000000                       53 ! Interrupt controller defines
+      00000000 00000000                       54 !
+      00000000 00000000                       55 intbas: equ     $10
+      00000000 00000000                       56 intmsk: equ     intbas+$00      ! mask
+      00000000 00000000                       57 intsts: equ     intbas+$01      ! status
+      00000000 00000000                       58 intact: equ     intbas+$02      ! active interrupt
+      00000000 00000000                       59 intpol: equ     intbas+$03      ! polarity select
+      00000000 00000000                       60 intedg: equ     intbas+$04      ! edge/level select
+      00000000 00000000                       61 intvec: equ     intbas+$05      ! vector base page      
+      00000000 00000000                       62 !
+      00000000 00000000                       63 ! Mits Serial I/O card
+      00000000 00000000                       64 !
+      00000000 00000000                       65 siobas: equ     $20
+      00000000 00000000                       66 sioctl: equ     siobas+$00      ! control register
+      00000000 00000000                       67 siodat: equ     siobas+$01      ! data
+      00000000 00000000                       68 
+      00000000 00000000                       69 !
+      00000000 00000000                       70 ! Set up selectors
+      00000000 00000000                       71 !
+      00000000 00000000                       72 
+      00000000 00000000                       73 !
+      00000000 00000000                       74 ! ROM
+      00000000 00000000                       75 !
+      00000000 00000000 3E 00                 76         mvi     a,rombas shr 8  ! enable select 1 to 4kb at base
+      00000002 00000000 D3 03                 77         out     sel1cmp
+      00000004 00000000 3E F1                 78         mvi     a,($f000 shr 8) or selenb
+      00000006 00000000 D3 02                 79         out     sel1msk
+      00000008 00000000                       80 !
+      00000008 00000000                       81 ! RAM
+      00000008 00000000                       82 !
+      00000008 00000000 3E 10                 83         mvi     a,rambas shr 8  ! enable select 2 to 1kb at base
+      0000000A 00000000 D3 05                 84         out     sel2cmp
+      0000000C 00000000 3E FD                 85         mvi     a,($fc00 shr 8) or selenb
+      0000000E 00000000 D3 04                 86         out     sel2msk
+
+
+                                                                 test                                                           Page 2
+
+
+      Program  Variable Code              C Line Source
+      -----------------------------------------------------------------------------------------------------------------------------------
+      00000010 00000000                       87 !
+      00000010 00000000                       88 ! ROM and RAM set up, exit bootstrap mode
+      00000010 00000000                       89 !
+      00000010 00000000 3E 00                 90         mvi     a,$00           ! exit bootstrap mode 
+      00000012 00000000 D3 00                 91         out     selmain
+      00000014 00000000                       92 !
+      00000014 00000000                       93 ! Serial I/O
+      00000014 00000000                       94 !
+      00000014 00000000 3E 20                 95         mvi     a,siobas        ! enable serial controller for 4 addresses
+      00000016 00000000 D3 09                 96         out     sel4cmp
+      00000018 00000000 3E FF                 97         mvi     a,$fc or selio or selenb
+      0000001A 00000000 D3 08                 98         out     sel4msk
+      0000001C 00000000                       99 
+      0000001C 00000000                      100 !************************************************************
+      0000001C 00000000                      101 !                8080/8085 CPU TEST/DIAGNOSTIC
+      0000001C 00000000                      102 !************************************************************
+      0000001C 00000000                      103 !
+      0000001C 00000000                      104 !note: (1) program assumes "call",and "lxi sp" instructions work!
+      0000001C 00000000                      105 !
+      0000001C 00000000                      106 !      (2) instructions not tested are "hlt","di","ei",
+      0000001C 00000000                      107 !          and "rst 0" thru "rst 7"
+      0000001C 00000000                      108 !
+      0000001C 00000000                      109 !
+      0000001C 00000000                      110 !
+      0000001C 00000000                      111 !test jump instructions and flags
+      0000001C 00000000                      112 !
+      0000001C 00000000 31 07 11             113 cpu:    lxi     sp,stack !set the stack pointer
+      0000001F 00000000 E6 00                114         ani     0       !initialize a reg. and clear all flags
+      00000021 00000000 CA 27 00             115         jz      j010    !test "jz"
+      00000024 00000000 CD FA 04             116         call    cpuer
+      00000027 00000000 D2 2D 00             117 j010:   jnc     j020    !test "jnc"
+      0000002A 00000000 CD FA 04             118         call    cpuer
+      0000002D 00000000 EA 33 00             119 j020:   jpe     j030    !test "jpe"
+      00000030 00000000 CD FA 04             120         call    cpuer
+      00000033 00000000 F2 39 00             121 j030:   jp      j040    !test "jp"
+      00000036 00000000 CD FA 04             122         call    cpuer
+      00000039 00000000 C2 48 00             123 j040:   jnz     j050    !test "jnz"
+      0000003C 00000000 DA 48 00             124         jc      j050    !test "jc"
+      0000003F 00000000 E2 48 00             125         jpo     j050    !test "jpo"
+      00000042 00000000 FA 48 00             126         jm      j050    !test "jm"
+      00000045 00000000 C3 4B 00             127         jmp     j060    !test "jmp" (it's a little late,but what the hell!
+      00000048 00000000 CD FA 04             128 j050:   call    cpuer
+      0000004B 00000000 C6 06                129 j060:   adi     6       !a=6,c=0,p=1,s=0,z=0
+      0000004D 00000000 C2 53 00             130         jnz     j070    !test "jnz"
+      00000050 00000000 CD FA 04             131         call    cpuer
+      00000053 00000000 DA 5C 00             132 j070:   jc      j080    !test "jc"
+      00000056 00000000 E2 5C 00             133         jpo     j080    !test "jpo"
+      00000059 00000000 F2 5F 00             134         jp      j090    !test "jp"
+      0000005C 00000000 CD FA 04             135 j080:   call    cpuer
+      0000005F 00000000 C6 70                136 j090:   adi     $070    !a=76h,c=0,p=0,s=0,z=0
+      00000061 00000000 E2 67 00             137         jpo     j100    !test "jpo"
+      00000064 00000000 CD FA 04             138         call    cpuer
+      00000067 00000000 FA 70 00             139 j100:   jm      j110    !test "jm"
+      0000006A 00000000 CA 70 00             140         jz      j110    !test "jz"
+      0000006D 00000000 D2 73 00             141         jnc     j120    !test "jnc"
+      00000070 00000000 CD FA 04             142 j110:   call    cpuer
+      00000073 00000000 C6 81                143 j120:   adi     $081    !a=f7h,c=0,p=0,s=1,z=0
+      00000075 00000000 FA 7B 00             144         jm      j130    !test "jm"
+      00000078 00000000 CD FA 04             145         call    cpuer
+      0000007B 00000000 CA 84 00             146 j130:   jz      j140    !test "jz"
+      0000007E 00000000 DA 84 00             147         jc      j140    !test "jc"
+      00000081 00000000 E2 87 00             148         jpo     j150    !test "jpo"
+      00000084 00000000 CD FA 04             149 j140:   call    cpuer
+      00000087 00000000 C6 FE                150 j150:   adi     $0fe    !a=f5h,c=1,p=1,s=1,z=0
+      00000089 00000000 DA 8F 00             151         jc      j160    !test "jc"
+      0000008C 00000000 CD FA 04             152         call    cpuer
+      0000008F 00000000 CA 98 00             153 j160:   jz      j170    !test "jz"
+      00000092 00000000 E2 98 00             154         jpo     j170    !test "jpo"
+      00000095 00000000 FA 9B 00             155         jm      aimm    !test "jm"
+      00000098 00000000 CD FA 04             156 j170:   call    cpuer
+      0000009B 00000000                      157 !
+      0000009B 00000000                      158 !
+      0000009B 00000000                      159 !
+      0000009B 00000000                      160 !test accumulator immediate instructions
+      0000009B 00000000                      161 !
+      0000009B 00000000 FE 00                162 aimm:   cpi     0       !a=f5h,c=0,z=0
+      0000009D 00000000 DA B3 00             163         jc      cpie    !test "cpi" for re-set carry
+      000000A0 00000000 CA B3 00             164         jz      cpie    !test "cpi" for re-set zero
+      000000A3 00000000 FE F5                165         cpi     $0f5    !a=f5h,c=0,z=1
+      000000A5 00000000 DA B3 00             166         jc      cpie    !test "cpi" for re-set carry ("adi")
+      000000A8 00000000 C2 B3 00             167         jnz     cpie    !test "cpi" for re-set zero
+      000000AB 00000000 FE FF                168         cpi     $0ff    !a=f5h,c=1,z=0
+      000000AD 00000000 CA B3 00             169         jz      cpie    !test "cpi" for re-set zero
+      000000B0 00000000 DA B6 00             170         jc      acii    !test "cpi" for set carry
+      000000B3 00000000 CD FA 04             171 cpie:   call    cpuer
+      000000B6 00000000 CE 0A                172 acii:   aci     $00a    !a=f5h+0ah+carry(1)=0,c=1
+
+
+                                                                 test                                                           Page 3
+
+
+      Program  Variable Code              C Line Source
+      -----------------------------------------------------------------------------------------------------------------------------------
+      000000B8 00000000 CE 0A                173         aci     $00a    !a=0+0ah+carry(0)=0bh,c=0
+      000000BA 00000000 FE 0B                174         cpi     $00b
+      000000BC 00000000 CA C2 00             175         jz      suii    !test "aci"
+      000000BF 00000000 CD FA 04             176         call    cpuer
+      000000C2 00000000 D6 0C                177 suii:   sui     $00c    !a=ffh,c=0
+      000000C4 00000000 D6 0F                178         sui     $00f    !a=f0h,c=1
+      000000C6 00000000 FE F0                179         cpi     $0f0
+      000000C8 00000000 CA CE 00             180         jz      sbii    !test "sui"
+      000000CB 00000000 CD FA 04             181         call    cpuer
+      000000CE 00000000 DE F1                182 sbii:   sbi     $0f1    !a=f0h-0f1h-carry(0)=ffh,c=1
+      000000D0 00000000 DE 0E                183         sbi     $00e    !a=ffh-oeh-carry(1)=f0h,c=0
+      000000D2 00000000 FE F0                184         cpi     $0f0
+      000000D4 00000000 CA DA 00             185         jz      anii    !test "sbi"
+      000000D7 00000000 CD FA 04             186         call    cpuer
+      000000DA 00000000 E6 55                187 anii:   ani     $055    !a=f0h<and>55h=50h,c=0,p=1,s=0,z=0
+      000000DC 00000000 FE 50                188         cpi     $050
+      000000DE 00000000 CA E4 00             189         jz      orii    !test "ani"
+      000000E1 00000000 CD FA 04             190         call    cpuer
+      000000E4 00000000 F6 3A                191 orii:   ori     $03a    !a=50h<or>3ah=7ah,c=0,p=0,s=0,z=0
+      000000E6 00000000 FE 7A                192         cpi     $07a
+      000000E8 00000000 CA EE 00             193         jz      xrii    !test "ori"
+      000000EB 00000000 CD FA 04             194         call    cpuer
+      000000EE 00000000 EE 0F                195 xrii:   xri     $00f    !a=7ah<xor>0fh=75h,c=0,p=0,s=0,z=0
+      000000F0 00000000 FE 75                196         cpi     $075
+      000000F2 00000000 CA F8 00             197         jz      c010    !test "xri"
+      000000F5 00000000 CD FA 04             198         call    cpuer
+      000000F8 00000000                      199 !
+      000000F8 00000000                      200 !
+      000000F8 00000000                      201 !
+      000000F8 00000000                      202 !test calls and returns
+      000000F8 00000000                      203 !
+      000000F8 00000000 E6 00                204 c010:   ani     $0      !a=0,c=0,p=1,s=0,z=1
+      000000FA 00000000 DC FA 04             205         cc      cpuer   !test "cc"
+      000000FD 00000000 E4 FA 04             206         cpo     cpuer   !test "cpo"
+      00000100 00000000 FC FA 04             207         cm      cpuer   !test "cm"
+      00000103 00000000 C4 FA 04             208         cnz     cpuer   !test "cnz"
+      00000106 00000000 FE 00                209         cpi     $0
+      00000108 00000000 CA 0E 01             210         jz      c020    !a=0,c=0,p=0,s=0,z=1
+      0000010B 00000000 CD FA 04             211         call    cpuer
+      0000010E 00000000 D6 77                212 c020:   sui     $077    !a=89h,c=1,p=0,s=1,z=0
+      00000110 00000000 D4 FA 04             213         cnc     cpuer   !test "cnc"
+      00000113 00000000 EC FA 04             214         cpe     cpuer   !test "cpe"
+      00000116 00000000 F4 FA 04             215         cp      cpuer   !test "cp"
+      00000119 00000000 CC FA 04             216         cz      cpuer   !test "cz"
+      0000011C 00000000 FE 89                217         cpi     $089
+      0000011E 00000000 CA 24 01             218         jz      c030    !test for "calls" taking branch
+      00000121 00000000 CD FA 04             219         call    cpuer
+      00000124 00000000 E6 FF                220 c030:   ani     $0ff    !set flags back!
+      00000126 00000000 E4 31 01             221         cpo     cpoi    !test "cpo"
+      00000129 00000000 FE D9                222         cpi     $0d9
+      0000012B 00000000 CA 8E 01             223         jz      movi    !test "call" sequence success
+      0000012E 00000000 CD FA 04             224         call    cpuer
+      00000131 00000000 E8                   225 cpoi:   rpe             !test "rpe"
+      00000132 00000000 C6 10                226         adi     $010    !a=99h,c=0,p=0,s=1,z=0
+      00000134 00000000 EC 3D 01             227         cpe     cpei    !test "cpe"
+      00000137 00000000 C6 02                228         adi     $002    !a=d9h,c=0,p=0,s=1,z=0
+      00000139 00000000 E0                   229         rpo             !test "rpo"
+      0000013A 00000000 CD FA 04             230         call    cpuer
+      0000013D 00000000 E0                   231 cpei:   rpo             !test "rpo"
+      0000013E 00000000 C6 20                232         adi     $020    !a=b9h,c=0,p=0,s=1,z=0
+      00000140 00000000 FC 49 01             233         cm      cmi     !test "cm"
+      00000143 00000000 C6 04                234         adi     $004    !a=d7h,c=0,p=1,s=1,z=0
+      00000145 00000000 E8                   235         rpe             !test "rpe"
+      00000146 00000000 CD FA 04             236         call    cpuer
+      00000149 00000000 F0                   237 cmi:    rp              !test "rp"
+      0000014A 00000000 C6 80                238         adi     $080    !a=39h,c=1,p=1,s=0,z=0
+      0000014C 00000000 F4 55 01             239         cp      tcpi    !test "cp"
+      0000014F 00000000 C6 80                240         adi     $080    !a=d3h,c=0,p=0,s=1,z=0
+      00000151 00000000 F8                   241         rm              !test "rm"
+      00000152 00000000 CD FA 04             242         call    cpuer
+      00000155 00000000 F8                   243 tcpi:   rm              !test "rm"
+      00000156 00000000 C6 40                244         adi     $040    !a=79h,c=0,p=0,s=0,z=0
+      00000158 00000000 D4 61 01             245         cnc     cnci    !test "cnc"
+      0000015B 00000000 C6 40                246         adi     $040    !a=53h,c=0,p=1,s=0,z=0
+      0000015D 00000000 F0                   247         rp              !test "rp"
+      0000015E 00000000 CD FA 04             248         call    cpuer
+      00000161 00000000 D8                   249 cnci:   rc              !test "rc"
+      00000162 00000000 C6 8F                250         adi     $08f    !a=08h,c=1,p=0,s=0,z=0
+      00000164 00000000 DC 6D 01             251         cc      cci     !test "cc"
+      00000167 00000000 D6 02                252         sui     $002    !a=13h,c=0,p=0,s=0,z=0
+      00000169 00000000 D0                   253         rnc             !test "rnc"
+      0000016A 00000000 CD FA 04             254         call    cpuer
+      0000016D 00000000 D0                   255 cci:    rnc             !test "rnc"
+      0000016E 00000000 C6 F7                256         adi     $0f7    !a=ffh,c=0,p=1,s=1,z=0
+      00000170 00000000 C4 79 01             257         cnz     cnzi    !test "cnz"
+      00000173 00000000 C6 FE                258         adi     $0fe    !a=15h,c=1,p=0,s=0,z=0
+
+
+                                                                 test                                                           Page 4
+
+
+      Program  Variable Code              C Line Source
+      -----------------------------------------------------------------------------------------------------------------------------------
+      00000175 00000000 D8                   259         rc              !test "rc"
+      00000176 00000000 CD FA 04             260         call    cpuer
+      00000179 00000000 C8                   261 cnzi:   rz              !test "rz"
+      0000017A 00000000 C6 01                262         adi     $001    !a=00h,c=1,p=1,s=0,z=1
+      0000017C 00000000 CC 85 01             263         cz      czi     !test "cz"
+      0000017F 00000000 C6 D0                264         adi     $0d0    !a=17h,c=1,p=1,s=0,z=0
+      00000181 00000000 C0                   265         rnz             !test "rnz"
+      00000182 00000000 CD FA 04             266         call    cpuer
+      00000185 00000000 C0                   267 czi:    rnz             !test "rnz"
+      00000186 00000000 C6 47                268         adi     $047    !a=47h,c=0,p=1,s=0,z=0
+      00000188 00000000 FE 47                269         cpi     $047    !a=47h,c=0,p=1,s=0,z=1
+      0000018A 00000000 C8                   270         rz              !test "rz"
+      0000018B 00000000 CD FA 04             271         call    cpuer
+      0000018E 00000000                      272 !
+      0000018E 00000000                      273 !
+      0000018E 00000000                      274 !
+      0000018E 00000000                      275 !test "mov","inr",and "dcr" instructions
+      0000018E 00000000                      276 !
+      0000018E 00000000 3E 77                277 movi:   mvi     a,$077
+      00000190 00000000 3C                   278         inr     a
+      00000191 00000000 47                   279         mov     b,a
+      00000192 00000000 04                   280         inr     b
+      00000193 00000000 48                   281         mov     c,b
+      00000194 00000000 0D                   282         dcr     c
+      00000195 00000000 51                   283         mov     d,c
+      00000196 00000000 5A                   284         mov     e,d
+      00000197 00000000 63                   285         mov     h,e
+      00000198 00000000 6C                   286         mov     l,h
+      00000199 00000000 7D                   287         mov     a,l     !test "mov" a,l,h,e,d,c,b,a
+      0000019A 00000000 3D                   288         dcr     a
+      0000019B 00000000 4F                   289         mov     c,a
+      0000019C 00000000 59                   290         mov     e,c
+      0000019D 00000000 6B                   291         mov     l,e
+      0000019E 00000000 45                   292         mov     b,l
+      0000019F 00000000 50                   293         mov     d,b
+      000001A0 00000000 62                   294         mov     h,d
+      000001A1 00000000 7C                   295         mov     a,h     !test "mov" a,h,d,b,l,e,c,a
+      000001A2 00000000 57                   296         mov     d,a
+      000001A3 00000000 14                   297         inr     d
+      000001A4 00000000 6A                   298         mov     l,d
+      000001A5 00000000 4D                   299         mov     c,l
+      000001A6 00000000 0C                   300         inr     c
+      000001A7 00000000 61                   301         mov     h,c
+      000001A8 00000000 44                   302         mov     b,h
+      000001A9 00000000 05                   303         dcr     b
+      000001AA 00000000 58                   304         mov     e,b
+      000001AB 00000000 7B                   305         mov     a,e     !test "mov" a,e,b,h,c,l,d,a
+      000001AC 00000000 5F                   306         mov     e,a
+      000001AD 00000000 1C                   307         inr     e
+      000001AE 00000000 43                   308         mov     b,e
+      000001AF 00000000 60                   309         mov     h,b
+      000001B0 00000000 24                   310         inr     h
+      000001B1 00000000 4C                   311         mov     c,h
+      000001B2 00000000 69                   312         mov     l,c
+      000001B3 00000000 55                   313         mov     d,l
+      000001B4 00000000 15                   314         dcr     d
+      000001B5 00000000 7A                   315         mov     a,d     !test "mov" a,d,l,c,h,b,e,a
+      000001B6 00000000 67                   316         mov     h,a
+      000001B7 00000000 25                   317         dcr     h
+      000001B8 00000000 54                   318         mov     d,h
+      000001B9 00000000 42                   319         mov     b,d
+      000001BA 00000000 68                   320         mov     l,b
+      000001BB 00000000 2C                   321         inr     l
+      000001BC 00000000 5D                   322         mov     e,l
+      000001BD 00000000 1D                   323         dcr     e
+      000001BE 00000000 4B                   324         mov     c,e
+      000001BF 00000000 79                   325         mov     a,c     !test "mov" a,c,e,l,b,d,h,a
+      000001C0 00000000 6F                   326         mov     l,a
+      000001C1 00000000 2D                   327         dcr     l
+      000001C2 00000000 65                   328         mov     h,l
+      000001C3 00000000 5C                   329         mov     e,h
+      000001C4 00000000 53                   330         mov     d,e
+      000001C5 00000000 4A                   331         mov     c,d
+      000001C6 00000000 41                   332         mov     b,c
+      000001C7 00000000 78                   333         mov     a,b
+      000001C8 00000000 FE 77                334         cpi     $077
+      000001CA 00000000 C4 FA 04             335         cnz     cpuer   !test "mov" a,b,c,d,e,h,l,a
+      000001CD 00000000                      336 !
+      000001CD 00000000                      337 !
+      000001CD 00000000                      338 !
+      000001CD 00000000                      339 !test arithmetic and logic instructions
+      000001CD 00000000                      340 !
+      000001CD 00000000 AF                   341         xra     a
+      000001CE 00000000 06 01                342         mvi     b,$001
+      000001D0 00000000 0E 03                343         mvi     c,$003
+      000001D2 00000000 16 07                344         mvi     d,$007
+
+
+                                                                 test                                                           Page 5
+
+
+      Program  Variable Code              C Line Source
+      -----------------------------------------------------------------------------------------------------------------------------------
+      000001D4 00000000 1E 0F                345         mvi     e,$00f
+      000001D6 00000000 26 1F                346         mvi     h,$01f
+      000001D8 00000000 2E 3F                347         mvi     l,$03f
+      000001DA 00000000 80                   348         add     b
+      000001DB 00000000 81                   349         add     c
+      000001DC 00000000 82                   350         add     d
+      000001DD 00000000 83                   351         add     e
+      000001DE 00000000 84                   352         add     h
+      000001DF 00000000 85                   353         add     l
+      000001E0 00000000 87                   354         add     a
+      000001E1 00000000 FE F0                355         cpi     $0f0
+      000001E3 00000000 C4 FA 04             356         cnz     cpuer   !test "add" b,c,d,e,h,l,a
+      000001E6 00000000 90                   357         sub     b
+      000001E7 00000000 91                   358         sub     c
+      000001E8 00000000 92                   359         sub     d
+      000001E9 00000000 93                   360         sub     e
+      000001EA 00000000 94                   361         sub     h
+      000001EB 00000000 95                   362         sub     l
+      000001EC 00000000 FE 78                363         cpi     $078
+      000001EE 00000000 C4 FA 04             364         cnz     cpuer   !test "sub" b,c,d,e,h,l
+      000001F1 00000000 97                   365         sub     a
+      000001F2 00000000 C4 FA 04             366         cnz     cpuer   !test "sub" a
+      000001F5 00000000 3E 80                367         mvi     a,$080
+      000001F7 00000000 87                   368         add     a
+      000001F8 00000000 06 01                369         mvi     b,$001
+      000001FA 00000000 0E 02                370         mvi     c,$002
+      000001FC 00000000 16 03                371         mvi     d,$003
+      000001FE 00000000 1E 04                372         mvi     e,$004
+      00000200 00000000 26 05                373         mvi     h,$005
+      00000202 00000000 2E 06                374         mvi     l,$006
+      00000204 00000000 88                   375         adc     b
+      00000205 00000000 06 80                376         mvi     b,$080
+      00000207 00000000 80                   377         add     b
+      00000208 00000000 80                   378         add     b
+      00000209 00000000 89                   379         adc     c
+      0000020A 00000000 80                   380         add     b
+      0000020B 00000000 80                   381         add     b
+      0000020C 00000000 8A                   382         adc     d
+      0000020D 00000000 80                   383         add     b
+      0000020E 00000000 80                   384         add     b
+      0000020F 00000000 8B                   385         adc     e
+      00000210 00000000 80                   386         add     b
+      00000211 00000000 80                   387         add     b
+      00000212 00000000 8C                   388         adc     h
+      00000213 00000000 80                   389         add     b
+      00000214 00000000 80                   390         add     b
+      00000215 00000000 8D                   391         adc     l
+      00000216 00000000 80                   392         add     b
+      00000217 00000000 80                   393         add     b
+      00000218 00000000 8F                   394         adc     a
+      00000219 00000000 FE 37                395         cpi     $037
+      0000021B 00000000 C4 FA 04             396         cnz     cpuer   !test "adc" b,c,d,e,h,l,a
+      0000021E 00000000 3E 80                397         mvi     a,$080
+      00000220 00000000 87                   398         add     a
+      00000221 00000000 06 01                399         mvi     b,$001
+      00000223 00000000 98                   400         sbb     b
+      00000224 00000000 06 FF                401         mvi     b,$0ff
+      00000226 00000000 80                   402         add     b
+      00000227 00000000 99                   403         sbb     c
+      00000228 00000000 80                   404         add     b
+      00000229 00000000 9A                   405         sbb     d
+      0000022A 00000000 80                   406         add     b
+      0000022B 00000000 9B                   407         sbb     e
+      0000022C 00000000 80                   408         add     b
+      0000022D 00000000 9C                   409         sbb     h
+      0000022E 00000000 80                   410         add     b
+      0000022F 00000000 9D                   411         sbb     l
+      00000230 00000000 FE E0                412         cpi     $0e0
+      00000232 00000000 C4 FA 04             413         cnz     cpuer   !test "sbb" b,c,d,e,h,l
+      00000235 00000000 3E 80                414         mvi     a,$080
+      00000237 00000000 87                   415         add     a
+      00000238 00000000 9F                   416         sbb     a
+      00000239 00000000 FE FF                417         cpi     $0ff
+      0000023B 00000000 C4 FA 04             418         cnz     cpuer   !test "sbb" a
+      0000023E 00000000 3E FF                419         mvi     a,$0ff
+      00000240 00000000 06 FE                420         mvi     b,$0fe
+      00000242 00000000 0E FC                421         mvi     c,$0fc
+      00000244 00000000 16 EF                422         mvi     d,$0ef
+      00000246 00000000 1E 7F                423         mvi     e,$07f
+      00000248 00000000 26 F4                424         mvi     h,$0f4
+      0000024A 00000000 2E BF                425         mvi     l,$0bf
+      0000024C 00000000 A7                   426         ana     a
+      0000024D 00000000 A1                   427         ana     c
+      0000024E 00000000 A2                   428         ana     d
+      0000024F 00000000 A3                   429         ana     e
+      00000250 00000000 A4                   430         ana     h
+
+
+                                                                 test                                                           Page 6
+
+
+      Program  Variable Code              C Line Source
+      -----------------------------------------------------------------------------------------------------------------------------------
+      00000251 00000000 A5                   431         ana     l
+      00000252 00000000 A7                   432         ana     a
+      00000253 00000000 FE 24                433         cpi     $024
+      00000255 00000000 C4 FA 04             434         cnz     cpuer   !test "ana" b,c,d,e,h,l,a
+      00000258 00000000 AF                   435         xra     a
+      00000259 00000000 06 01                436         mvi     b,$001
+      0000025B 00000000 0E 02                437         mvi     c,$002
+      0000025D 00000000 16 04                438         mvi     d,$004
+      0000025F 00000000 1E 08                439         mvi     e,$008
+      00000261 00000000 26 10                440         mvi     h,$010
+      00000263 00000000 2E 20                441         mvi     l,$020
+      00000265 00000000 B0                   442         ora     b
+      00000266 00000000 B1                   443         ora     c
+      00000267 00000000 B2                   444         ora     d
+      00000268 00000000 B3                   445         ora     e
+      00000269 00000000 B4                   446         ora     h
+      0000026A 00000000 B5                   447         ora     l
+      0000026B 00000000 B7                   448         ora     a
+      0000026C 00000000 FE 3F                449         cpi     $03f
+      0000026E 00000000 C4 FA 04             450         cnz     cpuer   !test "ora" b,c,d,e,h,l,a
+      00000271 00000000 3E 00                451         mvi     a,$0
+      00000273 00000000 26 8F                452         mvi     h,$08f
+      00000275 00000000 2E 4F                453         mvi     l,$04f
+      00000277 00000000 A8                   454         xra     b
+      00000278 00000000 A9                   455         xra     c
+      00000279 00000000 AA                   456         xra     d
+      0000027A 00000000 AB                   457         xra     e
+      0000027B 00000000 AC                   458         xra     h
+      0000027C 00000000 AD                   459         xra     l
+      0000027D 00000000 FE CF                460         cpi     $0cf
+      0000027F 00000000 C4 FA 04             461         cnz     cpuer   !test "xra" b,c,d,e,h,l
+      00000282 00000000 AF                   462         xra     a
+      00000283 00000000 C4 FA 04             463         cnz     cpuer   !test "xra" a
+      00000286 00000000 06 44                464         mvi     b,$044
+      00000288 00000000 0E 45                465         mvi     c,$045
+      0000028A 00000000 16 46                466         mvi     d,$046
+      0000028C 00000000 1E 47                467         mvi     e,$047
+      0000028E 00000000 26 10                468         mvi     h,(temp0 / $0ff)        !high byte of test memory location
+      00000290 00000000 2E 00                469         mvi     l,(temp0 and $0ff)      !low byte of test memory location
+      00000292 00000000 70                   470         mov     m,b
+      00000293 00000000 06 00                471         mvi     b,$0
+      00000295 00000000 46                   472         mov     b,m
+      00000296 00000000 3E 44                473         mvi     a,$044
+      00000298 00000000 B8                   474         cmp     b
+      00000299 00000000 C4 FA 04             475         cnz     cpuer   !test "mov" m,b and b,m
+      0000029C 00000000 72                   476         mov     m,d
+      0000029D 00000000 16 00                477         mvi     d,$0
+      0000029F 00000000 56                   478         mov     d,m
+      000002A0 00000000 3E 46                479         mvi     a,$046
+      000002A2 00000000 BA                   480         cmp     d
+      000002A3 00000000 C4 FA 04             481         cnz     cpuer   !test "mov" m,d and d,m
+      000002A6 00000000 73                   482         mov     m,e
+      000002A7 00000000 1E 00                483         mvi     e,$0
+      000002A9 00000000 5E                   484         mov     e,m
+      000002AA 00000000 3E 47                485         mvi     a,$047
+      000002AC 00000000 BB                   486         cmp     e
+      000002AD 00000000 C4 FA 04             487         cnz     cpuer   !test "mov" m,e and e,m
+      000002B0 00000000 74                   488         mov     m,h
+      000002B1 00000000 26 10                489         mvi     h,(temp0 / $0ff)
+      000002B3 00000000 2E 00                490         mvi     l,(temp0 and $0ff)
+      000002B5 00000000 66                   491         mov     h,m
+      000002B6 00000000 3E 10                492         mvi     a,(temp0 / $0ff)
+      000002B8 00000000 BC                   493         cmp     h
+      000002B9 00000000 C4 FA 04             494         cnz     cpuer   !test "mov" m,h and h,m
+      000002BC 00000000 75                   495         mov     m,l
+      000002BD 00000000 26 10                496         mvi     h,(temp0 / $0ff)
+      000002BF 00000000 2E 00                497         mvi     l,(temp0 and $0ff)
+      000002C1 00000000 6E                   498         mov     l,m
+      000002C2 00000000 3E 00                499         mvi     a,(temp0 and $0ff)
+      000002C4 00000000 BD                   500         cmp     l
+      000002C5 00000000 C4 FA 04             501         cnz     cpuer   !test "mov" m,l and l,m
+      000002C8 00000000 26 10                502         mvi     h,(temp0 / $0ff)
+      000002CA 00000000 2E 00                503         mvi     l,(temp0 and $0ff)
+      000002CC 00000000 3E 32                504         mvi     a,$032
+      000002CE 00000000 77                   505         mov     m,a
+      000002CF 00000000 BE                   506         cmp     m
+      000002D0 00000000 C4 FA 04             507         cnz     cpuer   !test "mov" m,a
+      000002D3 00000000 86                   508         add     m
+      000002D4 00000000 FE 64                509         cpi     $064
+      000002D6 00000000 C4 FA 04             510         cnz     cpuer   !test "add" m
+      000002D9 00000000 AF                   511         xra     a
+      000002DA 00000000 7E                   512         mov     a,m
+      000002DB 00000000 FE 32                513         cpi     $032
+      000002DD 00000000 C4 FA 04             514         cnz     cpuer   !test "mov" a,m
+      000002E0 00000000 26 10                515         mvi     h,(temp0 / $0ff)
+      000002E2 00000000 2E 00                516         mvi     l,(temp0 and $0ff)
+
+
+                                                                 test                                                           Page 7
+
+
+      Program  Variable Code              C Line Source
+      -----------------------------------------------------------------------------------------------------------------------------------
+      000002E4 00000000 7E                   517         mov     a,m
+      000002E5 00000000 96                   518         sub     m
+      000002E6 00000000 C4 FA 04             519         cnz     cpuer   !test "sub" m
+      000002E9 00000000 3E 80                520         mvi     a,$080
+      000002EB 00000000 87                   521         add     a
+      000002EC 00000000 8E                   522         adc     m
+      000002ED 00000000 FE 33                523         cpi     $033
+      000002EF 00000000 C4 FA 04             524         cnz     cpuer   !test "adc" m
+      000002F2 00000000 3E 80                525         mvi     a,$080
+      000002F4 00000000 87                   526         add     a
+      000002F5 00000000 9E                   527         sbb     m
+      000002F6 00000000 FE CD                528         cpi     $0cd
+      000002F8 00000000 C4 FA 04             529         cnz     cpuer   !test "sbb" m
+      000002FB 00000000 A6                   530         ana     m
+      000002FC 00000000 C4 FA 04             531         cnz     cpuer   !test "ana" m
+      000002FF 00000000 3E 25                532         mvi     a,$025
+      00000301 00000000 B6                   533         ora     m
+      00000302 00000000 FE 37                534         cpi     $37
+      00000304 00000000 C4 FA 04             535         cnz     cpuer   !test "ora" m
+      00000307 00000000 AE                   536         xra     m
+      00000308 00000000 FE 05                537         cpi     $005
+      0000030A 00000000 C4 FA 04             538         cnz     cpuer   !test "xra" m
+      0000030D 00000000 36 55                539         mvi     m,$055
+      0000030F 00000000 34                   540         inr     m
+      00000310 00000000 35                   541         dcr     m
+      00000311 00000000 86                   542         add     m
+      00000312 00000000 FE 5A                543         cpi     $05a
+      00000314 00000000 C4 FA 04             544         cnz     cpuer   !test "inr","dcr",and "mvi" m
+      00000317 00000000 01 FF 12             545         lxi     b,$12ff
+      0000031A 00000000 11 FF 12             546         lxi     d,$12ff
+      0000031D 00000000 21 FF 12             547         lxi     h,$12ff
+      00000320 00000000 03                   548         inx     b
+      00000321 00000000 13                   549         inx     d
+      00000322 00000000 23                   550         inx     h
+      00000323 00000000 3E 13                551         mvi     a,$013
+      00000325 00000000 B8                   552         cmp     b
+      00000326 00000000 C4 FA 04             553         cnz     cpuer   !test "lxi" and "inx" b
+      00000329 00000000 BA                   554         cmp     d
+      0000032A 00000000 C4 FA 04             555         cnz     cpuer   !test "lxi" and "inx" d
+      0000032D 00000000 BC                   556         cmp     h
+      0000032E 00000000 C4 FA 04             557         cnz     cpuer   !test "lxi" and "inx" h
+      00000331 00000000 3E 00                558         mvi     a,$0
+      00000333 00000000 B9                   559         cmp     c
+      00000334 00000000 C4 FA 04             560         cnz     cpuer   !test "lxi" and "inx" b
+      00000337 00000000 BB                   561         cmp     e
+      00000338 00000000 C4 FA 04             562         cnz     cpuer   !test "lxi" and "inx" d
+      0000033B 00000000 BD                   563         cmp     l
+      0000033C 00000000 C4 FA 04             564         cnz     cpuer   !test "lxi" and "inx" h
+      0000033F 00000000 0B                   565         dcx     b
+      00000340 00000000 1B                   566         dcx     d
+      00000341 00000000 2B                   567         dcx     h
+      00000342 00000000 3E 12                568         mvi     a,$012
+      00000344 00000000 B8                   569         cmp     b
+      00000345 00000000 C4 FA 04             570         cnz     cpuer   !test "dcx" b
+      00000348 00000000 BA                   571         cmp     d
+      00000349 00000000 C4 FA 04             572         cnz     cpuer   !test "dcx" d
+      0000034C 00000000 BC                   573         cmp     h
+      0000034D 00000000 C4 FA 04             574         cnz     cpuer   !test "dcx" h
+      00000350 00000000 3E FF                575         mvi     a,$0ff
+      00000352 00000000 B9                   576         cmp     c
+      00000353 00000000 C4 FA 04             577         cnz     cpuer   !test "dcx" b
+      00000356 00000000 BB                   578         cmp     e
+      00000357 00000000 C4 FA 04             579         cnz     cpuer   !test "dcx" d
+      0000035A 00000000 BD                   580         cmp     l
+      0000035B 00000000 C4 FA 04             581         cnz     cpuer   !test "dcx" h
+      0000035E 00000000 32 00 10             582         sta     temp0
+      00000361 00000000 AF                   583         xra     a
+      00000362 00000000 3A 00 10             584         lda     temp0
+      00000365 00000000 FE FF                585         cpi     $0ff
+      00000367 00000000 C4 FA 04             586         cnz     cpuer   !test "lda" and "sta"
+      0000036A 00000000 2A 00 05             587         lhld    tempp
+      0000036D 00000000 22 00 10             588         shld    temp0
+      00000370 00000000 3A 00 05             589         lda     tempp
+      00000373 00000000 47                   590         mov     b,a
+      00000374 00000000 3A 00 10             591         lda     temp0
+      00000377 00000000 B8                   592         cmp     b
+      00000378 00000000 C4 FA 04             593         cnz     cpuer   !test "lhld" and "shld"
+      0000037B 00000000 3A 01 05             594         lda     tempp+1
+      0000037E 00000000 47                   595         mov     b,a
+      0000037F 00000000 3A 01 10             596         lda     temp0+1
+      00000382 00000000 B8                   597         cmp     b
+      00000383 00000000 C4 FA 04             598         cnz     cpuer   !test "lhld" and "shld"
+      00000386 00000000 3E AA                599         mvi     a,$0aa
+      00000388 00000000 32 00 10             600         sta     temp0
+      0000038B 00000000 44                   601         mov     b,h
+      0000038C 00000000 4D                   602         mov     c,l
+
+
+                                                                 test                                                           Page 8
+
+
+      Program  Variable Code              C Line Source
+      -----------------------------------------------------------------------------------------------------------------------------------
+      0000038D 00000000 AF                   603         xra     a
+      0000038E 00000000 0A                   604         ldax    b
+      0000038F 00000000 FE AA                605         cpi     $0aa
+      00000391 00000000 C4 FA 04             606         cnz     cpuer   !test "ldax" b
+      00000394 00000000 3C                   607         inr     a
+      00000395 00000000 02                   608         stax    b
+      00000396 00000000 3A 00 10             609         lda     temp0
+      00000399 00000000 FE AB                610         cpi     $0ab
+      0000039B 00000000 C4 FA 04             611         cnz     cpuer   !test "stax" b
+      0000039E 00000000 3E 77                612         mvi     a,$077
+      000003A0 00000000 32 00 10             613         sta     temp0
+      000003A3 00000000 2A 00 05             614         lhld    tempp
+      000003A6 00000000 11 00 00             615         lxi     d,$00000
+      000003A9 00000000 EB                   616         xchg
+      000003AA 00000000 AF                   617         xra     a
+      000003AB 00000000 1A                   618         ldax    d
+      000003AC 00000000 FE 77                619         cpi     $077
+      000003AE 00000000 C4 FA 04             620         cnz     cpuer   !test "ldax" d and "xchg"
+      000003B1 00000000 AF                   621         xra     a
+      000003B2 00000000 84                   622         add     h
+      000003B3 00000000 85                   623         add     l
+      000003B4 00000000 C4 FA 04             624         cnz     cpuer   !test "xchg"
+      000003B7 00000000 3E CC                625         mvi     a,$0cc
+      000003B9 00000000 12                   626         stax    d
+      000003BA 00000000 3A 00 10             627         lda     temp0
+      000003BD 00000000 FE CC                628         cpi     $0cc
+      000003BF 00000000 12                   629         stax    d
+      000003C0 00000000 3A 00 10             630         lda     temp0
+      000003C3 00000000 FE CC                631         cpi     $0cc
+      000003C5 00000000 C4 FA 04             632         cnz     cpuer   !test "stax" d
+      000003C8 00000000 21 77 77             633         lxi     h,$07777
+      000003CB 00000000 29                   634         dad     h
+      000003CC 00000000 3E EE                635         mvi     a,$0ee
+      000003CE 00000000 BC                   636         cmp     h
+      000003CF 00000000 C4 FA 04             637         cnz     cpuer   !test "dad" h
+      000003D2 00000000 BD                   638         cmp     l
+      000003D3 00000000 C4 FA 04             639         cnz     cpuer   !test "dad" h
+      000003D6 00000000 21 55 55             640         lxi     h,$05555
+      000003D9 00000000 01 FF FF             641         lxi     b,$0ffff
+      000003DC 00000000 09                   642         dad     b
+      000003DD 00000000 3E 55                643         mvi     a,$055
+      000003DF 00000000 D4 FA 04             644         cnc     cpuer   !test "dad" b
+      000003E2 00000000 BC                   645         cmp     h
+      000003E3 00000000 C4 FA 04             646         cnz     cpuer   !test "dad" b
+      000003E6 00000000 3E 54                647         mvi     a,$054
+      000003E8 00000000 BD                   648         cmp     l
+      000003E9 00000000 C4 FA 04             649         cnz     cpuer   !test "dad" b
+      000003EC 00000000 21 AA AA             650         lxi     h,$0aaaa
+      000003EF 00000000 11 33 33             651         lxi     d,$03333
+      000003F2 00000000 19                   652         dad     d
+      000003F3 00000000 3E DD                653         mvi     a,$0dd
+      000003F5 00000000 BC                   654         cmp     h
+      000003F6 00000000 C4 FA 04             655         cnz     cpuer   !test "dad" d
+      000003F9 00000000 BD                   656         cmp     l
+      000003FA 00000000 C4 FA 04             657         cnz     cpuer   !test "dad" b
+      000003FD 00000000 37                   658         stc
+      000003FE 00000000 D4 FA 04             659         cnc     cpuer   !test "stc"
+      00000401 00000000 3F                   660         cmc
+      00000402 00000000 DC FA 04             661         cc      cpuer   !test "cmc
+      00000405 00000000 3E AA                662         mvi     a,$0aa
+      00000407 00000000 2F                   663         cma     
+      00000408 00000000 FE 55                664         cpi     $055
+      0000040A 00000000 C4 FA 04             665         cnz     cpuer   !test "cma"
+      0000040D 00000000 B7                   666         ora     a       !re-set auxiliary carry
+      0000040E 00000000 27                   667         daa
+      0000040F 00000000 FE 55                668         cpi     $055
+      00000411 00000000 C4 FA 04             669         cnz     cpuer   !test "daa"
+      00000414 00000000 3E 88                670         mvi     a,$088
+      00000416 00000000 87                   671         add     a
+      00000417 00000000 27                   672         daa
+      00000418 00000000 FE 76                673         cpi     $076
+      0000041A 00000000 C4 FA 04             674         cnz     cpuer   !test "daa"
+      0000041D 00000000 AF                   675         xra     a
+      0000041E 00000000 3E AA                676         mvi     a,$0aa
+      00000420 00000000 27                   677         daa
+      00000421 00000000 D4 FA 04             678         cnc     cpuer   !test "daa"
+      00000424 00000000 FE 10                679         cpi     $010
+      00000426 00000000 C4 FA 04             680         cnz     cpuer   !test "daa"
+      00000429 00000000 AF                   681         xra     a
+      0000042A 00000000 3E 9A                682         mvi     a,$09a
+      0000042C 00000000 27                   683         daa
+      0000042D 00000000 D4 FA 04             684         cnc     cpuer   !test "daa"
+      00000430 00000000 C4 FA 04             685         cnz     cpuer   !test "daa"
+      00000433 00000000 37                   686         stc
+      00000434 00000000 3E 42                687         mvi     a,$042
+      00000436 00000000 07                   688         rlc
+
+
+                                                                 test                                                           Page 9
+
+
+      Program  Variable Code              C Line Source
+      -----------------------------------------------------------------------------------------------------------------------------------
+      00000437 00000000 DC FA 04             689         cc      cpuer   !test "rlc" for re-set carry
+      0000043A 00000000 07                   690         rlc
+      0000043B 00000000 D4 FA 04             691         cnc     cpuer   !test "rlc" for set carry
+      0000043E 00000000 FE 09                692         cpi     $009
+      00000440 00000000 C4 FA 04             693         cnz     cpuer   !test "rlc" for rotation
+      00000443 00000000 0F                   694         rrc
+      00000444 00000000 D4 FA 04             695         cnc     cpuer   !test "rrc" for set carry
+      00000447 00000000 0F                   696         rrc
+      00000448 00000000 FE 42                697         cpi     $042
+      0000044A 00000000 C4 FA 04             698         cnz     cpuer   !test "rrc" for rotation
+      0000044D 00000000 17                   699         ral
+      0000044E 00000000 17                   700         ral
+      0000044F 00000000 D4 FA 04             701         cnc     cpuer   !test "ral" for set carry
+      00000452 00000000 FE 08                702         cpi     $008
+      00000454 00000000 C4 FA 04             703         cnz     cpuer   !test "ral" for rotation
+      00000457 00000000 1F                   704         rar
+      00000458 00000000 1F                   705         rar
+      00000459 00000000 DC FA 04             706         cc      cpuer   !test "rar" for re-set carry
+      0000045C 00000000 FE 02                707         cpi     $002
+      0000045E 00000000 C4 FA 04             708         cnz     cpuer   !test "rar" for rotation
+      00000461 00000000 01 34 12             709         lxi     b,$01234
+      00000464 00000000 11 AA AA             710         lxi     d,$0aaaa
+      00000467 00000000 21 55 55             711         lxi     h,$05555
+      0000046A 00000000 AF                   712         xra     a
+      0000046B 00000000 C5                   713         push    b
+      0000046C 00000000 D5                   714         push    d
+      0000046D 00000000 E5                   715         push    h
+      0000046E 00000000 F5                   716         push    psw
+      0000046F 00000000 01 00 00             717         lxi     b,$00000
+      00000472 00000000 11 00 00             718         lxi     d,$00000
+      00000475 00000000 21 00 00             719         lxi     h,$00000
+      00000478 00000000 3E C0                720         mvi     a,$0c0
+      0000047A 00000000 C6 F0                721         adi     $0f0
+      0000047C 00000000 F1                   722         pop     psw
+      0000047D 00000000 E1                   723         pop     h
+      0000047E 00000000 D1                   724         pop     d
+      0000047F 00000000 C1                   725         pop     b
+      00000480 00000000 DC FA 04             726         cc      cpuer   !test "push psw" and "pop psw"
+      00000483 00000000 C4 FA 04             727         cnz     cpuer   !test "push psw" and "pop psw"
+      00000486 00000000 E4 FA 04             728         cpo     cpuer   !test "push psw" and "pop psw"
+      00000489 00000000 FC FA 04             729         cm      cpuer   !test "push psw" and "pop psw"
+      0000048C 00000000 3E 12                730         mvi     a,$012
+      0000048E 00000000 B8                   731         cmp     b
+      0000048F 00000000 C4 FA 04             732         cnz     cpuer   !test "push b" and "pop b"
+      00000492 00000000 3E 34                733         mvi     a,$034
+      00000494 00000000 B9                   734         cmp     c
+      00000495 00000000 C4 FA 04             735         cnz     cpuer   !test "push b" and "pop b"
+      00000498 00000000 3E AA                736         mvi     a,$0aa
+      0000049A 00000000 BA                   737         cmp     d
+      0000049B 00000000 C4 FA 04             738         cnz     cpuer   !test "push d" and "pop d"
+      0000049E 00000000 BB                   739         cmp     e
+      0000049F 00000000 C4 FA 04             740         cnz     cpuer   !test "push d" and "pop d"
+      000004A2 00000000 3E 55                741         mvi     a,$055
+      000004A4 00000000 BC                   742         cmp     h
+      000004A5 00000000 C4 FA 04             743         cnz     cpuer   !test "push h" and "pop h"
+      000004A8 00000000 BD                   744         cmp     l
+      000004A9 00000000 C4 FA 04             745         cnz     cpuer   !test "push h" and "pop h"
+      000004AC 00000000 21 00 00             746         lxi     h,$00000
+      000004AF 00000000 39                   747         dad     sp
+      000004B0 00000000 22 05 10             748         shld    savstk  !save the "old" stack-pointer!
+      000004B3 00000000 31 04 10             749         lxi     sp,temp4
+      000004B6 00000000 3B                   750         dcx     sp
+      000004B7 00000000 3B                   751         dcx     sp
+      000004B8 00000000 33                   752         inx     sp
+      000004B9 00000000 3B                   753         dcx     sp
+      000004BA 00000000 3E 55                754         mvi     a,$055
+      000004BC 00000000 32 02 10             755         sta     temp2
+      000004BF 00000000 2F                   756         cma
+      000004C0 00000000 32 03 10             757         sta     temp3
+      000004C3 00000000 C1                   758         pop     b
+      000004C4 00000000 B8                   759         cmp     b
+      000004C5 00000000 C4 FA 04             760         cnz     cpuer   !test "lxi","dad","inx",and "dcx" sp
+      000004C8 00000000 2F                   761         cma
+      000004C9 00000000 B9                   762         cmp     c
+      000004CA 00000000 C4 FA 04             763         cnz     cpuer   !test "lxi","dad","inx", and "dcx" sp
+      000004CD 00000000 21 04 10             764         lxi     h,temp4
+      000004D0 00000000 F9                   765         sphl
+      000004D1 00000000 21 33 77             766         lxi     h,$07733
+      000004D4 00000000 3B                   767         dcx     sp
+      000004D5 00000000 3B                   768         dcx     sp
+      000004D6 00000000 E3                   769         xthl
+      000004D7 00000000 3A 03 10             770         lda     temp3
+      000004DA 00000000 FE 77                771         cpi     $077
+      000004DC 00000000 C4 FA 04             772         cnz     cpuer   !test "sphl" and "xthl"
+      000004DF 00000000 3A 02 10             773         lda     temp2
+      000004E2 00000000 FE 33                774         cpi     $033
+
+
+                                                                 test                                                           Page 10
+
+
+      Program  Variable Code              C Line Source
+      -----------------------------------------------------------------------------------------------------------------------------------
+      000004E4 00000000 C4 FA 04             775         cnz     cpuer   !test "sphl" and "xthl"
+      000004E7 00000000 3E 55                776         mvi     a,$055
+      000004E9 00000000 BD                   777         cmp     l
+      000004EA 00000000 C4 FA 04             778         cnz     cpuer   !test "sphl" and "xthl"
+      000004ED 00000000 2F                   779         cma
+      000004EE 00000000 BC                   780         cmp     h
+      000004EF 00000000 C4 FA 04             781         cnz     cpuer   !test "sphl" and "xthl"
+      000004F2 00000000 2A 05 10             782         lhld    savstk  !restore the "old" stack-pointer
+      000004F5 00000000 F9                   783         sphl
+      000004F6 00000000 21 FD 04             784         lxi     h,cpuok
+      000004F9 00000000 E9                   785         pchl            !test "pchl"
+      000004FA 00000000                      786 
+      000004FA 00000000 3E AA                787 cpuer:  mvi     a, $aa  ! set exit code (failure)
+      000004FC 00000000 76                   788         hlt             ! stop here
+      000004FD 00000000                      789 
+      000004FD 00000000 3E 55                790 cpuok:  mvi     a, $55  !
+      000004FF 00000000 76                   791         hlt             ! stop here - no trap
+      00000500 00000000                      792 
+      00000500 00000000                      793 
+      00000500 00000000                      794 !
+      00000500 00000000                      795 ! Data area in program space
+      00000500 00000000                      796 !
+      00000500 00000000 00 10                797 tempp:  defw    temp0   !pointer used to test "lhld","shld",
+      00000502 00000000                      798                         ! and "ldax" instructions
+      00000502 00000000                      799 !
+      00000502 00000000                      800 ! Data area in variable space
+      00000502 00000000                      801 !
+      00000502 00000000                      802 temp0:  defvs   1       !temporary storage for cpu test memory locations
+      00000502 00000001                      803 temp1:  defvs   1       !temporary storage for cpu test memory locations
+      00000502 00000002                      804 temp2:  defvs   1       !temporary storage for cpu test memory locations
+      00000502 00000003                      805 temp3:  defvs   1       !temporary storage for cpu test memory locations
+      00000502 00000004                      806 temp4:  defvs   1       !temporary storage for cpu test memory locations
+      00000502 00000005                      807 savstk: defvs   2       !temporary stack-pointer storage location
+      00000502 00000007                      808 
+      00000502 00000007                      809         defvs   256     !de-bug stack pointer storage area
+      00000502 00000107                   +  810 stack:  defvs           
+      00000502 00000107                   +  811 

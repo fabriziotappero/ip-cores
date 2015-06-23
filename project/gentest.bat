@@ -1,0 +1,1 @@
+genrom test.obj > test.lst
