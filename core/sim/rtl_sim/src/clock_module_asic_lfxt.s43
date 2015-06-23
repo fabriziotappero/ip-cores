@@ -1,0 +1,116 @@
+/*===========================================================================*/
+/* Copyright (C) 2001 Authors                                                */
+/*                                                                           */
+/* This source file may be used and distributed without restriction provided */
+/* that this copyright statement is not removed from the file and that any   */
+/* derivative work contains the original copyright notice and the associated */
+/* disclaimer.                                                               */
+/*                                                                           */
+/* This source file is free software; you can redistribute it and/or modify  */
+/* it under the terms of the GNU Lesser General Public License as published  */
+/* by the Free Software Foundation; either version 2.1 of the License, or    */
+/* (at your option) any later version.                                       */
+/*                                                                           */
+/* This source is distributed in the hope that it will be useful, but WITHOUT*/
+/* ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or     */
+/* FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public       */
+/* License for more details.                                                 */
+/*                                                                           */
+/* You should have received a copy of the GNU Lesser General Public License  */
+/* along with this source; if not, write to the Free Software Foundation,    */
+/* Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA        */
+/*                                                                           */
+/*===========================================================================*/
+/*                               CLOCK MODULE                                */
+/*---------------------------------------------------------------------------*/
+/* Test the clock module:                                                    */
+/*                        - Check the MCLK clock generation.                 */
+/*                                                                           */
+/* Author(s):                                                                */
+/*             - Olivier Girard,    olgirard@gmail.com                       */
+/*                                                                           */
+/*---------------------------------------------------------------------------*/
+/* $Rev: 19 $                                                                */
+/* $LastChangedBy: olivier.girard $                                          */
+/* $LastChangedDate: 2009-08-04 23:47:15 +0200 (Tue, 04 Aug 2009) $          */
+/*===========================================================================*/
+
+.include "pmem_defs.asm"
+
+.global main
+
+.macro LPM_CUSTOM		; # Stop CPU and LFXT oscillator
+ bis    #0x0030, r2
+.endm
+.macro LPM_CUSTOM_exit
+ bic    #0x0030, @r1
+.endm
+
+	
+WAIT_FUNC:
+	dec r14
+	jnz WAIT_FUNC
+	ret
+	
+main:
+ 	mov #DMEM_250, r1       ; # Initialize stack pointer
+	eint                    ; # Enable interrupts
+	
+	mov   #0x0000, &DMEM_200
+	mov   #0x0000, r15
+	mov   #0x0000, r10
+
+	
+      /* --------------      MCLK GENERATION - LFXT_CLK INPUT    ----------------- */
+	
+ 	mov.b  #0x80, &BCSCTL2  ; # Div /1
+ 	mov    #0x0003, r14
+        call   #WAIT_FUNC
+
+	mov    #0x0001, r15	; # First make sure CPU runs with LFXT_CLK
+ 	mov    #0x000A, r14
+        call   #WAIT_FUNC
+
+	mov    #0x0002, r15	; # Make sure the CPU stops and LFXT oscillator too
+	LPM_CUSTOM
+
+	mov    #0x0003, r15	; # Make sure CPU re-runs with LFXT_CLK
+ 	mov    #0x000A, r14
+        call   #WAIT_FUNC
+	
+	mov    #0x0004, r15
+ 				
+
+        /* ----------------------         END OF TEST        --------------- */
+end_of_test:
+	nop
+	br #0xffff
+
+
+        /* ----------------------    FUNCTIONS    --------------- */
+
+IRQ00_ROUTINE:
+        add #0x5678, r10
+	LPM_CUSTOM_exit
+	reti
+
+	
+        /* ----------------------         INTERRUPT VECTORS  --------------- */
+
+.section .vectors, "a"
+.word IRQ00_ROUTINE      ; Interrupt  0 (lowest priority)    <unused>
+.word end_of_test        ; Interrupt  1                      <unused>
+.word end_of_test        ; Interrupt  2                      <unused>
+.word end_of_test        ; Interrupt  3                      <unused>
+.word end_of_test        ; Interrupt  4                      <unused>
+.word end_of_test        ; Interrupt  5                      <unused>
+.word end_of_test        ; Interrupt  6                      <unused>
+.word end_of_test        ; Interrupt  7                      <unused>
+.word end_of_test        ; Interrupt  8                      <unused>
+.word end_of_test        ; Interrupt  9                      <unused>
+.word end_of_test        ; Interrupt 10                      Watchdog timer
+.word end_of_test        ; Interrupt 11                      <unused>
+.word end_of_test        ; Interrupt 12                      <unused>
+.word end_of_test        ; Interrupt 13                      <unused>
+.word end_of_test        ; Interrupt 14                      NMI
+.word main               ; Interrupt 15 (highest priority)   RESET

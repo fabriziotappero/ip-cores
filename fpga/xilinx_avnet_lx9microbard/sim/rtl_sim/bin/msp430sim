@@ -1,0 +1,149 @@
+#!/bin/bash
+#------------------------------------------------------------------------------
+# Copyright (C) 2001 Authors
+#
+# This source file may be used and distributed without restriction provided
+# that this copyright statement is not removed from the file and that any
+# derivative work contains the original copyright notice and the associated
+# disclaimer.
+#
+# This source file is free software; you can redistribute it and/or modify
+# it under the terms of the GNU Lesser General Public License as published
+# by the Free Software Foundation; either version 2.1 of the License, or
+# (at your option) any later version.
+#
+# This source is distributed in the hope that it will be useful, but WITHOUT
+# ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+# FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public
+# License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public License
+# along with this source; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
+#
+#------------------------------------------------------------------------------
+# 
+# File Name: msp430sim
+# 
+# Author(s):
+#             - Olivier Girard,    olgirard@gmail.com
+#
+#------------------------------------------------------------------------------
+# $Rev: 151 $
+# $LastChangedBy: olivier.girard $
+# $LastChangedDate: 2012-07-23 00:24:11 +0200 (Mon, 23 Jul 2012) $
+#------------------------------------------------------------------------------
+
+###############################################################################
+#                            Parameter Check                                  #
+###############################################################################
+EXPECTED_ARGS=1
+if [ $# -ne $EXPECTED_ARGS ]; then
+  echo "ERROR    : wrong number of arguments"
+  echo "USAGE    : msp430sim <test name>"
+  echo "Example  : msp430sim leds"
+  echo ""
+  echo "In order to switch the verilog simulator, the OMSP_SIMULATOR environment"
+  echo "variable can be set to the following values:"
+  echo ""
+  echo "                  - iverilog  : Icarus Verilog  (default)"
+  echo "                  - cver      : CVer"
+  echo "                  - verilog   : Verilog-XL"
+  echo "                  - ncverilog : NC-Verilog"
+  echo "                  - vcs       : VCS"
+  echo "                  - vsim      : Modelsim"
+  echo "                  - isim      : Xilinx simulator"
+  echo ""
+  exit 1
+fi
+
+
+###############################################################################
+#                     Check if the required files exist                       #
+###############################################################################
+softdir=../../../software/$1;
+elffile=../../../software/$1/$1.elf;
+verfile=../src/$1.v;
+submitfile=../src/submit.f;
+if [ $OMSP_SIMULATOR == "isim" ]; then
+    submitfile=../src/submit.prj;
+fi
+incfile=../../../rtl/verilog/openmsp430/openMSP430_defines.v;
+
+if [ ! -e $softdir ]; then
+    echo "Software directory doesn't exist: $softdir"
+    exit 1
+fi
+if [ ! -e $verfile ]; then
+    echo "Verilog stimulus file $verfile doesn't exist: $verfile"
+    exit 1
+fi
+if [ ! -e $submitfile ]; then
+    echo "Verilog submit file $submitfile doesn't exist: $submitfile"
+    exit 1
+fi
+
+
+###############################################################################
+#                               Cleanup                                       #
+###############################################################################
+echo "Cleanup..."
+rm -rf *.vcd
+rm -rf *.vpd
+rm -rf *.trn
+rm -rf *.dsn
+rm -rf pmem.*
+rm -rf stimulus.v
+
+
+###############################################################################
+#                              Run simulation                                 #
+###############################################################################
+echo " ======================================================="
+echo "| Start simulation:             $1"
+echo " ======================================================="
+
+# Make C program
+cd $softdir
+make clean
+make
+cd ../../sim/rtl_sim/run/
+
+# Create links
+if [ `uname -o` = "Cygwin" ]
+then
+    cp $elffile pmem.elf
+    cp $verfile stimulus.v
+else
+    ln -s $elffile pmem.elf
+    ln -s $verfile stimulus.v
+fi
+
+# Make local copy of the openMSP403 configuration file
+# and prepare it for MSPGCC preprocessing
+cp  $incfile  ./pmem.h
+sed -i 's/`ifdef/#ifdef/g'   ./pmem.h 
+sed -i 's/`else/#else/g'     ./pmem.h 
+sed -i 's/`endif/#endif/g'   ./pmem.h 
+sed -i 's/`define/#define/g' ./pmem.h 
+sed -i 's/`//g'              ./pmem.h 
+sed -i "s/'//g"              ./pmem.h
+
+# Use MSPGCC preprocessor to extract the Program, Data
+# and Peripheral memory sizes
+msp430-gcc -E -P -x c ../bin/omsp_config.sh > pmem.sh
+
+# Source the extracted configuration file
+source pmem.sh
+
+# Create IHEX file from ELF
+echo "Convert ELF file to IHEX format..."
+msp430-objcopy -O ihex  pmem.elf pmem.ihex
+
+# Generate Program memory file
+echo "Convert IHEX file to Verilog MEMH format..."
+../bin/ihex2mem.tcl -ihex pmem.ihex -out pmem.mem -mem_size $pmemsize
+
+# Start verilog simulation
+echo "Start Verilog simulation..."
+../bin/rtlsim.sh    stimulus.v pmem.mem $submitfile

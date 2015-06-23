@@ -1,0 +1,1 @@
+../bin/openmsp430-gdbproxy.tcl

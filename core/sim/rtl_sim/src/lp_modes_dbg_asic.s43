@@ -1,0 +1,225 @@
+/*===========================================================================*/
+/* Copyright (C) 2001 Authors                                                */
+/*                                                                           */
+/* This source file may be used and distributed without restriction provided */
+/* that this copyright statement is not removed from the file and that any   */
+/* derivative work contains the original copyright notice and the associated */
+/* disclaimer.                                                               */
+/*                                                                           */
+/* This source file is free software; you can redistribute it and/or modify  */
+/* it under the terms of the GNU Lesser General Public License as published  */
+/* by the Free Software Foundation; either version 2.1 of the License, or    */
+/* (at your option) any later version.                                       */
+/*                                                                           */
+/* This source is distributed in the hope that it will be useful, but WITHOUT*/
+/* ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or     */
+/* FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public       */
+/* License for more details.                                                 */
+/*                                                                           */
+/* You should have received a copy of the GNU Lesser General Public License  */
+/* along with this source; if not, write to the Free Software Foundation,    */
+/* Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA        */
+/*                                                                           */
+/*===========================================================================*/
+/*                            CPU OPERATING MODES                            */
+/*---------------------------------------------------------------------------*/
+/* Test the CPU Low Power modes:                                             */
+/*                              - LPM0    <=>  CPUOFF                        */
+/*                              - LPM1    <=>  CPUOFF + SCG0                 */
+/*                              - LPM2    <=>  CPUOFF +        SCG1          */
+/*                              - LPM3    <=>  CPUOFF + SCG0 + SCG1          */
+/*                              - LPM4    <=>  CPUOFF + SCG0 + SCG1 + OSCOFF */
+/*                                                                           */
+/* Reminder:                                                                 */
+/*                              - CPUOFF  <=>  turns off CPU.                */
+/*                              - SCG0    <=>  turns off DCO.                */
+/*                              - SCG1    <=>  turns off SMCLK.              */
+/*                              - OSCOFF  <=>  turns off LFXT_CLK.           */
+/*                                                                           */
+/* Author(s):                                                                */
+/*             - Olivier Girard,    olgirard@gmail.com                       */
+/*                                                                           */
+/*---------------------------------------------------------------------------*/
+/* $Rev: 19 $                                                                */
+/* $LastChangedBy: olivier.girard $                                          */
+/* $LastChangedDate: 2009-08-04 23:47:15 +0200 (Tue, 04 Aug 2009) $          */
+/*===========================================================================*/
+
+.include "pmem_defs.asm"
+
+.global main
+
+.macro LPM0
+ bis    #0x0010, r2
+.endm
+.macro LPM1
+ bis    #0x0050, r2
+.endm
+.macro LPM2
+ bis    #0x0090, r2
+.endm
+.macro LPM3
+ bis    #0x00D0, r2
+.endm
+.macro LPM4
+ bis    #0x00F0, r2
+.endm
+
+.macro LPM0_exit
+ bic    #0x0010, @r1
+.endm
+.macro LPM1_exit
+ bic    #0x0050, @r1
+.endm
+.macro LPM2_exit
+ bic    #0x0090, @r1
+.endm
+.macro LPM3_exit
+ bic    #0x00D0, @r1
+.endm
+.macro LPM4_exit
+ bic    #0x00F0, @r1
+.endm
+	
+		
+WAIT_FUNC:
+	dec r14
+	jnz WAIT_FUNC
+	ret
+	
+main:
+
+	; Initialize stack and enable global interrupts
+	mov    #DMEM_250, r1
+	eint
+
+	; Wait for a while to give enough time to ACLK
+ 	mov    #0x0050, r14
+        call   #WAIT_FUNC
+	mov    #0x1000, r15
+
+        /* --------------- ACTIVE ------------------------------------------ */
+
+	mov    #0x1001, r15
+ 	mov.b  #0x00, &BCSCTL2  ; # MCLK  = DCO_CLK
+	                        ; # SMCLK = DCO_CLK
+	mov    #0x0080, r14
+        call   #WAIT_FUNC
+
+	mov    #0x2000, r15
+
+		
+        /* --------------- LPM0  ( CPUOFF ) -------------------------------- */
+
+	mov    #0x2001, r15
+ 	mov.b  #0x00, &BCSCTL2  ; # MCLK  = DCO_CLK
+                                ; # SMCLK = DCO_CLK
+
+ 	LPM0                    ; #                     MCLK off
+ 	mov    #0x0090, r14
+        call   #WAIT_FUNC
+
+	mov    #0x3000, r15
+
+
+        /* --------------- LPM1  ( CPUOFF + SCG0 ) ------------------------- */
+
+	mov    #0x3001, r15
+ 	mov.b  #0x08, &BCSCTL2  ; # MCLK  = DCO_CLK
+                                ; # SMCLK = LFXT_CLK
+
+ 	LPM1                    ; #                     MCLK off + DCO off
+ 	mov    #0x0090, r14
+        call   #WAIT_FUNC
+
+	mov    #0x4000, r15
+
+
+        /*---------------- LPM2  ( CPUOFF + SCG1 ) ------------------------- */
+
+	mov    #0x4001, r15
+ 	mov.b  #0x08, &BCSCTL2  ; # MCLK  = DCO_CLK
+                                ; # SMCLK = LFXT_CLK
+
+ 	LPM2                    ; #                     MCLK off + SMCLK off
+ 	mov    #0x0190, r14
+        call   #WAIT_FUNC
+
+	mov    #0x5000, r15
+
+
+        /*---------------- LPM3  ( CPUOFF + SCG0 + SCG1 ) ------------------ */
+
+	mov    #0x5001, r15
+ 	mov.b  #0x08, &BCSCTL2  ; # MCLK  = DCO_CLK
+                                ; # SMCLK = LFXT_CLK
+
+ 	LPM3                    ; #                     MCLK off + DCO off + SMCLK off
+ 	mov    #0x0190, r14
+        call   #WAIT_FUNC
+
+	mov    #0x6000, r15
+
+
+        /*---------------- LPM4  ( CPUOFF + SCG0 + SCG1 + OSCOFF ) --------- */
+
+ 	mov    #0x6001, r15
+ 	mov.b  #0x08, &BCSCTL2  ; # MCLK  = DCO_CLK
+                                ; # SMCLK = LFXT_CLK
+
+ 	LPM4                    ; #                     MCLK off + DCO off + SMCLK off + LFXT off
+ 	mov    #0x0100, r14
+        call   #WAIT_FUNC
+
+	mov    #0x6000, r15
+
+
+        /* ----------------------         END OF TEST        --------------- */
+end_of_test:
+	nop
+	br #0xffff
+
+	  
+        /* ----------------------      INTERRUPT ROUTINES    --------------- */
+
+PORT1_VECTOR:
+	push       r13
+	push       r14
+ 	mov    #0x0060, r14
+        call   #WAIT_FUNC
+	mov    #0xaaaa, r13
+	pop        r14
+	pop        r13
+ 	reti	
+
+PORT2_VECTOR:
+	push       r13
+ 	push       r14
+ 	mov    #0x0060, r14
+        call   #WAIT_FUNC
+	mov    #0xbbbb, r13
+	pop        r14
+	pop        r13
+        bic    #0xf0, 0(r1) ;exit all lowpower mode
+	reti	
+
+
+        /* ----------------------         INTERRUPT VECTORS  --------------- */
+
+.section .vectors, "a"
+.word end_of_test  ; Interrupt  0 (lowest priority)    <unused>
+.word end_of_test  ; Interrupt  1                      <unused>
+.word PORT1_VECTOR ; Interrupt  2                      <unused>
+.word PORT2_VECTOR ; Interrupt  3                      <unused>
+.word end_of_test  ; Interrupt  4                      <unused>
+.word end_of_test  ; Interrupt  5                      <unused>
+.word end_of_test  ; Interrupt  6                      <unused>
+.word end_of_test  ; Interrupt  7                      <unused>
+.word end_of_test  ; Interrupt  8                      <unused>
+.word end_of_test  ; Interrupt  9                      <unused>
+.word end_of_test  ; Interrupt 10                      Watchdog timer
+.word end_of_test  ; Interrupt 11                      <unused>
+.word end_of_test  ; Interrupt 12                      <unused>
+.word end_of_test  ; Interrupt 13                      <unused>
+.word end_of_test  ; Interrupt 14                      NMI
+.word main         ; Interrupt 15 (highest priority)   RESET

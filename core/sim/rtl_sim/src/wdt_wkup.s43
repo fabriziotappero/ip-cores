@@ -1,0 +1,185 @@
+/*===========================================================================*/
+/* Copyright (C) 2001 Authors                                                */
+/*                                                                           */
+/* This source file may be used and distributed without restriction provided */
+/* that this copyright statement is not removed from the file and that any   */
+/* derivative work contains the original copyright notice and the associated */
+/* disclaimer.                                                               */
+/*                                                                           */
+/* This source file is free software; you can redistribute it and/or modify  */
+/* it under the terms of the GNU Lesser General Public License as published  */
+/* by the Free Software Foundation; either version 2.1 of the License, or    */
+/* (at your option) any later version.                                       */
+/*                                                                           */
+/* This source is distributed in the hope that it will be useful, but WITHOUT*/
+/* ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or     */
+/* FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public       */
+/* License for more details.                                                 */
+/*                                                                           */
+/* You should have received a copy of the GNU Lesser General Public License  */
+/* along with this source; if not, write to the Free Software Foundation,    */
+/* Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA        */
+/*                                                                           */
+/*===========================================================================*/
+/*                            WATCHDOG TIMER                                 */
+/*---------------------------------------------------------------------------*/
+/* Test the Watdog timer:                                                    */
+/*                        - Interval timer mode.                             */
+/*                                                                           */
+/* Author(s):                                                                */
+/*             - Olivier Girard,    olgirard@gmail.com                       */
+/*                                                                           */
+/*---------------------------------------------------------------------------*/
+/* $Rev: 19 $                                                                */
+/* $LastChangedBy: olivier.girard $                                          */
+/* $LastChangedDate: 2009-08-04 23:47:15 +0200 (Tue, 04 Aug 2009) $          */
+/*===========================================================================*/
+/*                                                                           */
+/* Low Power modes:                                                          */
+/*                              - LPM0    <=>  CPUOFF                        */
+/*                              - LPM1    <=>  CPUOFF + SCG0                 */
+/*                              - LPM2    <=>  CPUOFF +        SCG1          */
+/*                              - LPM3    <=>  CPUOFF + SCG0 + SCG1          */
+/*                              - LPM4    <=>  CPUOFF + SCG0 + SCG1 + OSCOFF */
+/*                                                                           */
+/* Reminder:                                                                 */
+/*                              - CPUOFF  <=>  turns off CPU.                */
+/*                              - SCG0    <=>  turns off DCO.                */
+/*                              - SCG1    <=>  turns off SMCLK.              */
+/*                              - OSCOFF  <=>  turns off LFXT_CLK.           */
+/*                                                                           */
+/*---------------------------------------------------------------------------*/
+
+.include "pmem_defs.asm"
+
+.global main
+
+.macro LPM0
+ bis    #0x0010, r2
+.endm
+.macro LPM1
+ bis    #0x0050, r2
+.endm
+.macro LPM2
+ bis    #0x0090, r2
+.endm
+.macro LPM3
+ bis    #0x00D0, r2
+.endm
+.macro LPM4
+ bis    #0x00F0, r2
+.endm
+
+.macro LPM0_exit
+ bic    #0x0010, @r1
+.endm
+.macro LPM1_exit
+ bic    #0x0050, @r1
+.endm
+.macro LPM2_exit
+ bic    #0x0090, @r1
+.endm
+.macro LPM3_exit
+ bic    #0x00D0, @r1
+.endm
+.macro LPM4_exit
+ bic    #0x00F0, @r1
+.endm
+
+		
+main:
+		
+        /* --------------   WATCHDOG TEST:  WAKE-UP INTERVAL MODE   ------------ */
+
+	mov   &IFG1, r4
+	cmp #0x0001, &IFG1        ;# Check if we come out of a watchdog reset
+	jeq   end_of_test
+
+	mov   #DMEM_250, r1	  ;# Initialize stack & Enable interrupts
+	eint
+	bis.b #0x01,   &IE1
+
+	mov   #0x0000, r6
+	
+	mov   #0x5a1f, &WDTCTL	  ;# Enable interval mode /64 and select ACLK
+
+	mov   &WDTCTL, r5	  ;# If ACLK is selected, go to LPM3... otherwhise go to LPM0
+	bit   #0x0004, r5
+	jnz   lpm3_test
+   lpm0_test:
+	mov   #0x1000, r15
+	LPM0
+	jmp   lpm_test_done
+   lpm3_test:
+	mov   #0x1000, r15
+	LPM3
+   lpm_test_done:
+
+        /* --------------   WATCHDOG TEST:  WAKE-UP RESET MODE   ------------ */
+
+	mov   #0x5a0f, &WDTCTL	  ;# Enable reset mode /64 and select ACLK
+	mov   #0x5555, r7
+
+	mov   &WDTCTL, r5	  ;# If ACLK is selected, go to LPM3... otherwhise go to LPM0
+	bit   #0x0004, r5
+	jnz   lpm3_rst_test
+   lpm0_rst_test:
+	mov   #0x1000, r15
+	LPM0
+	jmp   lpm_rst_test_done
+   lpm3_rst_test:
+	mov   #0x1000, r15
+	LPM3
+   lpm_rst_test_done:
+	
+
+        /* ----------------------         END OF TEST        --------------- */
+end_of_test:
+	mov   #0x5000, r15
+	nop
+	br #0xffff
+
+
+        /* ----------------------      INTERRUPT ROUTINES    --------------- */
+
+WDOG_VECTOR:
+	inc    r6		;# Increment counter variable
+	cmp    #10, r6
+	jl     end_of_irq
+	
+	mov   &WDTCTL, r5	;# If ACLK is selected, exit LPM3... otherwhise exit LPM0
+	bit   #0x0004, r5
+	jnz   lpm3_test_exit
+   lpm0_test_exit:
+	mov   #0x2000, r15
+	LPM0_exit
+	reti
+   lpm3_test_exit:
+	mov   #0x2000, r15
+	LPM3_exit
+
+   end_of_irq:		
+	mov   #0x6666, r7
+   	reti
+
+
+
+        /* ----------------------         INTERRUPT VECTORS  --------------- */
+
+.section .vectors, "a"
+.word end_of_test  ; Interrupt  0 (lowest priority)    <unused>
+.word end_of_test  ; Interrupt  1                      <unused>
+.word end_of_test  ; Interrupt  2                      <unused>
+.word end_of_test  ; Interrupt  3                      <unused>
+.word end_of_test  ; Interrupt  4                      <unused>
+.word end_of_test  ; Interrupt  5                      <unused>
+.word end_of_test  ; Interrupt  6                      <unused>
+.word end_of_test  ; Interrupt  7                      <unused>
+.word end_of_test  ; Interrupt  8                      <unused>
+.word end_of_test  ; Interrupt  9                      <unused>
+.word WDOG_VECTOR  ; Interrupt 10                      Watchdog timer
+.word end_of_test  ; Interrupt 11                      <unused>
+.word end_of_test  ; Interrupt 12                      <unused>
+.word end_of_test  ; Interrupt 13                      <unused>
+.word end_of_test  ; Interrupt 14                      NMI
+.word main         ; Interrupt 15 (highest priority)   RESET

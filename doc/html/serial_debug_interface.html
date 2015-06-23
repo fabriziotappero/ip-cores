@@ -1,0 +1,1240 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html><head><title>openMSP430 Serial Debug Interface</title>
+
+
+<meta http-equiv="content-type" content="text/html; charset=utf-8"></head><body>
+<a name="TOC"></a>
+<h3>Table of content</h3>
+<ul>
+	<li><strong><a href="#1.%20Introduction">                          1. Introduction</a></strong></li>
+	<li><strong><a href="#2.%20Debug%20Unit">                            2. Debug Unit</a></strong>
+	<ul>
+      <li><a href="#2.1%20Register%20Mapping">                  2.1 Register Mapping</a></li>
+      <li><a href="#2.2%20CPU%20Control/Status%20Registers">      2.2 CPU Control/Status Registers</a></li>
+		<ul>
+   	   <li><a href="#2.2.1%20CPU_ID">                       2.2.1 CPU_ID</a></li>
+      	<li><a href="#2.2.2%20CPU_CTL">                      2.2.2 CPU_CTL</a></li>
+      	<li><a href="#2.2.3%20CPU_STAT">                     2.2.3 CPU_STAT</a></li>
+      	<li><a href="#2.2.4%20CPU_NR">                       2.2.4 CPU_NR</a></li>
+		</ul>
+      <li><a href="#2.3%20Memory%20Access%20Registers">           2.3 Memory Access Registers</a></li>
+		<ul>
+   	   <li><a href="#2.3.1%20MEM_CTL">                      2.3.1 MEM_CTL</a></li>
+      	<li><a href="#2.3.2%20MEM_ADDR">                     2.3.2 MEM_ADDR</a></li>
+      	<li><a href="#2.3.3%20MEM_DATA">                     2.3.3 MEM_DATA</a></li>
+      	<li><a href="#2.3.4%20MEM_CNT">                      2.3.4 MEM_CNT</a></li>
+		</ul>
+      <li><a href="#2.4%20Hardware%20Breakpoint%20Unit%20Registers">2.4 Hardware Breakpoint Unit Registers</a></li>
+		<ul>
+   	   <li><a href="#2.4.1%20BRKx_CTL">                     2.4.1 BRKx_CTL</a></li>
+      	<li><a href="#2.4.2%20BRKx_STAT">                    2.4.2 BRKx_STAT</a></li>
+      	<li><a href="#2.4.3%20BRKx_ADDR0">                   2.4.3 BRKx_ADDR0</a></li>
+      	<li><a href="#2.4.4%20BRKx_ADDR1">                   2.4.4 BRKx_ADDR1</a></li>
+		</ul>
+	</ul>
+  	</li>	
+	<li><strong><a href="#3.%20Debug%20Communication%20Interface:%20UART">   3. Debug Communication Interface: UART</a></strong>
+		<ul>
+   	   <li><a href="#3.1%20Serial%20communication%20protocol:%208N1">       3.1 Serial communication protocol: 8N1</a></li>
+      	<li><a href="#3.2%20Synchronization%20frame">                    3.2 Synchronization frame</a></li>
+      	<li><a href="#3.3%20Read/Write%20access%20to%20the%20debug%20registers"> 3.3 Read/Write access to the debug registers</a></li>
+			<ul>
+   	   	<li><a href="#3.3.1%20Command%20Frame">                       3.3.1 Command Frame</a></li>
+      		<li><a href="#3.3.2%20Write%20access">                        3.3.2 Write access</a></li>
+      		<li><a href="#3.3.3%20Read%20access">                         3.3.3 Read access</a></li>
+			</ul>
+      	<li><a href="#3.4%20Read/Write%20burst%20implementation%20for%20the%20CPU%20Memory%20access">3.4 Read/Write burst implementation for the CPU Memory access</a></li>
+			<ul>
+   	   	<li><a href="#3.4.1%20Write%20Burst%20access">                  3.4.1 Write Burst access</a></li>
+      		<li><a href="#3.4.2%20Read%20Burst%20access">                   3.4.2 Read Burst access</a></li>
+			</ul>
+		</ul>
+   </li>
+	<li><strong><a href="#4.%20Debug%20Communication%20Interface:%20I2C">   4. Debug Communication Interface: I2C</a></strong>
+		<ul>
+   	   <li><a href="#4.1%20I2C%20communication%20protocol">       4.1 I2C communication protocol</a></li>
+      	<li><a href="#4.2%20Synchronization%20frame">                    4.2 Synchronization frame</a></li>
+      	<li><a href="#4.3%20Read/Write%20access%20to%20the%20debug%20registers"> 4.3 Read/Write access to the debug registers</a></li>
+			<ul>
+   	   	<li><a href="#4.3.1%20Command%20Frame">                       4.3.1 Command Frame</a></li>
+      		<li><a href="#4.3.2%20Write%20access">                        4.3.2 Write access</a></li>
+      		<li><a href="#4.3.3%20Read%20access">                         4.3.3 Read access</a></li>
+			</ul>
+      	<li><a href="#4.4%20Read/Write%20burst%20implementation%20for%20the%20CPU%20Memory%20access">4.4 Read/Write burst implementation for the CPU Memory access</a></li>
+			<ul>
+   	   	<li><a href="#4.4.1%20Write%20Burst%20access">                  4.4.1 Write Burst access</a></li>
+      		<li><a href="#4.4.2%20Read%20Burst%20access">                   4.4.2 Read Burst access</a></li>
+			</ul>
+		</ul>
+   </li>
+</ul>
+
+<a name="1. Introduction"></a>
+<h1>1. Introduction</h1>
+The original MSP430 from TI provides a serial debug interface to allow
+in-system software debugging. In that case, the communication
+with the host computer is typically built on a JTAG or Spy-Bi-Wire
+serial protocol. However, the global debug architecture from the MSP430
+is unfortunately poorly documented on the web (and is also probably
+tightly linked with the internal core micro-architecture).
+<br><br>A custom module has therefore been implemented for the
+openMSP430. The communication with the host is done with a simple two-wire cable following either the UART or I<sup>2</sup>C serial protocol (interface is selectable in the <a href="http://opencores.org/project,openmsp430,core#2.1.3.3%20Expert%20System%20Configuration">Expert System Configuraiton</a> section).
+<br><br>The debug unit provides all required features for Nexus Class 3 debugging (beside trace), namely: <br>
+<br>
+<table style="text-align: left; width: 50%; margin-left: auto; margin-right: auto;" border="1" cellpadding="2" cellspacing="2">
+  <tbody>
+    <tr align="center">
+      <td style="vertical-align: top;"><span style="font-weight: bold;"><strong>Debug unit features</strong></span><br>
+      </td>
+    </tr>
+    <tr>
+      <td style="vertical-align: top;">
+      <ul>
+<li>CPU control (run, stop, step, reset).</li><li>Software &amp; hardware breakpoint.</li><li>Hardware watchpoint.<br>
+  </li><li>Memory read/write on-the-fly (no need to halt execution).</li><li>CPU registers read/write on-the-fly (no need to halt execution).</li>
+      </ul>
+      </td>
+    </tr>
+  </tbody>
+</table>
+<br>
+<ul></ul>
+
+Depending on the selected serial interface, the following features are available:<br>
+<br>
+<table style="text-align: left; width: 50%; margin-left: auto; margin-right: auto;" border="1" cellpadding="2" cellspacing="2">
+  <tbody>
+    <tr align="center">
+      <td colspan="2" rowspan="1" style="vertical-align: top;"><span style="font-weight: bold;"><strong>Debug interface features</strong></span><br>
+      </td>
+    </tr>
+<tr>
+      <td style="vertical-align: top; text-align: center;"><strong>UART</strong><br>
+      </td>
+      <td style="vertical-align: top; text-align: center;"><strong>I<sup>2</sup>C</strong><br>
+      </td>
+    </tr>
+    <tr>
+      <td style="vertical-align: top; text-align: left;">
+      <span style="font-weight: bold;"><br>
+Strengths:</span><br>
+<ul>
+        
+        <li>No extra hardware required for most FPGA boards (almost all come with a UART interface, either <a href="http://www.ftdichip.com/Products/Cables/USBRS232.htm">RS232 or USB</a> based).</li>
+
+        
+        <li>Possibility to use <a href="http://www.ftdichip.com/Products/Cables/USBTTLSerial.htm">USB to serial TTL</a> cables.</li>
+
+      </ul><span style="font-weight: bold;">Weaknesses:</span><br>
+      <ul>
+        <li>Need to reset the debug interface after cable insertion.</li>
+        <li>For ASICs, no possibility to change the MCLK frequency during a debug session.<br>
+        </li>
+      </ul>
+
+</td>
+      <td style="vertical-align: top; text-align: left;"><br>
+      <span style="font-weight: bold;">Strengths:</span><br>
+<ul>
+        
+        <li>Very stable interface (synchronous protocol, no synchronization frame required).</li>
+
+        
+        <li>Multi-core chip support with a single I2C
+interface (i.e. TWO pins)... in such a system, each openMSP430 instance has its own I2C device address.</li>
+        <li>Possibility to combine the openMSP430 debug interface with
+an already existing "functional" I2C interface... effectively creating
+a ZERO
+wire serial debug interface.</li>
+        <li>Affordable <a href="http://www.robot-electronics.co.uk/htm/usb_iss_tech.htm">USB-ISS adapter</a> (~23€).</li>
+</ul><span style="font-weight: bold;">Weaknesses:</span><br>
+      <ul>
+        <li>Extra I2C adapter required (<a href="http://www.robot-electronics.co.uk/htm/usb_iss_tech.htm">USB-ISS</a> currently supported)<br>
+</li>
+      </ul>
+      <br>
+
+</td>
+    </tr>
+  </tbody>
+</table>
+
+<a name="2. Debug Unit"></a><br>
+
+<div style="text-align: right;"><a href="#TOC">Top</a></div>
+<h1>2. Debug Unit</h1>
+
+<a name="2.1 Register Mapping"></a>
+<h2>2.1 Register Mapping</h2>
+
+The following table summarize the complete debug register set accessible through the debug communication interface:
+<br><br>
+<table border="1">
+<tbody><tr align="center">
+<td rowspan="2"><b><small>Register Name</small></b></td>
+<td rowspan="2"><b><small>Address</small></b></td>
+<td colspan="16"><b><small>Bit Field</small></b></td>
+</tr>
+<tr align="center">
+<td><small>15</small></td><td><small>14</small></td>
+<td><small>13</small></td><td><small>12</small></td>
+<td><small>11</small></td><td><small>10</small></td>
+<td><small> 9</small></td><td><small> 8</small></td>
+<td><small> 7</small></td><td><small> 6</small></td>
+<td><small> 5</small></td><td><small> 4</small></td>
+<td><small> 3</small></td><td><small> 2</small></td>
+<td><small> 1</small></td><td><small> 0</small></td>
+</tr>
+<tr align="center">
+<td><small><a href="#2.2.1%20CPU_ID">CPU_ID_LO</a></small></td>
+<td><small>0x00</small></td>
+<td colspan="7"><font size="-5">PER_SPACE</font></td>
+<td colspan="5"><font size="-5">USER_VERSION</font></td>
+<td colspan="1"><font size="-5">ASIC</font></td>
+<td colspan="3"><font size="-5">CPU_VERSION</font></td>
+</tr>
+<tr align="center">
+<td><small><a href="#2.2.1%20CPU_ID">CPU_ID_HI</a></small></td>
+<td><small>0x01</small></td>
+<td colspan="6"><font size="-5">PMEM_SIZE</font></td>
+<td colspan="9"><font size="-5">DMEM_SIZE</font></td>
+<td colspan="1"><font size="-5">MPY</font></td>
+</tr>
+<tr align="center">
+<td><small><a href="#2.2.2%20CPU_CTL">CPU_CTL</a></small></td>
+<td><small>0x02</small></td>
+<td colspan="9"><font size="-5">Reserved</font></td>
+<td><font size="-5">CPU_RST</font></td>
+<td><font size="-5">RST_BRK_EN</font></td>
+<td><font size="-5">FRZ_BRK_EN</font></td>
+<td><font size="-5">SW_BRK_EN</font></td>
+<td><font size="-5">ISTEP</font></td>
+<td><font size="-5">RUN</font></td>
+<td><font size="-5">HALT</font></td>
+</tr>
+<tr align="center">
+<td><small><a href="#2.2.3%20CPU_STAT">CPU_STAT</a></small></td>
+<td><small>0x03</small></td>
+<td colspan="8"><font size="-5">Reserved</font></td>
+<td><font size="-5">HWBRK3_PND</font></td>
+<td><font size="-5">HWBRK2_PND</font></td>
+<td><font size="-5">HWBRK1_PND</font></td>
+<td><font size="-5">HWBRK0_PND</font></td>
+<td><font size="-5">SWBRK_PND</font></td>
+<td><font size="-5">PUC_PND</font></td>
+<td><font size="-5">Res.</font></td>
+<td><font size="-5">HALT_RUN</font></td>
+</tr>
+<tr align="center">
+<td><small><a href="#2.3.1%20MEM_CTL">MEM_CTL</a></small></td>
+<td><small>0x04</small></td>
+<td colspan="12"><font size="-5">Reserved</font></td>
+<td><font size="-5">B/W</font></td>
+<td><font size="-5">MEM/REG</font></td>
+<td><font size="-5">RD/WR</font></td>
+<td><font size="-5">START</font></td>
+</tr>
+<tr align="center">
+<td><small><a href="#2.3.2%20MEM_ADDR">MEM_ADDR</a></small></td>
+<td><small>0x05</small></td>
+<td colspan="16"><font size="-5">MEM_ADDR[15:0]</font></td>
+</tr>
+<tr align="center">
+<td><small><a href="#2.3.3%20MEM_DATA">MEM_DATA</a></small></td>
+<td><small>0x06</small></td>
+<td colspan="16"><font size="-5">MEM_DATA[15:0]</font></td>
+</tr>
+<tr align="center">
+<td><small><a href="#2.3.4%20MEM_CNT">MEM_CNT</a></small></td>
+<td><small>0x07</small></td>
+<td colspan="16"><font size="-5">MEM_CNT[15:0]</font></td>
+</tr>
+<tr align="center">
+<td><small><a href="#2.4.1%20BRKx_CTL">BRK0_CTL</a></small></td>
+<td><small>0x08</small></td>
+<td colspan="11"><font size="-5">Reserved</font></td>
+<td><font size="-5">RANGE_MODE</font></td>
+<td><font size="-5">INST_EN</font></td>
+<td><font size="-5">BREAK_EN</font></td>
+<td colspan="2"><font size="-5">ACCESS_MODE</font></td>
+</tr>
+<tr align="center">
+<td><small><a href="#2.4.2%20BRKx_STAT">BRK0_STAT</a></small></td>
+<td><small>0x09</small></td>
+<td colspan="10"><font size="-5">Reserved</font></td>
+<td><font size="-5">RANGE_WR</font></td>
+<td><font size="-5">RANGE_RD</font></td>
+<td><font size="-5">ADDR1_WR</font></td>
+<td><font size="-5">ADDR1_RD</font></td>
+<td><font size="-5">ADDR0_WR</font></td>
+<td><font size="-5">ADDR0_RD</font></td>
+</tr>
+<tr align="center">
+<td><small><a href="#2.4.3%20BRKx_ADDR0">BRK0_ADDR0</a></small></td>
+<td><small>0x0A</small></td>
+<td colspan="16"><font size="-5">BRK_ADDR0[15:0]</font></td>
+</tr>
+<tr align="center">
+<td><small><a href="#2.4.4%20BRKx_ADDR1">BRK0_ADDR1</a></small></td>
+<td><small>0x0B</small></td>
+<td colspan="16"><font size="-5">BRK_ADDR1[15:0]</font></td>
+</tr>
+<tr align="center">
+<td><small><a href="#2.4.1%20BRKx_CTL">BRK1_CTL</a></small></td>
+<td><small>0x0C</small></td>
+<td colspan="11"><font size="-5">Reserved</font></td>
+<td><font size="-5">RANGE_MODE</font></td>
+<td><font size="-5">INST_EN</font></td>
+<td><font size="-5">BREAK_EN</font></td>
+<td colspan="2"><font size="-5">ACCESS_MODE</font></td>
+</tr>
+<tr align="center">
+<td><small><a href="#2.4.2%20BRKx_STAT">BRK1_STAT</a></small></td>
+<td><small>0x0D</small></td>
+<td colspan="10"><font size="-5">Reserved</font></td>
+<td><font size="-5">RANGE_WR</font></td>
+<td><font size="-5">RANGE_RD</font></td>
+<td><font size="-5">ADDR1_WR</font></td>
+<td><font size="-5">ADDR1_RD</font></td>
+<td><font size="-5">ADDR0_WR</font></td>
+<td><font size="-5">ADDR0_RD</font></td>
+</tr>
+<tr align="center">
+<td><small><a href="#2.4.3%20BRKx_ADDR0">BRK1_ADDR0</a></small></td>
+<td><small>0x0E</small></td>
+<td colspan="16"><font size="-5">BRK_ADDR0[15:0]</font></td>
+</tr>
+<tr align="center">
+<td><small><a href="#2.4.4%20BRKx_ADDR1">BRK1_ADDR1</a></small></td>
+<td><small>0x0F</small></td>
+<td colspan="16"><font size="-5">BRK_ADDR1[15:0]</font></td>
+</tr>
+<tr align="center">
+<td><small><a href="#2.4.1%20BRKx_CTL">BRK2_CTL</a></small></td>
+<td><small>0x10</small></td>
+<td colspan="11"><font size="-5">Reserved</font></td>
+<td><font size="-5">RANGE_MODE</font></td>
+<td><font size="-5">INST_EN</font></td>
+<td><font size="-5">BREAK_EN</font></td>
+<td colspan="2"><font size="-5">ACCESS_MODE</font></td>
+</tr>
+<tr align="center">
+<td><small><a href="#2.4.2%20BRKx_STAT">BRK2_STAT</a></small></td>
+<td><small>0x11</small></td>
+<td colspan="10"><font size="-5">Reserved</font></td>
+<td><font size="-5">RANGE_WR</font></td>
+<td><font size="-5">RANGE_RD</font></td>
+<td><font size="-5">ADDR1_WR</font></td>
+<td><font size="-5">ADDR1_RD</font></td>
+<td><font size="-5">ADDR0_WR</font></td>
+<td><font size="-5">ADDR0_RD</font></td>
+</tr>
+<tr align="center">
+<td><small><a href="#2.4.3%20BRKx_ADDR0">BRK2_ADDR0</a></small></td>
+<td><small>0x12</small></td>
+<td colspan="16"><font size="-5">BRK_ADDR0[15:0]</font></td>
+</tr>
+<tr align="center">
+<td><small><a href="#2.4.4%20BRKx_ADDR1">BRK2_ADDR1</a></small></td>
+<td><small>0x13</small></td>
+<td colspan="16"><font size="-5">BRK_ADDR1[15:0]</font></td>
+</tr>
+<tr align="center">
+<td><small><a href="#2.4.1%20BRKx_CTL">BRK3_CTL</a></small></td>
+<td><small>0x14</small></td>
+<td colspan="11"><font size="-5">Reserved</font></td>
+<td><font size="-5">RANGE_MODE</font></td>
+<td><font size="-5">INST_EN</font></td>
+<td><font size="-5">BREAK_EN</font></td>
+<td colspan="2"><font size="-5">ACCESS_MODE</font></td>
+</tr>
+<tr align="center">
+<td><small><a href="#2.4.2%20BRKx_STAT">BRK3_STAT</a></small></td>
+<td><small>0x15</small></td>
+<td colspan="10"><font size="-5">Reserved</font></td>
+<td><font size="-5">RANGE_WR</font></td>
+<td><font size="-5">RANGE_RD</font></td>
+<td><font size="-5">ADDR1_WR</font></td>
+<td><font size="-5">ADDR1_RD</font></td>
+<td><font size="-5">ADDR0_WR</font></td>
+<td><font size="-5">ADDR0_RD</font></td>
+</tr>
+<tr align="center">
+<td><small><a href="#2.4.3%20BRKx_ADDR0">BRK3_ADDR0</a></small></td>
+<td><small>0x16</small></td>
+<td colspan="16"><font size="-5">BRK_ADDR0[15:0]</font></td>
+</tr>
+<tr align="center">
+<td><small><a href="#2.4.4%20BRKx_ADDR1">BRK3_ADDR1</a></small></td>
+<td><small>0x17</small></td>
+<td colspan="16"><font size="-5">BRK_ADDR1[15:0]</font></td>
+</tr>
+<tr align="center">
+<td><small><a href="#2.2.4%20CPU_NR">CPU_NR</a></small></td>
+<td><small>0x18</small></td>
+<td colspan="8"><small>CPU_TOTAL_NR</small></td>
+<td colspan="8"><small>CPU_INST_NR</small></td>
+</tr>
+
+</tbody></table>
+
+<a name="2.2 CPU Control/Status Registers"></a>
+<div style="text-align: right;"><a href="#TOC">Top</a></div>
+<h2>2.2 CPU Control/Status Registers</h2>
+
+<a name="2.2.1 CPU_ID"></a>
+<h3>2.2.1 CPU_ID</h3>
+This 32 bit read-only register holds the program and data memory size information of the implemented openMSP430.
+<br><br>
+<table border="1">
+<tbody><tr align="center">
+<td rowspan="2"><b><small>Register Name</small></b></td>
+<td rowspan="2"><b><small>Address</small></b></td>
+<td colspan="16"><b><small>Bit Field</small></b></td>
+</tr>
+<tr align="center">
+<td><small>15</small></td><td><small>14</small></td>
+<td><small>13</small></td><td><small>12</small></td>
+<td><small>11</small></td><td><small>10</small></td>
+<td><small> 9</small></td><td><small> 8</small></td>
+<td><small> 7</small></td><td><small> 6</small></td>
+<td><small> 5</small></td><td><small> 4</small></td>
+<td><small> 3</small></td><td><small> 2</small></td>
+<td><small> 1</small></td><td><small> 0</small></td>
+</tr>
+<tr align="center">
+<td><small>CPU_ID_LO</small></td>
+<td><small>0x00</small></td>
+<td colspan="7"><font size="-5">PER_SPACE</font></td>
+<td colspan="5"><font size="-5">USER_VERSION</font></td>
+<td colspan="1"><font size="-5">ASIC</font></td>
+<td colspan="3"><font size="-5">CPU_VERSION</font></td>
+</tr>
+<tr align="center">
+<td><small>CPU_ID_HI</small></td>
+<td><small>0x01</small></td>
+<td colspan="6"><font size="-5">PMEM_SIZE</font></td>
+<td colspan="9"><font size="-5">DMEM_SIZE</font></td>
+<td colspan="1"><font size="-5">MPY</font></td>
+</tr>
+</tbody></table>
+<br>
+<table border="0">
+<tbody><tr>
+   <td>&nbsp;</td><td valign="top"><li><b>CPU_VERSION</b></li></td>
+   <td>: Current CPU version<br>
+</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>ASIC</b></li></td>
+   <td>: Defines if the ASIC specific features are enabled in the current openMSP430 implementation.</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>USER_VERSION</b></li></td>
+   <td>: Reflects the value defined in the <b>openMSP430_defines.v</b> file.</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>PER_SPACE</b></li></td>
+   <td>: Peripheral address space for the current implementation (byte size = PER_SPACE*512)</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>MPY</b></li></td>
+   <td>: This bit is set if the hardware multiplier is included in the current implementation</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>DMEM_SIZE</b></li></td>
+   <td>: Data memory size for the current implementation (byte size = DMEM_SIZE*128)</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>PMEM_SIZE</b></li></td>
+   <td>: Progam memory size for the current implementation (byte size = PMEM_SIZE*1024)</td>
+</tr>
+</tbody></table>
+
+<a name="2.2.2 CPU_CTL"></a>
+<h3>2.2.2 CPU_CTL</h3> This 8 bit read-write register is used to
+control the CPU and to configure some basic debug features. After a
+POR, this register is set to 0x10 or 0x30 (depending on the <span style="font-weight: bold;">DBG_RST_BRK_EN</span> configuration option).
+<br><br>
+<table border="1">
+<tbody><tr align="center">
+<td rowspan="2"><b><small>Register Name</small></b></td>
+<td rowspan="2"><b><small>Address</small></b></td>
+<td colspan="16"><b><small>Bit Field</small></b></td>
+</tr>
+<tr align="center">
+<td><small> 7</small></td><td><small> 6</small></td>
+<td><small> 5</small></td><td><small> 4</small></td>
+<td><small> 3</small></td><td><small> 2</small></td>
+<td><small> 1</small></td><td><small> 0</small></td>
+</tr>
+<tr align="center">
+<td><small>CPU_CTL</small></td>
+<td><small>0x02</small></td>
+<td><font size="-5">Res.</font></td>
+<td><font size="-5">CPU_RST</font></td>
+<td><font size="-5">RST_BRK_EN</font></td>
+<td><font size="-5">FRZ_BRK_EN</font></td>
+<td><font size="-5">SW_BRK_EN</font></td>
+<td><font size="-5">ISTEP</font></td>
+<td><font size="-5">RUN</font></td>
+<td><font size="-5">HALT</font></td>
+</tr>
+</tbody></table>
+<br>
+<table border="0">
+<tbody><tr>
+   <td>&nbsp;</td><td valign="top"><li><b>CPU_RST</b></li></td>
+   <td>: Setting this bit to 1 will activate the PUC reset. Setting it back to 0 will release it.</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>RST_BRK_EN</b></li></td>
+   <td>: If set to 1, the CPU will automatically break after a PUC occurrence.</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>FRZ_BRK_EN</b></li></td>
+   <td>: If set to 1, the timers and watchdog are frozen when the CPU is halted.</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>SW_BRK_EN</b></li></td>
+   <td>: Enables the software breakpoint detection.</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>ISTEP</b><sup>1</sup></li></td>
+   <td>: Writing 1 to this bit will perform a single instruction step if the CPU is halted.</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>RUN</b><sup>1</sup></li></td>
+   <td>: Writing 1 to this bit will get the CPU out of halt state.</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>HALT</b><sup>1</sup></li></td>
+   <td>: Writing 1 to this bit will put the CPU in halt state.</td>
+</tr>
+</tbody></table>
+<br><sup>1</sup>:this field is write-only and always reads back 0.
+<br>
+<a name="2.2.3 CPU_STAT"></a>
+<h3>2.2.3 CPU_STAT</h3>
+
+This 8 bit read-write register gives the global status of the debug interface. After a POR, this register is set to 0x00.
+<br><br>
+<table border="1">
+<tbody><tr align="center">
+<td rowspan="2"><b><small>Register Name</small></b></td>
+<td rowspan="2"><b><small>Address</small></b></td>
+<td colspan="16"><b><small>Bit Field</small></b></td>
+</tr>
+<tr align="center">
+<td><small> 7</small></td><td><small> 6</small></td>
+<td><small> 5</small></td><td><small> 4</small></td>
+<td><small> 3</small></td><td><small> 2</small></td>
+<td><small> 1</small></td><td><small> 0</small></td>
+</tr>
+<tr align="center">
+<td><small>CPU_STAT</small></td>
+<td><small>0x03</small></td>
+<td><font size="-5">HWBRK3_PND</font></td>
+<td><font size="-5">HWBRK2_PND</font></td>
+<td><font size="-5">HWBRK1_PND</font></td>
+<td><font size="-5">HWBRK0_PND</font></td>
+<td><font size="-5">SWBRK_PND</font></td>
+<td><font size="-5">PUC_PND</font></td>
+<td><font size="-5">Res.</font></td>
+<td><font size="-5">HALT_RUN</font></td>
+</tr>
+</tbody></table>
+<br>
+<table border="0">
+<tbody><tr>
+   <td>&nbsp;</td><td valign="top"><li><b>HWBRK3_PND</b></li></td>
+   <td>: This bit reflects if one of the Hardware Breakpoint Unit 3 status bit is set (i.e. BRK3_STAT≠0).</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>HWBRK2_PND</b></li></td>
+   <td>: This bit reflects if one of the Hardware Breakpoint Unit 2 status bit is set (i.e. BRK2_STAT≠0).</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>HWBRK1_PND</b></li></td>
+   <td>: This bit reflects if one of the Hardware Breakpoint Unit 1 status bit is set (i.e. BRK1_STAT≠0).</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>HWBRK0_PND</b></li></td>
+   <td>: This bit reflects if one of the Hardware Breakpoint Unit 0 status bit is set (i.e. BRK0_STAT≠0).</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>SWBRK_PND</b></li></td>
+   <td>: This bit is set to 1 when a software breakpoint occurred. It can be cleared by writing 1 to it.</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>PUC_PND</b></li></td>
+   <td>: This bit is set to 1 when a PUC reset occured. It can be cleared by writing 1 to it.</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>HALT_RUN</b></li></td>
+   <td>: This read-only bit gives the current status of the CPU:
+   </td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td>&nbsp;</td>
+   <td>&nbsp;&nbsp;&nbsp;0 - CPU is running.
+   	 <br>&nbsp;&nbsp;&nbsp;1 - CPU is stopped.
+   </td>
+</tr>
+</tbody></table>
+<a name="2.2.4 CPU_NR"></a>
+<h3>2.2.4 CPU_NR</h3>
+
+This 16 bit read only register gives useful information for multi-core systems.
+<br>
+<br>
+
+<table border="1">
+
+<tbody><tr align="center">
+<td rowspan="2"><b><small>Register Name</small></b></td>
+<td rowspan="2"><b><small>Address</small></b></td>
+<td colspan="16"><b><small>Bit Field</small></b></td>
+</tr>
+<tr align="center">
+<td><small>15</small></td><td><small>14</small></td>
+<td><small>13</small></td><td><small>12</small></td>
+<td><small>11</small></td><td><small>10</small></td>
+<td><small> 9</small></td><td><small> 8</small></td>
+<td><small> 7</small></td><td><small> 6</small></td>
+<td><small> 5</small></td><td><small> 4</small></td>
+<td><small> 3</small></td><td><small> 2</small></td>
+<td><small> 1</small></td><td><small> 0</small></td>
+</tr>
+    <tr>
+      <td style="vertical-align: top; text-align: center;"><small>CPU_NR</small></td>
+      <td style="vertical-align: top; text-align: center;"><small>0x18</small></td>
+      <td colspan="8" rowspan="1" style="vertical-align: top; text-align: center;"><font size="-5">CPU_TOTAL_NR</font></td>
+      <td colspan="8" rowspan="1" style="vertical-align: top; text-align: center;"><font size="-5">CPU_INST_NR</font></td>
+    </tr>
+
+
+</tbody>
+</table>
+
+<br>
+
+<table border="0">
+
+<tbody><tr>
+   <td>&nbsp;</td><td valign="top"><li><b>CPU_TOTAL_NR</b></li></td>
+   <td>: <span style="color: rgb(0, 0, 0); font-family: 'Times New Roman'; font-style: normal; font-variant: normal; font-weight: normal; letter-spacing: normal; line-height: normal; orphans: 2; text-indent: 0px; text-transform: none; white-space: normal; widows: 2; word-spacing: 0px; font-size: medium; display: inline ! important; float: none;">Total number of oMSP instances -1 (for multicore systems)</span>.</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>CPU_INST_NR</b></li></td>
+   <td>: <span style="color: rgb(0, 0, 0); font-family: 'Times New Roman'; font-style: normal; font-variant: normal; font-weight: normal; letter-spacing: normal; line-height: normal; orphans: 2; text-indent: 0px; text-transform: none; white-space: normal; widows: 2; word-spacing: 0px; font-size: medium; display: inline ! important; float: none;">Current oMSP instance number (for multicore systems)</span>.</td>
+</tr>
+
+
+
+
+
+
+</tbody>
+</table>
+<a name="2.3 Memory Access Registers"></a>
+<div style="text-align: right;"><a href="#TOC">Top</a></div>
+<h2>2.3 Memory Access Registers</h2>
+
+The following four registers enable single and burst read/write access to both CPU-Registers and full memory address range.
+<br>In order to perform an access, the following sequences are typically done:
+<ul>
+   <li>single read access (MEM_CNT=0):</li>
+	<ol>
+   	<li>set MEM_ADDR with the memory address (or register number) to be read</li>
+  		<li>set MEM_CTL (in particular RD/WR=0 and START=1)</li>
+  		<li>read MEM_DATA</li>
+	</ol>
+  	<li>single write access (MEM_CNT=0):</li>
+	<ol>
+   	<li>set MEM_ADDR with the memory address (or register number) to be written</li>
+  		<li>set MEM_DATA with the data to be written</li>
+		<li>set MEM_CTL (in particular RD/WR=1 and START=1)</li>
+  	</ol>
+   <li>burst read/write access (MEM_CNT≠0):</li>
+	<ul>
+   	<li>burst access are optimized for the communication interface used (i.e. for the UART).
+   	The burst sequence are therefore described in the corresponding section (<a href="#3.4%20Read/Write%20burst%20implementation%20for%20the%20CPU%20Memory%20access">3.4 Read/Write burst implementation for the CPU Memory access</a>)</li>
+	</ul>
+</ul>
+<a name="2.3.1 MEM_CTL"></a>
+<h3>2.3.1 MEM_CTL</h3>This 8 bit read-write register is used to control
+the Memory and CPU-Register read/write access. After a POR, this
+register is set to 0x00.
+<br><br>
+<table border="1">
+<tbody><tr align="center">
+<td rowspan="2"><b><small>Register Name</small></b></td>
+<td rowspan="2"><b><small>Address</small></b></td>
+<td colspan="16"><b><small>Bit Field</small></b></td>
+</tr>
+<tr align="center">
+<td><small> 7</small></td><td><small> 6</small></td>
+<td><small> 5</small></td><td><small> 4</small></td>
+<td><small> 3</small></td><td><small> 2</small></td>
+<td><small> 1</small></td><td><small> 0</small></td>
+</tr>
+<tr align="center">
+<td><small>MEM_CTL</small></td>
+<td><small>0x04</small></td>
+<td colspan="4"><font size="-5">Reserved</font></td>
+<td><font size="-5">B/W</font></td>
+<td><font size="-5">MEM/REG</font></td>
+<td><font size="-5">RD/WR</font></td>
+<td><font size="-5">START</font></td>
+</tr>
+</tbody></table>
+<br>
+<table border="0">
+<tbody><tr>
+   <td>&nbsp;</td><td valign="top"><li><b>B/W</b></li></td>
+   <td>: 0 - 16 bit access.</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td>&nbsp;</td>
+   <td>&nbsp;&nbsp;1 - &nbsp;&nbsp;8 bit access (not valid for CPU-Registers).</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>MEM/REG</b></li></td>
+   <td>: 0 - Memory access.</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td>&nbsp;</td>
+   <td>&nbsp;&nbsp;1 - CPU-Register access.</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>RD/WR</b></li></td>
+   <td>: 0 - Read access.</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td>&nbsp;</td>
+   <td>&nbsp;&nbsp;1 - Write access.</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>START</b></li></td>
+   <td>: 0- Do nothing</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td>&nbsp;</td>
+   <td>&nbsp;&nbsp;1 - Initiate memory transfer.</td>
+</tr>
+</tbody></table>
+
+<a name="2.3.2 MEM_ADDR"></a>
+<h3>2.3.2 MEM_ADDR</h3>This 16 bit read-write register specifies the
+Memory or CPU-Register address to be used for the next read/write
+transfer. After a POR, this register is set to 0x0000.
+<br>
+<strong>Note:</strong> in case of burst (i.e. MEM_CNT≠0), this register
+specifies the first address of the burst transfer and will be
+incremented automatically as the burst goes (by 1 for 8-bit access and
+by 2 for 16-bit access).
+<br><br>
+<table border="1">
+<tbody><tr align="center">
+<td rowspan="2"><b><small>Register Name</small></b></td>
+<td rowspan="2"><b><small>Address</small></b></td>
+<td colspan="16"><b><small>Bit Field</small></b></td>
+</tr>
+<tr align="center">
+<td><small>15</small></td><td><small>14</small></td>
+<td><small>13</small></td><td><small>12</small></td>
+<td><small>11</small></td><td><small>10</small></td>
+<td><small> 9</small></td><td><small> 8</small></td>
+<td><small> 7</small></td><td><small> 6</small></td>
+<td><small> 5</small></td><td><small> 4</small></td>
+<td><small> 3</small></td><td><small> 2</small></td>
+<td><small> 1</small></td><td><small> 0</small></td>
+</tr>
+<tr align="center">
+<td><small>MEM_ADDR</small></td>
+<td><small>0x05</small></td>
+<td colspan="16"><font size="-5">MEM_ADDR[15:0]</font></td>
+</tr>
+</tbody></table>
+<br>
+<table border="0">
+<tbody><tr>
+   <td>&nbsp;</td><td valign="top"><li><b>MEM_ADDR</b></li></td>
+   <td>: Memory or CPU-Register address to be used for the next read/write transfer.</td>
+</tr>
+</tbody></table>
+
+<a name="2.3.3 MEM_DATA"></a>
+<h3>2.3.3 MEM_DATA</h3>This 16 bit read-write register gives (wr)
+or receive (rd) the Memory or CPU-Register data for the next
+transfer. After a POR, this register is set to 0x0000.
+<br><br>
+<table border="1">
+<tbody><tr align="center">
+<td rowspan="2"><b><small>Register Name</small></b></td>
+<td rowspan="2"><b><small>Address</small></b></td>
+<td colspan="16"><b><small>Bit Field</small></b></td>
+</tr>
+<tr align="center">
+<td><small>15</small></td><td><small>14</small></td>
+<td><small>13</small></td><td><small>12</small></td>
+<td><small>11</small></td><td><small>10</small></td>
+<td><small> 9</small></td><td><small> 8</small></td>
+<td><small> 7</small></td><td><small> 6</small></td>
+<td><small> 5</small></td><td><small> 4</small></td>
+<td><small> 3</small></td><td><small> 2</small></td>
+<td><small> 1</small></td><td><small> 0</small></td>
+</tr>
+<tr align="center">
+<td><small>MEM_DATA</small></td>
+<td><small>0x06</small></td>
+<td colspan="16"><font size="-5">MEM_DATA[15:0]</font></td>
+</tr>
+</tbody></table>
+<br>
+<table border="0">
+<tbody><tr>
+   <td>&nbsp;</td><td valign="top"><li><b>MEM_DATA</b></li></td>
+   <td>: if MEM_CTL.WR - data to be written during the next write transfer.</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td>&nbsp;</td>
+   <td>&nbsp;&nbsp;if MEM_CTL.RD - updated with the data from the read transfer</td>
+</tr>
+</tbody></table>
+
+<a name="2.3.4 MEM_CNT"></a>
+<h3>2.3.4 MEM_CNT</h3>This 16 bit read-write register controls the
+burst access to the Memory or CPU-Registers. If set to 0, a single
+access will occur, otherwise, a burst will be performed. The burst
+being optimized for the communication interface, more details are given
+<a href="#3.4%20Read/Write%20burst%20implementation%20for%20the%20CPU%20Memory%20access">there</a>. After a POR, this register is set to 0x0000.
+<br><br>
+<table border="1">
+<tbody><tr align="center">
+<td rowspan="2"><b><small>Register Name</small></b></td>
+<td rowspan="2"><b><small>Address</small></b></td>
+<td colspan="16"><b><small>Bit Field</small></b></td>
+</tr>
+<tr align="center">
+<td><small>15</small></td><td><small>14</small></td>
+<td><small>13</small></td><td><small>12</small></td>
+<td><small>11</small></td><td><small>10</small></td>
+<td><small> 9</small></td><td><small> 8</small></td>
+<td><small> 7</small></td><td><small> 6</small></td>
+<td><small> 5</small></td><td><small> 4</small></td>
+<td><small> 3</small></td><td><small> 2</small></td>
+<td><small> 1</small></td><td><small> 0</small></td>
+</tr>
+<tr align="center">
+<td><small>MEM_CNT</small></td>
+<td><small>0x07</small></td>
+<td colspan="16"><font size="-5">MEM_CNT[15:0]</font></td>
+</tr>
+</tbody></table>
+<br>
+<table border="0">
+<tbody><tr>
+   <td>&nbsp;</td><td valign="top"><li><b>MEM_CNT</b></li></td>
+   <td>: =0 - a single access will be performed with the next transfer.</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td>&nbsp;</td>
+   <td>&nbsp;&nbsp;≠0 -
+specifies the burst size for the next transfer (i.e number of data
+access). This field will be automatically decremented as the burst goes.</td>
+</tr>
+</tbody></table>
+
+<a name="2.4 Hardware Breakpoint Unit Registers"></a>
+<div style="text-align: right;"><a href="#TOC">Top</a></div>
+<h2>2.4 Hardware Breakpoint Unit Registers</h2>
+Depending on the <a href="http://opencores.org/project,openmsp430,core#2.1.3%20Configuration">defines</a>
+located in the "openmsp430_defines.v" file, up to four hardware
+breakpoint units can be included in the design. These units can be
+individually controlled with the following registers.
+<a name="2.4.1 BRKx_CTL"></a>
+<h3>2.4.1 BRKx_CTL</h3>
+
+This 8 bit read-write register controls the hardware breakpoint unit x. After a POR, this register is set to 0x00.
+<br><br>
+<table border="1">
+<tbody><tr align="center">
+<td rowspan="2"><b><small>Register Name</small></b></td>
+<td rowspan="2"><b><small>Address</small></b></td>
+<td colspan="16"><b><small>Bit Field</small></b></td>
+</tr>
+<tr align="center">
+<td><small> 7</small></td><td><small> 6</small></td>
+<td><small> 5</small></td><td><small> 4</small></td>
+<td><small> 3</small></td><td><small> 2</small></td>
+<td><small> 1</small></td><td><small> 0</small></td>
+</tr>
+<tr align="center">
+<td><small>BRKx_CTL</small></td>
+<td><small>0x08, 0x0C, 0x10, 0x14</small></td>
+<td colspan="3"><font size="-5">Reserved</font></td>
+<td><font size="-5">RANGE_MODE</font></td>
+<td><font size="-5">INST_EN</font></td>
+<td><font size="-5">BREAK_EN</font></td>
+<td colspan="2"><font size="-5">ACCESS_MODE</font></td>
+</tr>
+</tbody></table>
+<br>
+<table border="0">
+<tbody><tr>
+   <td>&nbsp;</td><td valign="top"><li><b>RANGE_MODE</b></li></td>
+   <td>:  0 - Address match on BRK_ADDR0 or BRK_ADDR1 (normal mode)</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td>&nbsp;</td>
+   <td>&nbsp;&nbsp;1 - Address match on BRK_ADDR0→BRK_ADDR1 range (range mode)
+   <br><font color="red"><b>Note</b>: range mode is not supported by the core unless the `DBG_HWBRK_RANGE define is set to 1'b1 in the <i>openMSP430_define.v</i> file.</font></td>
+
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>INST_EN</b></li></td>
+   <td>: 0 - Checks are done on the execution unit (data flow).</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td>&nbsp;</td>
+   <td>&nbsp;&nbsp;1 - Checks are done on the frontend (instruction flow).</td>
+</tr>
+
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>BREAK_EN</b></li></td>
+   <td>: 0 - Watchpoint mode enable (don't stop on address match).</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td>&nbsp;</td>
+   <td>&nbsp;&nbsp;1 - Breakpoint mode enable (stop on address match).</td>
+</tr>
+
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>ACCESS_MODE</b></li></td>
+   <td>: 00 - Disabled</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td>&nbsp;</td>
+   <td>  &nbsp;&nbsp;01 - Detect read access.
+   <br>&nbsp;&nbsp;10 - Detect write access.
+   <br>&nbsp;&nbsp;11 - Detect read/write access
+   <br><b>Note</b>: '10' &amp; '11' modes are not supported on the instruction flow</td>
+</tr>
+</tbody></table>
+
+<a name="2.4.2 BRKx_STAT"></a>
+<h3>2.4.2 BRKx_STAT</h3>This 8 bit read-write register gives the status
+of the hardware breakpoint unit x. Each status bit can be cleared by
+writing 1 to it. After a POR, this register is set to 0x00.
+<br><br>
+<table border="1">
+<tbody><tr align="center">
+<td rowspan="2"><b><small>Register Name</small></b></td>
+<td rowspan="2"><b><small>Address</small></b></td>
+<td colspan="16"><b><small>Bit Field</small></b></td>
+</tr>
+<tr align="center">
+<td><small> 7</small></td><td><small> 6</small></td>
+<td><small> 5</small></td><td><small> 4</small></td>
+<td><small> 3</small></td><td><small> 2</small></td>
+<td><small> 1</small></td><td><small> 0</small></td>
+</tr>
+<tr align="center">
+<td><small>BRKx_STAT</small></td>
+<td><small>0x09, 0x0D, 0x11, 0x15</small></td>
+<td colspan="2"><font size="-5">Reserved</font></td>
+<td><font size="-5">RANGE_WR</font></td>
+<td><font size="-5">RANGE_RD</font></td>
+<td><font size="-5">ADDR1_WR</font></td>
+<td><font size="-5">ADDR1_RD</font></td>
+<td><font size="-5">ADDR0_WR</font></td>
+<td><font size="-5">ADDR0_RD</font></td>
+</tr>
+</tbody></table>
+<br>
+<table border="0">
+<tbody><tr>
+   <td>&nbsp;</td><td valign="top"><li><b>RANGE_WR</b></li></td>
+   <td>:
+This bit is set whenever the CPU performs a write access within the
+BRKx_ADDR0→BRKx_ADDR1 range (valid if RANGE_MODE=1 and
+ACCESS_MODE[1]=1).</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>RANGE_RD</b></li></td>
+   <td>:
+This bit is set whenever the CPU performs a read access within the
+BRKx_ADDR0→BRKx_ADDR1 range (valid if RANGE_MODE=1 and
+ACCESS_MODE[0]=1). <br><font color="red"><b>Note</b>: range mode is not supported by the core unless the `DBG_HWBRK_RANGE define is set to 1'b1 in the <i>openMSP430_define.v</i> file.</font></td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>ADDR1_WR</b></li></td>
+   <td>:
+This bit is set whenever the CPU performs a write access at the
+BRKx_ADDR1 address (valid if RANGE_MODE=0 and ACCESS_MODE[1]=1).</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>ADDR1_RD</b></li></td>
+   <td>:
+This bit is set whenever the CPU performs a read access at the
+BRKx_ADDR1 address (valid if RANGE_MODE=0 and ACCESS_MODE[0]=1).</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>ADDR0_WR</b></li></td>
+   <td>:
+This bit is set whenever the CPU performs a write access at the
+BRKx_ADDR0 address (valid if RANGE_MODE=0 and ACCESS_MODE[1]=1).</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>ADDR0_RD</b></li></td>
+   <td>:
+This bit is set whenever the CPU performs a read access at the
+BRKx_ADDR0 address (valid if RANGE_MODE=0 and ACCESS_MODE[0]=1).</td>
+</tr>
+</tbody></table>
+
+<a name="2.4.3 BRKx_ADDR0"></a>
+<h3>2.4.3 BRKx_ADDR0</h3>
+This 16 bit read-write register holds the value which is compared
+against the address value currently present on the program or data
+address bus. After a POR, this register is set to 0x0000.
+<br><br>
+<table border="1">
+<tbody><tr align="center">
+<td rowspan="2"><b><small>Register Name</small></b></td>
+<td rowspan="2"><b><small>Address</small></b></td>
+<td colspan="16"><b><small>Bit Field</small></b></td>
+</tr>
+<tr align="center">
+<td><small>15</small></td><td><small>14</small></td>
+<td><small>13</small></td><td><small>12</small></td>
+<td><small>11</small></td><td><small>10</small></td>
+<td><small> 9</small></td><td><small> 8</small></td>
+<td><small> 7</small></td><td><small> 6</small></td>
+<td><small> 5</small></td><td><small> 4</small></td>
+<td><small> 3</small></td><td><small> 2</small></td>
+<td><small> 1</small></td><td><small> 0</small></td>
+</tr>
+<tr align="center">
+<td><small>BRKx_ADDR0</small></td>
+<td><small>0x0A, 0x0E, 0x12, 0x16</small></td>
+<td colspan="16"><font size="-5">BRK_ADDR0[15:0]</font></td>
+</tr>
+</tbody></table>
+<br>
+<table border="0">
+<tbody><tr>
+   <td>&nbsp;</td><td valign="top"><li><b>BRK_ADDR0</b></li></td>
+   <td>: Value compared against the address value currently present on the program or data address bus.</td>
+</tr>
+</tbody></table>
+
+<a name="2.4.4 BRKx_ADDR1"></a>
+<h3>2.4.4 BRKx_ADDR1</h3>This 16 bit read-write register holds the
+value which is compared against the address value currently present on
+the program or data address bus. After a POR, this register is set to
+0x0000.
+<br><br>
+<table border="1">
+<tbody><tr align="center">
+<td rowspan="2"><b><small>Register Name</small></b></td>
+<td rowspan="2"><b><small>Addresses</small></b></td>
+<td colspan="16"><b><small>Bit Field</small></b></td>
+</tr>
+<tr align="center">
+<td><small>15</small></td><td><small>14</small></td>
+<td><small>13</small></td><td><small>12</small></td>
+<td><small>11</small></td><td><small>10</small></td>
+<td><small> 9</small></td><td><small> 8</small></td>
+<td><small> 7</small></td><td><small> 6</small></td>
+<td><small> 5</small></td><td><small> 4</small></td>
+<td><small> 3</small></td><td><small> 2</small></td>
+<td><small> 1</small></td><td><small> 0</small></td>
+</tr>
+<tr align="center">
+<td><small>BRKx_ADDR1</small></td>
+<td><small>0x0B, 0x0F, 0x13, 0x17</small></td>
+<td colspan="16"><font size="-5">BRK_ADDR1[15:0]</font></td>
+</tr>
+</tbody></table>
+<br>
+<table border="0">
+<tbody><tr>
+   <td>&nbsp;</td><td valign="top"><li><b>BRK_ADDR1</b></li></td>
+   <td>: Value compared against the address value currently present on the program or data address bus.</td>
+</tr>
+</tbody></table>
+
+<a name="3. Debug Communication Interface: UART"></a>
+<div style="text-align: right;"><a href="#TOC">Top</a></div>
+<h1>3. Debug Communication Interface: UART</h1>With its UART interface,
+the openMSP430 debug unit can communicate with the host computer using
+a simple RS232 cable (connected to the <a href="http://opencores.org/project,openmsp430,core#2.1.5%20Pinout">dbg_uart_txd</a> and <a href="http://opencores.org/project,openmsp430,core#2.1.5%20Pinout">dbg_uart_rxd</a> ports of the IP).<br>Typically, a <a href="http://www.google.com/search?q=usb+to+rs232+converter">USB to RS232</a> or <a href="http://www.ftdichip.com/Products/Cables/USBTTLSerial.htm">USB to serial TTL</a>
+cable will provides a reliable communication link between your host PC
+and the openMSP430 (speed being typically limited by the cable length).
+<a name="3.1 Serial communication protocol: 8N1"></a>
+<h2>3.1 Serial communication protocol: 8N1</h2>
+There are plenty tutorials on Internet regarding RS232 based protocols.
+However, here is quick recap about 8N1 (1 Start bit, 8 Data bits, No
+Parity, 1 Stop bit):<br>
+<br>
+<img src="usercontent,img,1247419201" alt="8N1 Serial Protocol" title="8N1 Serial Protocol">
+<br>
+As you can see in the above diagram, data transmission starts with a
+Start bit, followed by the data bits (LSB sent first and MSB sent
+last), and ends with a "Stop" bit.
+<a name="3.2 Synchronization frame"></a>
+<h2>3.2 Synchronization frame</h2>After a POR, the Serial Debug
+Interface expects a synchronization frame from the host computer in
+order to determine the communication speed (i.e. the baud rate).<br>
+The synchronization frame looks as following: 
+<br>
+<img src="usercontent,img,1247420610" alt="Debug Synchronization Frame" title="Debug Synchronization Frame">
+<br>
+As you can see, the host simply sends the 0x80 value. The openMSP430
+will then measure the time between the falling and rising edge, divide
+it by 8 and automatically deduce the baud rate it should use to
+properly communicate with the host.
+<br><br>
+<b>Important note</b>: if you want to change the communication speed
+between two debugging sessions, the Serial Debug Interface needs to go through a reset cycle (i.e. through the <span style="font-style: italic;">reset_n</span> or <span style="font-style: italic;">dbg_en</span> pins) and a new synchronization frame needs to be send.
+<br>
+<a name="3.3 Read/Write access to the debug registers"></a>
+<h2>3.3 Read/Write access to the debug registers</h2>
+In order to perform a read / write access to a debug register, the host needs to send a command frame to the openMSP430.<br>In
+case of write access, this command frame will be followed by 1 or 2
+data frames and in case of read access, the openMSP430 will send 1 or 2
+data frames after receiving the command.
+<a name="3.3.1 Command Frame"></a>
+<h3>3.3.1 Command Frame</h3>
+The command frame looks as following:
+<br>
+<img src="usercontent,img,1247427400" alt="Debug Command Frame" title="Debug Command Frame">
+<br>
+<table border="0">
+<tbody><tr>
+   <td>&nbsp;</td><td valign="top"><li><b>WR</b></li></td>
+   <td>: Perform a Write access when set. Read otherwise.</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>B/W</b></li></td>
+   <td>: Perform a 8-bit data access when set (one data frame). 16-bit otherwise (two data frame).</td></tr><tr>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>Address</b></li></td>
+   <td>: Debug register address.</td></tr><tr>
+</tr>
+</tbody></table>
+
+<a name="3.3.2 Write access"></a>
+<h3>3.3.2 Write access</h3>
+A write access transaction looks like this:
+<br>
+<img src="usercontent,img,1247428987" alt="Debug Write Transaction" title="Debug Write Transaction">
+
+<a name="3.3.3 Read access"></a>
+<h3>3.3.3 Read access</h3>
+A read access transaction looks like this:
+<br>
+<img src="usercontent,img,1247429086" alt="Debug Read Transaction" title="Debug Read Transaction">
+
+<a name="3.4 Read/Write burst implementation for the CPU Memory access"></a>
+<h2>3.4 Read/Write burst implementation for the CPU Memory access</h2>In
+order to optimize the data burst transactions for the UART, read/write
+access are not done by reading or writing the MEM_DATA register.<br>
+Instead, the data transfer starts immediately after the MEM_CTL.START bit has been set. 
+
+<a name="3.4.1 Write Burst access"></a>
+<h3>3.4.1 Write Burst access</h3>
+A write burst transaction looks like this:
+<br>
+<img src="usercontent,img,1247430408" alt="Debug Write Burst Transaction" title="Debug Write Burst Transaction">
+
+<a name="3.4.2 Read Burst access"></a>
+<h3>3.4.2 Read Burst access</h3>
+A read burst transaction looks like this:
+<br>
+<img src="usercontent,img,1247430449" alt="Debug Read Burst Transaction" title="Debug Read Burst Transaction">
+
+<a name="4. Debug Communication Interface: I2C"></a>
+<div style="text-align: right;"><a href="#TOC">Top</a></div>
+<h1>4. Debug Communication Interface: I2C</h1>
+With its I2C interface, the openMSP430 debug unit can communicate with the host computer using
+an I2C adapter (connected to the <a href="http://opencores.org/project,openmsp430,core#2.1.5%20Pinout">dbg_i2c_scl</a> and <a href="http://opencores.org/project,openmsp430,core#2.1.5%20Pinout">dbg_i2c_sda_in / dbg_i2c_sda_out</a> ports of the IP).<br>Currently, the <a href="http://www.robot-electronics.co.uk/acatalog/USB_I2C.html">USB-ISS</a>
+adapter from Devantech (Robot Electronics) is supported by the software
+development tools and provides a reliable communication link between
+your host PC
+and the openMSP430.
+<a name="4.1 I2C communication protocol"></a>
+<h2>4.1 I2C communication protocol</h2>
+There are plenty tutorials on Internet regarding the I2C protocol (see the official <a href="http://www.nxp.com/documents/user_manual/UM10204.pdf">I2C specification</a> for more info).<br>
+A simple byte read or write frame looks as following:<br>
+<br>
+<img src="usercontent,img,1352582784" alt="I2C Protocol" title="I2C Protocol" width="80%">
+<br><a name="4.2 Synchronization frame"></a>
+<h2>4.2 Synchronization frame</h2>
+Unlike the UART interface, the I2C is a synchronous communication protocol.<br>
+A synchronization frame is therefore not required.<br><br>
+
+<a name="4.3 Read/Write access to the debug registers"></a>
+<h2>4.3 Read/Write access to the debug registers</h2>
+In order to perform a read / write access to a debug register, the host needs to send a command frame to the openMSP430.<br>In
+case of write access, this command frame will be followed by 1 or 2
+data frames and in case of read access, the openMSP430 will send 1 or 2
+data frames after receiving the command.
+<a name="4.3.1 Command Frame"></a>
+<h3>4.3.1 Command Frame</h3>
+The command frame looks as following:
+<br>
+<img src="usercontent,img,1352584261" alt="Debug command frame" title="Debug command frame" width="100%">
+<br>
+<table border="0">
+<tbody><tr>
+   <td>&nbsp;</td><td valign="top"><li><b>WR</b></li></td>
+   <td>: Perform a Write access when set. Read otherwise.</td>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>B/W</b></li></td>
+   <td>: Perform a 8-bit data access when set (one data frame). 16-bit otherwise (two data frame).</td></tr><tr>
+</tr>
+<tr>
+   <td>&nbsp;</td><td valign="top"><li><b>Address</b></li></td>
+   <td>: Debug register address.</td></tr><tr>
+</tr>
+</tbody></table>
+
+<a name="4.3.2 Write access"></a>
+<h3>4.3.2 Write access</h3>
+A write access transaction looks like this:
+<br>
+<img src="usercontent,img,1352586896" alt="I2C Debug Write Transaction" title="I2C Debug Write Transaction" width="100%">
+
+<a name="4.3.3 Read access"></a>
+<h3>4.3.3 Read access</h3>
+A read access transaction looks like this:
+<br>
+<img src="usercontent,img,1352586064" alt="I2C Debug Read Transaction" title="I2C Debug Read Transaction" width="100%">
+
+<a name="4.4 Read/Write burst implementation for the CPU Memory access"></a>
+<h2>4.4 Read/Write burst implementation for the CPU Memory access</h2>In
+order to optimize the data burst transactions for the I2C, read/write
+access are not done by reading or writing the MEM_DATA register.<br>
+Instead, the data transfer starts immediately after the MEM_CTL.START bit has been set. 
+
+<a name="4.4.1 Write Burst access"></a>
+<h3>4.4.1 Write Burst access</h3>
+A write burst transaction looks like this:
+<br>
+<img src="usercontent,img,1352673100" alt="I2C Debug Write Burst Transaction" title="I2C Debug Write Burst Transaction" width="100%">
+
+<a name="4.4.2 Read Burst access"></a>
+<h3>4.4.2 Read Burst access</h3>
+A read burst transaction looks like this:
+<br>
+<img src="usercontent,img,1352672466" alt="I2C Debug Read Burst Transaction" title="I2C Debug Read Burst Transaction" width="100%">
+
+<div style="text-align: right;"><a href="#TOC">Top</a></div>
+
+</body></html>

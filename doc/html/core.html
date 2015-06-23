@@ -1,0 +1,1168 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html><head><title>openMSP430 Core</title></head>
+<body>
+<h3>Table of content</h3>
+<ul>
+<li><a href="#1.%20Introduction">						1. Introduction</a></li>
+<li><a href="#2.%20Core">							2. Core</a>
+	<ul>
+	<li><a href="#2.1%20Design%20structure">				2.1 Design structure</a></li>
+	<li><a href="#2.2%20Limitations">					2.2 Limitations</a></li>
+	<li><a href="#2.3%20Configuration">					2.3 Configuration</a>
+		<ul>
+		<li><a href="#2.3.1%20Basic%20System%20Configuration">		2.3.1 Basic System Configuration</a></li>
+		<li><a href="#2.3.2%20Advanced%20System%20Configuration">	2.3.2 Advanced System Configuration</a></li>
+		<li><a href="#2.3.3%20Expert%20System%20Configuration">		2.3.3 Expert System Configuration</a></li>
+		<li><a href="#2.3.4%20Parameters%20For%20Multi-Core%20Systems">	2.3.4 Parameters For Multi-Core Systems</a></li>
+		</ul>
+	</li>
+	<li><a href="#2.4%20Memory%20mapping">					2.4 Memory mapping</a></li>
+	<li><a href="#2.5%20Interrupt%20mapping">				2.5 Interrupt mapping</a></li>
+	<li><a href="#2.6%20Pinout">						2.6 Pinout</a></li>
+	<li><a href="#2.7%20Instruction%20Cycles%20and%20Lengths">		2.7 Instruction Cycles and Lengths</a></li>
+	<li><a href="#2.8%20Serial%20Debug%20Interface">			2.8 Serial Debug Interface</a></li>
+	<li><a href="#2.9%20Benchmark%20results">				2.9 Benchmark results</a>
+		<ul>
+		<li><a href="#2.9.1%20Dhrystone">				2.9.1 Dhrystone</a></li>
+		<li><a href="#2.9.2%20CoreMark">				2.9.2 CoreMark</a></li>
+		</ul>
+	</li>
+	</ul>
+</li>	
+</ul>
+
+<a name="1. Introduction"></a>
+<h1>1. Introduction</h1>
+
+The openMSP430 is a 16-bit microcontroller core compatible with <b><a href="http://www.ti.com/litv/pdf/slau049f">TI's MSP430 family</a></b>
+(note that the extended version of the architecture, the MSP430X, isn't
+supported by this IP). It is based on a Von Neumann architecture, with
+a single address space for instructions and data.
+<br><br>Depending on the selected configuration, this design can either be:<br>
+<ul>
+  <ul>
+    <ul>
+      <li>&nbsp;<span style="font-weight: bold;">FPGA friendly</span>: the core doesn't contain any clock gate and has only a single clock
+domain. As a consequence, in this mode, the <span style="font-style: italic;">Basic Clock Module</span> peripheral has a few
+limitations.<br>
+        <br>
+      </li>
+      <li>&nbsp;<span style="font-weight: bold;">ASIC friendly</span>: the core contains up to all clock management
+options (clock muxes &amp; low-power modes, fine grained clock
+gating, ...) and is also ready for scan insertion. In this mode, the <span style="font-style: italic;">Basic Clock Module</span> offers all features listed in the official <a href="http://www.ti.com/litv/pdf/slau049f">documentation</a>.<br>
+
+      </li>
+    </ul>
+  </ul>
+</ul>
+<br>It is to be noted that this IP doesn't contain the instruction and
+data memory blocks internally (these are technology dependent hard
+macros which are connected to the IP during chip integration).
+However the core is fully configurable in regard to the supported RAM
+and/or ROM sizes.
+<br><br>
+
+<a name="2. Core"></a>
+<h1>2. Core</h1>
+
+<a name="2.1 Design structure"></a>
+<h2>2.1 Design structure</h2>
+
+The following diagram shows the openMSP430 design structure:
+<br><br>
+<img src="http://opencores.org/usercontent,img,1354053264" alt="CPU Structure" title="CPU Structure" width="80%">
+<br>
+<ul>
+	<li><b>Frontend</b>: This module performs the instruction Fetch and Decode tasks. It also contains the execution state machine.</li>
+	<li><b>Execution unit</b>:
+Containing the ALU and the register file, this module executes the
+current decoded instruction according to the execution state.</li>
+	<li><b>Serial Debug Interface</b>:
+Contains all the required logic for a Nexus class 3 debugging unit
+(without trace). Communication with the host is performed with a standard
+two-wire interface following either the UART 8N1 or I<sup>2</sup>C serial protocol.</li>
+   <li><b>Memory backbone</b>: This block
+performs a simple arbitration between the frontend and execution-unit
+for program, data and peripheral memory access.</li>
+   <li><b>Basic Clock Module</b>: Generates MCLK, ACLK, SMCLK and manage the low power modes.</li>
+   <li><b>SFRs</b>: The <b>S</b>pecial <b>F</b>unction <b>R</b>egister<b>s</b> block contain diverse configuration registers (NMI, Watchdog, ...).</li>
+   <li><b>Watchdog</b>:
+Although it is a peripheral, the watchdog is directly included in
+the core because of its tight links with the NMI interrupts and PUC
+reset generation.</li>
+   <li><b>16x16 Multiplier</b>: The hardware
+multiplier peripheral is transparently supported by the GCC compiler
+and is therefore located in the core. It can be included or excluded at will
+through a Verilog define.</li>
+</ul>
+
+<a name="2.2 Limitations"></a>
+<h2>2.2 Limitations</h2>
+
+The known core limitations are the following:
+<br>
+<ul>
+	<li>Instructions can't be executed from the data memory.</li>
+	</ul>
+
+<a name="2.3 Configuration"></a>
+<h2>2.3 Configuration</h2>
+
+It is possible to configure the openMSP430 core through the <b><i>openMSP430_defines.v</i></b> file located in the <b><i>rtl</i></b> directory (see <a href="http://www.opencores.org/project,openmsp430,file%20and%20directory%20description">file and directory description</a>).<br>In
+this section, three sets of adjustabe user parameters are discussed in
+order to customize the core. A fourth set is available for ASIC
+specific options and will be discussed in the <a href="http://opencores.org/project,openmsp430,asic%20implementation">ASIC implementation</a>
+section.
+
+<a name="2.3.1 Basic System Configuration"></a>
+<h3>2.3.1 Basic System Configuration</h3>
+
+The basic system can be adjusted with the following set of defines in order to match the target system requirements.
+<br><br>
+<table border="0" cellpadding="0" cellspacing="4">
+<tbody><tr>
+<td width="35"><br>
+</td>
+<td bgcolor="#d0d0d0" width="3"><br>
+</td>
+<td width="15"><br>
+</td>
+<td>
+	<code>
+             //============================================================================<br>
+//============================================================================<br>
+// BASIC SYSTEM CONFIGURATION<br>
+//============================================================================<br>
+//============================================================================<br>
+//<br>
+// Note: the sum of program, data and peripheral memory spaces must not<br>
+//&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; exceed 64 kB<br>
+//<br>
+      <br>
+// Program Memory Size:<br>
+//&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Uncomment the required memory size<br>
+//-------------------------------------------------------<br>
+//`define PMEM_SIZE_CUSTOM<br>
+//`define PMEM_SIZE_59_KB<br>
+//`define PMEM_SIZE_55_KB<br>
+//`define PMEM_SIZE_54_KB<br>
+//`define PMEM_SIZE_51_KB<br>
+//`define PMEM_SIZE_48_KB<br>
+//`define PMEM_SIZE_41_KB<br>
+//`define PMEM_SIZE_32_KB<br>
+//`define PMEM_SIZE_24_KB<br>
+//`define PMEM_SIZE_16_KB<br>
+//`define PMEM_SIZE_12_KB<br>
+//`define PMEM_SIZE_8_KB<br>
+//`define PMEM_SIZE_4_KB<br>
+`define PMEM_SIZE_2_KB<br>
+//`define PMEM_SIZE_1_KB<br>
+      <br>
+      <br>
+// Data Memory Size:<br>
+//&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+Uncomment the required memory size<br>
+//-------------------------------------------------------<br>
+//`define DMEM_SIZE_CUSTOM<br>
+//`define DMEM_SIZE_32_KB<br>
+//`define DMEM_SIZE_24_KB<br>
+//`define DMEM_SIZE_16_KB<br>
+//`define DMEM_SIZE_10_KB<br>
+//`define DMEM_SIZE_8_KB<br>
+//`define DMEM_SIZE_5_KB<br>
+//`define DMEM_SIZE_4_KB<br>
+//`define DMEM_SIZE_2p5_KB<br>
+//`define DMEM_SIZE_2_KB<br>
+//`define DMEM_SIZE_1_KB<br>
+//`define DMEM_SIZE_512_B<br>
+//`define DMEM_SIZE_256_B<br>
+`define DMEM_SIZE_128_B<br>
+      <br>
+      <br>
+// Include/Exclude Hardware Multiplier<br>
+`define MULTIPLIER<br>
+      <br>
+      <br>
+// Include/Exclude Serial Debug interface<br>
+`define DBG_EN<br>
+      </code></td></tr></tbody></table><br><br>
+The only design considerations at this stage are:
+<ul>
+	<li>Make sure that the program and data memories have the correct size :-P</li>
+	<li>The sum of program, data and peripheral memory space <b>MUST NOT</b> exceed 64 kB</li>
+</ul>
+<br> 
+<b><u>Note:</u></b> when selected, full custom memory sizes can be specified in the "Expert System Configuration" section.
+<br> 
+<br> 
+
+<a name="2.3.2 Advanced System Configuration"></a>
+<h3>2.3.2 Advanced System Configuration</h3>
+
+In this section, some additional features are available in order to match the needs of more experienced users.
+<br><br>
+<table border="0" cellpadding="0" cellspacing="4">
+<tbody><tr>
+<td width="35"><br>
+</td>
+<td bgcolor="#d0d0d0" width="3"><br>
+</td>
+<td width="15"><br>
+</td>
+<td><code>//============================================================================<br>
+//============================================================================<br>
+// ADVANCED SYSTEM CONFIGURATION (FOR EXPERIENCED USERS)<br>
+//============================================================================<br>
+//============================================================================<br>
+      <br>
+//-------------------------------------------------------<br>
+// Custom user version number<br>
+//-------------------------------------------------------<br>
+// This 5 bit field can be freely used in order to allow<br>
+// custom identification of the system through the debug<br>
+// interface.<br>
+// (see CPU_ID.USER_VERSION field in the documentation)<br>
+//-------------------------------------------------------<br>
+`define USER_VERSION 5'b00000<br>
+      <br>
+      <br>
+//-------------------------------------------------------<br>
+// Include/Exclude Watchdog timer<br>
+//-------------------------------------------------------<br>
+// When excluded, the following functionality will be<br>
+// lost:<br>
+//&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; - Watchog (both interval and watchdog modes)<br>
+//&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; - NMI interrupt edge selection<br>
+//&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; - Possibility to generate a software PUC reset<br>
+//-------------------------------------------------------<br>
+`define WATCHDOG<br>
+      <br>
+      <br>
+///-------------------------------------------------------<br>
+// Include/Exclude Non-Maskable-Interrupt support<br>
+//--------------------------------------------------------<br>
+`define NMI<br>
+      <br>
+      <br>
+//-------------------------------------------------------<br>
+// Number of available IRQs<br>
+//-------------------------------------------------------<br>
+// Indicates the number of interrupt vectors supported<br>
+// (16, 32 or 64).<br>
+//-------------------------------------------------------<br>
+`define IRQ_16<br>
+//`define IRQ_32<br>
+//`define IRQ_64<br>
+      <br>
+      <br>
+//-------------------------------------------------------<br>
+// Input synchronizers<br>
+//-------------------------------------------------------<br>
+// In some cases, the asynchronous input ports might<br>
+// already be synchronized externally.<br>
+// If an extensive CDC design review showed that this<br>
+// is really the case,&nbsp; the individual synchronizers<br>
+// can be disabled with the following defines.<br>
+//<br>
+// Notes:<br>
+//&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; - all three signals are all sampled in the MCLK domain<br>
+//<br>
+//&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; - the dbg_en signal reset the debug interface<br>
+//&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; when 0. Therefore make sure it is glitch free.<br>
+//<br>
+//-------------------------------------------------------<br>
+`define SYNC_NMI<br>
+//`define SYNC_CPU_EN<br>
+//`define SYNC_DBG_EN<br>
+</code><code><br>
+      <br>
+</code><code>//-------------------------------------------------------<br>
+// Peripheral Memory Space:<br>
+//-------------------------------------------------------<br>
+// The original MSP430 architecture map the peripherals<br>
+// from 0x0000 to 0x01FF (i.e. 512B of the memory space).<br>
+// The following defines allow you to expand this space<br>
+// up to 32 kB (i.e. from 0x0000 to 0x7fff).<br>
+// As a consequence, the data memory mapping will be<br>
+// shifted up and a custom linker script will therefore<br>
+// be required by the GCC compiler.<br>
+//-------------------------------------------------------<br>
+//`define PER_SIZE_CUSTOM<br>
+//`define PER_SIZE_32_KB<br>
+//`define PER_SIZE_16_KB<br>
+//`define PER_SIZE_8_KB<br>
+//`define PER_SIZE_4_KB<br>
+//`define PER_SIZE_2_KB<br>
+//`define PER_SIZE_1_KB<br>
+`define PER_SIZE_512_B<br>
+      <br>
+      <br></code><code>//-------------------------------------------------------<br>
+// Defines the debugger CPU_CTL.RST_BRK_EN reset value<br>
+// (CPU break on PUC reset)<br>
+//-------------------------------------------------------<br>
+// When defined, the CPU will automatically break after<br>
+// a PUC occurrence by default. This is typically useful<br>
+// when the program memory can only be initialized through<br>
+// the serial debug interface.<br>
+//-------------------------------------------------------<br>
+`define DBG_RST_BRK_EN</code><br>
+</td></tr></tbody></table><br><br>
+Design consideration at this stage are:
+<ul>
+	<li>Setting a peripheral memory space to something else than 512B
+will shift the data memory mapping up, which in turn will require the
+use of a custom linker script. If you don't know what a linker script
+is and if you don't want to know what it is, you should probably not
+modify this section.</li>
+	<li>The sum of program, data and peripheral memory space <b>MUST NOT</b> exceed 64 kB</li>
+</ul>
+<br>
+<b><u>Note:</u></b> when selected, full custom peripheral memory space can be specified in the "Expert System Configuration" section.
+<br> 
+<br> 
+
+<a name="2.3.3 Expert System Configuration"></a>
+<h3>2.3.3 Expert System Configuration</h3>
+
+In this section, you will find configuration options which are
+relevant for roughly 0.1% of the users (according to a highly
+reliable market analysis ;-) ).
+<br><br>
+<table border="0" cellpadding="0" cellspacing="4">
+<tbody><tr>
+<td width="35"><br>
+</td>
+<td bgcolor="#d0d0d0" width="3"><br>
+</td>
+<td width="15"><br>
+</td>
+<td>
+	<code> //============================================================================<br>
+//============================================================================<br>
+// EXPERT SYSTEM CONFIGURATION ( !!!! EXPERTS ONLY !!!! )<br>
+//============================================================================<br>
+//============================================================================<br>
+//<br>
+// IMPORTANT NOTE:&nbsp; Please update following configuration options ONLY if<br>
+//&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+you have a good reason to do so... and if you know what<br>
+//&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; you are doing :-P<br>
+//<br>
+//============================================================================<br>
+      <br>
+//-------------------------------------------------------<br>
+// Select serial debug interface protocol<br>
+//-------------------------------------------------------<br>
+//&nbsp;&nbsp;&nbsp; DBG_UART -&gt; Enable UART (8N1) debug interface<br>
+//&nbsp;&nbsp;&nbsp; DBG_I2C&nbsp; -&gt; Enable I2C debug interface<br>
+//-------------------------------------------------------<br>
+`define DBG_UART<br>
+//`define DBG_I2C<br>
+      <br>
+      <br>
+//-------------------------------------------------------<br>
+// Enable the I2C broadcast address<br>
+//-------------------------------------------------------<br>
+// For multicore systems, a common I2C broadcast address<br>
+// can be given to all oMSP cores in order to<br>
+// synchronously RESET, START, STOP, or STEP all CPUs<br>
+// at once with a single I2C command.<br>
+// If you have a single openMSP430 in your system,<br>
+// this option can stay commented-out.<br>
+//-------------------------------------------------------<br>
+//`define DBG_I2C_BROADCAST<br>
+      <br>
+<br>
+//-------------------------------------------------------<br>// Number of hardware breakpoint/watchpoint units<br>
+// (each unit contains two hardware addresses available<br>
+// for breakpoints or watchpoints):<br>
+//&nbsp;&nbsp; - DBG_HWBRK_0 -&gt; Include hardware breakpoints unit 0<br>
+//&nbsp;&nbsp; - DBG_HWBRK_1 -&gt; Include hardware breakpoints unit 1<br>
+//&nbsp;&nbsp; - DBG_HWBRK_2 -&gt; Include hardware breakpoints unit 2<br>
+//&nbsp;&nbsp; - DBG_HWBRK_3 -&gt; Include hardware breakpoints unit 3<br>
+//-------------------------------------------------------<br>
+// Please keep in mind that hardware breakpoints only<br>
+// make sense whenever the program memory is not an SRAM<br>
+// (i.e. Flash/OTP/ROM/...) or when you are interested<br>
+// in data breakpoints.<br>
+//-------------------------------------------------------<br>
+//`define&nbsp; DBG_HWBRK_0<br>
+//`define&nbsp; DBG_HWBRK_1<br>
+//`define&nbsp; DBG_HWBRK_2<br>
+//`define&nbsp; DBG_HWBRK_3<br>
+      <br>
+      <br>
+//-------------------------------------------------------<br>
+// Enable/Disable the hardware breakpoint RANGE mode<br>
+//-------------------------------------------------------<br>
+// When enabled this feature allows the hardware breakpoint<br>
+// units to stop the cpu whenever an instruction or data<br>
+// access lays within an address range.<br>
+// Note that this feature is not supported by GDB.<br>
+//-------------------------------------------------------<br>
+//`define DBG_HWBRK_RANGE<br>
+      <br>
+      <br>
+//-------------------------------------------------------<br>
+// Custom Program/Data and Peripheral Memory Spaces<br>
+//-------------------------------------------------------<br>
+// The following values are valid only if the<br>
+// corresponding *_SIZE_CUSTOM defines are uncommented:<br>
+//<br>
+//  - *_SIZE   : size of the section in bytes.<br>
+//  - *_AWIDTH : address port width, this value must allow<br>
+//               to address all WORDS of the section<br>
+//               (i.e. the *_SIZE divided by 2)<br>
+//-------------------------------------------------------<br>
+<br>
+// Custom Program memory (enabled with PMEM_SIZE_CUSTOM)<br>
+`define PMEM_CUSTOM_AWIDTH      10<br>
+`define PMEM_CUSTOM_SIZE      2048<br>
+<br>
+// Custom Data memory    (enabled with DMEM_SIZE_CUSTOM)<br>
+`define DMEM_CUSTOM_AWIDTH       6<br>
+`define DMEM_CUSTOM_SIZE       128<br>
+<br>
+// Custom Peripheral memory  (enabled with PER_SIZE_CUSTOM)<br>
+`define PER_CUSTOM_AWIDTH        8<br>
+`define PER_CUSTOM_SIZE        512<br>
+<br>
+<br>
+//-------------------------------------------------------<br>
+// ASIC version<br>
+//-------------------------------------------------------<br>
+// When uncommented, this define will enable the<br>
+// ASIC system configuration section (see below) and<br>
+// will activate scan support for production test.<br>
+//<br>
+// WARNING: if you target an FPGA, leave this define<br>
+//&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; commented.<br>
+//-------------------------------------------------------<br>
+//`define ASIC<br></code></td></tr></tbody></table><br><br>
+Design consideration at this stage are:
+<ul>
+	<li>This is the expert section... so you know what your are doing anyway, right ;-)</li>
+</ul>
+<br>
+All remaining defines located after the ASIC section in the <b><i>openMSP430_defines.v</i></b> file are system constants and <b>MUST NOT</b> be edited.
+<br> 
+<br> 
+
+<a name="2.3.4 Parameters For Multi-Core Systems"></a>
+<h3>2.3.4 Parameters For Multi-Core Systems</h3>
+
+In addition to the define file, two Verilog parameters are available to facilitate software development on multi-core systems.<br> 
+For example, in a dual-core openMSP430 system, the cores can be instantiated as following:
+<br>
+<br>
+<table border="0" cellpadding="0" cellspacing="4">
+<tbody><tr>
+<td width="35"><br></td>
+<td bgcolor="#d0d0d0" width="3"><br></td>
+<td width="15"><br></td>
+<td>
+	<code>
+		          openMSP430 #(.INST_NR (<strong>0</strong>), .TOTAL_NR(<strong>1</strong>)) openMSP430_core_0 (
+		      <br>...
+		      <br>);
+		      <br>
+		      <br>openMSP430 #(.INST_NR (<strong>1</strong>), .TOTAL_NR(<strong>1</strong>)) openMSP430_core_1 (
+		      <br>...
+		      <br>);
+	</code>
+</td>
+</tr>
+</tbody>
+</table>
+<br>
+The values of these parameters are then directly accessible through the CPU_NR register of the SFR peripheral.<br>
+For example, if both cores share the same program memory, the software can take advantage of this information as following:
+<br><br>
+<table border="0" cellpadding="0" cellspacing="4">
+<tbody><tr>
+<td width="35"><br></td>
+<td bgcolor="#d0d0d0" width="3"><br></td>
+<td width="15"><br></td>
+<td>
+	<code>
+		           "...
+		      <br>int main(void) {
+		      <br>&nbsp;&nbsp;if (CPU_NR==<strong>0x0100</strong>) {
+		      <br>&nbsp;&nbsp;&nbsp;&nbsp;main_core_0();&nbsp;// Main routine call for core 0
+		      <br>&nbsp;&nbsp;}
+		      <br>&nbsp;&nbsp;if (CPU_NR==<strong>0x0101</strong>) {
+		      <br>&nbsp;&nbsp;&nbsp;&nbsp;main_core_1();&nbsp;// Main routine call for core 1
+		      <br>&nbsp;&nbsp;}
+		      <br>}
+		      <br>..."
+	</code>
+</td>
+</tr>
+</tbody>
+</table>
+<br><br>
+
+<a name="2.4 Memory mapping"></a>
+<h2>2.4 Memory mapping</h2>
+
+As discussed earlier, the openMSP430 memory mapping is fully configurable.<br>The
+basic system configuration section allows to adjust program and data
+memory sizes while keeping 100% compatibility with the pre-existing
+linker scripts provided by MSPGCC (or any other toolchain for that
+matter).<br>
+However, an increasing number of users saw the 512B space available for
+peripherals in the standard MSP430 architecture as a limitation.
+Therefore, the advanced system configuration section gives the
+possibility to up-scale the reserved peripheral address space anywhere
+between 512B and 32kB. As a consequence, the data memory space will be
+shifted up, which means that the linker script of your favorite
+toolchain will have to be modified accordingly.<br>
+The following schematic should hopefully illustrate this:<br>
+<br><br>
+<img src="usercontent,img,1306066277" alt="Memory mapping" title="Memory mapping" width="80%">
+<br>
+<br><br>
+
+<a name="2.5 Interrupt mapping"></a>
+<h2>2.5 Interrupt mapping</h2>
+
+The number of supported interrupts is configurable with the IRQ_xx macros.
+The interrupt vectors are then mapped as following:
+<br><br>
+<img src="http://opencores.org/usercontent,img,1387146236" alt="Interrupt mapping" title="Interrupt mapping" width="70%">
+
+<br><br>
+<a name="2.6 Pinout"></a>
+<h2>2.6 Pinout</h2>
+
+The full pinout of the openMSP430 core is provided in the following table:
+<br><br>
+<table border="1">
+	<tbody><tr> <td align="center"><b>Port Name</b></td> <td align="center"><b>Direction</b></td> <td align="center"><b>Width</b>    </td> <td style="vertical-align: top; text-align: center;"><span style="font-weight: bold;">Clock</span><br style="font-weight: bold;">
+      <span style="font-weight: bold;">Domain</span><br>
+      </td>
+<td align="center"><b>Description</b></td> </tr>
+	
+	<tr> <td colspan="5" align="center"> <b><i>Clocks &amp; Power-Managment</i></b>                         </td></tr>
+	<tr>
+	     <td> cpu_en                                                           </td>
+	     <td> Input                                                            </td>
+	     <td> 1                                                                </td>
+	     <td style="vertical-align: top; text-align: center;">&lt;async&gt;<br>
+or mclk<b><sup><font color="#ff0000">4</font></sup></b></td>
+<td> Enable CPU code execution (asynchronous and non-glitchy).<br>
+ Set to 1 if unused.    </td>
+	</tr> 
+	<tr>
+	     <td> dco_clk                                                          </td>
+	     <td> Input                                                            </td>
+	     <td> 1                                                                </td>
+	     <td style="vertical-align: top; text-align: center;">-<br>
+      </td>
+<td> Fast oscillator (fast clock)                          </td>
+	</tr> 
+	<tr>
+      <td style="vertical-align: top;"> lfxt_clk</td>
+      <td style="vertical-align: top;">Input<br>
+      </td>
+      <td style="vertical-align: top;">1<br>
+      </td>
+      <td style="vertical-align: top; text-align: center;">-<br>
+      </td>
+<td style="vertical-align: top;"> Low frequency oscillator (typ. 32kHz)<br>
+Set to 0 if unused.<br>
+      </td>
+    </tr>
+    <tr>
+      <td style="vertical-align: top;"> mclk</td>
+      <td style="vertical-align: top;">Output<br>
+      </td>
+      <td style="vertical-align: top;">1<br>
+      </td>
+      <td style="vertical-align: top; text-align: center;">-<br>
+      </td>
+<td style="vertical-align: top;"> Main system clock</td>
+    </tr>
+    <tr>
+      <td style="vertical-align: top;"> aclk_en</td>
+      <td style="vertical-align: top;">Output</td>
+      <td style="vertical-align: top;">1<br>
+      </td>
+      <td style="vertical-align: top; text-align: center;">mclk<br>
+      </td>
+<td style="vertical-align: top;">FPGA ONLY: ACLK enable</td>
+    </tr>
+    <tr>
+      <td style="vertical-align: top;">smclk_en</td>
+      <td style="vertical-align: top;">Output</td>
+      <td style="vertical-align: top;">1<br>
+      </td>
+      <td style="vertical-align: top; text-align: center;">mclk<br>
+      </td>
+<td style="vertical-align: top;">FPGA ONLY: SMCLK enable</td>
+    </tr>
+    <tr>
+      <td style="vertical-align: top;">dco_enable<br>
+      </td>
+      <td style="vertical-align: top;">Output<br>
+      </td>
+      <td style="vertical-align: top;">1<br>
+      </td>
+      <td style="vertical-align: top; text-align: center;">dco_clk<br>
+      </td>
+<td style="vertical-align: top;">ASIC ONLY: Fast oscillator enable<br>
+      </td>
+    </tr>
+    <tr>
+      <td style="vertical-align: top;">dco_wkup<br>
+      </td>
+      <td style="vertical-align: top;">Output<br>
+      </td>
+      <td style="vertical-align: top;">1<br>
+      </td>
+      <td style="vertical-align: top; text-align: center;">&lt;async&gt;<br>
+      </td>
+<td style="vertical-align: top;">ASIC ONLY: Fast oscillator wakeup (asynchronous)<br>
+      </td>
+    </tr>
+
+	<tr>
+      <td style="vertical-align: top;">lfxt_enable<br>
+      </td>
+      <td style="vertical-align: top;">Output<br>
+      </td>
+      <td style="vertical-align: top;">1<br>
+      </td>
+      <td style="vertical-align: top; text-align: center;">lfxt_clk<br>
+      </td>
+<td style="vertical-align: top;">ASIC ONLY: Low frequency oscillator enable<br>
+      </td>
+    </tr>
+    <tr>
+      <td style="vertical-align: top;">lfxt_wkup<br>
+      </td>
+      <td style="vertical-align: top;">Output<br>
+      </td>
+      <td style="vertical-align: top;">1<br>
+      </td>
+      <td style="vertical-align: top; text-align: center;">&lt;async&gt;<br>
+      </td>
+<td style="vertical-align: top;">ASIC ONLY: Low frequency oscillator wakeup (asynchronous)<br>
+      </td>
+    </tr>
+
+	<tr>
+      <td style="vertical-align: top;">aclk<br>
+      </td>
+      <td style="vertical-align: top;">Output<br>
+      </td>
+      <td style="vertical-align: top;">1<br>
+      </td>
+      <td style="vertical-align: top; text-align: center;">-<br>
+      </td>
+<td style="vertical-align: top;">ASIC ONLY: ACLK<br>
+      </td>
+    </tr>
+
+	<tr>
+      <td style="vertical-align: top;">smclk<br>
+      </td>
+      <td style="vertical-align: top;">Output<br>
+      </td>
+      <td style="vertical-align: top;">1<br>
+      </td>
+      <td style="vertical-align: top; text-align: center;">-<br>
+      </td>
+<td style="vertical-align: top;">ASIC ONLY: SMCLK<br>
+      </td>
+    </tr>
+
+
+	<tr>
+      <td style="vertical-align: top;">wkup<br>
+      </td>
+      <td style="vertical-align: top;">Input<br>
+      </td>
+      <td style="vertical-align: top;">1<br>
+      </td>
+      <td style="vertical-align: top; text-align: center;">&lt;async&gt;<br>
+      </td>
+<td style="vertical-align: top;">ASIC ONLY: System Wake-up (asynchronous and non-glitchy)<br>
+Set to 0 if unused.<br>
+      </td>
+    </tr>
+<tr> <td colspan="5" align="center"> <b><i>Resets</i></b>                         </td></tr>
+	<tr>
+	     <td> puc_rst                                                          </td>
+	     <td> Output                                                           </td>
+	     <td> 1                                                                </td>
+	     <td style="vertical-align: top; text-align: center;">mclk<br>
+      </td>
+<td> Main system reset                                                </td>
+   </tr>
+	<tr>
+	     <td> reset_n                                                          </td>
+	     <td> Input                                                            </td>
+	     <td> 1                                                                </td>
+	     <td style="vertical-align: top; text-align: center;">&lt;async&gt;<br>
+      </td>
+<td> Reset Pin (active low, asynchronous and non-glitchy)                             </td>
+	</tr>
+
+
+	<tr> <td colspan="5" align="center"> <b><i>Program Memory interface</i></b>       </td></tr>
+	<tr> 
+	     <td> pmem_addr                                                        </td>
+	     <td> Output                                                           </td>
+	     <td><small> `PMEM_AWIDTH</small> <b><sup><font color="#ff0000">1</font></sup></b> </td>
+	     <td style="vertical-align: top; text-align: center;">mclk<br>
+      </td>
+<td> Program Memory address                                           </td>
+	</tr>
+	<tr> 
+	     <td> pmem_cen                                                         </td>
+	     <td> Output                                                           </td>
+	     <td> 1                                                                </td>
+	     <td style="vertical-align: top; text-align: center;">mclk<br>
+      </td>
+<td> Program Memory chip enable (low active)                          </td>
+	</tr>
+	<tr> 
+	     <td> pmem_din                                                         </td>
+	     <td> Output                                                           </td>
+	     <td> 16                                                               </td>
+	     <td style="vertical-align: top; text-align: center;">mclk<br>
+      </td>
+<td> Program Memory data input (optional <b><sup><font color="#ff0000">2</font></sup></b>)</td>
+	</tr>
+	<tr> 
+	     <td> pmem_dout                                                        </td>
+	     <td> Input                                                            </td> 
+	     <td> 16                                                               </td>
+	     <td style="vertical-align: top; text-align: center;">mclk<br>
+      </td>
+<td> Program Memory data output                                       </td>
+	</tr>
+	<tr> 
+	     <td> pmem_wen                                                         </td>
+	     <td> Output                                                           </td>
+	     <td> 2                                                                </td>
+	     <td style="vertical-align: top; text-align: center;">mclk<br>
+      </td>
+<td> Program Memory write byte enable (low active) (optional <b><sup><font color="#ff0000">2</font></sup></b>) </td>
+	</tr>
+
+	<tr> <td colspan="5" align="center"> <b><i>Data Memory interface</i></b>          </td></tr>
+	<tr>
+	     <td> dmem_addr                                                        </td>
+	     <td> Output                                                           </td>
+	     <td><small> `DMEM_AWIDTH</small> <b><sup><font color="#ff0000">1</font></sup></b></td>
+	     <td style="vertical-align: top; text-align: center;">mclk<br>
+      </td>
+<td> Data Memory address                                              </td>
+	</tr>
+	<tr>
+	     <td> dmem_cen                                                         </td>
+	     <td> Output                                                           </td>
+	     <td> 1                                                                </td>
+	     <td style="vertical-align: top; text-align: center;">mclk<br>
+      </td>
+<td> Data Memory chip enable (low active)                             </td>
+	</tr>
+	<tr>
+	     <td> dmem_din                                                         </td>
+	     <td> Output                                                           </td>
+	     <td> 16                                                               </td>
+	     <td style="vertical-align: top; text-align: center;">mclk<br>
+      </td>
+<td> Data Memory data input                                           </td>
+	</tr>
+	<tr>
+	     <td> dmem_dout                                                        </td>
+	     <td> Input                                                            </td>
+	     <td> 16                                                               </td>
+	     <td style="vertical-align: top; text-align: center;">mclk<br>
+      </td>
+<td> Data Memory data output                                          </td>
+	</tr>
+	<tr>
+	     <td> dmem_wen                                                         </td>
+	     <td> Output                                                           </td>
+	     <td> 2                                                                </td>
+	     <td style="vertical-align: top; text-align: center;">mclk<br>
+      </td>
+<td> Data Memory write byte enable (low active)                       </td>
+	</tr>
+
+	<tr> <td colspan="5" align="center"> <b><i>External Peripherals interface</i></b> </td></tr>
+	<tr>
+	     <td> per_addr                                                         </td>
+	     <td> Output                                                           </td>
+	     <td> 14                                                                </td>
+	     <td style="vertical-align: top; text-align: center;">mclk<br>
+      </td>
+<td> Peripheral address                                               </td>
+	</tr>
+	<tr>
+	     <td> per_din                                                          </td>
+	     <td> Output                                                           </td>
+	     <td> 16                                                               </td>
+	     <td style="vertical-align: top; text-align: center;">mclk<br>
+      </td>
+<td> Peripheral data input                                            </td>
+   </tr>
+	<tr>
+	     <td> per_dout                                                         </td>
+	     <td> Input                                                            </td>
+	     <td> 16                                                               </td>
+	     <td style="vertical-align: top; text-align: center;">mclk<br>
+      </td>
+<td> Peripheral data output                                           </td>
+	</tr>
+	<tr>
+	     <td> per_en                                                           </td>
+	     <td> Output                                                           </td>
+	     <td> 1                                                                </td>
+	     <td style="vertical-align: top; text-align: center;">mclk<br>
+      </td>
+<td> Peripheral enable (high active)                                  </td>
+	</tr>
+	<tr>
+	     <td> per_we                                                           </td>
+	     <td> Output                                                           </td>
+	     <td> 2                                                                </td>
+	     <td style="vertical-align: top; text-align: center;">mclk<br>
+      </td>
+<td> Peripheral write enable (high active)                            </td>
+	</tr>
+
+	<tr> <td colspan="5" align="center"> <b><i>Interrupts</i></b>                     </td></tr>
+	<tr>
+		  <td> irq                                                              </td>
+		  <td> Input                                                            </td>
+		  <td> `IRQ_NR-2<b><sup><font color="#ff0000">1</font></sup></b>        </td>
+		  <td style="vertical-align: top; text-align: center;">mclk<br>
+      </td>
+<td> Maskable interrupts (one-hot signal)                             </td>
+   </tr>
+	<tr> 
+	     <td> nmi                                                              </td>
+	     <td> Input                                                            </td>
+	     <td> 1                                                                </td>
+	     <td style="vertical-align: top; text-align: center;">&lt;async&gt;<br>
+or mclk<b><sup><font color="#ff0000">4</font></sup></b></td>
+<td> Non-maskable interrupt (asynchronous and non-glitchy)<br>
+Set to 0 if unused.<br>
+                            </td>
+	</tr>
+	<tr>
+	     <td> irq_acc                                                          </td>
+	     <td> Output                                                           </td>
+	     <td> `IRQ_NR-2<b><sup><font color="#ff0000">1</font></sup></b>        </td>
+	     <td style="vertical-align: top; text-align: center;">mclk<br>
+      </td>
+<td> Interrupt request accepted (one-hot signal)                      </td>
+	</tr>
+
+	<tr> <td colspan="5" align="center"> <b><i>Serial Debug interface</i></b>         </td></tr>
+	<tr> 
+	     <td> dbg_en                                                           </td>
+	     <td> Input                                                            </td>
+	     <td> 1                                                                </td>
+	     <td style="vertical-align: top; text-align: center;">&lt;async&gt;<br>
+
+or mclk<b><sup><font color="#ff0000">4</font></sup></b></td>
+<td> Debug interface enable (asynchronous) <b><sup><font color="#ff0000">3</font></sup></b> </td>
+	</tr>
+	<tr> 
+	     <td> dbg_freeze                                                       </td>
+	     <td> Output                                                           </td>
+	     <td> 1                                                                </td>
+	     <td style="vertical-align: top; text-align: center;">mclk<br>
+      </td>
+<td> Freeze peripherals                                               </td>
+	</tr>
+	<tr> 
+	     <td> dbg_uart_txd                                                     </td>
+	     <td> Output                                                           </td>
+	     <td> 1                                                                </td>
+	     <td style="vertical-align: top; text-align: center;">mclk<br>
+      </td>
+<td> Debug interface: UART TXD                                        </td>
+	</tr>
+	<tr> 
+	     <td> dbg_uart_rxd                                                     </td>
+	     <td> Input                                                            </td>
+	     <td> 1                                                                </td>
+	     <td style="vertical-align: top; text-align: center;">&lt;async&gt;<br>
+      </td>
+<td> Debug interface: UART RXD (asynchronous)                         </td>
+	</tr><tr>
+      <td style="vertical-align: top;">dbg_i2c_addr<br>
+      </td>
+      <td style="vertical-align: top;"> Input</td>
+      <td style="vertical-align: top;"> 7</td>
+      <td style="vertical-align: top; text-align: center;">mclk</td>
+      <td style="vertical-align: top;">Debug interface: I2C Address<br>
+      </td>
+    </tr>
+    <tr>
+      <td style="vertical-align: top;">dbg_i2c_broadcast<br>
+      </td>
+      <td style="vertical-align: top;"> Input</td>
+      <td style="vertical-align: top;"> 7</td>
+      <td style="vertical-align: top; text-align: center;">mclk</td>
+      <td style="vertical-align: top;">Debug interface: I2C Broadcast Address (for multicore systems)<br>
+      </td>
+    </tr>
+    <tr>
+      <td style="vertical-align: top;">dbg_i2c_scl<br>
+      </td>
+      <td style="vertical-align: top;"> Input</td>
+      <td style="vertical-align: top;"> 1</td>
+      <td style="vertical-align: top; text-align: center;">&lt;async&gt;</td>
+      <td style="vertical-align: top;">Debug interface: I2C SCL (asynchronous)</td>
+    </tr>
+    <tr>
+      <td style="vertical-align: top;">dbg_i2c_sda_in<br>
+      </td>
+      <td style="vertical-align: top;"> Input</td>
+      <td style="vertical-align: top;"> 1</td>
+      <td style="vertical-align: top; text-align: center;">&lt;async&gt;</td>
+      <td style="vertical-align: top;">Debug interface: I2C SDA IN (asynchronous)</td>
+    </tr>
+    <tr>
+      <td style="vertical-align: top;">dbg_i2c_sda_out<br>
+      </td>
+      <td style="vertical-align: top;"> Output</td>
+      <td style="vertical-align: top;"> 1</td>
+      <td style="vertical-align: top; text-align: center;">mclk</td>
+      <td style="vertical-align: top;">Debug interface: I2C SDA OUT<br>
+      </td>
+    </tr>
+<tr align="center">
+      <td colspan="5" rowspan="1" style="vertical-align: top;"><b><i>Scan</i></b></td>
+    </tr>
+    <tr>
+      <td style="vertical-align: top;">scan_enable<br>
+      </td>
+      <td style="vertical-align: top;">Input<br>
+      </td>
+      <td style="vertical-align: top;">1<br>
+      </td>
+      <td style="vertical-align: top; text-align: center;">dco_clk<br>
+      </td>
+<td style="vertical-align: top;">ASIC ONLY: Scan enable (active during scan shifting)<br>
+      </td>
+    </tr>
+    <tr>
+      <td style="vertical-align: top;">scan_mode<br>
+      </td>
+      <td style="vertical-align: top;">Input<br>
+      </td>
+      <td style="vertical-align: top;">1<br>
+      </td>
+      <td style="vertical-align: top; text-align: center;">&lt;stable&gt;<br>
+      </td>
+<td style="vertical-align: top;">ASIC ONLY: Scan mode<br>
+      </td>
+    </tr>
+
+</tbody></table> 
+<br>
+<b><sup><font color="#ff0000">1</font></sup></b>: This parameter is declared in the "openMSP430_defines.v" file and defines the RAM/ROM size or the number of interrupts vectors (16, 32 or 64).<br>
+<b><sup><font color="#ff0000">2</font></sup></b>: These two optional
+ports can be connected whenever the program memory is a RAM. This will
+allow the user to load a program through the serial debug interface and
+to use software breakpoints.<br>
+<b><sup><font color="#ff0000">3</font></sup></b>: When disabled, the debug interface is hold into reset (and clock gated in ASIC mode). As a consequence, the <b><i>dbg_en</i></b> port can be used to reset the debug interface without disrupting the CPU execution.<br>
+<b><sup><font color="#ff0000">4</font></sup></b>: Clock domain is selectable through configuration in the "openMSP430_defines.v" file (see Advanced System Configuration).<br>
+<br>
+<span style="text-decoration: underline; font-weight: bold;">Note:</span> in the FPGA configuration, the <span style="font-style: italic;">ASIC ONLY</span> signals must be left unconnected (for the outputs) and tied low (for the inputs).<br>
+
+<a name="2.7 Instruction Cycles and Lengths"></a>
+<h2>2.7 Instruction Cycles and Lengths</h2>
+
+Please note that a detailed description of the instruction and addressing modes can be found in the <b><a href="http://www.ti.com/litv/pdf/slau049f">MSP430x1xx Family User's Guide</a></b> (Chapter 3).<br><br>
+The number of CPU clock cycles required for an instruction depends on
+the instruction format and the addressing modes used, not the
+instruction itself.<br>
+In the following tables, the number of clock cycles refers to the main clock (<i>MCLK</i>).
+Differences with the original MSP430 are highlighted in green (the original value being red).
+<ul>
+	<li><b>Interrupt and Reset Cycles</b></li>
+</ul>
+<table border="1">
+	<tbody><tr> <td align="center"><b>Action</b>  </td> <td align="center"><b>No. of Cycles</b></td> <td align="center"><b>Length of Instruction</b></td> </tr>
+	<tr> <td> Return from interrupt (RETI) </td> <td align="center">       5            </td> <td align="center">           1                </td> </tr>
+	<tr> <td> Interrupt accepted           </td> <td align="center">       6            </td> <td align="center">           -                </td> </tr>
+	<tr> <td> WDT reset                    </td> <td align="center">       4            </td> <td align="center">           -                </td> </tr>
+	<tr> <td> Reset (!RST/NMI)             </td> <td align="center">       4            </td> <td align="center">           -                </td> </tr>
+</tbody></table>
+
+<ul>
+	<li><b>Format-II (Single Operand) Instruction Cycles and Lengths</b></li>
+</ul>
+<table border="1">
+	<tbody><tr> <td rowspan="2" align="center"><b>Addressing Mode</b>  </td> <td colspan="3" align="center"><b>No. of Cycles</b></td> <td rowspan="2" align="center"><b>Length of Instruction</b></td> </tr>
+	<tr>                                                              <td><b>RRA, RRC, SWPB, SXT</b></td> <td><b>PUSH</b></td> <td><b>CALL</b></td> </tr>
+
+	<tr> <td align="center"> Rn    </td> <td align="center"> 1   </td> <td align="center"> 3 </td> <td align="center"><b><font color="green">3 </font><font color="red"> (4)</font></b></td> <td align="center"> 1 </td> </tr>
+	<tr> <td align="center"> @Rn   </td> <td align="center"> 3   </td> <td align="center"> 4 </td> <td align="center"> 4 </td> <td align="center"> 1 </td> </tr>
+	<tr> <td align="center"> @Rn+  </td> <td align="center"> 3   </td> <td align="center"><b><font color="green">4 </font><font color="red"> (5)</font></b></td> <td align="center"><b><font color="green">4 </font><font color="red"> (5)</font></b></td> <td align="center"> 1 </td> </tr>
+	<tr> <td align="center"> #N    </td> <td align="center"> N/A </td> <td align="center"> 4 </td> <td align="center"> 5 </td> <td align="center"> 2 </td> </tr>
+	<tr> <td align="center"> X(Rn) </td> <td align="center"> 4   </td> <td align="center"> 5 </td> <td align="center"> 5 </td> <td align="center"> 2 </td> </tr>
+	<tr> <td align="center"> EDE   </td> <td align="center"> 4   </td> <td align="center"> 5 </td> <td align="center"> 5 </td> <td align="center"> 2 </td> </tr>
+	<tr> <td align="center"> &amp;EDE  </td> <td align="center"> 4   </td> <td align="center"> 5 </td> <td align="center"> 5 </td> <td align="center"> 2 </td> </tr>
+</tbody></table>
+
+<ul>
+	<li><b>Format-III (Jump) Instruction Cycles and Lengths</b></li>
+</ul>
+All jump instructions require one code word, and take two CPU cycles to execute, regardless of whether the jump is taken or not.
+
+<ul>
+	<li><b>Format-I (Double Operand) Instruction Cycles and Lengths</b></li>
+</ul>
+<table border="1">
+	<tbody><tr> <td colspan="2" align="center"><b>Addressing Mode</b>  </td> <td rowspan="2" align="center"><b>No. of Cycles</b></td> <td rowspan="2" align="center"><b>Length of Instruction</b></td> </tr>
+	<tr> <td align="center"><b>Src</b></td> <td align="center"><b>Dst</b></td> </tr>
+
+	<tr> <td rowspan="5" align="center"> Rn    </td> <td align="center"> Rm    </td> <td align="center"> 1 </td> <td align="center"> 1 </td> </tr>
+	<tr>                                             <td align="center"> PC    </td> <td align="center"> 2 </td> <td align="center"> 1 </td> </tr>
+	<tr>                                             <td align="center"> x(Rm) </td> <td align="center"> 4 </td> <td align="center"> 2 </td> </tr>
+	<tr>                                             <td align="center"> EDE   </td> <td align="center"> 4 </td> <td align="center"> 2 </td> </tr>
+	<tr>                                             <td align="center"> &amp;EDE  </td> <td align="center"> 4 </td> <td align="center"> 2 </td> </tr>
+	<tr> <td rowspan="5" align="center"> @Rn   </td> <td align="center"> Rm    </td> <td align="center"> 2 </td> <td align="center"> 1 </td> </tr>
+	<tr>                                             <td align="center"> PC    </td> <td align="center"><b><font color="green">3 </font><font color="red"> (2)</font></b></td> <td align="center"> 1 </td> </tr>
+	<tr>                                             <td align="center"> x(Rm) </td> <td align="center"> 5 </td> <td align="center"> 2 </td> </tr>
+	<tr>                                             <td align="center"> EDE   </td> <td align="center"> 5 </td> <td align="center"> 2 </td> </tr>
+	<tr>                                             <td align="center"> &amp;EDE  </td> <td align="center"> 5 </td> <td align="center"> 2 </td> </tr>
+	<tr> <td rowspan="5" align="center"> @Rn+  </td> <td align="center"> Rm    </td> <td align="center"> 2 </td> <td align="center"> 1 </td> </tr>
+	<tr>                                             <td align="center"> PC    </td> <td align="center"> 3 </td> <td align="center"> 1 </td> </tr>
+	<tr>                                             <td align="center"> x(Rm) </td> <td align="center"> 5 </td> <td align="center"> 2 </td> </tr>
+	<tr>                                             <td align="center"> EDE   </td> <td align="center"> 5 </td> <td align="center"> 2 </td> </tr>
+	<tr>                                             <td align="center"> &amp;EDE  </td> <td align="center"> 5 </td> <td align="center"> 2 </td> </tr>
+	<tr> <td rowspan="5" align="center"> #N    </td> <td align="center"> Rm    </td> <td align="center"> 2 </td> <td align="center"> 2 </td> </tr>
+	<tr>                                             <td align="center"> PC    </td> <td align="center"> 3 </td> <td align="center"> 2 </td> </tr>
+	<tr>                                             <td align="center"> x(Rm) </td> <td align="center"> 5 </td> <td align="center"> 3 </td> </tr>
+	<tr>                                             <td align="center"> EDE   </td> <td align="center"> 5 </td> <td align="center"> 3 </td> </tr>
+	<tr>                                             <td align="center"> &amp;EDE  </td> <td align="center"> 5 </td> <td align="center"> 3 </td> </tr>
+	<tr> <td rowspan="5" align="center"> x(Rn) </td> <td align="center"> Rm    </td> <td align="center"> 3 </td> <td align="center"> 2 </td> </tr>
+	<tr>                                             <td align="center"> PC    </td> <td align="center"><b><font color="green">3 </font><font color="red"> (4)</font></b></td> <td align="center"> 2 </td> </tr>
+	<tr>                                             <td align="center"> x(Rm) </td> <td align="center"> 6 </td> <td align="center"> 3 </td> </tr>
+	<tr>                                             <td align="center"> EDE   </td> <td align="center"> 6 </td> <td align="center"> 3 </td> </tr>
+	<tr>                                             <td align="center"> &amp;EDE  </td> <td align="center"> 6 </td> <td align="center"> 3 </td> </tr>
+	<tr> <td rowspan="5" align="center"> EDE   </td> <td align="center"> Rm    </td> <td align="center"> 3 </td> <td align="center"> 2 </td> </tr>
+	<tr>                                             <td align="center"> PC    </td> <td align="center"><b><font color="green">3 </font><font color="red"> (4)</font></b></td> <td align="center"> 2 </td> </tr>
+	<tr>                                             <td align="center"> x(Rm) </td> <td align="center"> 6 </td> <td align="center"> 3 </td> </tr>
+	<tr>                                             <td align="center"> EDE   </td> <td align="center"> 6 </td> <td align="center"> 3 </td> </tr>
+	<tr>                                             <td align="center"> &amp;EDE  </td> <td align="center"> 6 </td> <td align="center"> 3 </td> </tr>
+	<tr> <td rowspan="5" align="center"> &amp;EDE  </td> <td align="center"> Rm    </td> <td align="center"> 3 </td> <td align="center"> 2 </td> </tr>
+	<tr>                                             <td align="center"> PC    </td> <td align="center"> 3 </td> <td align="center"> 2 </td> </tr>
+	<tr>                                             <td align="center"> x(Rm) </td> <td align="center"> 6 </td> <td align="center"> 3 </td> </tr>
+	<tr>                                             <td align="center"> EDE   </td> <td align="center"> 6 </td> <td align="center"> 3 </td> </tr>
+	<tr>                                             <td align="center"> &amp;EDE  </td> <td align="center"> 6 </td> <td align="center"> 3 </td> </tr>
+</tbody></table>
+
+<a name="2.8 Serial Debug Interface"></a>
+<h2>2.8 Serial Debug Interface</h2>
+
+All the details about the Serial Debug Interface are located <a href="http://opencores.org/project,openmsp430,serial%20debug%20interface">here</a>.<br>
+<br>
+
+<a name="2.9 Benchmark results"></a>
+<h2>2.9 Benchmark results</h2>
+
+<a name="2.9.1 Dhrystone"></a>
+<h3>2.9.1 Dhrystone (DMIPS/MHz)</h3>
+Dhrystone is known for being susceptible to compiler optimizations (among other issues).<br>However,
+as it is still quite a popular metric, some results are provided here
+(ranging from 0.30 to 0.45 DMIPS/MHz depending on the compiler version
+and options).<br>
+Note that the used C-code is available in the repository <a href="http://opencores.org/websvn,listing?repname=openmsp430&amp;path=%2Fopenmsp430%2Ftrunk%2Fcore%2Fsim%2Frtl_sim%2Fsrc-c%2Fdhrystone_v2.1%2F#path_openmsp430_trunk_core_sim_rtl_sim_src-c_dhrystone_v2.1_">here</a> and <a href="http://opencores.org/websvn,listing?repname=openmsp430&amp;path=%2Fopenmsp430%2Ftrunk%2Fcore%2Fsim%2Frtl_sim%2Fsrc-c%2Fdhrystone_4mcu%2F#path_openmsp430_trunk_core_sim_rtl_sim_src-c_dhrystone_4mcu_">here</a>.<br>
+<br>
+
+<table style="text-align: left; width: 40%;" border="1" cellpadding="2" cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="text-align: center;" colspan="1" rowspan="2"><span style="font-weight: bold;">Dhrystone flavor</span></td>
+      <td style="font-weight: bold; text-align: right;">Compiler options</td>    
+      <td colspan="1" rowspan="2" style="vertical-align: top; text-align: center; font-weight: bold;">-Os</td>
+      <td colspan="1" rowspan="2" style="vertical-align: top; text-align: center; font-weight: bold;">-O2</td>
+      <td colspan="1" rowspan="2" style="vertical-align: top; text-align: center; font-weight: bold;">-O3</td>
+    </tr>
+    <tr align="left">
+      <td style="font-weight: bold;">Compiler version
+      </td>
+    </tr>
+    <tr>
+      <td style="text-align: center;" colspan="1" rowspan="2">Dhrystone v2.1<br>
+                     (<a href="http://ftp.unicamp.br/pub/unix-c/benchmark/system/">common version</a>)</td>
+      <td style="text-align: left;">mspgcc v4.4.5</td>
+      <td style="text-align: center;">0.30</td>
+      <td style="text-align: center;">0.32</td>
+      <td style="text-align: center;">0.33</td>
+    </tr>
+    <tr>
+      <td style="text-align: left;">mspgcc v4.6.3</td>
+      <td style="text-align: center;">0.37</td>
+      <td style="text-align: center;">0.39</td>
+      <td style="text-align: center;">0.40</td>
+    </tr>
+    <tr>
+      <td style="text-align: center;" colspan="1" rowspan="2">Dhrystone v2.1<br>
+                     (<a href="http://www.ecrostech.com/Other/Resources/Dhrystone.htm">MCU adapted</a>)</td>
+      <td style="text-align: left;">mspgcc v4.4.5</td>
+      <td style="text-align: center;">0.30</td>
+      <td style="text-align: center;">0.30</td>
+      <td style="text-align: center;">0.31</td>
+    </tr>
+    <tr>
+      <td style="text-align: left;">mspgcc v4.6.3</td>
+      <td style="text-align: center;">0.37</td>
+      <td style="text-align: center;">0.44</td>
+      <td style="text-align: center;">0.45</td>
+    </tr>
+  </tbody>
+</table>
+
+<a name="2.9.2 CoreMark"></a>
+<h3>2.9.2 CoreMark (CoreMark/MHz)</h3>
+CoreMark tries to address most of Dhrystone's pitfall by preventing the
+compiler to optimize some code away and using "real-life" algorithm.<br>
+Note that the used C-code is available in the repository <a href="http://opencores.org/websvn,listing?repname=openmsp430&amp;path=%2Fopenmsp430%2Ftrunk%2Fcore%2Fsim%2Frtl_sim%2Fsrc-c%2Fcoremark_v1.0%2F#path_openmsp430_trunk_core_sim_rtl_sim_src-c_coremark_v1.0_">here</a>.<br>
+<br>
+
+<table style="text-align: left; width: 40%;" border="1" cellpadding="2" cellspacing="2">
+  <tbody>
+    <tr>
+      <td style="text-align: center;" colspan="1" rowspan="2"><br>
+</td>
+      <td style="font-weight: bold; text-align: right;">Compiler options</td>
+      <td colspan="1" rowspan="2" style="vertical-align: top; text-align: center; font-weight: bold;">-Os</td>
+      <td colspan="1" rowspan="2" style="vertical-align: top; text-align: center; font-weight: bold;">-O2</td>
+      <td colspan="1" rowspan="2" style="vertical-align: top; text-align: center; font-weight: bold;">-O3</td>
+    </tr>
+    <tr align="left">
+      <td style="font-weight: bold;">Compiler version</td>
+    </tr>
+    <tr>
+      <td style="text-align: center;" colspan="1" rowspan="2">CoreMark v1.0<br>
+                     (<a href="http://www.coremark.org/">official version</a>)</td>
+      <td style="text-align: left;">mspgcc v4.4.5</td>
+      <td style="text-align: center;">0.78</td>
+      <td style="text-align: center;">0.85</td>
+      <td style="text-align: center;">0.83</td>
+    </tr>
+    <tr>
+      <td style="text-align: left;">mspgcc v4.6.3</td>
+      <td style="text-align: center;">0.74</td>
+      <td style="text-align: center;">0.91</td>
+      <td style="text-align: center;">0.87</td>
+    </tr>
+  </tbody>
+</table>
+<br><br>
+</body></html>

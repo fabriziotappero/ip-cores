@@ -1,0 +1,187 @@
+/*===========================================================================*/
+/* Copyright (C) 2001 Authors                                                */
+/*                                                                           */
+/* This source file may be used and distributed without restriction provided */
+/* that this copyright statement is not removed from the file and that any   */
+/* derivative work contains the original copyright notice and the associated */
+/* disclaimer.                                                               */
+/*                                                                           */
+/* This source file is free software; you can redistribute it and/or modify  */
+/* it under the terms of the GNU Lesser General Public License as published  */
+/* by the Free Software Foundation; either version 2.1 of the License, or    */
+/* (at your option) any later version.                                       */
+/*                                                                           */
+/* This source is distributed in the hope that it will be useful, but WITHOUT*/
+/* ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or     */
+/* FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public       */
+/* License for more details.                                                 */
+/*                                                                           */
+/* You should have received a copy of the GNU Lesser General Public License  */
+/* along with this source; if not, write to the Free Software Foundation,    */
+/* Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA        */
+/*                                                                           */
+/*===========================================================================*/
+/*                            WATCHDOG TIMER                                 */
+/*---------------------------------------------------------------------------*/
+/* Test the Watdog timer:                                                    */
+/*                        - Watchdog mode.                                   */
+/*                                                                           */
+/* Author(s):                                                                */
+/*             - Olivier Girard,    olgirard@gmail.com                       */
+/*                                                                           */
+/*---------------------------------------------------------------------------*/
+/* $Rev: 141 $                                                                */
+/* $LastChangedBy: olivier.girard $                                          */
+/* $LastChangedDate: 2012-05-05 23:22:06 +0200 (Sat, 05 May 2012) $          */
+/*===========================================================================*/
+
+.include "pmem_defs.asm"
+
+.global main
+
+main:
+
+        /* --------------   WATCHDOG TEST:  STARTUP SEQUENCE  --------------- */
+
+	mov   &IFG1, r4       	;# Check if we come out of a watchdog reset
+	cmp #0x0000, r4
+	jeq   RD_WR_ACCESS
+
+	mov &DMEM_250, r15        ;# If yes, check RAM variable to see where to go next
+
+ 	cmp #0x0000, r15
+	jeq   RESET_64
+ 	cmp #0x1000, r15
+	jeq   RESET_512
+ 	cmp #0x2000, r15
+	jeq   RESET_8192
+ 	cmp #0x3000, r15
+	jeq   RESET_32768
+ 	cmp #0x4000, r15
+	jeq   CHECK_32768
+	
+	jmp  end_of_test
+
+	
+        /* --------------   WATCHDOG TEST:  RD/WR ACCESS    --------------- */
+RD_WR_ACCESS:
+	mov  #0x0000, &DMEM_250
+
+	mov  &WDTCTL, &DMEM_200
+	mov  #0x5aff, &WDTCTL
+	mov  &WDTCTL, &DMEM_202
+	mov  #0x5a55, &WDTCTL
+	mov  &WDTCTL, &DMEM_204
+	mov  #0x5aaa, &WDTCTL
+	mov  &WDTCTL, &DMEM_206
+	mov  #0x5a00, &WDTCTL
+	mov  &WDTCTL, &DMEM_208
+
+	mov  #0xDEAD, &WDTCTL	 ;# Generate reset through wrong password 
+	
+	jmp  end_of_test         ;# Force end of test if watchdog reset don't happen
+
+
+		
+        /* --------------   WATCHDOG TEST:  WATCHODG MODE /64  ------------ */
+RESET_64:
+	bic.b #0x01,   &IFG1
+	mov   #0x1000, &DMEM_250
+	
+	mov   #0x5a0b, &WDTCTL	 ;# Enable watchdog mode /64 & clear counter
+
+	mov   #0x0000, &DMEM_200
+wait_loop_64:
+	inc   &DMEM_200
+	jmp   wait_loop_64
+
+	jmp   end_of_test        ;# Force end of test if watchdog reset don't happen
+	
+
+
+        /* --------------   WATCHDOG TEST:  INTERVAL MODE /512  ------------ */
+RESET_512:
+	bic.b #0x01,   &IFG1
+	mov   #0x2000, &DMEM_250
+
+	mov   #0x5a0a, &WDTCTL	  ;# Enable watchdog mode /512 & clear counter
+
+	mov   #0x0000, &DMEM_202
+wait_loop_512:
+	inc   &DMEM_202
+	jmp   wait_loop_512
+	
+	jmp   end_of_test         ;# Force end of test if watchdog reset don't happen
+
+
+	
+        /* --------------   WATCHDOG TEST:  INTERVAL MODE /8192  ------------ */
+RESET_8192:
+	bic.b #0x01,   &IFG1
+	mov   #0x3000, &DMEM_250
+
+	mov   #0x5a09, &WDTCTL	  ;# Enable watchdog mode /8192 & clear counter
+
+	mov   #0x0000, &DMEM_204
+wait_loop_8192:
+	inc   &DMEM_204
+	jmp   wait_loop_8192
+	
+	jmp   end_of_test         ;# Force end of test if watchdog reset don't happen
+
+	
+	
+        /* --------------   WATCHDOG TEST:  INTERVAL MODE /32768  ------------ */
+RESET_32768:
+	bic.b #0x01,   &IFG1
+	mov   #0x4000, &DMEM_250
+
+	mov   #0x5a08, &WDTCTL	  ;# Enable interval mode /32768 & clear counter
+
+	mov   #0x0000, &DMEM_206
+wait_loop_32768:
+	inc   &DMEM_206
+	jmp   wait_loop_32768
+	
+	jmp   end_of_test         ;# Force end of test if watchdog reset don't happen
+
+	
+CHECK_32768:
+	bic.b #0x01,   &IFG1
+	mov   #0x5000, &DMEM_250
+	
+
+        /* ----------------------         END OF TEST        --------------- */
+end_of_test:
+	nop
+	br #0xffff
+
+
+        /* ----------------------      INTERRUPT ROUTINES    --------------- */
+
+WDOG_VECTOR:
+	bis  #0x3400, r5
+	mov    &IFG1, r6
+	mov       r4, r7
+	reti
+
+
+        /* ----------------------         INTERRUPT VECTORS  --------------- */
+
+.section .vectors, "a"
+.word end_of_test  ; Interrupt  0 (lowest priority)    <unused>
+.word end_of_test  ; Interrupt  1                      <unused>
+.word end_of_test  ; Interrupt  2                      <unused>
+.word end_of_test  ; Interrupt  3                      <unused>
+.word end_of_test  ; Interrupt  4                      <unused>
+.word end_of_test  ; Interrupt  5                      <unused>
+.word end_of_test  ; Interrupt  6                      <unused>
+.word end_of_test  ; Interrupt  7                      <unused>
+.word end_of_test  ; Interrupt  8                      <unused>
+.word end_of_test  ; Interrupt  9                      <unused>
+.word WDOG_VECTOR  ; Interrupt 10                      Watchdog timer
+.word end_of_test  ; Interrupt 11                      <unused>
+.word end_of_test  ; Interrupt 12                      <unused>
+.word end_of_test  ; Interrupt 13                      <unused>
+.word end_of_test  ; Interrupt 14                      NMI
+.word main         ; Interrupt 15 (highest priority)   RESET

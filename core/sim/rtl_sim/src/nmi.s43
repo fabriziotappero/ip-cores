@@ -1,0 +1,189 @@
+/*===========================================================================*/
+/* Copyright (C) 2001 Authors                                                */
+/*                                                                           */
+/* This source file may be used and distributed without restriction provided */
+/* that this copyright statement is not removed from the file and that any   */
+/* derivative work contains the original copyright notice and the associated */
+/* disclaimer.                                                               */
+/*                                                                           */
+/* This source file is free software; you can redistribute it and/or modify  */
+/* it under the terms of the GNU Lesser General Public License as published  */
+/* by the Free Software Foundation; either version 2.1 of the License, or    */
+/* (at your option) any later version.                                       */
+/*                                                                           */
+/* This source is distributed in the hope that it will be useful, but WITHOUT*/
+/* ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or     */
+/* FITNESS FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public       */
+/* License for more details.                                                 */
+/*                                                                           */
+/* You should have received a copy of the GNU Lesser General Public License  */
+/* along with this source; if not, write to the Free Software Foundation,    */
+/* Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA        */
+/*                                                                           */
+/*===========================================================================*/
+/*                 SINGLE-OPERAND ARITHMETIC: CALL  INSTRUCTION              */
+/*---------------------------------------------------------------------------*/
+/* Test the CALL  instruction.                                               */
+/*                                                                           */
+/* Author(s):                                                                */
+/*             - Olivier Girard,    olgirard@gmail.com                       */
+/*                                                                           */
+/*---------------------------------------------------------------------------*/
+/* $Rev: 19 $                                                                */
+/* $LastChangedBy: olivier.girard $                                          */
+/* $LastChangedDate: 2009-08-04 23:47:15 +0200 (Tue, 04 Aug 2009) $          */
+/*===========================================================================*/
+
+.include "pmem_defs.asm"
+
+.global main
+
+.macro LPM4
+ bis    #0x00F0, r2
+.endm
+.macro LPM4_exit
+ bic    #0x00F0, @r1
+.endm
+
+
+main:
+	mov   #DMEM_250, r1   ;# Initialize stack & Enable interrupts
+	eint
+
+	mov     #0x0000, r6   ;# R6 will be incremented with every NMI serviced interrupts
+        mov     #0x0000, r7   ;# Save Status register in NMI service routine
+        mov     #0x0000, r8   ;# Save Stack register in NMI service routine
+	
+        ;# Test NMI disabled
+	;#-----------------------
+	mov     #0x1000, r15
+
+	mov.b   &IFG1,   r14 	;# Check reset value
+	mov     #0x1001, r15
+
+	LPM4
+
+	mov     #0x0100, r9     ;# Wait a while while .v stimulus plays with NMI pin
+   wait_loop_nmi_dis:
+	dec     r9
+	jnz     wait_loop_nmi_dis
+
+	mov.b   &IFG1,   r13    ;# Check the flag
+	bic.b   #0x10,   &IFG1
+	mov.b   &IFG1,   r12
+	nop
+	nop
+	nop
+	nop
+	mov.b   &IFG1,   r11    ;# Wait a while and re-check the flag
+
+	mov     #0x1002, r15
+
+	
+        ;# Test NMI rising edge
+        ;#-----------------------
+	mov     #0x2000, r15
+
+	mov     #0x5a00, &WDTCTL  ; NMI Edge selection: rising
+	bic.b   #0x10,   &IFG1    ; Clear NMI flag
+	bis.b   #0x10,   &IE1     ; Enable NMI
+
+	mov     #0x2001, r15
+
+	LPM4
+
+	mov     #0x0100, r9     ;# Wait a while
+   wait_loop_nmi_re:
+	dec     r9
+	jnz     wait_loop_nmi_re
+
+	
+        ;# Test NMI falling edge
+        ;#-----------------------
+	mov     #0x3000, r15
+
+	bic.b   #0x10,   &IE1     ; Disable NMI
+	mov     #0x5a40, &WDTCTL  ; NMI Edge selection: falling
+	bic.b   #0x10,   &IFG1    ; Clear NMI flag
+	bis.b   #0x10,   &IE1     ; Enable NMI
+	mov     #0x0000, r6
+
+	mov     #0x3001, r15
+
+	LPM4
+
+	mov     #0x0100, r9     ;# Wait a while
+   wait_loop_nmi_fe:
+	dec     r9
+	jnz     wait_loop_nmi_fe
+
+
+        ;# Test NMI nested in maskable IRQ
+	;#---------------------------------
+	mov     #0x4000, r15
+
+	bic.b   #0x10,   &IE1     ; Disable NMI
+	mov     #0x5a00, &WDTCTL  ; NMI Edge selection: rising
+	bic.b   #0x10,   &IFG1    ; Clear NMI flag
+	bis.b   #0x10,   &IE1     ; Enable NMI
+	mov     #0x0000, r6
+
+	mov     #0x4001, r15
+
+	LPM4
+
+	mov     #0x0100, r9     ;# Wait a while
+   wait_loop_nmi_nested:
+	dec     r9
+	jnz     wait_loop_nmi_nested
+
+	mov     #0x4002, r15
+
+        /* ----------------------    END OF TEST   --------------- */
+end_of_test:
+	nop
+	br #0xffff
+
+
+
+        /* ----------------------    FUNCTIONS    --------------- */
+
+IRQ00_ROUTINE:
+        mov #0x5678, r10
+	add      r6, r10    ; If NMI was taken before, 1 will be added to R10
+	LPM4_exit
+	reti
+
+NMI_ROUTINE:
+        mov #0x1234, r10
+        inc          r6     ; Increment R6
+	cmp      #2, r6
+	jl   end_of_nmi
+	LPM4_exit
+    end_of_nmi:
+        mov       r2, r7    ; Save Status register
+        mov       r1, r8    ; Save Stack register
+	bic.b  #0x10, &IFG1 ; Clear NMI flag
+	bis.b  #0x10, &IE1  ; Enable NMI
+	reti
+
+
+        /* ----------------------         INTERRUPT VECTORS  --------------- */
+
+.section .vectors, "a"
+.word IRQ00_ROUTINE     ; Interrupt  0 (lowest priority)    <unused>
+.word end_of_test       ; Interrupt  1                      <unused>
+.word end_of_test       ; Interrupt  2                      <unused>
+.word end_of_test       ; Interrupt  3                      <unused>
+.word end_of_test       ; Interrupt  4                      <unused>
+.word end_of_test       ; Interrupt  5                      <unused>
+.word end_of_test       ; Interrupt  6                      <unused>
+.word end_of_test       ; Interrupt  7                      <unused>
+.word end_of_test       ; Interrupt  8                      <unused>
+.word end_of_test       ; Interrupt  9                      <unused>
+.word end_of_test       ; Interrupt 10                      Watchdog timer
+.word end_of_test       ; Interrupt 11                      <unused>
+.word end_of_test       ; Interrupt 12                      <unused>
+.word end_of_test       ; Interrupt 13                      <unused>
+.word NMI_ROUTINE       ; Interrupt 14                      NMI
+.word main              ; Interrupt 15 (highest priority)   RESET
