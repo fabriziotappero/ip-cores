@@ -1,0 +1,653 @@
+/*-----------------------------------------------------------------------------
+
+								Video Stream Scaler
+								
+							Author: David Kronstein
+							
+
+
+Copyright 2011, David Kronstein, and individual contributors as indicated
+by the @authors tag.
+
+This is free software; you can redistribute it and/or modify it
+under the terms of the GNU Lesser General Public License as
+published by the Free Software Foundation; either version 2.1 of
+the License, or (at your option) any later version.
+
+This software is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public
+License along with this software; if not, write to the Free
+Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
+02110-1301 USA, or see the FSF site: http://www.fsf.org.
+
+								
+-------------------------------------------------------------------------------
+
+Scales streaming video up or down in resolution. Bilinear and nearest neighbor
+modes are supported.
+
+Run-time adjustment of input and output resolution, scaling factors, and scale
+type. 
+
+-------------------------------------------------------------------------------
+
+Revisions
+
+V1.0.0	Feb 21 2011		Initial Release		David Kronstein
+Known bugs:
+Very slight numerical errors (+0/-2 LSb) in output data due to coefficient arithmetic.
+Impossible to notice without adjustment in video levels. Attempted to fix by setting
+coeff11 to 1.0 - other coefficients, but this caused timing issues.
+
+*/
+`default_nettype none
+
+module bilinearDemosaic #(
+//---------------------------Parameters----------------------------------------
+parameter	DATA_WIDTH =			8,		//Width of input/output data
+parameter	X_RES_WIDTH =			11,		//Widths of input/output resolution control signals
+parameter	Y_RES_WIDTH =			11,
+parameter	BUFFER_SIZE =			5,		//Depth of RFIFO
+//---------------------Non-user-definable parameters----------------------------
+parameter	BUFFER_SIZE_WIDTH =		((BUFFER_SIZE+1) <= 2) ? 1 :	//wide enough to hold value BUFFER_SIZE + 1
+									((BUFFER_SIZE+1) <= 4) ? 2 :
+									((BUFFER_SIZE+1) <= 8) ? 3 :
+									((BUFFER_SIZE+1) <= 16) ? 4 :
+									((BUFFER_SIZE+1) <= 32) ? 5 :
+									((BUFFER_SIZE+1) <= 64) ? 6 : 7
+)(
+//---------------------------Module IO-----------------------------------------
+//Clock and reset
+input wire							clk,
+input wire							rst,
+
+//User interface
+//Input
+input wire [DATA_WIDTH-1:0]			dIn,
+input wire							dInValid,
+output wire							nextDin,
+input wire							start,
+
+//Output
+output reg [DATA_WIDTH-1:0]
+									rOut,
+output reg [DATA_WIDTH-1:0]
+									gOut,
+output reg [DATA_WIDTH-1:0]
+									bOut,
+output reg							dOutValid,			//latency of x clock cycles after nextDout is asserted
+input wire							nextDout,
+
+//Control
+input wire [X_RES_WIDTH-1:0]	xRes,			//Resolution of input data minus 1
+input wire [Y_RES_WIDTH-1:0]	yRes
+
+);
+//-----------------------Internal signals and registers------------------------
+reg								advanceRead1;
+
+wire [DATA_WIDTH-1:0]	readData0;
+wire [DATA_WIDTH-1:0]	readData1;
+wire [DATA_WIDTH-1:0]	readData2;
+
+wire [X_RES_WIDTH-1:0]			readAddress;
+
+reg 							readyForRead;		//Indicates two full lines have been put into the buffer
+reg [Y_RES_WIDTH-1:0]	outputLine;			//which output video line we're on
+reg [X_RES_WIDTH-1:0]	outputColumn;		//which output video column we're on
+wire [BUFFER_SIZE_WIDTH-1:0] 	fillCount;			//Numbers used rams in the ram fifo
+reg                 			lineSwitchOutputDisable; //On the end of an output line, disable the output for one cycle to let the RAM data become valid
+reg								dOutValidInt;
+
+wire 							allDataWritten;		//Indicates that all data from input has been read in
+reg 							readState;
+
+//States for read state machine
+parameter RS_START = 0;
+parameter RS_READ_LINE = 1;
+
+//Read state machine
+//Controls the RFIFO(ram FIFO) readout and generates output data valid signals
+always @ (posedge clk or posedge rst or posedge start)
+begin
+	if(rst | start)
+	begin
+		outputLine <= 0;
+		outputColumn <= 0;
+		readState <= RS_START;
+		dOutValidInt <= 0;
+		lineSwitchOutputDisable <= 0;
+		advanceRead1 <= 0;
+	end
+	else
+	begin
+		case (readState)
+		  
+			RS_START:
+			begin
+				if(readyForRead)
+				begin
+					readState <= RS_READ_LINE;
+					dOutValidInt <= 1;
+				end
+			end
+
+			RS_READ_LINE:
+			begin
+			
+				//outputLine goes through all output lines, and the logic determines which input lines to read into the RRB and which ones to discard.
+				if(nextDout && dOutValidInt)
+				begin
+					if(outputColumn == xRes)
+					begin //On the last input pixel of the line
+
+						advanceRead1 <= 1;
+						if(fillCount < 3)		//If the RRB doesn't have enough data, stop reading it out
+							dOutValidInt <= 0;
+
+					
+						outputColumn <= 0;
+						outputLine <= outputLine + 1;
+						lineSwitchOutputDisable <= 1;
+					end
+					else
+					begin
+						//Advance the output pixel selection values except when waiting for the ram data to become valid
+						if(lineSwitchOutputDisable == 0)
+						begin
+							outputColumn <= outputColumn + 1;
+						end
+						advanceRead1 <= 0;
+						lineSwitchOutputDisable <= 0;
+					end
+				end
+				else //else from if(nextDout && dOutValidInt)
+				begin
+					advanceRead1 <= 0;
+					lineSwitchOutputDisable <= 0;
+				end
+				
+				//Once the RRB has enough data, let data be read from it. If all input data has been written, always allow read
+				if(fillCount >= 3 && dOutValidInt == 0 || allDataWritten)
+				begin
+					if(!advanceRead1)
+					begin
+						dOutValidInt <= 1;
+						lineSwitchOutputDisable <= 0;
+					end
+				end
+			end//state RS_READ_LINE:
+		endcase
+		
+	end
+end
+
+assign readAddress = outputColumn;
+
+//Generate dOutValid signal, delayed to account for delays in data path
+reg dOutValid_1;
+reg dOutValid_2;
+reg dOutValid_3;
+
+always @(posedge clk or posedge rst)
+begin
+	if(rst)
+	begin
+		dOutValid_1 <= 0;
+		dOutValid_2 <= 0;
+		dOutValid_3 <= 0;
+		dOutValid <= 0;
+	end
+	else
+	begin
+		dOutValid_1 <= nextDout && dOutValidInt && !lineSwitchOutputDisable;
+		dOutValid_2 <= dOutValid_1;
+		dOutValid_3 <= dOutValid_2;
+		dOutValid <= dOutValid_3;
+	end
+end
+
+
+wire		advanceWrite;
+
+reg [1:0]	writeState;
+
+reg [X_RES_WIDTH-1:0] writeColCount;
+reg [Y_RES_WIDTH-1:0] writeRowCount;
+reg			enableNextDin;
+reg			forceRead;
+
+//Write state machine
+//Controls writing scaler input data into the RRB
+
+parameter	WS_START = 0;
+parameter	WS_DISCARD = 1;
+parameter	WS_READ = 2;
+parameter	WS_DONE = 3;
+
+//Control write and address signals to write data into ram FIFO
+always @ (posedge clk or posedge rst or posedge start)
+begin
+	if(rst | start)
+	begin
+		writeState <= WS_START;
+		enableNextDin <= 0;
+		readyForRead <= 0;
+		writeRowCount <= 0;
+		writeColCount <= 0;
+		forceRead <= 0;
+	end
+	else
+	begin
+		case (writeState)
+		
+			WS_START:
+			begin
+				enableNextDin <= 1;
+				writeState <= WS_READ;
+			end
+			
+			WS_READ:
+			begin
+				if(dInValid & nextDin)
+				begin
+					if(writeColCount == xRes)
+					begin	//Occurs on the last pixel in the line
+						
+						//Once writeRowCount is >= 3, data is ready to start being output.
+						if(writeRowCount[1:0] == 2'h3)
+							readyForRead <= 1;
+						
+						if(writeRowCount == yRes)	//When all data has been read in, stop reading.
+						begin
+							writeState <= WS_DONE;
+							enableNextDin <= 0;
+							forceRead <= 1;
+						end
+						
+						writeColCount <= 0;
+						writeRowCount <= writeRowCount + 1;
+					end
+					else
+					begin
+						writeColCount <= writeColCount + 1;
+					end
+				end
+			end
+			
+			WS_DONE:
+			begin
+				//do nothing, wait for reset
+			end
+			
+		endcase
+	end
+end
+
+
+wire leftMask =		outputColumn == 0;
+wire rightMask =	outputColumn == xRes;
+wire topMask =		outputLine == 0;
+wire bottomMask =	outputLine == yRes;
+
+reg [DATA_WIDTH-1:0]    pixel [2:0][2:0];    //[y, x]
+wire [DATA_WIDTH-1:0]    pixelMasked [2:0][2:0];    //[y, x]
+
+always @ (posedge clk or posedge rst or posedge start)
+begin
+   if(rst | start)
+   begin
+       pixel[0][0] <= 0;
+       pixel[0][1] <= 0;
+       pixel[0][2] <= 0;
+       pixel[1][0] <= 0;
+       pixel[1][1] <= 0;
+       pixel[1][2] <= 0;
+       pixel[2][0] <= 0;
+       pixel[2][1] <= 0;
+       pixel[2][2] <= 0;
+   end
+   else
+   begin
+       pixel[0][0] <= readData0;
+       pixel[0][1] <= pixel[0][0];
+       pixel[0][2] <= pixel[0][1];
+
+       pixel[1][0] <= readData1;
+       pixel[1][1] <= pixel[1][0];
+       pixel[1][2] <= pixel[1][1];
+       
+       pixel[2][0] <= readData2;
+       pixel[2][1] <= pixel[2][0];
+       pixel[2][2] <= pixel[2][1];                
+   end
+end
+
+assign pixelMasked[0][0] = pixel[0][0] & {DATA_WIDTH{leftMask}} & {DATA_WIDTH{topMask}};
+assign pixelMasked[0][1] = pixel[0][1] & {DATA_WIDTH{topMask}};
+assign pixelMasked[0][2] = pixel[0][2] & {DATA_WIDTH{rightMask}} & {DATA_WIDTH{topMask}};
+assign pixelMasked[1][0] = pixel[1][0] & {DATA_WIDTH{leftMask}};
+assign pixelMasked[1][1] = pixel[1][1];
+assign pixelMasked[1][2] = pixel[1][2] & {DATA_WIDTH{rightMask}};
+assign pixelMasked[2][0] = pixel[2][0] & {DATA_WIDTH{leftMask}} & {DATA_WIDTH{bottomMask}};
+assign pixelMasked[2][1] = pixel[2][1] & {DATA_WIDTH{bottomMask}};
+assign pixelMasked[2][2] = pixel[2][2] & {DATA_WIDTH{rightMask}} & {DATA_WIDTH{bottomMask}};
+
+wire [2:0] sidesMasked = ~leftMask + ~rightMask + ~topMask + ~bottomMask;	//Number of sides masked, either 0, 1 or 2
+
+
+
+wire [DATA_WIDTH+1:0] blend1Sum_1 = pixelMasked[1][0] + pixelMasked[1][2] + pixelMasked[0][1] + pixelMasked[2][1];
+reg [DATA_WIDTH+1:0] blend1SumOver3;
+reg [DATA_WIDTH+1:0] blend1, blend2, blend3, blend4, blend5, blend2_1, blend3_1, blend4_1, blend5_1;
+
+always @ (posedge clk or posedge rst or posedge start)
+begin
+	if(rst | start)
+	begin
+		blend1SumOver3 <= 0;
+		blend1Sum <= 0;
+		blend1 <= 0;
+		blend2 <= 0;
+		blend3 <= 0;
+		blend4 <= 0;
+	end
+	else
+	begin
+		blend1SumOver3 <= (blend1Sum_1 >> 2) + (blend1Sum_1 >> 4) + (blend1Sum_1 >> 6) + (blend1Sum_1 >> 10);	//Constant multiply by 1/3 (approximate, but close enough)
+		blend1Sum <= blend1Sum_1;
+		blend1 <= ((sidesMasked == 0) ? blend1Sum >> 2 : (sidesMasked == 1) ? blend1SumOver3 : blend1Sum >> 1);	// divide by 4, 3, 2
+		
+		blend2_1 <= (pixelMasked[0][0] + pixelMasked[2][2] + pixelMasked[0][2] + pixelMasked[2][0]) >> ((sidesMasked == 0) ? 2 : (sidesMasked == 1) ? 1 : 0);	// divide by 4, 2, 1
+		blend3_1 <= (pixelMasked[1][0] + pixelMasked[1][2]) >> ((!leftMask || !rightMask) ? 1 : 2);	//divide by 2, 1
+		blend4_1 <= (pixelMasked[0][1] + pixelMasked[2][1]) >> ((!topMask || !bottomMask) ? 1 : 2);	//divide by 2, 1
+		blend5_1 <= pixelMasked[1][1];	//Straight through
+		
+		blend2 <= blend2_1;
+		blend3 <= blend3_1;
+		blend4 <= blend4_1;
+		blend5 <= blend5_1;
+		
+	end
+end
+
+
+//0 = R, 1 = G, 2 = B
+
+wire [1:0] pixel0 = 0; 
+wire [1:0] pixel1 = 1; 
+wire [1:0] pixel2 = 1; 
+wire [1:0] pixel3 = 2; 
+
+wire [1:0]	quadPosition = {outputLine[0], outputColumn[0]};
+wire [1:0]	blendModeSelect =	quadPosition == 0 ? pixel0 :
+								quadPosition == 1 ? pixel1 :
+								quadPosition == 2 ? pixel2 :
+													pixel3;
+
+always @ (posedge clk or posedge rst or posedge start)
+begin
+	if(rst | start)
+	begin
+		rOut <= 0;
+		gOut <= 0;
+		bOut <= 0;
+	end
+	else
+	begin
+		case(blendModeSelect)
+		0:	//Red filter
+		begin
+			rOut <= blend5;	// Straight through
+			gOut <= blend1;	// +
+			bOut <= blend2;	// X
+		end
+		
+		1:	//Green filter
+		begin
+			rOut <= blend4;	// |
+			gOut <= blend5;	// Straight through
+			bOut <= blend3;	// --
+		end
+		2:	//Blue filter
+		begin
+			rOut <= blend2;	// X
+			gOut <= blend1;	// +
+			bOut <= blend5;	// Straight through
+		end
+		
+		
+		endcase
+		
+	end
+end
+
+
+
+
+
+
+
+//Advance write whenever we have just written a valid line (discardInput == 0)
+//Generate this signal one earlier than discardInput above that uses the same conditions, to advance the buffer at the right time.
+assign advanceWrite =	(writeColCount == xRes) & dInValid & nextDin;
+assign allDataWritten = writeState == WS_DONE;
+assign nextDin = (fillCount < BUFFER_SIZE) & enableNextDin;
+
+ramFifo #(
+	.DATA_WIDTH( DATA_WIDTH ),
+	.ADDRESS_WIDTH( X_RES_WIDTH ),	//Controls width of RAMs
+	.BUFFER_SIZE( BUFFER_SIZE )		//Number of RAMs
+) ramRB (
+	.clk( clk ),
+	.rst( rst | start ),
+	.advanceRead1( advanceRead1 ),
+	.advanceRead2( 0 ),
+	.advanceWrite( advanceWrite ),
+
+	.writeData( dIn ),		
+	.writeAddress( writeColCount ),
+	.writeEnable( dInValid & nextDin & enableNextDin & ~discardInput ),
+	.fillCount( fillCount ),
+	
+	.readData0( readData0 ),
+	.readData1( readData1 ),
+	.readData2( readData2 ),
+	.readAddress( readAddress )
+);
+
+endmodule	//scaler
+
+
+
+//---------------------------Ram FIFO (RFIFO)-----------------------------
+//FIFO buffer with rams as the elements, instead of data
+//One ram is filled, while two others are simultaneously read out.
+//Four neighboring pixels are read out at once, at the selected RAM and one line down, and at readAddress and readAddress + 1
+module ramFifo #(
+	parameter DATA_WIDTH = 8,
+	parameter ADDRESS_WIDTH = 8,
+	parameter BUFFER_SIZE = 3,
+	parameter BUFFER_SIZE_WIDTH =	((BUFFER_SIZE+1) <= 2) ? 1 :	//wide enough to hold value BUFFER_SIZE + 1
+									((BUFFER_SIZE+1) <= 4) ? 2 :
+									((BUFFER_SIZE+1) <= 8) ? 3 :
+									((BUFFER_SIZE+1) <= 16) ? 4 :
+									((BUFFER_SIZE+1) <= 32) ? 5 :
+									((BUFFER_SIZE+1) <= 64) ? 6 : 7
+)(
+	input wire 						clk,
+	input wire 						rst,
+	input wire						advanceRead1,	//Advance selected read RAM by one
+	input wire						advanceRead2,	//Advance selected read RAM by two
+	input wire						advanceWrite,	//Advance selected write RAM by one	
+
+	input wire [DATA_WIDTH-1:0]		writeData,
+	input wire [ADDRESS_WIDTH-1:0]	writeAddress,
+	input wire						writeEnable,
+	output reg [BUFFER_SIZE_WIDTH-1:0]
+									fillCount,
+
+	//										yx
+	output wire [DATA_WIDTH-1:0]	readData0,		//Read from deepest RAM (earliest data), at readAddress
+	output wire [DATA_WIDTH-1:0]	readData1,		//Read from second deepest RAM (second earliest data), at readAddress
+	output wire [DATA_WIDTH-1:0]	readData2,		//Read from second deepest RAM (second earliest data), at readAddress
+	input wire [ADDRESS_WIDTH-1:0]	readAddress
+);
+
+reg [BUFFER_SIZE-1:0]		writeSelect;
+reg [BUFFER_SIZE-1:0]		readSelect;
+
+//Read select ring register
+always @(posedge clk or posedge rst)
+begin
+	if(rst)
+		readSelect <= 1;
+	else
+	begin
+		if(advanceRead1)
+		begin
+			readSelect <= {readSelect[BUFFER_SIZE-2 : 0], readSelect[BUFFER_SIZE-1]};
+		end
+		else if(advanceRead2)
+		begin
+			readSelect <= {readSelect[BUFFER_SIZE-3 : 0], readSelect[BUFFER_SIZE-1:BUFFER_SIZE-2]};
+		end
+	end
+end
+
+//Write select ring register
+always @(posedge clk or posedge rst)
+begin
+	if(rst)
+		writeSelect <= 1;
+	else
+	begin
+		if(advanceWrite)
+		begin
+			writeSelect <= {writeSelect[BUFFER_SIZE-2 : 0], writeSelect[BUFFER_SIZE-1]};
+		end
+	end
+end
+
+wire [DATA_WIDTH-1:0] ramDataOut [2**BUFFER_SIZE-1:0];
+
+//Generate to instantiate the RAMs
+generate
+genvar i;
+	for(i = 0; i < BUFFER_SIZE; i = i + 1)
+		begin : ram_generate
+
+			ramDualPort #(
+				.DATA_WIDTH( DATA_WIDTH ),
+				.ADDRESS_WIDTH( ADDRESS_WIDTH )
+			) ram_inst_i(
+				.clk( clk ),
+				
+				//Port A is written to as well as read from. When writing, this port cannot be read from.
+				//As long as the buffer is large enough, this will not cause any problem.
+				.addrA( writeAddress ),
+				.dataA( writeData ),													
+				.weA( writeEnable ),
+				.qA(  ),
+				
+				.addrB( readAddress ),
+				.dataB( 0 ),
+				.weB( 1'b0 ),
+				.qB( ramDataOut[2**i] )
+			);
+		end
+endgenerate
+
+//Select which ram to read from
+wire [BUFFER_SIZE-1:0]	readSelect0 = readSelect;
+wire [BUFFER_SIZE-1:0]	readSelect1 = (readSelect << 1) | readSelect[BUFFER_SIZE-1];
+wire [BUFFER_SIZE-1:0]	readSelect2 = (readSelect << 2) | readSelect[BUFFER_SIZE-2];
+
+//Steer the output data to the right ports
+assign readData0 = ramDataOut[readSelect0];
+assign readData1 = ramDataOut[readSelect1];
+assign readData2 = ramDataOut[readSelect2];
+
+
+//Keep track of fill level
+always @(posedge clk or posedge rst)
+begin
+	if(rst)
+	begin
+		fillCount <= 0;
+	end
+	else
+	begin
+		if(advanceWrite)
+		begin
+			if(advanceRead1)
+				fillCount <= fillCount;
+			else if(advanceRead2)
+				fillCount <= fillCount - 1;
+			else
+				fillCount <= fillCount + 1;
+		end
+		else
+		begin
+			if(advanceRead1)
+				fillCount <= fillCount - 1;
+			else if(advanceRead2)
+				fillCount <= fillCount - 2;
+			else
+				fillCount <= fillCount;
+		end
+	end
+end
+
+endmodule //ramFifo
+
+
+//Dual port RAM
+module ramDualPort #(
+	parameter DATA_WIDTH = 8,
+	parameter ADDRESS_WIDTH = 8
+)(
+	input wire [(DATA_WIDTH-1):0] dataA, dataB,
+	input wire [(ADDRESS_WIDTH-1):0] addrA, addrB,
+	input wire weA, weB, clk,
+	output reg [(DATA_WIDTH-1):0] qA, qB
+);
+
+	// Declare the RAM variable
+	reg [DATA_WIDTH-1:0] ram[2**ADDRESS_WIDTH-1:0];
+
+	//Port A
+	always @ (posedge clk)
+	begin
+		if (weA) 
+		begin
+			ram[addrA] <= dataA;
+			qA <= dataA;
+		end
+		else 
+		begin
+			qA <= ram[addrA];
+		end 
+	end 
+
+	//Port B
+	always @ (posedge clk)
+	begin
+		if (weB) 
+		begin
+			ram[addrB] <= dataB;
+			qB <= dataB;
+		end
+		else 
+		begin
+			qB <= ram[addrB];
+		end 
+	end
+
+endmodule //ramDualPort
+
+`default_nettype wire
