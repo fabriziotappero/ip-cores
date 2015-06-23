@@ -1,0 +1,142 @@
+==========================
+| Component Descriptions |
+==========================
+
+1.0  Timing Closure Components
+
+The timing closure components are intended for designing custom blocks and pipeline
+stages.  Each block provides timing closure for block outputs, or for block inputs
+and outputs.
+
+The two most common design methodologies today are registered-output (RO) and 
+registered-input-registered-output (RIRO).  The library is generally built around
+an assumption of an RO design style but also supports RIRO.
+
+1.1  sd_input
+
+When using an RO design style, the sd_input provides timing closure for a block's
+consumer interface.  The only block output for the consumer interface is c_drdy.
+sd_input also provides a one-word buffer on c_data, but doesn't provide timing
+closure for this input.
+
+1.2  sd_output
+
+The sd_output is the companion block to sd_input, providing timing closure for a
+block's producer interface (or interfaces).  It provides timing closure on p_srdy
+and p_data.
+
+1.3  sd_iohalf
+
+The sd_iohalf can be used as either an input or output timing closure block, as
+it closes timing on all of its inputs and outputs.  It has an efficiency of 0.5,
+meaning it can only accept data on at most every other clock, so it is useful for
+low-rate interfaces.
+
+1.4 sd_iofull
+
+Provided for completeness, this block can be used with a RIRO design style to
+provide timing closure for all of a block's inputs and outputs.  Combines an
+sd_input and sd_output.
+
+2.0 Buffers
+
+The buffers section of the library contains FIFOs for rate-matching and storage.
+Each buffer consists of a "head" (write) block, and a "tail" (read) block, so that
+the user can construct their own FIFOs from the blocks provided without having to
+modify the library code.  Each buffer is built around a synthesizable memory-like
+block, so the buffers can be synthesized as-is or the top-level blocks can be
+used as a template for creating your own FIFO around a library-specific memory.
+
+ECC generate/correct blocks can also be placed inside this wrapper if error
+correction is needed (see https://sourceforge.net/projects/xtgenerate/ for ECC
+generator/checker).
+
+2.1 sd_fifo_s
+
+This "small" (or "sync") FIFO is used for rate-matching between blocks.  It also 
+has built-in grey code conversion, so it can be used for crossing clock domains.  
+When the "async" parameter is set, the FIFO switches to using grey code pointers, 
+and instantiates double-sync flops between the head and tail blocks.
+
+sd_fifo_s can only be used in natural powers of 2, due to the async support.
+
+2.2 sd_fifo_b
+
+This "big" FIFO supports non-power-of-2 sizes, as well as abort/commit behavior on
+both of its interfaces.  It is intended for packet FIFOs where the writer may want
+to "forget" about a partially-written packet when an error is detected.  It is also
+useful for blocks which want to read ahead in the FIFO without actually removing data
+(p_abort rewinds the read pointer), or for retransmission.
+
+3.0 Forks and Joins
+
+This section provides pipeline fork (split) and join blocks.  A fork refers to any
+block which has multiple producer interfaces, with usually a single consumer
+interface.  A join is the corresponding block with multiple consumer interfaces and
+a single producer interface.
+
+3.1 sd_mirror
+
+This block is used to implement a mirrored fork, i.e. one in which all producer
+interfaces carry the same data.  This is useful in control pipelines when a single
+item of data needs to go to multiple blocks, which may all acknowledge at different
+times.
+
+It has an optional c_dst_vld input, which can be used to "steer" data to one or more
+destinations, instead of all of them.  c_dst_vld should be asserted with c_srdy, if
+it is being used.  If not used, tie this input to 0 and it will mirror to all 
+outputs.
+
+Note that sd_mirror is low-throughput, as it waits until all downstream blocks have
+acknoweldged before accepting another word.
+
+3.2 sd_rrmux
+
+This block implements a round-robin arbiter/mux.  It has multiple modes
+with options on whether a grant implies that input will "hold" the grant, or
+whether it moves on.
+
+Mode 0 multiplexes between single words of data.  Mode 1 allows an interface to burst,
+so once the interface begins transmitting it can transmit until it deasserts srdy.
+
+Mode 2 is for multiplexing packets, or other data where multiple words need to be
+kept together.  Once srdy is asserted, the block will not switch inputs until the
+end pattern is seen, even if srdy is deasserted.
+
+Also has a slow (1 cycle per input) and fast (immediate) arb mode.
+
+Validation note:  modes 1 and 2 have not been verified to date.
+
+4.0 Utility
+
+This is intended for blocks which do not fit into one of the above categories.  
+Utility blocks could be items like a switch fabric, packet ring, or a scoreboard.
+
+4.1 sd_ring_node
+
+This is a building block for a unidirectional ring.  Data is placed on the ring
+using the consumer interface and is removed on the producer interface.  sd_ring_node
+supports only point-to-point single-transaction processing (single transaction meaning
+that subsequent requests from the same source are treated as independent, and other
+requests from other nodes may be interleaved at the destination).
+
+4.2 sd_scoreboard
+
+This implements a "scoreboard", or centralized repository of information about a number
+of items.  The scoreboard has a single consumer and producer interface.  The user
+is expected to use a pipeline join block (such as sd_rrslow) to serialize requests.
+
+The scoreboard has a transaction id that it carries with each read request that can be
+used to steer the results back to the requestor.  For example, the "p_grant" output from
+rrslow can be connected to the c_txid input, and the p_txid output can be connected to
+the c_dst_vld input of sd_mirror, giving multi-read/multi-write capability.
+
+The scoreboard supports both read and write, where write can also use a mask to implement
+partial updates.  If the mask is set to anything other than all 1's, the scoreboard performs
+a read-modify-write to change only the unmasked portion of the data.
+
+5.0 Memory
+
+Contains synthesizable memories implemented as flops.  These correspond to the
+commonly used registered-output memories available in most technologies.
+
