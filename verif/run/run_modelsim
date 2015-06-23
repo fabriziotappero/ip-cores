@@ -1,0 +1,147 @@
+#!/bin/csh -f
+#
+# test all programs with ethernet controler
+#
+
+set failedm = 0; 
+set failedi = 0;
+set failedx = 0;
+set all_testsm = 0;
+set all_testsi = 0;
+set all_testsx = 0;
+
+set misc_tests=(gmac_test_2 gmac_test_1 uart_test_1 spi_test_1)
+#set misc_tests=( )
+
+set risc_ext_tests=(fib divmul sort gcd cast xram)
+
+set risc_int_tests=(fib divmul sort gcd cast xram)
+
+echo " Compiling with MODELSIM "
+
+./compile.modelsim | tee ../log/complie.log
+
+
+if ($status != 0) then
+  echo "#### Compile : FAILED"
+  echo ""
+  cat ../log/complie.log
+  exit
+else
+  echo "#### Compile : PASSED"
+endif
+
+
+echo ""
+echo "###########################################"
+echo " Runing GMAC/SPI/UART test programs "
+echo "###########################################"
+
+set i = 0;
+        echo "###########################################"
+foreach misc_test ($misc_tests)
+	@ i += 1;
+	#echo ""
+	echo "### Running test ${i}: ${misc_test}"
+
+        vsim -do run.do -c tb_top +${misc_test} | tee  ../log/run.log
+	if ($status != 0) then
+	  cat ../log/run.log
+	  exit
+	else if (`tail ../log/run.log | grep PASSED` == "") then
+	  echo "### test ${i}: ${misc_test} --> FAILED"
+          @ failedm += 1;
+          @ all_testsm += 1;
+        else
+	  echo "### test ${i}: ${misc_test} --> PASSED"
+          @ all_testsm += 1;
+	endif
+  
+        mv ../log/run.log ../log/${misc_test}.log
+
+
+end
+    echo "###########################################"
+
+
+set i = 0;
+echo ""
+echo "###########################################"
+echo "###  Test Logs                            "
+foreach misc_test ($misc_tests)
+	  @ i += 1;
+	  echo "   test ${i}: ../log/${misc_test}.log"
+
+end
+    echo "###########################################"
+
+echo ""
+echo ""
+echo "###########################################"
+echo "### tesing 8051 programs from external rom"
+echo "###########################################"
+
+set i = 0;
+        echo "###########################################"
+foreach risc_ext_test ($risc_ext_tests)
+	@ i += 1;
+	#echo ""
+
+	\cp ../testcase/dat/${risc_ext_test}.dat ./dat/oc8051_xrom.in
+        vsim -do run.do -c tb_top +EXTERNAL_ROM | tee  ../log/run.log
+	if ($status != 0) then
+	  cat ../log/run.log
+	  exit
+	else if (`tail ../log/run.log | grep Passed` == "") then
+	  echo "### test ${i}: ${risc_ext_test} --> FAILED"
+          @ failedx += 1;
+          @ all_testsx += 1;
+        else
+	  echo "### test ${i}: ${risc_ext_test} --> PASSED"
+          @ all_testsx += 1;
+	endif
+        mv ../log/run.log ../log/ext_${risc_ext_test}.log
+
+end
+        echo "###########################################"
+
+
+echo ""
+echo ""
+echo "###########################################"
+echo "### tesing 8051 programs from internal rom"
+echo "###########################################"
+
+set i = 0;
+        echo "###########################################"
+foreach risc_int_test ($risc_int_tests)
+	@ i += 1;
+	#echo ""
+
+	\cp ../testcase/dat/${risc_int_test}.dat ./dat/oc8051_xrom.in
+        vsim -do run.do -c tb_top +INTERNAL_ROM | tee  ../log/run.log
+	if ($status != 0) then
+	  cat ../log/run.log
+	  exit
+	else if (`tail ../log/run.log | grep Passed` == "") then
+	  echo "### test ${i}: ${risc_int_test} --> FAILED"
+          @ failedi += 1;
+          @ all_testsi += 1;
+        else
+	  echo "### test ${i}: ${risc_int_test} --> PASSED"
+          @ all_testsi += 1;
+	endif
+        mv ../log/run.log ../log/int_${risc_int_test}.log
+
+end
+        echo "###########################################"
+
+echo ""
+echo "###########################################"
+echo "###  Test Summary                          "
+echo "### "
+echo "### Failed $failedm of $all_testsm misc tests"
+echo "### Failed $failedx of $all_testsx external rom tests"
+echo "### Failed $failedi of $all_testsi internal rom tests"
+echo "###########################################"
+
