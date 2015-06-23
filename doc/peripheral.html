@@ -1,0 +1,246 @@
+<html>
+<title>
+SSBCC -- PERIPHERAL
+</title>
+<body>
+<tt>Copyright 2012, Sinclair, R.F., Inc.</tt><br/>
+<h1>Table of Contents</h1>
+  <a href="#introduction">Introduction</a><br/>
+  <a href="#command">Command</a><br/>
+  <a href="#cores">9x8&nbsp;Cores</a><br/>
+  <a href="#new">Creating&nbsp;new&nbsp;Peripherals</a><br/>
+  <a href="#recommendations">Reccomendations</a><br/>
+<h1><a name="introduction">Introduction</a></h1>
+  Within the processor configuration command, the PERIPHERAL configuration is used
+    to incorporate peripherals such as UARTs, TBD into the micro controller
+    core.<br/><br/>
+  This document describes the general format of the peripheral configuration
+    command, lists peripherals for the 9x8 core, and documents how to add
+    additional peripherals to the computer compiler.<br/><br/>
+<h1><a name="command">Command</a></h1>
+  TODO
+<h1><a name="cores">9x8&nbsp;Cores</a></h1>
+  TODO
+<h1><a name="new">Creating&nbsp;new&nbsp;Peripherals</a></h1>
+  New peripherals are created using a Python class with the following member
+    functions:
+  <h2>__init__(self,config,param_list):</h2>
+    Where:<br/>
+    <ul>
+      <li><tt>config</tt> is the computer compiler configuration state when
+        the peripheral configuration command is encountered.<br/><br/></li>
+      <li><tt>param_list</tt> is a list of the space separated parameters on
+        the peripheral
+        configuration command following the name of the peripheral.  This list
+        is used to provide mandatory and optional parameters to the
+        core.  For example, the <tt>UART_Tx</tt> peripheral requires
+        information to generate the desired baud rate and allows an optional
+        name to facilitate distinguishing between multiple instances of the
+        same peripheral.<br/><br/>
+        For example, the parameters in the peripheral configuration
+        command<br/><br/>
+        <tt>&nbsp;&nbsp;PERIPHERAL&nbsp;name&nbsp;param1&nbsp;\<br/>
+          &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;param2=options&nbsp;\<br/>
+          &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;param3="a&nbsp;string"&nbsp;\<br/>
+          &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;param4=value</tt><br/><br/>
+        is converted to the space delimited string<br/><br/>
+        <tt>&nbsp;&nbsp;param1&nbsp;param2=option&nbsp;param3="a&nbsp;string"&nbsp;param4=value</tt><br/><br/>
+        which is then provided to the <tt>__init__</tt> function as a
+        <tt>list()</tt> with the following four tuples:<br/><br/>
+        <tt>&nbsp;&nbsp;('param1',)<br/>
+          &nbsp;&nbsp;('param2','option',)<br/>
+          &nbsp;&nbsp;('param3','"a&nbsp;string"',)<br/>
+          &nbsp;&nbsp;('param4','value',)</tt><br/><br/>
+        These tuples can then be parsed within the <tt>__init__</tt> function to
+        intialize the object.<br/>
+        </li>
+      </ul>
+    This function should store instantiation specific information in
+      <tt>self</tt>.<br/><br/>
+    Inputs from the FPGA fabric to the micro controller module are added by
+      appending a tuple describing the input.  The tuple consists of the
+      following:<br/>
+      <ol>
+        <li>signal name</li>
+        <li>signal width</li>
+        <li>signal type:  the string <tt>'input'</tt><br/></li>
+        </ol>
+    For example, to add an 8-bit input named "<tt>i_new_input</tt>", use the
+      following statement:<br/><br/>
+      <tt>&nbsp;&nbsp;config['ios'].append(('i_new_input',8,'input',));</tt><br/><br/>
+    Outputs from the micro controller to the FPGA fabric are added using the
+      signal type <tt>'output'</tt>.  For example, to add an 8-bit output
+      named "<tt>o_new_output</tt>", use the following statement:<br/><br/>
+      <tt>&nbsp;&nbsp;config['ios'].append(('o_new_output',8,'output',));</tt><br/><br/>
+    Similarly, to add a 16-bit tri-state input/output signal, use the
+      followiing statement:<br/><br/>
+      <tt>&nbsp;&nbsp;config['ios'].append(('io_new_signal',16,'inout',));</tt><br/><br/>
+    To add a signal or a composite signal output from the micro controller
+      core to the peripheral two actions are required.  These can be done in
+      either order, but it may make more sense to maintainers or subsequent
+      users to do them in the following order:<br/><br/>
+      <ol>
+        <li>Add the output port to the micro controller core:<br/><br/>
+          This consists of adding a tuple to <tt>config['outports']</tt>.  The
+          first element of this tuple is the name of the outport.  The
+          subsequent elements of this tuple are tuples describing the
+          signal(s) associated with the outport.  These tuples have the
+          following ordered format:<br/><br/>
+          <ol>
+            <li>signal name</li>
+            <li>signal width</li>
+            <li>signal type:  <tt>'data'</tt> or <tt>'strobe'</tt><br/>
+              Note:  Signal type <tt>'data'</tt> is used to relay single or
+              multiple bit data from the micro controller core to the
+              peripheral.  Signal type <tt>'strobe'</tt> generates a single
+              bit strobe during the clock cycle immediately following the
+              <tt>outport</tt> instruction.<br/><br/>
+              </li>
+            </ol>
+        <li>Add these same signals to <tt>config['signals']</tt>, one at a
+          time using tuples with the following ordered format:<br/><br/>
+          <ol>
+            <li>signal name</li>
+            <li>signal width<br/></li>
+            </ol>
+          </li>
+        </ol>
+    For example, to add two outputs from the micro controller core to a
+      multiplier, use the following:<br/><br/>
+      <tt>&nbsp;&nbsp;config['outports'].append(('O_MULT_A',<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;('s_mult_a',8,'data'),<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;));<br/>
+      &nbsp;&nbsp;config['outports'].append(('O_MULT_B',<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;('s_mult_b',8,'data'),<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;));<br/>
+      &nbsp;&nbsp;config['signals'].append(('s_mult_a',8,));<br/>
+      &nbsp;&nbsp;config['signals'].append(('s_mult_b',8,));</tt><br/><br/>
+    As&nbsp;a second example, to add an output from the micro controller core
+      to the input side of an 8-bit FIFO, use the following.  Here, the signal
+      <tt>s_fifo_data</tt> will be the data to write to the FIFO and
+      <tt>s_fifo_wr</tt> will be a strobe that is set high during the clock
+      cycle immediately following the <tt>outport</tt> instruction.<br/><br/>
+      <tt>&nbsp;&nbsp;config['outports'].append(('O_FIFO',<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;('s_fifo_data',8,'data'),<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;('s_fifo_wr',1,'strobe'),<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;));<br/>
+      &nbsp;&nbsp;config['signals'].append(('s_fifo_data',8,));<br/>
+      &nbsp;&nbsp;config['signals'].append(('s_fifo_wr',1,));</tt><br/><br/>
+    Adding a signal or a composite signal from the peripheral to the micro
+      controller core requires two similar actions:<br/>
+      <ol>
+        <li>Add the input port to the micro controller core:<br/><br/>
+          This consists of adding a tuple to <tt>config['inports']</tt>.  The
+          first element of this tuple is the name of the inport.  The
+          subsequent elements of this tuple are tuples describing the
+          signal(s) associated with the inport.  These tuples have the
+          following ordered format:<br/><br/>
+          <ol>
+            <li>signal name</li>
+            <li>signal width</li>
+            <li>signal type:  <tt>'data'</tt>, <tt>'set-reset'</tt>, or
+              <tt>'strobe'</tt>
+              Note:  Signal type <tt>'data'</tt> is used to relay single or
+              multiple bit data from the peripheral to the micro controller
+              core.  Signal type <tt>'set-reset'</tt> latches the associated
+              input bit until the signal is read, at which time it is cleared.
+              Signal type <tt>'strobe'</tt> generates a single bit strobe
+              during the clock cycle immediately following the
+              <tt>inport</tt> instruction.<br/>
+              Note:  The <tt>'set-reset'</tt> signal type is provided as a
+              signal type for the <tt>INPORT</tt> command and may not be as
+              useful for peripherals since the peripheral can include the
+              associated logic required for the latch.<br/><br/>
+              </li>
+            </ol>
+        <li>Add these same signals to <tt>config['signals']</tt>, one at a
+          time using tuples with the following ordered format:<br/><br/>
+          <ol>
+            <li>signal name</li>
+            <li>signal width<br/></li>
+            </ol>
+          </li>
+        </ol>
+    For example, to add two inport ports for the MSB and LSB from an 8 by 8 multipler, use the
+      following:<br/><br/>
+      <tt>&nbsp;&nbsp;config['inports'].append(('I_MULT_MSB',<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;('s_mult_msb',8,'data'),<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;));<br/>
+      &nbsp;&nbsp;config['inports'].append(('I_MULT_LSB',<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;('s_mult_lsb',8,'data'),<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;));<br/>
+      &nbsp;&nbsp;config['signals'].append(('s_mult_msb',8,));<br/>
+      &nbsp;&nbsp;config['signals'].append(('s_mult_lsb',8,));</tt><br/><br/>
+    As&nbsp;a second example, to add an input port from a FIFO in the
+      peripheral to the micro controlller core, use the following:<br/><br/>
+      <tt>&nbsp;&nbsp;config['inports'].append(('I_FIFO',<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;('s_fifo_data',8,'data'),<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;('s_fifo_ack',1,'strobe'),<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;));<br/>
+      &nbsp;&nbsp;config['signals'].append(('s_fifo_data',8,));<br/>
+      &nbsp;&nbsp;config['signals'].append(('s_fifo_ack',1,));</tt><br/><br/>
+    As&nbsp;a third example, to add an input port for two status bits from a
+      FIFO in the peripheral to the micro controlller core, use the
+      following:<br/><br/>
+      <tt>&nbsp;&nbsp;config['inports'].append(('I_FIFO_STATUS',<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;('s_fifo_full',1,'data'),<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;('s_fifo_empty',1,'data'),<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;));<br/>
+      &nbsp;&nbsp;config['signals'].append(('s_fifo_full',1,));<br/>
+      &nbsp;&nbsp;config['signals'].append(('s_fifo_empty',1,));</tt><br/><br/>
+  <h2>GenAssembly(self,config):</h2>
+    This is an optional function to generate an assembly file associated with
+      the peripheral.<br/>
+    TODO
+  <h2>GenHDL(self,fp,config):</h2>
+    This function examines <tt>config['hdl']</tt> to determine the HDL language
+      for generating the FPGA logic for the peripheral.  The logic is written to
+      the file handle <tt>fp</tt>.<br/><br/>
+    Rather than capture all HDL languages in this function, the following type
+      of structure is recommended:<br/><br/>
+      <tt>&nbsp;&nbsp;GenHDL(self,fp,config):<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;if&nbsp;config['hdl']&nbsp;==&nbsp;'Verilog':<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;self.GenVerilog(fp,config);<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;elif&nbsp;config['hdl']&nbsp;==&nbsp;'VHDL':<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;self.GenVHDL(fp,config);<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;else:<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;raise&nbsp;Exception('HDL&nbsp;"%s"&nbsp;not&nbsp;implemented'&nbsp;%&nbsp;config['hdl']);</tt><br/><br/>
+    For example, to generate the logic for an unsigned 8 by 8 multiplier using
+      the previous inport, outport, and signal assignments, the Verilog code
+      could be generated using:<br/><br/>
+      <tt>&nbsp;&nbsp;GenVerilog(self,fp,config):<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;fp.write('initial s_mult_msb = 8\'d0;\n');<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;fp.write('initial s_mult_lsb = 8\'d0;\n');<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;fp.write('always&nbsp;@&nbsp;(posedge&nbsp;i_clk)\n');<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;fp.write('&nbsp;&nbsp;if&nbsp;(i_rst) begin\n');<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;fp.write('&nbsp;&nbsp;&nbsp;&nbsp;s_mult_msb&nbsp;&lt;=&nbsp;8\'d0;\n');<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;fp.write('&nbsp;&nbsp;&nbsp;&nbsp;s_mult_lsb&nbsp;&lt;=&nbsp;8\'d0;\n');<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;fp.write('&nbsp;&nbsp;end&nbsp;else\n');<br/>
+      &nbsp;&nbsp;&nbsp;&nbsp;fp.write('&nbsp;&nbsp;&nbsp;&nbsp;{&nbsp;s_mult_msb,&nbsp;s_mult_lsb&nbsp;}&nbsp;&lt;=&nbsp;$unsigned(s_mult_a)&nbsp;*&nbsp;$unsigned(s_mult_b);\n');</tt><br/><br/>
+    Note:  The results of this multiplication are available two clock cycles
+      after the <tt>outport</tt> instruction setting the <tt>s_mult_a</tt> or
+      <tt>s_mult_b</tt> value.  This isn't a problem with the processor as the
+      <tt>outport</tt> is probably followed by a <tt>drop</tt>
+      instruction and the <tt>inport</tt> instruction to read either part of the
+      multiplication has to be preceded by an instruction pushing the port
+      number onto the data stack.<br/><br/>
+    Note:  While Python allows the entire logic block to be written using a
+      single <tt>fp.write("""initial&nbsp;s_...""");</tt> statement, breaking
+      out the individual statements allows computed signal names to be included
+      more cleanly and also accomodates conditional inclusion of code.<br/><br/>
+<h1><a name="recommendations">Recommendations</a></h1>
+  <h2>help</h2>
+    The PERIPHERAL configuration command will print the documentation string for
+    peripherals if the parameter "<tt>help</tt>" is listed.  For example, to get
+    help for the <tt>monitor_stack</tt> peripheral, insert the peripheral
+    using:<br/><br/>
+    <tt>&nbsp;&nbsp;PERIPHERAL&nbsp;monitor_stack&nbsp;help</tt><br/><br/>
+    This will display the documentation string for the <tt>monitor_stack</tt>
+    peripheral and then terminate the build.<br/><br/>
+    If&nbsp;there is no documentation string for the peripheral, the
+    following message is printed and the build is terminated:<br/><br/>
+    <tt>&nbsp;&nbsp;No&nbsp;help&nbsp;for&nbsp;periperal&nbsp;XXX&nbsp;is&nbsp;provided</tt><br/><br/>
+    Note:  The help message displays the name of the peripheral and the source
+    file.<br/><br/>
+</body>
+</html>

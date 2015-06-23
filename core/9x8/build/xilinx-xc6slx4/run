@@ -1,0 +1,80 @@
+#!/bin/bash
+# Copyright 2013-2014, Sinclair R.F., Inc.
+# Test against Xilinx Spartan 6 and ISE.
+#
+# To replicate the performance runs (using uc_led)
+# - Minimum resource utilization, use -3 speed grade, 10 ns clock, XST and MAP
+#   set for minimum area, and ISE 13.3 or 14.4
+# - results for ISE 13.3 and 14.4 or 14.7 are identical
+# - Maximum speed (rounded down)
+#   -1L 11.4 9.6 ns "-timing -t  53" ==> 9.575 ns (104.4 MHz)
+#   -1L 12.4 9.6 ns "-timing -t  52" ==> 9.906 ns (100.9 MHz)
+#   -1L 13.3 9.8 ns "-timing -t   8" ==> 9.844 ns (101.5 MHz)
+#   -2  11.4 8.2 ns "-timing -t  37" ==> 8.166 ns (122.4 MHz)
+#   -2  12.4 7.7 ns "-timing -t  56" ==> 7.955 ns (125.7 MHz)
+#   -2  13.3 5.8 ns "-timing -t  80" ==> 5.781 ns (172.9 MHz)
+#   -3  11.4 5.9 ns "-timing -t  45" ==> 5.927 ns (167.7 MHz)
+#   -3  12.4 5.4 ns "-timing -t  63" ==> 5.162 ns (193.7 MHz)
+#   -3  13.3 5.3 ns "-timing -t  14" ==> 5.162 ns (193.7 MHz)
+
+TESTED="11.4 12.4 13.3 14.7";
+
+TEST_BENCHES="";
+TEST_BENCHES+=" uc_combine_instr_ds";
+TEST_BENCHES+=" uc_led";
+TEST_BENCHES+=" uc_peripherals";
+
+PWD="`pwd`";
+PWD="${PWD/*\/}";
+
+while getopts "ht:v:" OPTNAME; do
+  case ${OPTNAME} in
+    ( h ) echo "Usage:  run [-t uc_name] [-v ISE_version]" > /dev/stderr;
+          echo "Where:" > /dev/stderr;
+          echo "  uc_name is one of the .9x8 files in ../uc" > /dev/stderr;
+          echo "  ISE_version is an ISE version number" > /dev/stderr;
+          exit 0;;
+    ( t ) TEST_BENCHES="${OPTARG}";;
+    ( v ) TESTED="${OPTARG}";;
+  esac
+done
+
+let nTested=0;
+for VERSION in ${TESTED}; do
+  TOOL_DIR="/opt/Xilinx/${VERSION}";
+  if [ ! -e "${TOOL_DIR}" ]; then
+    echo "Xilinx ISE version ${VERSION} not found at ${TOOL_DIR}" > /dev/stderr;
+    continue;
+  fi
+  if [ -d "${TOOL_DIR}/ISE_DS" ]; then
+    TOOL_DIR="${TOOL_DIR}/ISE_DS";
+  fi
+  for TB in ${TEST_BENCHES}; do
+    let nTested+=1;
+    LOGFILE="log-${VERSION}-${TB}";
+    if [ ! -z "`./make "${TOOL_DIR}" ${TB} 2>&1 | tee "${LOGFILE}" | sed -n '/ERROR/p'`" ]; then
+      grep "ERROR" "${LOGFILE}"                 > /dev/stderr;
+      echo "BUILD TEST BENCH FAILED"            > /dev/stderr;
+      echo "build directory:    ${PWD}"         > /dev/stderr;
+      echo "TOOL:               ${TOOL_DIR}"    > /dev/stderr;
+      echo "TEST:               ${TB}"          > /dev/stderr;
+      echo "LOG FILE:           ${LOGFILE}"     > /dev/stderr;
+      exit 1;
+    fi
+    echo "Build results for ${PWD} Xilinx ISE/${VERSION} ${TB}";
+    sed -n \
+        -e '/Minimum period/p' \
+        -e '/^  Number of occupied Slices:/p' \
+        -e '/^  Number of Slice LUTs:/p' \
+        -e '/^  Number of RAMB[0-9]*BWERs: *[1-9]/p' \
+        -e '/TS_i_clk = PERIOD/,+1p' \
+        "${LOGFILE}" \
+        ;
+  done
+done
+
+if [ ${nTested} == "0" ]; then
+  echo "No tests performed in ${PWD/*\/}" > /dev/stderr;
+else
+  echo "${nTested} tool versions successfully tested in ${PWD/*\/}" > /dev/stderr;
+fi

@@ -1,0 +1,47 @@
+#!/bin/bash
+#
+# Build the micro controller and convert it to a Vivado IP.
+
+# Print status message.
+echo ;
+echo "***";
+echo "*** Creating IP for `pwd`";
+echo "***";
+
+# Remove SSBCC and Vivado outputs to ensure a clean core generation.
+rm -rf \
+  *.9x8-meta    \
+  *.mem         \
+  *_pkg.vhd     \
+  component.xml \
+  edit_ip*      \
+  mip           \
+  vivado*.jou   \
+  vivado*.log   \
+  vivado*.tcl   \
+  vivado.*      \
+  xgui          \
+  ;
+
+# Build the micro controller.
+../../../../../ssbcc                            \
+  -q                                            \
+  --synth-instr-mem '(* ROM_STYLE="BLOCK" *)'   \
+  --rand-instr-mem                              \
+  --define-clog2                                \
+  uc_led.9x8                                    \
+|| exit 1;
+
+# Generate the core.
+time vivado -mode tcl <<EOF
+create_project mip mip -ip
+ipx::infer_core "."
+set_property "vendor" "sinclairrf.com" [ipx::current_core]
+set_property "library" "none" [ipx::current_core]
+set_property "version" "1.0" [ipx::current_core]
+set_property "display_name" "micro controller" [ipx::current_core]
+set_property "previous_version_for_upgrade" {sinclairrf.com:user:uc_led:1.0} [ipx::current_core]
+set_property "supported_families" {{artix7} {Production} {kintex7} {Pre-Production} {virtex7} {Pre-Production}} [ipx::current_core]
+set_property "supports_vivado" 1 [ipx::current_core]
+ipx::save_core [ipx::current_core]
+EOF

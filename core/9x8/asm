@@ -1,0 +1,361 @@
+#!/usr/bin/python2.7
+
+################################################################################
+#
+# Copyright 2012, Sinclair R.F., Inc.
+#
+# Assembler for SSBCC 9x8 processor
+#
+################################################################################
+
+# global modules
+import argparse
+import os
+import re
+import sys
+
+# User defined modules
+import asmDef
+
+################################################################################
+#
+# Surround the program with a try ... except clause
+#
+################################################################################
+
+try:
+
+  ################################################################################
+  #
+  # The main loop:
+  #
+  # - Process the command line arguments.
+  #
+  ################################################################################
+
+  #
+  # Construct the command-line argument list parser
+  #
+
+  def validateFile(filename):
+    try:
+      return file(filename,'r');
+    except:
+      raise asmDef.AsmException('Error opening "%s"' % filename);
+
+  argListParser = argparse.ArgumentParser(description='SSBCC 9x8 assembler');
+  argListParser.add_argument('-C', metavar='CONSTANT=value', action='append', help='Constant definition');
+  argListParser.add_argument('-D', metavar='define', type=str, action='append', help='Define symbol (must start with "D_")');
+  argListParser.add_argument('-G', metavar='parametername', action='append', help='parameter names');
+  argListParser.add_argument('-I', metavar='PORT=index', action='append', help='Input port names');
+  argListParser.add_argument('-L', metavar='librarypath', action='append', help='Library search path');
+  argListParser.add_argument('-M', metavar='macropath', action='append', help='Macro search path');
+  argListParser.add_argument('-O', metavar='PORT=index', action='append', help='Output port names');
+  argListParser.add_argument('-R', metavar='PORT=index', action='append', help='Strobe-only output port names');
+  argListParser.add_argument('-S', metavar='MEMORY=length', action='append', help='Memory length');
+  argListParser.add_argument('--help-macro', metavar='macroName', type=str, help='Display usage message for the specified macro');
+  argListParser.add_argument('-i', action='store_true', help='enable/require interrupt');
+  argListParser.add_argument('--list-macros', action='store_true', help='list the built-in and user-defined macros');
+  argListParser.add_argument('-o', metavar='outfile', type=argparse.FileType('w'), required =True, help='output metafile');
+  argListParser.add_argument('-s', metavar='STACK_NAME=length', action='append', help='Stack length');
+  argListParser.add_argument('filename', metavar='filename', nargs='+', type=validateFile, help='required list of files');
+  argList = argListParser.parse_args();
+
+  # Construct the keyword parser
+  from asmDef_9x8 import asmDef_9x8
+  ad = asmDef_9x8();
+
+  # Record the constants in the program symbol table.
+  if argList.C:
+    for constant in argList.C:
+      a=re.findall(r'^(C_\w+)=(-?[1-9]\d*|\w+)$',constant);
+      if not a:
+        raise asmDef.AsmException('Malformed -C argument: "%s"' % constant);
+      a = list(a[0]);
+      try:
+        a[1] = eval(a[1]);
+      except:
+        raise asmDef.AsmException('Cannot evaluate "%s"' % a[1]);
+      if ad.IsSymbol(a[0]):
+        raise asmDef.AsmException('Command line constant "%s" already defined' % a[0]);
+      ad.AddSymbol(a[0], 'constant', body=[a[1]]);
+
+  # Record the defines.
+  if argList.D:
+    for name in argList.D:
+      if not re.match('D_',name):
+        raise SSBCCException('Bad define name "%s" should start with "D_"' % name);
+      ad.AddSymbol(name, 'define');
+
+  # Record the input names and values in the appropriate record type
+  if argList.G:
+    for parameter in argList.G:
+      a = re.findall(r'^([LG]_\w+)$',parameter);
+      if not a:
+        raise asmDef.AsmException('Malformed -G argument: "%s"' % parameter);
+      if ad.IsSymbol(a[0]):
+        raise asmDef.AsmException('Program Bug -- repeated symbol "%s"' % a[0]);
+      ad.RegisterParameterName(a[0]);
+  if argList.I:
+    for inport in argList.I:
+      a=re.findall(r'^(I_\w+)=(0|[1-9]\d*)$',inport);
+      if not a:
+        raise asmDef.AsmException('Malformed -I argument: "%s"' % inport);
+      a = a[0];
+      if ad.IsSymbol(a[0]):
+        raise Exception('Program Bug -- repeated symbol "%s"' % a[0]);
+      ix = int(a[1]);
+      if not (0 <= ix < 256):
+        raise asmDef.AsmException('Out-of-range inport index:  "%s"' % inport);
+      ad.RegisterInport(a[0],ix);
+  if argList.O:
+    for outport in argList.O:
+      a=re.findall(r'^(O_\w+)=(0|[1-9]\d*)$',outport);
+      if not a:
+        raise asmDef.AsmException('Malformed -O argument: "%s"' % outport);
+      a = a[0];
+      if ad.IsSymbol(a[0]):
+        raise asmDef.AsmException('Program Bug -- repeated symbol "%s"' % a[0]);
+      ix = int(a[1]);
+      if not (0 <= ix < 256):
+        raise asmDef.AsmException('Out-of-range outport index:  "%s"' % outport);
+      ad.RegisterOutport(a[0],ix);
+  if argList.R:
+    for outstrobe in argList.R:
+      a=re.findall(r'^(O_\w+)=(0|[1-9]\d*)$',outstrobe);
+      if not a:
+        raise asmDef.AsmException('Malformed -R argument: "%s"' % outstrobe);
+      a = a[0];
+      if ad.IsSymbol(a[0]):
+        raise asmDef.AsmException('Program Bug -- repeated symbol "%s"' % a[0]);
+      ix = int(a[1]);
+      if not (0 <= ix < 256):
+        raise asmDef.AsmException('Out-of-range strobe-only outport index:  "%s"' % outstrobe);
+      ad.RegisterOutstrobe(a[0],ix);
+  if argList.S:
+    for memory in argList.S:
+      a=re.findall(r'^(\w+)=(0|[1-9]\d*)$',memory);
+      if not a:
+        raise asmDef.AsmException('Malformed -S argument: "%s"' % memory);
+      a=a[0];
+      length = int(a[1]);
+      if not (0 < length <= 256):
+        raise asmDef.AsmException('Out-of-range memory length:  "%s"' % outport);
+      ad.RegisterMemoryLength(a[0],length);
+  if argList.s:
+    for stack in argList.s:
+      a=re.findall(r'^(\w+)=(0|[1-9]\d*)$',stack);
+      if not a:
+        raise asmDef.AsmException('Malformed -s argument: "%s"' % stack);
+      a = a[0];
+      ad.RegisterStackLength(a[0],int(a[1]));
+
+  # Construct the iterator that loops through the code bodies.
+  fbi = asmDef.FileBodyIterator(argList.filename,ad);
+
+  # Add paths for the ".include" directive.
+  if argList.L:
+    for path in argList.L:
+      fbi.AddSearchPath(path);
+
+  # Add paths for the ".macro" directive.
+  if argList.M:
+    for path in argList.M:
+      ad.AddMacroSearchPath(path);
+
+  ##############################################################################
+  #
+  # Terminating help messages
+  #
+  ##############################################################################
+
+  # If asked, print the usage for the specified macro.
+  if argList.help_macro:
+    macroName = argList.help_macro
+    if macroName[0] != '.':
+      macroName = '.%s' % macroName
+    if macroName not in ad.macros['list']:
+      try:
+        ad.AddUserMacro(macroName[1:])
+      except:
+        pass
+    if macroName in ad.macros['list']:
+      ix = ad.macros['list'].index(macroName)
+      if ad.macros['doc'][ix]:
+        print '\n%s usage message:' % macroName
+        print ad.macros['doc'][ix]
+      else:
+        print '\nNo usage message for %s\n' % macroName
+    else:
+      print 'Macro "%s" not recognized or malformed' % macroName
+    print 'Assembler terminated by "--help-macro" option'
+    sys.exit(1)
+
+  # If asked, list the available macros.
+  if argList.list_macros:
+    print '\nBuilt-in macros\n'
+    tmp = [name for name in ad.macros['builtIn']]
+    tmp.sort()
+    for name in tmp:
+      print name
+    for testPath in ad.macroSearchPaths:
+      if not os.path.isdir(testPath):
+        continue
+      for testName in os.listdir(testPath):
+        if not re.match(r'.*\.py$',testName):
+          continue;
+        fullFile = os.path.join(testPath,testName);
+        if not os.path.isfile(fullFile):
+          continue
+        try:
+          execfile(fullFile)
+          exec('%s(ad)' % testName[:-3])
+        except:
+          pass
+    print '\nUser-defined macros\n'
+    tmp = [name for name in ad.macros['list'] if name not in ad.macros['builtIn']]
+    tmp.sort()
+    for name in tmp:
+      print name
+    print
+    print 'Assembler terminated by "--list-macros" option'
+    sys.exit(1)
+
+  ################################################################################
+  #
+  # Stage 1:  Parse the files.
+  #
+  # Read the entire file, doing the following while reading the file:
+  # - Store the raw content of each line or group of lines for output to the
+  #   assembled memory initialization.
+  #   Note: A group of lines consists the comment lines preceding a directive and
+  #         the body of the directive.
+  # - Convert group of lines into an array of the raw tokens.
+  # - Check the integrity of the bodies defined by the list of raw tokens.
+  # - For each array of raw tokens, incorporate already-defined symbols and update
+  #   the assembler dictionaries.
+  #   Note: At this point the space required for the function or main program
+  #     is fully computed.
+  #
+  ################################################################################
+
+  #
+  # Loop through the directive bodies in the input files (including ".include"d
+  # files).
+  #
+
+  ifstackStack = list();
+  ifstack = None;
+  for bl in fbi:
+    filename = bl[0];
+    startLine = bl[1];
+    body = bl[2:];
+    flc_loc = filename + ' at line ' + str(startLine+len(body)-1);
+    # Start-of-file processing.
+    if startLine == 0:
+      if ifstack != None:
+        ifstackStack.append(ifstack);
+      ifstack = list();
+    # End-of-file processing.
+    elif startLine == -1:
+      if len(ifstack) != 0:
+        raise asmDef.AsmException('%d unmatched .IFDEF/.IFNDEF(s) at the end of %s' % (len(ifstack),filename,));
+      if ifstackStack:
+        ifstack = ifstackStack.pop();
+      else:
+        ifstack = None;
+    # Handle conditional compilation directives.
+    elif re.match(r'\s*\.ELSE\b',body[-1]):
+      if not re.match(r'\s*\.ELSE\s*(;.*)?$',body[-1]):
+        raise asmDef.AsmException('Malformed ".ELSE" in %s' % flc_loc);
+      if not ifstack:
+        raise asmDef.AsmException('Unmatched ".ELSE" in %s' % flc_loc);
+      ifstack[-1] ^= True;
+    elif re.match(r'\s*\.ENDIF\b',body[-1]):
+      if not re.match(r'\s*\.ENDIF\s*(;.*)?$',body[-1]):
+        raise asmDef.AsmException('Malformed ".ENDIF" in %s' % flc_loc);
+      if not ifstack:
+        raise asmDef.AsmException('Unmatched ".ENDIF" in %s' % flc_loc);
+      ifstack.pop();
+    elif re.match(r'\s*\.IFN?DEF\b',body[-1]):
+      a = re.findall(r'\s*(\.IFN?DEF)\s*(\S+)\b\s*(;.*)?$',body[-1]);
+      if not a:
+        raise asmDef.AsmException('Malformed .IFDEF or .IFNDEF in %s' % flc_loc);
+      a = a[0];
+      ifstack.append(ad.IsSymbol(a[1]));
+      if a[0] == '.IFNDEF':
+        ifstack[-1] ^= True;
+    # Ignore bodies rejected by conditional compilation.
+    elif ifstack and not ifstack[-1]:
+      pass;
+    # ".include" directives don't have an associated body
+    elif re.match(r'\s*\.include\s',body[-1]):
+      a = re.findall(r'\s*\.include\s+(\S+)(\s*|\s*;.*)$',body[-1]);
+      if not a:
+        raise asmDef.AsmException('Malformed .include directive in %s' % flc_loc);
+      a = a[0];
+      fbi.Include(a[0]);
+    # Parse the body of all other directives and ensure that only one ".main"
+    # and one ".interrupt" are defined.
+    else:
+      rawTokens = asmDef.RawTokens(ad,filename,startLine,body);
+      if not rawTokens:
+        continue;
+      ad.CheckRawTokens(rawTokens);
+      ad.FillRawTokens(rawTokens);
+
+  #
+  # Ensure a ".main" body was declared.
+  #
+
+  if not ad.Main():
+    raise asmDef.AsmException('Required ".main" body not provided');
+
+  #
+  # Enforce consistency between the command-line "-i" flag and whether or not an
+  # ".interrupt" body was declared.
+  #
+
+  if argList.i and not ad.Interrupt():
+    raise asmDef.AsmException('Required ".interrupt" body not provided');
+  if not argList.i and ad.Interrupt():
+    raise asmDef.AsmException('".interrupt" body not allowed near %s' % ad.Interrupt()[0]['loc']);
+
+  ################################################################################
+  #
+  # Stage 2:  Identify the required functions, compute their addresses, and set
+  # the addresses for all "jump" and "call" macros.
+  #
+  ################################################################################
+
+  ad.EvaluateMemoryTree();
+  ad.EvaluateFunctionTree();
+
+  ################################################################################
+  #
+  # Stage 3:  Emit the program
+  #
+  # Do the following:
+  # - If interrupts are enabled, then set the first 4 instructions to be a "dis"
+  #   and a ".jump" instruction to the ".interrupt" function.
+  # - Write the instructions for the ".main" body.
+  # - Loop through the ".function" list in the order in which they were defined
+  #   and write their instructions.
+  # - Print the memory and instruction usage statistics.
+  #
+  ################################################################################
+
+  ad.EmitMemories(argList.o);
+  ad.EmitProgram(argList.o);
+  argList.o.close();
+
+################################################################################
+#
+# Terminating except clause -- print fatal error message and indicate failure to
+# the invoking program.
+#
+################################################################################
+
+except asmDef.AsmException, msg:
+  print >> sys.stderr, 'FATAL ERROR:  ' + str(msg);
+  exit(1);

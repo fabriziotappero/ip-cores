@@ -1,0 +1,133 @@
+#!/bin/bash
+# Copyright 2013, Sinclair R.F., Inc.
+# Make script for Xilinx Spartan 6
+
+XST_ARG="";
+MAP_ARG="";
+
+TOOL_DIR="$1";
+NAME="$2";
+if [ -n "$3" ]; then
+  MAP_ARG+=" $3";
+fi
+
+#DEVICE=xc6slx4l-tqg144;  # low power device
+DEVICE=xc6slx4-2tqg144;  # standard performance device
+#DEVICE=xc6slx4-3tqg144;  # high performance device
+
+( cd ../uc; ../../../../ssbcc -q --define-clog2 ${NAME}.9x8; ) || exit 1;
+
+FILES="";
+FILES+=" ../uc/${NAME}.v";
+
+VERSION="`echo ${TOOL_DIR} | sed -e 's/^[^0-9]\+//' -e 's/[^0-9]\+$//'`";
+
+#
+# Optional configuration parameters.
+#
+
+# Configure tools for minimum area implementation.
+#XST_ARG+="-opt_mode area -fsm_encoding user ";
+#MAP_ARG+=" -global_opt area -lc area";
+
+# Configure tools for maximum speed.
+XST_ARG+="-opt_mode speed -resource_sharing no ";
+#MAP_ARG+=" -global_opt speed -lc auto -logic_opt on -register_duplication on -retiming on -timing -xe c";
+
+#
+# Configure and run the synthesis
+#
+
+SETTINGS="";
+if [[ "`uname --machine`" == "x86_64" && -f "${TOOL_DIR}/settings64.sh" ]]; then
+  SETTINGS="${TOOL_DIR}/settings64.sh";
+fi
+if [ -z "${SETTINGS}" ]; then
+  SETTINGS="${TOOL_DIR}/settings32.sh";
+fi
+source ${SETTINGS} || { echo "ERROR:  ${SETTINGS} failed" > /dev/stderr; exit 1; }
+
+for fname in ${FILES}; do
+  echo "verilog work \"${fname}\"";
+done > ${NAME}.prj;
+
+mkdir -p xst/projnav.tmp;
+
+cat <<EOF > ${NAME}.xst
+set -tmpdir "xst/projnav.tmp"
+set -xsthdpdir "xst"
+run
+-ifn ${NAME}.prj
+-ofn ${NAME}
+-p ${DEVICE}
+-top ${NAME}
+${XST_ARG}
+EOF
+
+xst \
+  -ifn "${NAME}.xst" \
+  -ofn "${NAME}.syr" \
+|| { echo "ERROR:  XST Failed!"; exit 1; }
+
+#
+# Convert the ngc to an ngd.
+#
+
+ngdbuild \
+  -dd _ngo \
+  -nt timestamp \
+  -uc ${NAME}.ucf \
+  -p ${DEVICE} \
+  ${NAME}.ngc ${NAME}.ngd \
+|| { echo "ngdbuild Failed!"; exit 1; }
+
+#
+# Run map.
+#
+
+if [[ "${VERSION}" > "12.0" ]]; then
+  MAP_ARG+=" -r 4";
+fi
+
+if [ -z "`echo ${MAP_ARG} | sed -n '/logic_opt/p'`" ]; then
+  MAP_ARG+=" -logic_opt off";
+fi
+
+map                             \
+  -p ${DEVICE}                  \
+  -o ${NAME}.ncd                \
+  -detail                       \
+  -w                            \
+  ${MAP_ARG}                    \
+  ${NAME}.ngd ${NAME}.pcf       \
+|| { echo "MAP Failed!"; exit 1; }
+
+#
+# Run par.
+#
+
+par             \
+  -w            \
+  -xe n         \
+  ${NAME}.ncd ${NAME}.ncd ${NAME}.pcf \
+|| { echo "PAR Failed!"; exit 1; }
+
+#
+# Optionally perform timing analysis
+#
+
+if [ `false` ]; then
+  trce \
+    -v 3 \
+    -s 3 \
+    -n 3 \
+    -fastpaths \
+    -xml ${NAME}.twx \
+    ${NAME}.ncd \
+    -o ${NAME}.twr \
+    ${NAME}.pcf \
+    -ucf ${NAME}.ucf
+fi
+
+# Successful execution!
+exit 0;

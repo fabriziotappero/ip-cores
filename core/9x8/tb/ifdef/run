@@ -1,0 +1,67 @@
+#!/bin/bash
+
+rm -f ssbcc;
+ln -s ../../../../ssbcc;
+
+NAME=ifdef;
+
+for INCLUDE_UART in false true; do
+  for INCLUDE_I2C in false true; do
+    FLAGS="";
+    if ${INCLUDE_UART}; then
+      FLAGS+=" -D INCLUDE_UART";
+    fi
+    if ${INCLUDE_I2C}; then
+      FLAGS+=" -D INCLUDE_I2C";
+    fi
+    ssbcc -q ${FLAGS} uc.9x8 || { echo "FATAL ERROR:  ssbcc failed" > /dev/stderr; exit 1; }
+    FAILED=false;
+    # Validate existence/non-existence of UART peripheral.
+    RESULT="`grep 'PERIPHERAL UART_Tx:' uc.v`";
+    if ${INCLUDE_UART}; then
+      if [ -z "${RESULT}" ]; then FAILED=true; fi
+    else
+      if [ -n "${RESULT}" ]; then FAILED=true; fi
+    fi
+    # Validate existence/non-existence of "NO I2C BUS" message.
+    RESULT="`grep '// WARNING -- NO I2C BUS' uc.v`";
+    if ${INCLUDE_I2C}; then
+      if [ -n "${RESULT}" ]; then FAILED=true; fi
+    else
+      if [ -z "${RESULT}" ]; then FAILED=true; fi
+    fi
+    # Validate existence/non-existence of I2C bus signals.
+    RESULT="`grep 'io_scl' uc.v`";
+    if ${INCLUDE_I2C}; then
+      if [ -z "${RESULT}" ]; then FAILED=true; fi
+    else
+      if [ -n "${RESULT}" ]; then FAILED=true; fi
+    fi
+    # Validate use of ":infinite_1" for existence/non-existence of I2C bus in uc.s
+    RESULT="`grep ':infinite_1' uc.v`";
+    if ${INCLUDE_I2C}; then
+      if [ -z "${RESULT}" ]; then FAILED=true; fi
+    else
+      if [ -n "${RESULT}" ]; then FAILED=true; fi
+    fi
+    # Validate use of :loop_2 for existence/non-existence of UART use in uc.s
+    RESULT="`grep ':loop_2' uc.v`";
+    if ${INCLUDE_UART}; then
+      if [ -z "${RESULT}" ]; then FAILED=true; fi
+    else
+      if [ -n "${RESULT}" ]; then FAILED=true; fi
+    fi
+    # Print error message if test failed.
+    if $FAILED; then
+      echo "ifdef test failed for ${FLAGS}" > /dev/stderr;
+      exit 1;
+    fi
+  done
+done
+
+# Remove the temporary output files.
+rm -f ssbcc uc.9x8-meta uc.v;
+
+# Print success message and return success indication.
+echo "Passed:  ${NAME}";
+exit 0;

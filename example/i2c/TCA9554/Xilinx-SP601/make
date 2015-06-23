@@ -1,0 +1,199 @@
+#!/bin/sh
+#
+# Make script for SP601 board.
+#
+# Usage:
+#   ./make |& tee log
+
+source /opt/Xilinx/14.7/ISE_DS/settings64.sh
+
+# Ensure the script to build the micro processor is present.
+if [ -n "`which ssbcc | sed -n -e '/^which:/p'`" ]; then
+  echo "FATAL ERROR:" > /dev/stderr;
+  echo "Could not find \"ssbcc\" required for build" > /dev/stderr;
+  exit 1;
+fi
+
+#
+# Set the build parameters.
+#
+
+NAME=sp601
+DEVICE=xc6slx16-2-csg324
+
+FILES="";
+FILES+=" ../uc/i2c_tca9554.v";
+FILES+=" ${NAME}.v";
+
+#
+# Prepatory work
+#
+
+# Build the micro processor.
+( cd ../uc; ssbcc --define-clog i2c_tca9554.9x8 ) || { echo "SSBCC failed" > /dev/stderr; exit 1; }
+
+#
+# Configure and run synthesis.
+#
+
+for fname in ${FILES}; do
+  echo "verilog work \"${fname}\"";
+done > ${NAME}.prj;
+
+mkdir -p xst/projnav.tmp;
+
+cat <<EOF > ${NAME}.xst
+set -tmpdir "xst/projnav.tmp"
+set -xsthdpdir "xst"
+run
+-ifn ${NAME}.prj
+-ifmt mixed
+-ofn ${NAME}
+-ofmt NGC
+-p ${DEVICE}
+-top ${NAME}
+-opt_mode Speed
+-opt_level 1
+-power NO
+-iuc NO
+-keep_hierarchy No
+-netlist_hierarchy As_Optimized
+-rtlview Yes
+-glob_opt AllClockNets
+-read_cores YES
+-write_timing_constraints NO
+-cross_clock_analysis NO
+-hierarchy_separator /
+-bus_delimiter <>
+-case Maintain
+-slice_utilization_ratio 100
+-bram_utilization_ratio 100
+-dsp_utilization_ratio 100
+-lc Auto
+-reduce_control_sets Auto
+-fsm_extract YES -fsm_encoding Auto
+-safe_implementation No
+-fsm_style LUT
+-ram_extract Yes
+-ram_style Auto
+-rom_extract Yes
+-shreg_extract YES
+-rom_style Auto
+-auto_bram_packing NO
+-resource_sharing YES
+-async_to_sync NO
+-shreg_min_size 2
+-use_dsp48 Auto
+-iobuf YES
+-max_fanout 100000
+-bufg 16
+-register_duplication YES
+-register_balancing No
+-optimize_primitives NO
+-use_clock_enable Auto
+-use_sync_set Auto
+-use_sync_reset Auto
+-iob Auto
+-equivalent_register_removal YES
+-slice_utilization_ratio_maxmargin 5
+EOF
+
+xst \
+  -ifn "${NAME}.xst" \
+  -ofn "${NAME}.syr" \
+|| { echo "XST Failed!" > /dev/stderr; exit 1; }
+
+#
+# Run through PAR.
+#
+
+ngdbuild \
+  -dd _ngo \
+  -nt timestamp \
+  -uc ${NAME}.ucf \
+  -p ${DEVICE} \
+  ${NAME}.ngc ${NAME}.ngd \
+|| { echo "ngdbuild Failed!" > /dev/stderr; exit 1; }
+
+map \
+  -p ${DEVICE} \
+  -w \
+  -logic_opt off \
+  -ol high \
+  -t 1 \
+  -xt 0 \
+  -register_duplication off \
+  -r 4 \
+  -global_opt off \
+  -mt off \
+  -ir off \
+  -pr off \
+  -lc off \
+  -power off \
+  -o ${NAME}.ncd \
+  ${NAME}.ngd ${NAME}.pcf \
+|| { echo "MAP Failed!" > /dev/stderr; exit 1; }
+
+par \
+  -w \
+  -ol high \
+  -mt off \
+  ${NAME}.ncd ${NAME}.ncd ${NAME}.pcf \
+|| { echo "PAR Failed!" > /dev/stderr; exit 1; }
+
+#
+# Optionally perform timing analysis.
+#
+
+if false; then
+  trce \
+    -v 3 \
+    -s 3 \
+    -n 3 \
+    -fastpaths \
+    -xml ${NAME}.twx \
+    ${NAME}.ncd \
+    -o ${NAME}.twr \
+    ${NAME}.pcf \
+    -ucf ${NAME}.ucf 
+fi
+
+#
+# Generate the bitstream file
+#
+
+cat <<EOF >${NAME}.ut
+-w
+-g DebugBitstream:No
+-g Binary:no
+-g CRC:Enable
+-g Reset_on_err:No
+-g ConfigRate:2
+-g ProgPin:PullUp
+-g TckPin:PullUp
+-g TdiPin:PullUp
+-g TdoPin:PullUp
+-g TmsPin:PullUp
+-g UnusedPin:PullDown
+-g UserID:0xFFFFFFFF
+-g ExtMasterCclk_en:No
+-g SPI_buswidth:1
+-g TIMER_CFG:0xFFFF
+-g multipin_wakeup:No
+-g StartUpClk:CClk
+-g DONE_cycle:4
+-g GTS_cycle:5
+-g GWE_cycle:6
+-g LCK_cycle:NoWait
+-g Security:None
+-g DonePipe:No
+-g DriveDone:No
+-g en_sw_gsr:No
+-g drive_awake:No
+-g sw_clk:Startupclk
+-g sw_gwe_cycle:5
+-g sw_gts_cycle:4
+EOF
+
+bitgen -f ${NAME}.ut ${NAME}.ncd \
+|| { echo "BITGEN Failed!" > /dev/stderr; exit 1; }

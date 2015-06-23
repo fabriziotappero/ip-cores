@@ -1,0 +1,1324 @@
+SSBCC.9x8 is a free Small Stack-Based Computer Compiler with a 9-bit opcode,
+8-bit data core designed to facilitate FPGA HDL development.
+
+The primary design criteria are:
+- high speed (to avoid timing issues)
+- low fabric utilization
+- vendor independent
+- development tools available for all operating systems
+
+It has been used in Spartan-3A, Spartan-6, Virtex-6, and Artix-7 FPGAs and has
+been built for Altera, Lattice, and other Xilinx devices.  It is faster and
+usually smaller than vendor provided processors.
+
+The compiler takes an architecture file that describes the micro controller
+memory spaces, inputs and outputs, and peripherals and which specifies the HDL
+language and source assembly.  It generates a single HDL module implementing
+the entire micro controller.  No user-written HDL is required to instantiate
+I/Os, program memory, etc.
+
+The features are:
+- high speed, low fabric utilization
+- vendor-independent Verilog output with a VHDL package file
+- simple Forth-like assembly language (43 instructions)
+- single cycle instruction execution
+- automatic generation of I/O ports
+- configurable instruction, data stack, return stack, and memory utilization
+- extensible set of peripherals (I2C busses, UARTs, AXI4-Lite busses, etc.)
+- extensible set of macros
+- memory initialization file to facilitate code development without rebuilds
+- simulation diagnostics to facilitate identifying code errors
+- conditionally included I/Os and peripherals, functions, and assembly code
+
+SSBCC has been used for the following projects:
+- operate a media translator from a parallel camera interface to an OMAP GPMC
+  interface, detect and report bus errors and hardware errors, and act as an
+  SPI slave to the OMAP
+- operate two UART interfaces and multiple PWM controlled 2-lead bi-color LEDs
+- operate and monitor the Artix-7 fabric in a Zynq system using AXI4-Lite
+  master and slave buses, I2C buses for timing-critical voltage measurements
+
+The only external tool required is Python 2.7.
+
+
+DESCRIPTION
+================================================================================
+
+The computer compiler uses an architectural description of the processor stating
+the sizes of the instruction memory, data stack, and return stack; the input and
+output ports; RAM and ROM types and sizes; and peripherals.
+
+The instructions are all single-cycle.  The instructions are:
+- 4 arithmetic instructions:  addition, subtraction, increment, and decrement
+- 2 carry bit instructions:  +c and -c for addition and subtraction respectively
+- 3 bit-wise logical instructions:  and, or, and exclusive or
+- 7 shift and rotation instructions: <<0, <<1, 0>>, 1>>, <<msb, msb>>, and lsb>>
+- 4 logical instructions:  0=, 0<>, -1=, -1<>
+- 6 Forth-like data stack instructions:  drop, dup, nip, over, push, swap
+- 3 Forth-like return stack instructions:  >r, r>, r@
+- 2 I/O: inport, outport
+- 6 memory read and write with optional address post increment and post decrement
+- 2 jump and conditional jump
+- 2 call and conditional call
+- 1 function return
+- 1 nop
+
+The 9x8 address space is up to 8K.  This is achieved by pushing the 8 lsb of the
+target address onto the data stack immediately before the jump or call
+instruction and by encoding the 5 msb of the address within the jump or call
+instruction.  The instruction immediately following a jump, call, or return is
+executed before the instruction sequence at the destination address is executed
+(this is illustrated later).
+
+Up to four banks of memory, either RAM or ROM, are available.  Each of these can
+be up to 256 bytes long, providing a total of up to 1 kB of memory.
+
+The assembly language is Forth-like.  Built-in macros are used to encode the
+jump and call instructions and to encode the 2-bit memory bank index in memory
+store and fetch instructions.
+
+The computer compiler and assembler are written in Python 2.7.  Peripherals are
+implemented by Python modules which generate the I/O ports and the peripheral
+HDL.
+
+The computer compiler is documented in the doc directory.  The 9x8 core is
+documented in the core/9x8/doc directory.  Several examples are provided.
+
+The computer compiler and assembler are fully functional and there are no known
+bugs.
+
+
+SPEED AND RESOURCE UTILIZATION
+================================================================================
+
+These device speed and resource utilization results are copied from the build
+tests.  The full results are listed in the core/9x8/build directories.  The
+tests use a minimal processor implementation (clock, reset, and one output).
+Device-specific scripts state how these performance numbers were obtained.
+
+VENDOR          DEVICE          BEST SPEED      SMALLEST RESOURCE UTILIZATION
+------          ------          ----------      -------------------------------
+Altera          Cyclone-III     190.6 MHz       282 LEs           (preliminary)
+Altera          Cyclone-IV      192.1 MHz       281 LEs           (preliminary)
+Altera          Stratix-V       372.9 MHz       198 ALUTs         (preliminary)
+Lattice         LCMXO2-640ZE-3   98.4 MHz       206 LUTs          (preliminary)
+Lattice         LFE2-6E-7       157.9 MHz       203 LUTs          (preliminary)
+Xilinx          Artix-7         TBD             163 slice LUTs (48 slices)
+Xilinx          Kintex-7        TBD             158 slice LUTs (44 slices)
+Xilinx          Spartan-3A      149.4 MHz       232 4-input LUTs (129 slices)
+Xilinx          Spartan-6       193.7 MHz       124 Slice LUTs (34 slices)
+Xilinx          Virtex-6        275.7 MHz       122 Slice LUTs (38 slices) (p.)
+
+Disclaimer:  Like other embedded processors, these are the maximum performance
+claims.  Realistic implementations will produce slower maximum clock rates,
+particularly with lots of I/O ports and peripherals and with the constraint of
+existing with other subsystems in the FPGA fabric.  What these performance
+numbers do provide is an estimate of the amount of slack available.  For
+example, you can't realistically expect to get 110 MHz from a processor that,
+under ideal conditions, places and routes at 125 MHz, but you can with a
+processor that is demonstrated to place and route at 150 MHz.
+
+
+EXAMPLE:
+================================================================================
+
+The LED flasher example demonstrates the simplicity of the architectural
+specification and the Forth-like assembly language.
+
+The architecture file, named "led.9x8", with the comments and user header
+removed, is as follows:
+
+  ARCHITECTURE    core/9x8 Verilog
+
+  INSTRUCTION     2048
+  RETURN_STACK    32
+  DATA_STACK      32
+
+  PORTCOMMENT LED on/off signal
+  OUTPORT 1-bit o_led O_LED
+
+  ASSEMBLY led.s
+
+The ARCHITECTURE configuration command specifies the 9x8 core and the Verilog
+language.  The INSTRUCTION, RETURN_STACK, and DATA_STACK configuration commands
+specify the sizes of the instruction space, return stack, and data stack.  The
+content of the PORTCOMMENT configuration command is inserted in the module
+declaration -- this facilitates identifying signals in micro controllers with a
+lot of inputs and outputs.  The single OUTPORT statement specifies a 1-bit
+signal named "o_led".  This signal is accessed in the assembly code through the
+symbol "O_LED".  The ASSEMBLY command specifies the single input file "led.s,"
+which is listed below.  The output module will be "led.v"
+
+The "led.s" assembly file is as follows:
+
+  ; Consume 256*5+4 clock cycles.
+  ; ( - )
+  .function pause
+    0 :inner 1- dup .jumpc(inner) drop
+  .return
+
+  ; Repeat "pause" 256 times.
+  ; ( - )
+  .function repause
+    0 :inner .call(pause) 1- dup .jumpc(inner) drop
+  .return
+
+  ; main program (as an infinite loop)
+  .main
+    0 :inner 1 ^ dup .outport(O_LED) .call(repause) .jump(inner)
+
+This example is coded in a traditional Forth structure with the conditional
+jumps consuming the top of the data stack.  Examining the "pause" function, the
+".function" directive specifies the start of a function and the function name.
+The "0" instruction pushes the value "0" onto the top of the data stack.
+":inner" is a label for a jump instruction.  The "1-" instruction decrements the
+top of the data stack.  "dup" is the Forth instruction to push a duplicate of
+the top of the data stack onto the data stack.  The ".jumpc(inner)" macro
+expands to three instructions as follows:  (1) push the 8 lsb of the address at
+"inner" onto the data stack, (2) the conditional jump instruction with the 5 msb
+of the address of "inner" (the jumpc instruction also drops the top of the data
+stack with its partial address), and (3) a "drop" instruction to drop the
+duplicated loop count from the top of the data stack.  Finally, the "drop"
+instruction drops the loop count from the top of the data stack and the
+".return" macro generates the "return" instruction and a "nop" instruction.
+
+The function "repause" calls the "pause" function 256 times.  The main program
+body is identified by the directive ".main"  This function runs an infinite loop
+that toggles the lsb of the LED output, outputs the LED setting, and calls the
+"repause" function.
+
+A tighter version of the loop in the "pause" function can be written as
+
+  ; Consume 256*3+3 clock cycles.
+  ; ( - )
+  .function pause
+    0xFF :inner .jumpc(inner,1-) .return(drop)
+
+which is 3 cycles long for each iteration, the "drop" that is normally part
+of the ".jumpc" macro has been replaced by the decrement instruction, and the
+final "drop" instruction has replaced the default "nop" instruction that is
+normally part of the ".return" macro.  Note that the decrement is performed
+after the non-zero comparison in the "jumpc" instruction.
+
+A version of the "pause" function that consumes exactly 1000 clock cycles is:
+
+  .function pause
+    ${(1000-4)/4-1} :inner nop .jumpc(inner,1-) drop .return
+
+The instruction memory initialization for the processor module includes the
+instruction mnemonics being performed at each address and replaces the "list"
+file output from traditional assemblers.  The following is the memory
+initialization for this LED flasher example.  The main program always starts at
+address zero and functions are included in the order encountered.  Unused
+library functions are not included in the generated instruction list.
+
+  reg [8:0] s_opcodeMemory[2047:0];
+  initial begin
+    // .main
+    s_opcodeMemory['h000] = 9'h100; // 0x00
+    s_opcodeMemory['h001] = 9'h101; // :inner 0x01
+    s_opcodeMemory['h002] = 9'h052; // ^
+    s_opcodeMemory['h003] = 9'h008; // dup
+    s_opcodeMemory['h004] = 9'h100; // O_LED
+    s_opcodeMemory['h005] = 9'h038; // outport
+    s_opcodeMemory['h006] = 9'h054; // drop
+    s_opcodeMemory['h007] = 9'h10D; // 
+    s_opcodeMemory['h008] = 9'h0C0; // call repause
+    s_opcodeMemory['h009] = 9'h000; // nop
+    s_opcodeMemory['h00A] = 9'h101; // 
+    s_opcodeMemory['h00B] = 9'h080; // jump inner
+    s_opcodeMemory['h00C] = 9'h000; // nop
+    // repause
+    s_opcodeMemory['h00D] = 9'h100; // 0x00
+    s_opcodeMemory['h00E] = 9'h119; // :inner 
+    s_opcodeMemory['h00F] = 9'h0C0; // call pause
+    s_opcodeMemory['h010] = 9'h000; // nop
+    s_opcodeMemory['h011] = 9'h05C; // 1-
+    s_opcodeMemory['h012] = 9'h008; // dup
+    s_opcodeMemory['h013] = 9'h10E; // 
+    s_opcodeMemory['h014] = 9'h0A0; // jumpc inner
+    s_opcodeMemory['h015] = 9'h054; // drop
+    s_opcodeMemory['h016] = 9'h054; // drop
+    s_opcodeMemory['h017] = 9'h028; // return
+    s_opcodeMemory['h018] = 9'h000; // nop
+    // pause
+    s_opcodeMemory['h019] = 9'h100; // 0x00
+    s_opcodeMemory['h01A] = 9'h05C; // :inner 1-
+    s_opcodeMemory['h01B] = 9'h008; // dup
+    s_opcodeMemory['h01C] = 9'h11A; // 
+    s_opcodeMemory['h01D] = 9'h0A0; // jumpc inner
+    s_opcodeMemory['h01E] = 9'h054; // drop
+    s_opcodeMemory['h01F] = 9'h054; // drop
+    s_opcodeMemory['h020] = 9'h028; // return
+    s_opcodeMemory['h021] = 9'h000; // nop
+    s_opcodeMemory['h022] = 9'h000;
+    s_opcodeMemory['h023] = 9'h000;
+    s_opcodeMemory['h024] = 9'h000;
+    ...
+    s_opcodeMemory['h7FF] = 9'h000;
+  end
+
+
+DATA and STRINGS
+================================================================================
+
+Values are pushed onto the data stack by stating the value.  For example,
+
+  0x10 0x20 'x'
+
+will successively push the values 0x10, 0x20, and the character 'x' onto the
+data stack.  The character 'x' will be at the top of the data stack after these
+3 instructions.
+
+Numeric values can be represented in binary, octal, decimal, and hex.  Binary
+values start with the two characters "0b" followed by a sequence of binary
+digits; octal numbers start with a "0" followed by a sequence of octal digits;
+decimal values can start with a "+" or "-" have a non-zero first digit and have
+zero or more decimal digits; and hex values start with the two characters "0X"
+followed by a sequence of hex digits.
+
+Examples of equivalent numeric values are:
+  binary:   0b01  0b10010
+  octal:    01    022
+  decimal:  1     18
+  hex:      0x1   0x12
+
+See the COMPUTED VALUES section for using computed values in the assembler.
+
+There are four ways to specify strings in the assembler.  Simply stating the
+string
+
+  "Hello World!"
+
+puts the characters in the string onto the data stack with the letter 'H' at the
+top of the data stack.  I.e., the individual push operations are
+
+  '!' 'd' 'l' ... 'e' 'H'
+
+Prepending a 'N' before the double quote, like
+
+  N"Hello World!"
+
+puts a null-terminated string onto the data stack.  I.e., the value under the
+'!' will be a 0x00 and the instruction sequence would be
+
+  0x0 '!' 'd' 'l' ... 'e' 'H'
+
+Forth uses counted strings, which are specified here as
+
+  C"Hello World!"
+
+In this case the number of characters, 12, in the string is pushed onto the data
+stack after the 'H', i.e., the instruction sequence would be
+
+  '!' 'd' 'l' ... 'e' 'H' 12
+
+Finally, a lesser-counted string specified like
+
+  c"Hello World!"
+
+is similar to the Forth-like counted string except that the value pushed onto
+the data stack is one less than the number of characters in the string.  Here
+the value pushed onto the data stack after the 'H' would be 11 instead of 12.
+
+Simple strings are useful for constructing more complex strings in conjunction
+with other string functions.   For example, to transmit the hex values of the
+top 2 values in the data stack, do something like:
+
+  ; move the top 2 values to the return stack
+  >r >r
+  ; push the tail of the message onto the data stack
+  N"\n\r"
+  ; convert the 2 values to 2-digit hex values, LSB deepest in the stack
+  r> .call(string_byte_to_hex)
+  r> .call(string_byte_to_hex)
+  ; pre-pend the identification message
+  "Message:  "
+  ; transmit the string, using the null terminator to terminate the loop
+  :loop_transmit .outport(O_UART_TX) .jumpc(loop_transmit,nop) drop
+
+A lesser-counted string would be used like:
+
+  c"Status Message\r\n"
+  :loop_msg swap .outport(O_UART_TX) .jumpc(loop_msg,1-) drop
+
+These four string formats can also be used for variable definitions.  For
+example 3 variables could be allocated and initialized as follows:
+
+  .memory ROM myrom
+  .variable fred N"fred"
+  .variable joe  c"joe"
+  .variable moe  "moe"
+
+These are equivalent to
+
+  .variable fred 'f' 'r' 'e' 'd'  0
+  .variable joe   2  'j' 'o' 'e'
+  .variable moe  'm' 'o' 'e'
+
+with 5 bytes allocated for the variable fred, 4 bytes for joe, and 3 bytes for
+moe.
+
+The following escaped characters are recognized:
+
+  '\0'     null character
+  '\a'     bell
+  '\b'     backspace
+  '\f'     form feed
+  '\n'     line feed
+  '\r'     carriage return
+  '\t'     horizontal tab
+  "\0ooo"  3-digit octal value
+  "\xXX"   2-digit hex value where X is one of 0-9, a-f, or A-F
+  "\Xxx"   alternate form for 2-digit hex value
+  "\\"     backslash character
+
+Unrecognized escaped characters are simple treated as that character.  For
+example, '\m' is treated as the single character 'm' and '\'' is treated as the
+single quote character.
+
+
+INSTRUCTIONS
+================================================================================
+
+The 43 instructions are as follows (see core/9x8/doc/opcodes.html for detailed
+descriptions).  Here, T is the top of the data stack, N is the next-to-top of
+the data stack, and R is the top of the return stack.  All of these are the
+values at the start of the instruction.
+
+The nop instruction does nothing:
+
+  nop           no operation
+
+Mathematical operations drop one value from the data stack and replace the new
+top with the state value:
+
+  &             bitwise and of N and T
+  +             N + T
+  -             N - T
+  ^             bitwise exclusive or of N and T
+  or            bitwise or of N and T
+
+Push the carry bit for addition or subtraction onto the data stack (see
+lib/9x8/math.s for examples on using +c and -c for multi-byte arithmetic):
+
+  +c            carry bit for N+T
+  -c            carry bit for N-T
+
+Increment and decrement replace the top of the data stack with the stated
+result.
+
+  1+            replace T with T+1
+  1-            replace T with T-1
+
+Comparison operations replace the top of the data stack with the results of the
+comparison:
+
+  -1<>          replace T with -1 if T != -1, otherwise set T to 0
+  -1=           replace T with 0 if T != -1, otherwise leave T as -1
+  0<>           replace T with -1 if T != 0, otherwise leave T as 0
+  0=            replace T with -1 if T == 0, otherwise set T to 0
+
+Shift/rotate operations replace the top of the data with with the result of the
+specified shift/rotate.
+
+  0>>           shift T right one bit and set the msb to 0
+  1>>           shift T right 1 bit and set the msb to 1
+  <<0           shift T left 1 bit and set the lsb to 0
+  <<1           shift T left 1 bit and set the lsb to 1
+  <<msb         rotate T left 1 bit
+  lsb>>         rotate T right 1 bit
+  msb>>         shift T right 1 bit and set the msb to the old msb
+
+Note:  There is no "<<lsb" shift/rotate instruction.
+
+Stack manipulation instructions are as follows:
+
+  >r            pushd T onto the return stack and drop T from the data stack
+  drop          drop T from the data stack
+  dup           push T onto the data stack
+  nip           drop N from the data stack
+  over          push N onto the data stack
+  push          push a single byte onto the data stack, see the preceding DATA
+                and STRINGS section
+  r>            push R onto the data stack and drop R from the return stack
+  r@            push R onto the data stack
+  swap          swap N and T
+
+Jump and call and their conditional variants are as follows and must use the
+associated macro:
+
+  call          call instruction -- use the .call macro
+  callc         conditional call instruction -- use the .callc macro
+  jump          jump instruction -- use the .jump macro
+  jumpc         conditional jump instruction -- use the .jumpc macro
+  return        return instruction -- use the .return macro
+
+See the MEMORY section for details for these memory operations.  T is the
+address for the instructions, N is the value stored.  Chained fetches insert the
+value below T.  Chained stores drop N.
+
+  fetch         memory fetch, replace T with the value fetched
+  fetch+        chained memory fetch, retain and increment the address
+  fetch-        chained memory fetch, retain and decrement the address
+  store         memory store, drop T (N is the next value of T)
+  store+        chained memory store, retain and increment the address
+  store-        chained memory store, retain and decrement the address
+
+See the INPORT and OUTPORT section for details for the input and output port
+operations:
+
+  inport        input port operation
+  outport       output port operation
+
+The .call, .callc, .jump, and .jumpc macros encode the 3 instructions required
+to perform a call or jump along with the subsequent instructions.  The default
+third instructions is "nop" for .call and .jump and it is "drop" for .callc and
+.jumpc.  The default can be changed by specifying the optional second argument.
+The .call and .callc macros must specify a function identified by the .function
+directive and the .jump and .jumpc macros must specify a label.
+
+The .function directive takes the name of the function and the function body.
+Function bodies must end with a .return or a .jump macro.  The .main directive
+defines the body of the main function, i.e., the function at which the processor
+starts.
+
+The .include directive is used to read additional assembly code.  You can, for
+example, put the main function in uc.s, define constants and such in consts.s,
+define the memories and variables in ram.s, and include UART utilities in
+uart.s.  These files could be included in uc.s through the following lines:
+
+  .include consts.s
+  .include myram.s
+  .include uart.s
+
+The assembler only includes functions that can be reached from the main
+function.  Unused functions will not consume instruction space.
+
+
+INPORT and OUTPORT
+================================================================================
+
+The INPORT and OUTPORT configuration commands are used to specify 2-state inputs
+and outputs.  For example
+
+  INPORT 8-bit i_value I_VALUE
+
+specifies a single 8-bit input signal named "i_value" for the module.  The port
+is accessed in assembly by ".inport(I_VALUE)" which is equivalent to the
+two-instruction sequence "I_VALUE inport".  To input an 8-bit value from a FIFO
+and send a single-clock-cycle wide acknowledgment strobe, use
+
+  INPORT 8-bit,strobe i_fifo,o_fifo_ack I_FIFO
+
+The assembly ".inport(I_FIFO)" will automatically send an acknowledgment strobe
+to the FIFO through "o_fifo_ack".
+
+A write port to an 8-bit FIFO is similarly specified by
+
+  OUTPORT 8-bit,strobe o_fifo,o_fifo_wr O_FIFO
+
+The assembly ".outport(O_FIFO)" which is equivalent to "O_FIFO outport drop"
+will automatically send a write strobe to the FIFO through "o_fifo_wr".
+
+Multiple signals can be packed into a single input or output port by defining
+them in comma separated lists.  The associated bit masks can be defined
+coincident with the port definition as follows:
+
+  INPUT 1-bit,1-bit i_fifo_full,i_fifo_empty I_FIFO_STATUS
+  CONSTANT C_FIFO_STATUS__FULL  0x02
+  CONSTANT C_FIFO_STATUS__EMPTY 0x01
+
+Checking the "full" status of the FIFO can be done by the following assembly
+sequence:
+
+  .inport(I_FIFO_STATUS) C_FIFO_STATUS__FULL &
+
+Multiple bits can be masked using a computed value as follows (see below for
+more details):
+
+  .inport(I_FIFO_STATUS) ${C_FIFO_STATUS__FULL|C_FIFO_STATUS__EMPTY} &
+
+The "${...}" creates an instruction to push the 8-bit value in the braces onto
+the data stack.  The computation is performed using the Python "eval" function
+in the context of the program constants, memory addresses, and memory sizes.
+
+Preceding all of these by
+
+  PORTCOMMENT external FIFO
+
+produces the following in the Verilog module statement.  The I/O ports are
+listed in the order in which they are declared.
+
+  // external FIFO
+  input  wire       [7:0] i_fifo,
+  output reg              o_fifo_ack,
+  output reg        [7:0] o_fifo,
+  output reg              o_fifo_wr,
+  input  wire             i_fifo_full,
+  input  wire             i_fifo_empty
+
+The HDL to implement the inputs and outputs is computer generated.  Identifying
+the port name in the architecture file eliminates the possibility of
+inconsistent port numbers between the HDL and the assembly.  Specifying the bit
+mapping for the assembly code immediately after the port definition helps
+prevent inconsistencies between the port definition and the bit mapping in the
+assembly code.
+
+The normal initial value for an outport is zero.  This can be changed by
+including an optional initial value as follows.  This initial value will be
+applied on system startup and when the micro controller is reset.
+
+  OUTPORT 4-bit=4'hA o_signal O_SIGNAL
+
+An isolated output strobe can also be created using:
+
+  OUTPORT strobe o_strobe O_STROBE
+
+The assembly ".outstrobe(O_STROBE)" which is equivalent to "O_STROBE outport"
+is used to generate the strobe.  Since "O_STROBE" is a strobe-only outport, the
+".outport" macro cannot be used with it.  Similarly, attempting to use the
+".outstrobe" macro will generate an error if it is invoked with an outport
+that does have data.
+
+A single-bit "set-reset" input port type is also included.  This sets a register
+when an external strobe is received and clears the register when the port is
+read.  For example, to capture an external timer for a polled-loop, include the
+following in the architecture file:
+
+  PORTCOMMENT external timer
+  INPORT set-reset i_timer I_TIMER
+
+The following is the assembly code to conditionally call two functions when the
+timer event is encountered:
+
+  .inport(I_TIMER)
+    .callc(timer_event_1,nop)
+    .callc(timer_event_2)
+
+The "nop" in the first conditional call prevents the conditional from being
+dropped from the data stack so that it can be used by the subsequent conditional
+function call.
+
+The input from a set-reset INPORT is a pure flag.  I.e., either all of the bits
+are zero or all of the bits are one.  This can be used as part of executing a
+loop a fixed number of times.  For example, the inperiod argument of the
+servo_motor peripheral can be used to receive a strobe every time the PWM goes
+high.  The following loop will wait for 10 occurrences of the rising edge of the
+servo_motor PWM before proceeding to the next block of code:
+
+  10 :loop .inport(I_INPERIOD) + .jumpc(loop,nop) drop
+
+
+PERIPHERAL
+================================================================================
+
+Peripherals are implemented via Python modules.  For example, an open drain I/O
+signal, such as is required for an I2C bus, does not fit the INPORT and OUTPORT
+functionality.  Instead, an "open_drain" peripheral is provided by the Python
+script in "core/9x8/peripherals/open_drain.py".  This puts a tri-state I/O in
+the module statement, allows it to be read through an "inport" instruction, and
+allows it to be set low or released through an "outport" instruction.  An I2C
+bus with separate SCL and SDA ports can then be incorporated into the processor
+as follows:
+
+  PORTCOMMENT     I2C bus
+  PERIPHERAL      open_drain      inport=I_SCL \
+                                  outport=O_SCL \
+                                  iosignal=io_scl
+  PERIPHERAL      open_drain      inport=I_SDA \
+                                  outport=O_SDA \
+                                  iosignal=io_sda
+
+The default width for this peripheral is 1 bit.  The module statement will then
+include the lines
+
+  // I2C bus
+  inout  wire     io_scl,
+  inout  wire     io_sda
+
+The assembly code to set the io_scl signal low is "0 .outport(O_SCL)" and to
+release it is "1 .outport(O_SCL)".  These instruction sequences are actually
+"0 O_SCL outport drop" and "1 O_SCL outport drop" respectively.  The "outport"
+instruction drops the top of the data stack (which contained the port number)
+and sends the next-to-the-top of the data stack to the designated output port.
+
+Two examples of I2C device operation are included in the examples directory.
+
+The following peripherals are provided:
+  adder_16bit   16-bit adder/subtractor
+  AXI4_Lite_Master
+                32-bit read/write AXI4-Lite Master
+                Note:  The synchronous version has been tested on hardware.
+  AXI4_Lite_Slave_DualPortRAM
+                dual-port-RAM interface for the micro controller to act as an
+                AXI4-Lite slave
+  big_inport    shift reads from a single INPORT to construct a wide input
+  big_outport   shift writes to a single OUTPORT to construct a wide output
+  counter       counter for number of received high cycles from signal
+  inFIFO_async  input FIFO with an asynchronous write clock
+  latch         latch wide inputs for sampling
+  monitor_stack simulation diagnostic (see below)
+  open_drain    for software-implemented I2C buses or similar
+  outFIFO_async output FIFO with an asynchronous read clock
+  PWM_8bit      PWM generator with an 8-bit control
+  servo_motor   PWM modulation suitable for servo motor or similar control
+  stepper_motor stepper motor controller with acceleration
+  timer         timing for polled loops or similar
+  trace         simulation diagnostic (see below)
+  UART          bidirectional UART
+  UART_Rx       receive UART
+  UART_Tx       transmit UART
+  wide_strobe   1 to 8 bit strobe generator
+
+The following command illustrates how to display the help message for
+peripherals:
+
+  echo "ARCHITECTURE core/9x8 Verilog" | ssbcc -P "big_inport help" - | less
+
+User defined peripherals can be in the same directory as the architecture file
+or a subdirectory named "peripherals".
+
+
+PARAMETER and LOCALPARAM
+================================================================================
+
+Parameters are incorporated through the PARAMETER and LOCALPARAM configuration
+commands.  For example, the clock frequency in hertz is needed for UARTs for
+their baud rate generator.  The configuration command
+
+  PARAMETER G_CLK_FREQ_HZ 97_000_000
+
+specifies the clock frequency as 97 MHz.  The HDL instantiating the processor
+can change this specification.  The frequency can also be changed through the
+command-line invocation of the computer compiler.  For example,
+
+  ssbcc -G "G_CLK_FREQ_HZ=100_000_000" myprogram.9x8
+
+specifies that a frequency of 100 MHz be used instead of the default frequency
+of 97 MHz.
+
+The LOCALPARAM configuration command can be used to specify parameters that
+should not be changed by the surrounding HDL.  For example,
+
+  LOCALPARAM L_VERSION 24'h00_00_00
+
+specifies a 24-bit parameter named "L_VERSION".  The 8-bit major, minor, and
+build sections of the parameter can be accessed in an assembly program using
+"L_VERSION[16+:8]", "L_VERSION[8+:8]", and "L_VERSION[0+:8]".
+
+For both parameters and localparams, the default range is "[0+:8]".  The
+instruction memory is initialized using the parameter value during synthesis,
+not the value used to initialize the parameter.  That is, the instruction memory
+initialization will be:
+
+  s_opcodeMemory[...] = { 1'b1, L_VERSION[16+:8] };
+
+The value of the localparam can be set when the computer compiler is run using
+the "-G" option.  For example,
+
+  ssbcc -G "L_VERSION=24'h01_04_03" myprogram.9x8
+
+can be used in a makefile to set the version number for a release without
+modifying the micro controller architecture file.
+
+
+DIAGNOSTICS AND DEBUGGING
+================================================================================
+
+A 3-character, human readable version of the opcode can be included in
+simulation waveform outputs by adding "--display-opcode" to the ssbcc command.
+
+The stack health can be monitored during simulation by including the
+"monitor_stack" peripheral through the command line.  For example, the LED
+flasher example can be generated using
+
+  ssbcc -P monitor_stack led.9x8
+
+This allows the architecture file to be unchanged between simulation and an FPGA
+build.
+
+Stack errors include underflow and overflow, malformed data validity, and
+incorrect use of the values on the return stack (returns to data values and data
+operations on return addresses).  Other errors include out-of-range for memory,
+inport, and outport operations.
+
+When stack errors are detected the last 50 instructions are dumped to the
+console and the simulation terminates.  The dump includes the PC, numeric
+opcode, textual representation of the opcode, data stack pointer, next-to-top of
+the data stack, top of the data stack, top of the return stack, and the return
+stack pointer.  Invalid stack values are displayed as "XX".  The length of the
+history dumped is configurable.
+
+Out-of-range PC checks are also performed if the instruction space is not a
+power of 2.
+
+A "trace" peripheral is also provided that dumps the entire execution history.
+This was used to validate the processor core.
+
+
+MEMORY ARCHITECTURE
+================================================================================
+
+The DATA_STACK, RETURN_STACK, INSTRUCTION, and MEMORY configuration commands
+allocate memory for the data stack, return stack, instruction ROM, and memory
+RAM and ROM respectively.  The data stack, return stack, and memories are
+normally instantiated as dual-port LUT-based memories with asynchronous reads
+while the instruction memory is always instantiated with a synchronous read
+architecture.
+
+The COMBINE configuration command is used to coalesce memories and to convert
+LUT-based memories to synchronous SRAM-based memories.  For example, the large
+SRAMs in modern FPGAs are ideal for storing the instruction opcodes and their
+dual-ported access allows either the data stack or the return stack to be
+stored in a relatively small region at the end of the large instruction memory.
+Memories, which required dual-ported operation, can also be instantiated in
+large RAMs either individually or in combination with each other.  Conversion
+to SRAM-based memories is also useful for FPGA architectures that do not have
+efficient LUT-based memories.
+
+The INSTRUCTION configuration allocates memory for the processor instruction
+space.  It has the form "INSTRUCTION N" or "INSTRUCTION N*M" where N must be a
+power of 2.  The first form is used if the desired instruction memory size is a
+power of 2.  The second form is used to allocate M memory blocks of size N
+where M is not a power of 2.  For example, on an Altera Cyclone III, the
+configuration command "INSTRUCTION 1024*3" allocates three M9Ks for the
+instruction space, saving one M9K as compared to the configuration command
+"INSTRUCTION 4096".
+
+The DATA_STACK configuration command allocates memory for the data stack.  It
+has the form "DATA_STACK N" where N is the commanded size of the data stack.
+N must be a power of 2.
+
+The RETURN_STACK configuration command allocates memory for the return stack and
+has the same format as the DATA_STACK configuration command.
+
+The MEMORY configuration command is used to define one to four memories, either
+RAM or ROM, with up to 256 bytes each.  If no MEMORY configuration command is
+issued, then no memories are allocated for the processor.  The MEMORY
+configuration command has the format "MEMORY {RAM|ROM} name N" where
+"{RAM|ROM}" specifies either a RAM or a ROM, name is the name of the memory and
+must start with an alphabetic character, and the size of the memory, N, must be
+a power of 2.  For example, "MEMORY RAM myram 64" allocates 64 bytes of memory
+to form a RAM named myram.  Similarly, "MEMORY ROM lut 256" defines a 256 byte
+ROM named lut.  More details on using memories is provided in the next section.
+
+The COMBINE configuration command can be used to combine the various memories
+for more efficient processor implementation as follows:
+
+  COMBINE INSTRUCTION,<single-port-memory>
+  COMBINE <single-port-memory>
+  COMBINE <single-port-memory>,<single-port-memory>
+  COMBINE <ramlist>
+
+where <single-port-memory> is one of DATA_STACK, RETURN_STACK, or a list of one
+or more ROMs and <ramlist> is a list of one or more RAMs and/or ROMs.  The first
+configuration command reserves space at the end of the instruction memory for
+the DATA_STACK, RETURN_STACK, or listed ROMs.
+
+The SRAM_WIDTH configuration command is used to make the memory allocations more
+efficient when the SRAM block width is more than 9 bits.  For example,
+Altera's Cyclone V family has 10-bit wide memory blocks and the configuration
+command "SRAM_WIDTH 10" is appropriate.  The configuration command
+sequence
+
+  INSTRUCTION     1024
+  RETURN_STACK    32
+  SRAM_WIDTH      10
+  COMBINE         INSTRUCTION,RETURN_STACK
+
+will use a single 10-bit memory entry for each element of the return stack
+instead of packing the 10-bit values into two memory entries of a 9-bit wide
+memory.
+
+The following illustrates a possible configuration for a Spartan-6 with a
+2048-long SRAM and relatively large 64-deep data stack.  The data stack will be
+in the last 64 elements of the instruction memory and the instruction space will
+be reduced to 1984 words.
+
+  INSTRUCTION   2048
+  DATA_STACK    64
+  COMBINE       INSTRUCTION,DATA_STACK
+
+The following illustrates a possible configuration for a Cyclone-III with three
+M9Ks for the instruction ROM and the data stack.
+
+  INSTRUCTION   1024*3
+  DATA_STACK    64
+  COMBINE       INSTRUCTION,DATA_STACK
+
+WARNING:  Some devices, such as Xilinx' Spartan-3A devices, do not support
+asynchronous reads, so the COMBINE configuration command does not work for them.
+
+WARNING:  Xilinx XST does not correctly infer a Block RAM when the
+"COMBINE INSTRUCTION,RETURN_STACK" configuration command is used and the
+instruction space is 1024 instructions or larger.  Xilinx is supposed to fix
+this in a future release of Vivado so the fix will only apply to 7-series or
+later FPGAs.
+
+
+MEMORY
+================================================================================
+
+The MEMORY configuration command is used as follows to allocate a 128-byte RAM
+named "myram" and to allocate a 32-byte ROM named "myrom".  Zero to four
+memories can be allocated, each with up to 256 bytes.
+
+  MEMORY RAM myram 128
+  MEMORY ROM myrom  32
+
+The assembly code to lay out the memory uses the ".memory" directive to identify
+the memory and the ".variable" directive to identify the symbol and its content.
+Single or multiple values can be listed and "*N" can be used to identify a
+repeat count.
+
+  .memory RAM myram
+  .variable a 0
+  .variable b 0
+  .variable c 0 0 0 0
+  .variable d 0*4
+
+  .memory ROM myrom
+  .variable coeff_table 0x04
+                        0x08
+                        0x10
+                        0x20
+  .variable hello_world N"Hello World!\r\n"
+
+Single values are fetched from or stored to memory using the following assembly:
+
+  .fetchvalue(a)
+  0x12 .storevalue(b)
+
+Multi-byte values are fetched or stored as follows.  This copies the four values
+from coeff_table, which is stored in a ROM, to d.
+
+  .fetchvector(coeff_table,4) .storevector(d,4)
+
+The memory size is available using computed values (see below) and can be used
+to clear the entire memory, etc.
+
+The available single-cycle memory operation macros are:
+  .fetch(mem_name)      replaces T with the value at the address T in the memory
+                        mem_name
+                        Note:  .fetchram(var_name) is safer.
+  .fetch+(mem_name)     pushes the value at address T in the memory mem_name
+                        into the data stack below T and increments T
+                        Note:  This is useful for fetching successive values
+                               from memory into the data stack.
+                        Note:  .fetchram+(var_name) is safer.
+  .fetch-(mem_name)     similar to .fetch+ but decrements T
+                        Note:  .fetchram-(var_name) is safer.
+  .store(ram_name)      stores N at address T in the RAM ram_name, also drops
+                        the top of the data stack
+                        Note:  .storeram(var_name) is safer.
+  .store+(ram_name)     stores N at address T in the RAM ram_name, also drops N
+                        from the data stack and increments T
+                        Note:  .storeram+(var_name) is safer.
+  .store-(ram_name)     similar to .store+ but decrements T
+                        Note:  .storeram-(var_name) is safer.
+
+The following multi-cycle macros provide more generalized access to the
+memories:
+  .fetchindexed(var_name)
+                        uses the top of the data stack as an index into var_name
+                        Note:  This is equivalent to the 3 instruction sequence
+                               "var_name + .fetch(mem_name)"
+  .fetchoffset(var_name,offset)
+                        fetches the single-byte value of var_name offset by
+                        "offset" bytes
+                        Note:  This is equivalent to
+                                 "${var_name+offset} .fetch(mem_name)"
+                               where mem_name is the memory in which var_name is
+                               stored.
+  .fetchram(var_name)   is similar to the .fetch(mem_name) macro except that the
+                        variable name is used to identify the memory instead of
+                        the name of the memory
+  .fetchram+(var_name)  is similar to the .fetch+(mem_name) macro except that
+                        the variable name is used to identify the memory instead
+                        of the name of the memory
+  .fetchram-(var_name)  is similar to the .fetch-(mem_name) macro except that the
+                        the variable name is used to identify the memory instead
+                        of the name of the memory
+  .fetchvalue(var_name) fetches the single-byte value of var_name
+                        Note:  This is equivalent to
+                                 "var_name .fetch(mem_name)"
+                               where mem_name is the memory in which var_name is
+                               stored.
+  .fetchvector(var_name,N)
+                        fetches N values starting at var_name into the data
+                        stack with the value at var_name at the top and the
+                        value at var_name+N-1 deep in the stack.
+                        Note:  This is equivalent N+1 operation sequence
+                                 "${var_name+N-1} .fetch-(mem_name) ...
+                                 .fetch-(mem_name) .fetch(mem_name)"
+                               where ".fetch-(mem_name)" is repeated N-1 times.
+  .storeindexed(var_name)
+                        uses the top of the data stack as an index into var_name
+                        into which to store the next-to-top of the data stack.
+                        Note:  This is equivalent to the 4 instruction sequence
+                                 "var_name + .store(mem_name) drop".
+                        Note:  The default "drop" instruction can be overriden
+                               by providing the optional second argument
+                               similarly to the .storevalue macro.
+  .storeoffset(var_name,offset)
+                        stores the single-byte value at the top of the data
+                        stack at var_name offset by "offset" bytes
+                        Note:  This is equivalent to
+                                 "${var_name+offset} .store(mem_name) drop"
+                               where mem_name is the memory in which var_name is
+                               stored.
+                        Note:  The default "drop" instruction can be replaced by
+                               providing the optional third argument.
+  .storeram(var_name)   is similar to the .store(mem_name) macro except that the
+                        variable name is used to identify the RAM instead of the
+                        name of the RAM
+  .storeram+(var_name)  is similar to the .store+(mem_name) macro except that
+                        the variable name is used to identify the RAM instead of
+                        the name of the RAM
+  .storeram-(var_name)  is similar to the .store-(mem_name) macro except that
+                        the variable name is used to identify the RAM instead of
+                        the name of the RAM
+  .storevalue(var_name) stores the single-byte value at the top of the data
+                        stack at var_name
+                        Note:  This is equivalent to
+                                 "var_name .store(mem_name) drop"
+                        Note:  The default "drop" instruction can be replaced by
+                               providing the optional second argument.  For
+                               example, the following instruction will store and
+                               then decrement the value at the top of the data
+                               stack:
+                                 .storevalue(var_name,1-)
+  .storevector(var_name,N)
+                        Does the reverse of the .fetchvector macro.
+                        Note:  This is equivalent to the N+2 operation sequence
+                                 "var_name .store+(mem_name) ... .store+(mem_name)
+                                 .store(mem_name) drop"
+                               where ".store+(mem_name)" is repeated N-1 times.
+
+The .fetchvector and .storevector macros are intended to work with values stored
+MSB first in memory and with the MSB toward the top of the data stack,
+similarly to the Forth language with multi-word values.  To demonstrate how
+this data structure works, consider the examples of decrementing and
+incrementing a two-byte value on the data stack:
+
+  ; Decrement a 2-byte value
+  ;   swap 1- swap      - decrement the LSB
+  ;   over -1=          - puts -1 on the top of the data stack if the LSB rolled
+  ;                       over from 0 to -1, puts 0 on the top otherwise
+  ;   +                 - decrements the MSB if the LSB rolled over
+  ; ( u_LSB u_MSB - u_LSB' u_MSB' )
+  .function decrement_2byte
+  swap 1- swap over -1= .return(+)
+
+  ; Increment a 2-byte value
+  ;   swap 1+ swap      - increment the LSB
+  ;   over 0=           - puts -1 on the top of the data stack if the LSB rolled
+  ;                       over from 0xFF to 0, puts 0 on the top otherwise
+  ;   -                 - increments the MSB if the LSB rolled over (by
+  ;                       subtracting -1)
+  ; ( u_LSB u_MSB - u_LSB' u_MSB' )
+  .function increment_2byte
+  swap 1+ swap over 0= .return(-)
+
+
+COMPUTED VALUES
+================================================================================
+
+Computed values can be pushed on the stack using a "${...}" where the "..." is
+evaluated in Python and cannot have any spaces.
+
+For example, a loop that should be run 5 times can be coded as:
+
+  ${5-1} :loop ... .jumpc(loop,1-) drop
+
+which is a clearer indication that the loop is to be run 5 times than is the
+instruction sequence
+
+  4 :loop ...
+
+Constants can be accessed in the computation.  For example, a block of memory
+can be allocated as follows:
+
+  .constant C_RESERVE
+  .memory RAM myram
+  ...
+  .variable reserved 0*${C_RESERVE}
+
+and the block of reserved memory can be cleared using the following loop:
+
+  ${C_RESERVE-1} :loop 0 over .storeindexed(reserved) .jumpc(loop,1-) drop
+
+The offsets of variables in their memory can also be accessed through a computed
+value.  The value of reserved could also be cleared as follows:
+
+  ${reserved-1} ${C_RESERVE-1} :loop >r
+    0 swap .store-(myram)
+  r> .jumpc(loop,-1) drop drop
+
+This body of this version of the loop is the same length as the first version.
+In general, it is better to use the memory macros to access variables as they
+ensure the correct memory is accessed.
+
+The sizes of memories can also be accessed using computed values.  If "myram" is
+a RAM, then "${size['myram']}" will push the size of "myram" on the stack.  As
+an example, the following code will clear the entire RAM:
+
+  ${size['myram']-1} :loop 0 swap .jumpc(loop,.store-(myram)) drop
+
+The lengths of I/O signals can also be accessed using computed values.  If
+"o_mask" is a mask, then "${size['o_mask']}" will push the size of the mask on
+the stack and "${2**size['o_mask']-1}" will push a value that sets all the bits
+of the mask.  The I/O signals include I/O signals instantiated by peripherals.
+For example, for the configuration command
+
+  PERIPHERAL big_outport outport=O_BIG outsignal=o_big width=47
+
+the width of the output signal is accessible using "${size['o_big']}".  You can
+set the wide signal to all zeroes using:
+
+  ${(size['o_big']+7)/8-1} :loop 0 .outport(O_BIG) .jumpc(loop,1-) drop
+
+
+MACROS
+================================================================================
+
+There are 3 types of macros used by the assembler.
+
+The first kind of macros are built in to the assembler and are required to
+encode instructions that have embedded values or have mandatory subsequent
+instructions.  These include function calls, jump instructions, function return,
+and memory accesses as follows:
+  .call(function,[op])
+  .callc(function,[op])
+  .fetch(ramName)
+  .fetch+(ramName)
+  .fetch-(ramName)
+  .jump(label,[op])
+  .jumpc(label,[op])
+  .return([op])
+  .store(ramName)
+  .store+(ramName)
+  .store-(ramName)
+
+The second kind of macros are designed to ease access to input and output
+operations and for memory accesses and to help ensure these operations are
+correctly constructed.  These are defined as python scripts in the
+core/9x8/macros directory and are automatically loaded into the assembler.
+These macros are:
+  .fetchindexed(variable)
+  .fetchoffset(variable,ix)
+  .fetchvalue(variableName)
+  .fetchvector(variableName,N)
+  .inport(I_name)
+  .outport(O_name[,op])
+  .outstrobe(O_name)
+  .storeindexed(variableName[,op])
+  .storeoffset(variableName,ix[,op])
+  .storevalue(variableName[,op])
+  .storevector(variableName,N)
+
+The third kind of macro is user-defined macros.  These macros must be registered
+with the assembler using the ".macro" directive.
+
+For example, the ".push32" macro is defined by macros/9x8/push32.py and can be
+used to push 32-bit (4-byte) values onto the data stack as follows:
+
+  .macro push32
+  .constant C_X 0x87654321
+  .main
+    ...
+    .push32(0x12345678)
+    .push32(C_X)
+    .push32(${0x12345678^C_X})
+    ...
+
+The following macros are provided in macros/9x8:
+  .push16(v)    push the 16-bit (2-byte) value "v" onto the data stack with the
+                MSB at the top of the data stack
+  .push24(v)    push the 24-bit (3-byte) value "v" onto the data stack with the
+                MSB at the top of the data stack
+  .push32(v)    push the 32-bit (4-byte) value "v" onto the data stack with the
+                MSB at the top of the data stack
+  .pushByte(v,ix)
+                push the ix'th byte of v onto the data stack
+                Note:  ix=0 designates the LSB
+
+Directories are searched in the following order for macros:
+  .
+  ./macros
+  include paths specified by the '-M' command line option.
+  macros/9x8
+
+The python scripts in core/9x8/macros and macros/9x8 can be used as design
+examples for user-defined macros.  The assembler does some type checking based
+on the list provided when the macro is registered by the "AddMacro" method, but
+additional type checking is often warranted by the macro "emitFunction" which
+emits the actual assembly code.  The ".fetchvector" and ".storevector" macros
+demonstrates how to design variable-length macros.  Several macros in
+core/9x8/macros illustrate designing macros with optional arguments.
+
+It is not an error to repeat the ".macro MACRO_NAME" directive for user-defined
+macros.  The assembler will issue a fatal error if a user-defined macro
+conflicts with a built-in macro.
+
+
+CONDITIONAL COMPILATION
+================================================================================
+
+Conditional compilation is accepted in the architecture file and in the assembly
+source files and is based on whether or not the referenced symbol is defined.
+
+In the architecture file, symbols are defined by CONSTANT, INPORT, OUTPORT, and
+PERIPHERAL statements, or by the "-D D_name" argument to ssbcc.  The line
+
+  .IFDEF name
+  <statements>
+  .ENDIF
+
+will then include the lines "<statements>" if the symbol "name" is defined.
+The ".IFNDEF" command is similar except that the statements included if the
+symbol is not defined.  A ".ELSE" is also provided.
+
+In an assembly file directives are conditionally included using the .IFDEF and
+.IFNDEF directives, an optional .ELSE directive, and the terminating .ENDIF
+directive.  Note that this is done at the directive level, i.e. function
+declarations, memory declarations, and so forth.  Within a function code is
+conditionally included starting with a ".ifdef(name)" or a ".ifndef(name)", an
+optional ".else" and a terminating ".endif".
+
+For example, a diagnostic UART can be conditionally included in a program by
+including the following lines in the architecture file:
+
+  .IFDEF D_ENABLE_UART
+  PORTCOMMENT Diagnostic UART
+  PERIPHERAL UART_Tx outport=O_UART_TX ...
+  .ENDIF
+
+A "uart_tx" function can be optionally created using code similar to the
+following.  Note that the symbol for the .outport macro is used to determine
+whether or not the function is defined since that is more closely related to
+whether or not the function can be defined.  The function definition must
+preceed any ".ifdef(uart_tx)" conditionals used to output diagnostics.
+
+  .IFDEF O_UART_TX
+  .function uart_tx
+    :loop .outport(O_UART_TX) .jumpc(loop,nop) .return(drop)
+  .ENDIF
+
+Diagnostics in the assembly code can be included using either
+
+  .ifdef(D_ENABLE_UART) N"Msg\r\n" .call(uart_tx) .endif
+
+or
+
+  .ifdef(uart_tx) N"Msg\r\n" .call(uart_tx) .endif
+
+Conditional compilation cannot cross file boundaries.
+
+The assembler also recognizes the ".define" directive.  For example, specific
+diagnostics could be enabled if the UART is instantiated as follows:
+
+  .IFDEF O_UART_TX
+  .define D_DEBUG_FUNCTION_A
+  .ENDIF
+
+  ...
+
+  .ifdef(D_DEBUG_FUNCTION_A) N"Debug Msg\r\n" .call(uart_tx) .endif
+
+The following code illustrates how to preclude multiple attempted inclusions of
+an assembly library file.
+
+  ; put these two lines near the top of the file
+  .IFNDEF D_FILENAME_INCLUDED
+  .define D_FILENAME_INCLUDED
+  ; put the library body here
+  ...
+  ; put this line at the bottom of the file
+  .ENDIF ; .IFNDEF D_FILENAME_INCLUDED
+
+The ".INCLUDE" configuration command can be used to read configuration commands
+from additional sources.  For example, the following code will conditionally
+include a general UART library if the outport O_UART_TX is defined:
+
+  .IFDEF O_UART_TX
+  .INCLUDE uart.s
+  .ENDIF
+
+
+SIMULATIONS
+================================================================================
+
+Simulations have been performed with Icarus Verilog, Verilator, and Xilinx'
+ISIM.  Icarus Verilog is good for short, simple simulations and is used for the
+core and peripheral test benches; Verilator for long simulations of large,
+complex systems; and ISIM when Xilinx-specific cores are used.  Verilator is
+the fastest simulators I've encountered.  Verilator is also used for lint
+checking in the core test benches.
+
+
+MEM INITIALIZATION FILE
+================================================================================
+
+A memory initialization file is produced during compilation.  This file can be
+used with tools such as Xilinx' data2mem to modify the SRAM contents without
+having to rebuild the entire system.  It is restricted to the opcode memory
+initialization.  The file must be processed before it can be used by specific
+tools, see doc/MemoryInitialization.html.
+
+WARNING:  The values of parameters used in the assembly code must match the
+instantiated design.
+
+
+THEORY OF OPERATION
+================================================================================
+
+Registers are used for the top of data stack, "T", and the next-to-top of the
+data stack, "N".  The data stack is a separate memory.  This means that the
+"DATA_STACK N" configuration command actually allows N+2 values in the data
+stack since T and N are not stored in the N-element deep data stack.
+
+The return stack is similar in that "R" is the top of the return stack and the
+"RETURN_STACK N" allocates an additional N words of memory.  The return stack is
+the wider of the 8-bit data width and the program counter width.
+
+The program counter is always either incremented by 1 or is set to an address
+as controlled by jump, jumpc, call, callc, and return instructions.  The
+registered program counter is used to read the next opcode from the instruction
+memory and this opcode is also registered in the memory.  This means that there
+is a 1 clock cycle delay between the address changing and the associated
+instruction being performed.  This is also part of the architecture required to
+have the processor operate at one instruction per clock cycle.
+
+Separate ALUs are used for the program counter, adders, logical operations, etc.
+and MUXes are used to select the values desired for the destination registers.
+The instruction execution consists of translating the upper 6 msb of the opcode
+into MUX settings and performing opcode-dependent ALU operations as controlled
+by the 3 lsb of the opcode (during the first half of the clock cycle) and then
+setting the T, N, R, memories, etc. as controlled by the computed MUX settings.
+
+The "core.v" file is the code for these operations.  Within this file there are
+several "@xxx@" strings that specify where the computer compiler is to insert
+code such as I/O declarations, memories, inport interpretation, outport
+generation, peripherals, etc.
+
+The file structure, i.e., putting the core and the assembler in "core/9x8"
+should facilitate application-specific modification of processor.  For example,
+the store+, store-, fetch+, and fetch- instructions could be replaced with
+additional stack manipulation operations, arithmetic operations with 2 byte
+results, etc.  Simply copy the "9x8" directory to something like "9x8_XXX" and
+make your modifications in that directory.  The 8-bit peripherals should still
+work, but the 9x8 library functions may need rework to accommodate the
+modifications.
+
+
+MISCELLANEOUS
+================================================================================
+
+Features and peripherals are still being added and the documentation is
+incomplete.  The output HDL is currently restricted to Verilog although a VHDL
+package file is automatically generated by the computer compiler.
+
+The "INVERT_RESET" configuration command is used to indicate an active-low reset
+is input to the micro controller rather than an active-high reset.

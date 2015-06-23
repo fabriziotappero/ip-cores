@@ -1,0 +1,69 @@
+#!/bin/bash
+# Copyright 2013, 2015, Sinclair R.F., Inc.
+
+NAME=UART_Rx
+
+cat <<EOF > tb.good
+48
+65
+6c
+6c
+6f
+20
+57
+6f
+72
+6c
+63
+12
+0d
+0a
+00
+EOF
+
+# Test +/-2.7% and 0% baud rates.
+cp tb_${NAME}.s-normal tb_${NAME}.s;
+cp tb.v-normal tb.v
+for baud in 112089 115200 118310; do
+  sed -e "s/115200/${baud}/" tb_${NAME}.9x8-good > tb_${NAME}.9x8;
+  ../../../../../ssbcc -q -P monitor_stack tb_${NAME}.9x8 || { echo "${NAME} compile failed" > /dev/stderr; exit 1; }
+  iverilog -o tb tb.v tb_${NAME}.v || { echo "${NAME} build failed" > /dev/stderr; exit 1; }
+  ./tb > tb.out;
+  if ! cmp -s tb.out tb.good; then
+    echo "${NAME} failed testing baud rate:  ${baud}" > /dev/stderr;
+    exit 1;
+  fi
+done
+
+# Partial test for input FIFO.
+cp tb_${NAME}.s-fifo tb_${NAME}.s;
+cp tb.v-normal tb.v
+sed -e "s/G_BAUD$/G_BAUD inFIFO=16/" tb_${NAME}.9x8-good > tb_${NAME}.9x8;
+../../../../../ssbcc -q -P monitor_stack tb_${NAME}.9x8 || { echo "${NAME} compile failed" > /dev/stderr; exit 1; }
+iverilog -o tb tb.v tb_${NAME}.v || { echo "${NAME} build failed" > /dev/stderr; exit 1; }
+./tb > tb.out
+if ! cmp tb.out tb.good; then
+  echo "${NAME} FIFO test failed" > /dev/stderr;
+  exit 1;
+fi
+
+# Validate RTRn signal generation
+cp tb_${NAME}.s-rtrn tb_${NAME}.s
+cp tb.v-rtrn tb.v
+for RTR_BUFFER in 1 2 4; do
+  for RTR_OVERFLOW  in 0 1 2 3; do
+    if [ ${RTR_OVERFLOW} -ge ${RTR_BUFFER} ]; then continue; fi
+    sed -e "s/G_BAUD$/G_BAUD inFIFO=8 RTRn=o_uart_rtrn rtr_buffer=${RTR_BUFFER}/" tb_${NAME}.9x8-good > tb_${NAME}.9x8;
+    sed -e "s/@RTR_OVERFLOW@/${RTR_OVERFLOW}/" tb.v-rtrn > tb.v;
+    ../../../../../ssbcc -q -P monitor_stack tb_${NAME}.9x8 || { echo "${NAME} compile failed" > /dev/stderr; exit 1; }
+    iverilog -o tb tb.v tb_${NAME}.v || { echo "${NAME} build failed" > /dev/stderr; exit 1; }
+    ./tb > tb.out
+    if ! cmp tb.out tb.good; then
+      echo "${NAME} FIFO test failed" > /dev/stderr;
+      exit 1;
+    fi
+  done
+done
+
+echo "Passed:  ${NAME}";
+exit 0;

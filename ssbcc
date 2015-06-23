@@ -1,0 +1,602 @@
+#!/usr/bin/python2.7
+
+################################################################################
+#
+# Copyright 2012, Sinclair R.F., Inc.
+#
+# Build an SSBCC system.
+#
+################################################################################
+
+import math
+import os
+import re
+import sys
+import tempfile
+
+from ssbccUtil import *;
+from ssbccConfig import SSBCCconfig;
+
+################################################################################
+#
+# Surround the program with a try ... except clause
+#
+################################################################################
+
+try:
+
+  ################################################################################
+  #
+  # Parse the command line arguments
+  #
+  ################################################################################
+
+  #
+  # Construct the command-line argument list parser
+  #
+
+  def validateFile(filename):
+    if filename == '-':
+      filename = '/dev/stdin';
+    try:
+      return file(filename,'r');
+    except:
+      raise SSBCCException('Error opening "%s"' % filename);
+
+  import argparse
+  argListParser = argparse.ArgumentParser(description='SSBCC system builder');
+  argListParser.add_argument('-D', metavar='D_name', type=str, action='append', help='Define symbol (must start with "D_")');
+  argListParser.add_argument('-G', metavar='parameter_name=value', type=str, action='append', help='Override parameter value');
+  argListParser.add_argument('-I', metavar='include_dir', type=str, action='append', help='Add search directory for included files and peripherals');
+  argListParser.add_argument('-M', metavar='macropath', action='append', help='Macro search path');
+  argListParser.add_argument('-P', metavar='peripheral_name[="parameters"]', type=str, action='append', help='Add peripheral');
+  argListParser.add_argument('-o', metavar='outCoreName', type=str, help='output core name');
+  argListParser.add_argument('-q', action='store_true', help='quiet');
+  argListParser.add_argument('--define-clog2', action='store_true', help='define clog2 instead of using built-in $clog2');
+  argListParser.add_argument('--display-opcode', action='store_true', help='add 3-letter decode of opcode (for trace viewer)');
+  argListParser.add_argument('--help-macro', metavar='macroName', type=str, help='Display usage message for the specified macro (passed on to the assembler)');
+  argListParser.add_argument('--list-macros', action='store_true', help='list the built-in and user-defined macros (passed on to the assembler)');
+  argListParser.add_argument('--rand-instr-mem', action='store_true', help='fill unused instruction memory with random values');
+  argListParser.add_argument('--synth-instr-mem', type=str, help='synthesis constraint for instruction memory');
+  argListParser.add_argument('--verilator-tracing-on', action='store_true', help='show all signals in verilator waveform files');
+  argListParser.add_argument('filename', metavar='filename', type=validateFile, help='SSBCC configuration file');
+  argList = argListParser.parse_args();
+
+  #
+  # Set the command-line dependent configuration parameters.
+  #
+
+  config = SSBCCconfig();
+
+  config.Set('define_clog2',argList.define_clog2);
+  config.Set('rand_instr_mem',argList.rand_instr_mem);
+  config.Set('verilator_tracing_on',argList.verilator_tracing_on);
+
+  if argList.display_opcode:
+    config.functions['display_opcode'] = True;
+
+  if argList.D:
+    for name in argList.D:
+      if not re.match('D_',name):
+        raise SSBCCException('Bad define name "%s" should start with "D_"' % name);
+      config.AddDefine(name);
+
+  if argList.I:
+    for pathString in argList.I:
+      if not os.path.isdir(pathString):
+        raise SSBCCException('Bad path string:  "%s/%s"' % (os.getcwd(),pathString,));
+      config.AppendIncludePath(pathString);
+      config.InsertPeripheralPath(pathString);
+
+  if argList.o:
+    config.Set('outCoreName',argList.o);
+  else:
+    config.Set('outCoreName',os.path.splitext(os.path.basename(argList.filename.name))[0]);
+
+  if argList.synth_instr_mem:
+    config.Set('synth_instr_mem',argList.synth_instr_mem);
+  else:
+    config.Set('synth_instr_mem',None);
+
+  #
+  # Read the configuration file into a line-by-line buffer.
+  # Note:  argList.filename is a file handle, so no paths will be searched by
+  #        LoadFile.  This is ensured by setting config to None.
+  #
+
+  filename = argList.filename.name;
+  configList = LoadFile(argList.filename,None);
+  ifstack = list();
+
+  configListStack = list();
+
+  #
+  # Read the configuration file.
+  #
+
+  bufLine = "";
+  compiler = [];
+  user_header = list();
+  while configList or configListStack:
+    # If the current file has ended, then proceed to the next file.
+    if not configList:
+      if not len(bufLine) == 0:
+        raise SSBCCException('Malformed configuration command at the end of %s' % filename);
+      if ifstack:
+        raise SSBCCException('%d unmatched conditional(s) at end of %s' % (len(ifstack),filename,));
+      (filename,configList,ifstack) = configListStack.pop();
+      continue;
+    # Get the next line to process and its line number.
+    (tmpLine,ixLine) = configList.pop(0);
+    # Use the start line of a sequence of lines for error messages.
+    if not bufLine:
+      loc = '%s:%d' % (filename,ixLine,);
+    # Merge continuation lines.
+    bufLine += tmpLine;
+    if bufLine and bufLine[-1] == '\\':
+      bufLine = bufLine[:-1];
+      continue;
+    line = bufLine;
+    bufLine = "";
+    # Reject blank and comment lines
+    if re.match(r'\s*(#.*)?$',line):
+      pass;
+    # .ELSE
+    elif re.match(r'\s*\.ELSE\b',line):
+      if not ifstack:
+        raise SSBCCException('unmatched ".ELSE" at %s' % loc);
+      ifstack[-1] = not ifstack[-1];
+    # .ENDIF
+    elif re.match(r'\s*\.ENDIF\b',line):
+      if not ifstack:
+        raise SSBCCException('unmatched ".ENDIF" at %s' % loc);
+      ifstack.pop();
+    # .IFDEF conditional
+    elif re.match(r'\s*\.IFDEF\b',line):
+      cmd = re.findall(r'\s*\.IFDEF\s+(\w+)\s*$',line);
+      if not cmd:
+        raise SSBCCException('Malformed ".IFDEF" configuration command on %s' % loc);
+      cmd = cmd[0];
+      ifstack.append(config.IsSymbol(cmd));
+    # .IFNDEF conditional
+    elif re.match(r'\s*\.IFNDEF\b',line):
+      cmd = re.findall(r'\s*\.IFNDEF\s+(\w+)\s*$',line);
+      if not cmd:
+        raise SSBCCException('Malformed ".IFNDEF" configuration command on %s' % loc);
+      cmd = cmd[0];
+      ifstack.append(not config.IsSymbol(cmd));
+    elif re.match(r'\s*.INCLUDE\b',line):
+      cmd = re.findall(r'\s*\.INCLUDE\s+(\S+)\s*$',line);
+      if not cmd:
+        raise SSBCCException('Malformed ".INCLUDE" configuration command on %s' % loc);
+      configListStack.append((filename,configList,ifstack,));
+      filename = cmd[0];
+      configList = LoadFile(filename,config);
+      ifstack = list();
+    # Consume configuration commands disabled by conditionals
+    elif ifstack and not ifstack[-1]:
+      pass;
+    # ARCHITECTURE
+    elif re.match(r'\s*ARCHITECTURE\b',line):
+      if config.Exists('architecture'):
+        raise SSBCCException('ARCHITECTURE already specified before %s' % loc);
+      cmd = re.findall(r'\s*ARCHITECTURE\s+(\S+)\s+(\S+)$',line);
+      if not cmd:
+        raise SSBCCException('Malformed ARCHITECTURE configuration command at %s: "%s"' % (loc,line,));
+      cmd = cmd[0];
+      config.Set('architecture',cmd[0]);
+      config.Set('hdl',cmd[1]);
+      config.Set('corepath',os.path.join(sys.path[0],config.Get('architecture')));
+      if not os.path.isdir(config.Get('corepath')):
+        raise SSBCCException('Architecture "%s" does not exist at %s' % (cmd,loc,));
+      config.InsertPeripheralPath(os.path.join(config.Get('corepath'),'peripherals'));
+      # TODO -- move these assignments into an object
+      config.Set('data_width',8);
+    # ASSEMBLY language for processor code
+    elif re.match(r'\s*ASSEMBLY\b',line):
+      cmd = re.findall(r'\s*ASSEMBLY\s+(\S.*)',line);
+      compiler = ('asm',cmd[0],);
+    # COMBINE
+    elif re.match(r'\s*COMBINE\b',line):
+      config.ProcessCombine(loc,line);
+    # CONSTANTS
+    elif re.match(r'\s*CONSTANT\b',line):
+      if not config.Exists('architecture'):
+        raise SSBCCException('"CONSTANT"s cannot be defined before the "ARCHITECTURE" is defined at %s' % loc);
+      cmd = re.findall(r'\s*CONSTANT\s+(C_\w+)\s+(0|-?[1-9]\d*|\w+)\s*$',line);
+      if not cmd:
+        raise SSBCCException('Malformed "CONSTANT" configuration command on %s: "%s"' % (loc,line,));
+      cmd = cmd[0];
+      config.AddConstant(cmd[0],cmd[1],loc);
+    # DATA_STACK
+    elif re.match(r'\s*DATA_STACK\b',line):
+      if config.Exists('data_stack'):
+        raise SSBCCException('DATA_STACK already defined before %s' % loc);
+      cmd = re.findall(r'\s*DATA_STACK\s+([1-9]\d*)',line);
+      if not cmd:
+        raise SSBCCException('Malformed "DATA_STACK" configuration command on %s: "%s"' % (loc,line,));
+      x = int(cmd[0]);
+      if math.modf(math.log(x,2))[0] != 0:
+        raise SSBCCException('DATA_STACK must be set to a power of 2, not %d, at %s' % (x,loc,));
+      if x < 8:
+        raise SSBCCException('DATA_STACK must be at least 8, not %d, at %s' % (x,loc,));
+      config.Set('data_stack',int(cmd[0]));
+    # INPORT
+    elif re.match(r'\s*INPORT\b',line):
+      if not config.Exists('architecture'):
+        raise SSBCCException('"INPORT"s cannot be defined before the "ARCHITECTURE" is defined at %s' % loc);
+      config.ProcessInport(loc,line);
+    # INSTRUCTION
+    elif re.match(r'\s*INSTRUCTION\b',line):
+      if config.Exists('nInstructions'):
+        raise SSBCCException('INSTRUCTION already specified before %s' % loc);
+      cmd = re.findall(r'\s*INSTRUCTION\s+([1-9]\d*\*?[1-9]?\d*)\s*$',line);
+      if not cmd:
+        raise SSBCCException('Malformed "INSTRUCTION" configuration command at %s: "%s"' % (loc,line,));
+      config.SetMemoryBlock('nInstructions',cmd[0],(loc,line,));
+    # INVERT_RESET
+    elif re.match(r'\s*INVERT_RESET\s*$',line):
+      if (config.Exists('invertReset')):
+        raise SSBCCException('INVERT_RESET already specified before %s' % loc);
+      config.Set('invertReset',True);
+    # LOCALPARM
+    elif re.match(r'\s*LOCALPARAM\b',line):
+      cmd = re.findall(r'\s*LOCALPARAM\s+(L_\w+)\s+(\S+)$',line);
+      if (not cmd) or (len(cmd[0]) != 2):
+        raise SSBCCException('Malformed LOCALPARAM configuration command at %s: "%s"' % (loc,line,));
+      cmd = cmd[0];
+      config.AddParameter(cmd[0],cmd[1],loc);
+    # MEMORY
+    elif re.match(r'\s*MEMORY\b',line):
+      if not config.Exists('architecture'):
+        raise SSBCCException('"MEMORY"s cannot be defined before the "ARCHITECTURE" is defined at %s' % loc);
+      # TODO -- make the maximum number of memories architecture dependent
+      if config.NMemories() >= 4:
+        raise SSBCCException('Program is limited to 4 memories');
+      cmd = re.findall(r'\s*MEMORY\s+(RAM|ROM)\s+([A-Za-z]\w*)\s+(\d+)\s*$',line);
+      if (not cmd) or (len(cmd[0]) != 3):
+        raise SSBCCException('Malformed MEMORY configuration command at %s: "%s"' % (loc,line,));
+      config.AddMemory(cmd[0],loc);
+    # OUTPORT
+    elif re.match(r'\s*OUTPORT\b',line):
+      if not config.Exists('architecture'):
+        raise SSBCCException('"OUTPORT"s cannot be defined before the "ARCHITECTURE" is defined at %s' % loc);
+      config.ProcessOutport(line,loc);
+    # PARAMETER
+    elif re.match(r'\s*PARAMETER\b',line):
+      cmd = re.findall(r'\s*PARAMETER\s+(G_\w+)\s+(\S+)$',line);
+      if (not cmd) or (len(cmd[0]) != 2):
+        raise SSBCCException('Malformed PARAMETER configuration command at %s: "%s"' % (loc,line,));
+      cmd = cmd[0];
+      config.AddParameter(cmd[0],cmd[1],loc);
+    # PERIPHERAL
+    elif re.match(r'\s*PERIPHERAL\b',line):
+      if not config.Exists('architecture'):
+        raise SSBCCException('"PERIPHERAL"s cannot be defined before the "ARCHITECTURE" is defined at %s' % loc);
+      config.ProcessPeripheral(loc,line);
+    # PORTCOMMENT
+    elif re.match(r'\s*PORTCOMMENT\b',line):
+      cmd = re.findall(r'\s*PORTCOMMENT\s+(.*)',line);
+      config.AddIO(cmd[0],0,'comment',loc);
+    # RETURN_STACK
+    elif re.match(r'\s*RETURN_STACK\b',line):
+      if config.Exists('return_stack'):
+        raise SSBCCException('RETURN_STACK already specified before %s' % loc);
+      cmd = re.findall(r'\s*RETURN_STACK\s+([1-9]\d*)',line);
+      if not cmd:
+        raise SSBCCException('Malformed "RETURN_STACK" configuration command at %s: "%s"' % (loc,line,));
+      config.Set('return_stack',int(cmd[0]));
+    # SRAM_WIDTH
+    elif re.match(r'\s*SRAM_WIDTH\b',line):
+      if config.Exists('sram_width'):
+        raise SSBCCException('SRAM_WIDTH already specified before %s' % loc);
+      cmd = re.findall(r'\s*SRAM_WIDTH\s+([1-9]\d*)',line);
+      if not cmd:
+        raise SSBCCException('Malformed "SRAM_WIDTH" configuration command %s: "%s"' % (loc,line,));
+      config.Set('sram_width',int(cmd[0]));
+    # USER_HEADER
+    elif re.match(r'\s*USER_HEADER\b',line):
+      user_header_done = False;
+      while configList:
+        (line,ixLine) = configList.pop(0);
+        if re.match(r'\s*END_USER_HEADER\b',line):
+          user_header_done = True;
+          break;
+        user_header.append(line);
+      if not user_header_done:
+        raise SSBCCException('No "END_USER_HEADER" found for "USER_HEADER" at %s' % loc);
+    # error
+    else:
+      raise SSBCCException('Unrecognized configuration command at %s: "%s"' % (loc,line,));
+  if bufLine:
+    raise SSBCCException('Malformed last line(s): "%s"' % bufLine);
+
+  if ifstack:
+    raise SSBCCException('%d unmatched conditional(s) at end of %s' % (len(ifstack),filename,));
+
+  #
+  # Incorporate command-line specified parameter and localparam values.
+  #
+
+  if argList.G:
+    for parameter in argList.G:
+      if not re.match(r'[LG]_\w+=\S+$',parameter):
+        raise SSBCCException('Malformed parameter specification: "%s"' % parameter);
+      cmd = re.findall(r'([LG]_\w+)=(\S+)',parameter);
+      cmd = cmd[0];
+      config.OverrideParameter(cmd[0],cmd[1]);
+
+  #
+  # Append peripherals from command-line.
+  #
+
+  if argList.P:
+    for peripheral in argList.P:
+      config.ProcessPeripheral(-1,'PERIPHERAL '+peripheral);
+
+  #
+  # Set unspecified default values
+  #
+
+  if not config.Exists('sram_width'):
+    config.Set('sram_width',9);
+  if not config.Exists('invertReset'):
+    config.Set('invertReset',False);
+
+  #
+  # end-of-file processing
+  #
+
+  if not config.Exists('architecture'):
+    raise SSBCCException('Required ARCHITECTURE configuration command missing');
+  if not config.Exists('data_stack'):
+    raise SSBCCException('Required DATA_STACK configuration command missing');
+  if not config.Exists('nInstructions'):
+    raise SSBCCException('Required INSTRUCTION configuration command missing');
+  if not config.Exists('return_stack'):
+    raise SSBCCException('Required RETURN_STACK configuration command missing');
+
+  # Ensure reasonable values
+  if config.Get('nInstructions')['length'] > 2**13:
+    raise SSBCCException('Instruction space cannot exceed %d at %s: "%s"' % (2**13,loc,line,));
+
+  # Add memories that are not combined into singleton entries in the "combined"
+  # list and complete the address range assignments.
+  config.CompleteCombines();
+
+  ################################################################################
+  #
+  # Compile the processor code and read the tables it generated.
+  #
+  ################################################################################
+
+  # Generate peripheral libraries (if any).
+  for p in config.peripheral:
+    p.GenAssembly(config);
+
+  # Compute the file name to store the assembler output
+  assemblerOutput = os.path.splitext(argList.filename.name)[0]+'.9x8-meta'
+
+  # Compute the command to invoke the compiler.
+  if not compiler:
+    raise SSBCCException('ASSEMBLY configuration command is missing');
+  cmd = os.path.join(config.Get('corepath'), compiler[0]);
+  if argList.help_macro:
+    cmd += ' --help-macro %s' % argList.help_macro
+  if argList.list_macros:
+    cmd += ' --list-macros'
+  for name in config.constants:
+    cmd += (' -C %s=%s' % (name,config.constants[name],));
+  for name in config.defines:
+    cmd += (' -D %s' % name);
+  for ix in range(len(config.parameters)):
+    cmd += (' -G %s' % config.parameters[ix][0]);
+  for ix in range(config.NInports()):
+    cmd += (' -I %s=%d' % (config.inports[ix][0],ix));
+  for ix in range(config.NOutports()):
+    if config.IsStrobeOnlyOutport(config.outports[ix]):
+      cmd += (' -R %s=%d' % (config.outports[ix][0],ix));
+    else:
+      cmd += (' -O %s=%d' % (config.outports[ix][0],ix));
+  for memNameLength in config.MemoryNameLengthList():
+    cmd += (' -S %s=%d' % memNameLength);
+  for signalNameLength in config.SignalLengthList():
+    cmd += (' -S %s=%d' % signalNameLength);
+  cmd += ' -o ' + assemblerOutput;
+  for stack_name in ('data_stack','return_stack',):
+    cmd += ' -s %s=%d' % (stack_name,config.config[stack_name],);
+  cmd += ' -L %s' % os.path.join(sys.path[0],'lib','9x8');
+  if argList.M:
+    for path in argList.M:
+      cmd += ' -M %s' % path;
+  cmd += ' -M %s' % os.path.join(sys.path[0],'macros','9x8');
+  if argList.I:
+    for pathString in argList.I:
+      cmd += ' -L %s' % pathString;
+  cmd += ' ' + compiler[1];
+
+  # Invoke the compiler and exit if it failed.
+  if not argList.q:
+    print 'Invoking the assembler with the following command:  ' + cmd;
+  cmdStatus = os.system(cmd);
+  if cmdStatus != 0:
+    raise SSBCCException('Running the assembler');
+
+  # Read the assembler output tables.
+  fpAssemberOutput = open(assemblerOutput,'rt');
+  ixLine = 0;
+  programBody = list();
+  programBodyLength = 0;
+  for line in fpAssemberOutput:
+    ixLine = ixLine + 1;
+    # blank line
+    if re.match('^\s*$',line):
+      continue;
+    # memory type, name, index, and length
+    elif re.match(':memory',line):
+      cmd = re.findall(':memory (\S+) (\S+) (\S+) (\S+)',line);
+      cmd = cmd[0];
+      memName = cmd[1];
+      if not config.IsMemory(memName):
+        raise SSBCCException('%s "%s" not declared in %s' % (cmd[0],memName,argList.filename,));
+      memParam = config.GetMemoryParameters(memName);
+      if cmd[0] != memParam['type']:
+        raise SSBCCException('Type of memory "%s" is inconsistent' % memName);
+      if int(cmd[3]) > memParam['maxLength']:
+        raise SSBCCException('Length of memory "%s" is %s which exceeds limit of %d' % (memName,cmd[3],memParam['maxLength'],));
+      memoryBody = list();
+      for line in fpAssemberOutput:
+        ixLine = ixLine + 1;
+        if len(line) > 1:
+          memoryBody.append(line)
+        else:
+          break;
+      config.SetMemoryParameters(memParam,dict(bank=int(cmd[2]),length=int(cmd[3]),body=memoryBody));
+    # program .main, optional .interrupt, and length
+    elif re.match(':program',line):
+      cmd = re.findall(':program (\d+) (\S+) (\d+)',line);
+      mainStart = int(cmd[0][0]);
+      if cmd[0][1] == '[]':
+        interruptStart = -1;
+      else:
+        interruptStart = int(cmd[0][1]);
+      mainLength = int(cmd[0][2]);
+      for line in fpAssemberOutput:
+        ixLine = ixLine + 1;
+        while line and line[-1] in ('\n','\r',):
+          line = line[:-1];
+        if not line:
+          break;
+        programBody.append(line);
+        if line[0] != '-':
+          programBodyLength = programBodyLength + 1;
+      if programBodyLength != mainLength:
+        raise SSBCCException('Program Bug:  program length doesn\'t match declared length');
+      maxProgramBodyLength = config.Get('nInstructions')['length'];
+      if programBodyLength > maxProgramBodyLength:
+        raise SSBCCException('Program body length = %d is longer than the allocated instruction table = %d' % (programBodyLength,maxProgramBodyLength,));
+    else:
+      raise Exception('Program Bug:  Unrecognized line at %s:%d :  "%s"' % (fpAssemberOutput.filename,ixLine,line,));
+
+  ################################################################################
+  #
+  # Ensure the processor has been consistently defined.
+  #
+  ################################################################################
+
+  # Ensure all memories are used.
+  for ixMem in range(config.NMemories()):
+    memParam = config.GetMemoryParameters(ixMem);
+    if 'length' not in memParam:
+      raise SSBCCException('Memory "%s" not used in program' % memParam['name']);
+
+  ################################################################################
+  #
+  # Generate the processor core.
+  #
+  ################################################################################
+
+  #
+  # Access the language-specific core generator and core.
+  #
+
+  if config.Get('hdl') == 'Verilog':
+    ssbccGenFile = 'ssbccGenVerilog.py';
+  elif config.Get('hdl') == 'VHDL':
+    ssbccGenFile = 'ssbccGenVHDL.py';
+  else:
+    raise SSBCCException('Unrecognized hdl = "%s"' % config.Get('hdl'));
+
+  ssbccGenFile = os.path.join(config.Get('corepath'),ssbccGenFile);
+  if not os.path.isfile(ssbccGenFile):
+    raise SSBCCException('Core generator "%s" missing for hdl = "%s"' % (ssbccGenFile,config.Get('hdl'),));
+  execfile(ssbccGenFile);
+
+  rawCoreName = os.path.join(config.Get('corepath'),genCoreName());
+  if not os.path.isfile(rawCoreName):
+    raise SSBCCException('Core "%s% missing for hdl = "%s"' % (rawCoreName,config.Get('hdl'),));
+  fpRawCore = open(rawCoreName,'rt');
+
+  outName = genOutName(config.Get('outCoreName'));
+  fpOutCore = open(outName,'wt');
+
+  memFileName = re.sub(r'\.v.*','.mem',outName);
+  fpMemFile = open(memFileName,'wt');
+
+  #
+  # Loop through the core, copying or filling in the file as required.
+  #
+
+  for line in fpRawCore:
+    if not re.match(r'..@SSBCC@',line):
+      if re.match(r'\s*(reg|wire)\s',line):
+        cmd = re.findall(r'\s*(reg|wire)\s+([[][^]]+]\s+)?(\w+)\b',line);
+        if config.IsSymbol(cmd[0][-1]):
+          raise SSBCCException('Symbol "%s" is used by the core and cannot be used by peripherals, etc.' % cmd[0][-1]);
+      fpOutCore.write(line);
+      continue;
+    fillCommand = re.findall(r'..@SSBCC@\s+(\S+)',line)[0];
+    # functions and tasks
+    if fillCommand == "functions":
+      genFunctions(fpOutCore,config);
+    # inports
+    elif fillCommand == 'inports':
+      genInports(fpOutCore,config);
+    # localparam
+    elif fillCommand == 'localparam':
+      genLocalParam(fpOutCore,config);
+    # memories
+    elif fillCommand == 'memories':
+      genMemories(fpOutCore,fpMemFile,config,programBody);
+    # module
+    elif fillCommand == 'module':
+      genModule(fpOutCore,config);
+    # outports
+    elif fillCommand == 'outports':
+      genOutports(fpOutCore,config);
+    # peripherals
+    elif fillCommand == 'peripherals':
+      if not config.peripheral:
+        fpOutCore.write('//\n// No peripherals\n//\n');
+      for p in config.peripheral:
+        if p != config.peripheral[0]:
+          fpOutCore.write('\n');
+        p.GenHDL(fpOutCore,config);
+    # "s_memory" declaration
+    elif fillCommand == 's_memory':
+      if config.NMemories() == 0:
+        fpOutCore.write('wire [7:0] s_memory = 8\'h00;\n');
+      else:
+        fpOutCore.write('wire [7:0] s_memory;\n');
+    # additional signals
+    elif fillCommand == 'signals':
+      genSignals(fpOutCore,config);
+    # user_header
+    elif fillCommand == 'user_header':
+      genUserHeader(fpOutCore,user_header);
+    # Verilator tracing on/off
+    elif fillCommand == "verilator_tracing":
+      if config.Get('verilator_tracing_on'):
+        fpOutCore.write('/* verilator tracing_on */\n');
+      else:
+        fpOutCore.write('/* verilator tracing_off */\n');
+    # error
+    else:
+      print 'WARNING:  Unimplemented command ' + fillCommand;
+
+  #
+  # Write package file (for use in VHDL or mixed-language projects)
+  #
+
+  import ssbccGenVhdlPkg
+  ssbccGenVhdlPkg.genVhdlPkg(config);
+
+################################################################################
+#
+# Terminating except clause
+#
+################################################################################
+
+except SSBCCException, msg:
+  print >> sys.stderr, 'FATAL ERROR:  ' + str(msg);
+  exit(1);
