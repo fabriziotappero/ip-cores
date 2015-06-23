@@ -1,0 +1,133 @@
+-------------------------------------------------------------------------------
+-- Title   : UART Testbench
+-- Project : UART 
+-------------------------------------------------------------------------------
+-- File        : test.vhd
+-- Author      : Philippe CARTON 
+--               (philippe.carton2@libertysurf.fr)
+-- Organization:
+-- Created     : 8/1/2003
+-- Last update : 9/1/2003
+-- Platform    : Windows
+-- Simulators  : ModelSim 5.5b
+-- Dependency  : IEEE std_logic_1164, simu_lib
+-------------------------------------------------------------------------------
+-- Description :
+-- test entity UART in loopback mode (TxD = RxD = LOOPBCK)
+-- with patt.in and clk.in
+-------------------------------------------------------------------------------
+-- Copyright (c) notice
+--    This core adheres to the GNU public license 
+--
+-------------------------------------------------------------------------------
+
+library IEEE;
+use IEEE.std_logic_1164.all;
+
+library simu_lib;
+use simu_lib.HORLOGE;
+use simu_lib.GEN_WAVE_BUS;
+
+library work;
+use work.all;
+
+-------------------------------------------------------------------------------
+entity TEST_MINIUART is
+ generic( CHEMIN : string := "test_bench1/");
+end TEST_MINIUART;
+-------------------------------------------------------------------------------
+-- behavioural architecture type
+-------------------------------------------------------------------------------
+architecture ARCH_TEST_BENCH OF TEST_MINIUART is
+
+-------------------------------------------------------------------------------
+-- internal signals connection declaration
+-------------------------------------------------------------------------------
+signal ZERO  : std_logic;
+signal UN    : std_logic;
+signal LOOPBCK : std_logic;
+
+signal PATT  : std_logic_vector(12 downto 0);
+signal VISU  : std_logic_vector(10 downto 0);
+
+signal CLK  : std_logic; -- system clock
+signal BRCLK : std_logic; -- Baudrate clock
+
+-------------------------------------------------------------------------------
+component HORLOGE
+ generic ( NOM_FICHIER_HORLOGE : string := "HORLOGE.IN" );
+ port    ( CLOCK : out std_logic );
+end component;
+
+-------------------------------------------------------------------------------
+component GEN_WAVE_BUS
+ generic ( nb_bits : integer := 4;   -- bus width
+           NOM_FICHIER_WAVE : string := "GEN_WAVE.IN" );
+ port ( SIGNAL_OUT : out std_logic_vector((nb_bits-1) downto 0) );
+end component;
+
+-------------------------------------------------------------------------------
+component UART
+ generic(BRDIVISOR: INTEGER range 0 to 65535 := 130); -- Baud rate divisor
+ port(
+-- Wishbone signals
+     WB_CLK_I : in  std_logic;  -- clock
+     WB_RST_I : in  std_logic;  -- Reset input
+     WB_ADR_I : in  std_logic_vector(1 downto 0); -- Adress bus          
+     WB_DAT_I : in  std_logic_vector(7 downto 0); -- DataIn Bus
+     WB_DAT_O : out std_logic_vector(7 downto 0); -- DataOut Bus
+     WB_WE_I  : in  std_logic;  -- Write Enable
+     WB_STB_I : in  std_logic;  -- Strobe
+     WB_ACK_O : out std_logic;	 -- Acknowledge
+-- process signals     
+     IntTx_O  : out std_logic;  -- Transmit interrupt: indicate waiting for Byte
+     IntRx_O  : out std_logic;  -- Receive interrupt: indicate Byte received
+     BR_Clk_I : in  std_logic;  -- Clock used for Transmit/Receive
+     TxD_PAD_O: out std_logic;  -- Tx RS232 Line
+     RxD_PAD_I: in  std_logic   -- Rx RS232 Line 
+     );
+end component;
+
+-------------------------------------------------------------------------------
+-- begin body entity 
+-------------------------------------------------------------------------------
+begin
+ UN <= '1';
+ ZERO <= '0';
+
+-------------------------------------------------------------------------------
+GERE_BUS : GEN_WAVE_BUS
+ generic map ( nb_bits	=> PATT'length,
+                NOM_FICHIER_WAVE => CHEMIN & "patt.in")
+ port map    ( SIGNAL_OUT => PATT );
+-------------------------------------------------------------------------------
+HORLOGE_CLK : HORLOGE
+ generic map ( NOM_FICHIER_HORLOGE => CHEMIN & "clk.in")
+ port map    ( CLOCK => CLK );
+-------------------------------------------------------------------------------
+HORLOGE_BRCLK : HORLOGE
+ generic map ( NOM_FICHIER_HORLOGE => CHEMIN & "brclk.in")
+ port map    ( CLOCK => BRCLK );
+-------------------------------------------------------------------------------
+DUT : UART 
+ generic map (BRDIVISOR => 1)
+ port map(
+     WB_CLK_I => CLK, 
+     WB_RST_I => PATT(0),
+     WB_ADR_I => PATT(2 downto 1),
+     WB_DAT_I => PATT(10 downto 3),
+     WB_DAT_O => VISU(7 downto 0),
+     WB_WE_I  => PATT(11),
+     WB_STB_I => PATT(12),
+     WB_ACK_O => VISU(8),
+   
+     IntTx_O  => VISU(9),
+     IntRx_O  => VISU(10),
+     BR_Clk_I => BRCLK,
+     TxD_PAD_O => LOOPBCK,
+     RxD_PAD_I => LOOPBCK
+     );
+-------------------------------------------------------------------------------
+
+end ARCH_TEST_BENCH;
+
