@@ -1,0 +1,187 @@
+Description of the internal SPI Flash controller:
+=================================================
+
+The SPI Flash controller occupies the following addresses in the
+DIY calculator address space:
+  $F038 : Tx data register (write)
+  $F018 : Rx data register (read)
+  $F039 : command register (write)
+  $F019 : status register  (read)
+  $F03A : address low register (write)
+  $F03B : address mid register (write)
+  $F03C : address high register (write)
+
+
+These are the bits of the status register:
+  busy:          $01
+  tx empty:      $02
+  rx ready:      $04
+  wait for data: $08
+Other bits read as '0'.
+
+
+How to communicate with the SPI flash:
+--------------------------------------
+
+The SPI flash (ST M25P80 chip) understands the following commands:
+  WREN ($06) .. write enable
+  WRDI ($04) .. write disable
+  RDSR ($05) .. read status register
+  WRSR ($01) .. write status register
+  RD   ($03) .. read data
+  F_RD ($0B) .. fast read data
+  PP   ($02) .. page program
+  SE   ($D8) .. sector erase
+  BE   ($C7) .. bulk erase
+  DP   ($B9) .. deep power down
+  RES  ($AB) .. read signature
+
+Additionally there is a pseudo-command defined for use with the SPI flash
+controller:
+  NOP  ($FF) .. no cmd to execute/end current command
+
+
+Command classification:
+-----------------------
+
+  Write Enable (WREN)              transmit 1 byte ... cmd (0x06)
+  Write Disable (WRDI)                                     (0x04)
+  Bulk Erase (BE)                                          (0xC7)
+  Deep Power Down (DP)                                     (0xB9)
+  
+  Write Status reg (WRSR)          transmit 1 byte ... cmd (0x01)
+                                            1 byte ... SR contents
+
+  Sector Erase (SE)                transmit 1 byte ... cmd (0xD8)
+                                            3 bytes .. address
+
+  Page Program (PP)                transmit 1 byte ... cmd (0x02)
+                                            3 bytes .. address
+                                            1-256 bytes .. data
+
+  Read Status reg (RDSR)           transmit 1 byte ... cmd (0x05)
+                                   receive  1 byte ... SR contents
+
+  Read Signature (RES)             transmit 1 byte ... cmd (0xAB)
+                                            3 bytes .. dummy
+                                   receive  1 byte ... the signature (0x13)
+
+  Read Data (RD)                   transmit 1 byte ... cmd (0x03)
+                                            3 bytes .. address
+                                   receive  n bytes .. data
+
+  Fast Read Data (F_RD)            transmit 1 byte ... cmd (0x0B)
+                                            3 bytes .. address
+                                            1 byte ... dummy
+                                   receive  n bytes .. data
+
+
+A command sequence depends on the command to be executed. For the simple
+commands (with no parameters) just the command is written to the SPI Flash
+controller command register (address $F039). The SPI controller shifts the
+cmd byte into the SPI flash. The more complex commands (with parameters)
+require that the parameters (e.g. address) are written first. The action
+of writing the command register triggers the transmission of the command
+plus all necessary parameter bytes to the SPI flash chip. With commands
+that receive a response (read commands) you have to wait for the response
+to arrive and then read the SPI flash controller data register ($F018).
+
+
+Examples
+--------
+
+1) issue the "Write Enable" command:
+           LDA     SPI_WREN
+           STA     [SPI_CMD]
+
+2) issue the "Read Signature" command:
+           LDA     SPI_RES
+           STA     [SPI_CMD]
+; wait for the response to arrive
+WAIT:      LDA     [SPI_STAT]
+           AND     SPI_RXR
+           JZ      [WAIT]
+; read the response
+           LDA     [SPI_RX]           
+
+3) issue the "Sector Erase" command:
+; symbolic constant 
+SECTOR     .EQU    $0F       ; sector number
+             .
+             .
+             .
+           LDA     SECTOR
+           STA     [SPI_AHI]
+           LDA     0
+           STA     [SPI_AMID]
+           STA     [SPI_ALO]
+           LDA     SPI_SE
+           STA     [SPI_CMD]
+
+4) issue the "Read Data" command:
+; symbolic constant 
+BUFSIZE:   .EQU    100
+             .
+             .
+             .
+
+; buffer reservation, in RAM
+BUF:       .BLOCK  BUFSIZE
+MAXBYTES:  .WORD
+NUMBYTES:  .WORD
+             .
+             .
+             .
+
+; code:
+           BLDX    BUFSIZE
+           BSTX    [MAXBYTES]
+           LDA     SECTOR
+           STA     [SPI_AHI]
+           LDA     BUF
+           STA     [SPI_AMID]
+           LDA     BUF+1
+           STA     [SPI_ALO]
+           LDA     SPI_RD
+           STA     [SPI_CMD]
+           BLDX    0
+           BSTX    [NUMBYTES]
+; now wait for the data to arrive
+LOOP:      LDA     [SPI_STAT]
+           AND     SPI_RXR
+           JZ      [LOOP]
+; data byte is ready
+           LDA     [SPI_RX]
+           STA     [BUF, X]
+           INCX
+; check for max number of bytes reached, high byte first
+           BSTX    [NUMBYTES]
+           LDA     [MAXBYTES]
+           CMPA    [NUMBYTES]
+           JC      [LOOP]         ; not yet reached
+           JNZ     [DONE]
+; high bytes are equal => compare low bytes as well
+           LDA     [MAXBYTES+1]
+           CMP     [NUMBYTES+1]
+           JC      [LOOP]         ; not yet reached
+; we are done now, transfer of desired number of bytes is completed
+DONE:      LDA     SPI_NOP
+           STA     [SPI_CMD]      ; write the pseudo "NOP" cmd to reset
+                                  ; the SPI controller to idle state
+
+Remarks:
+--------
+The flash utilizes a 3 byte address (using 20 bits for the 8Mbit
+M25P80 chip). The highest byte specifies the sector on which the PP, SE,
+RD, F_RD commands operate. In the DIY Calculator we use only the topmost
+sector (no. 0x0F).
+
+The PP, RD, and F_RD commands are special in that that the number of bytes
+to be transferred is not known in advance. Therefore the dummy "NOP" command
+must be issued to the SPI Flash controller after all bytes are transferred
+to terminate the active command and return the SPI Flash controller to its
+idle state.
+
+For commands that expect a response (read commands) it is necessary to poll
+the SPI controller status register (address $F019) to see when the data has
+arrived.
