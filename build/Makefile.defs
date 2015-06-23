@@ -1,0 +1,51 @@
+#Konrad Eisele<eiselekd@web.de>,2003
+
+ifdef QUIET
+ quiet=q_
+else
+ quiet=
+endif
+
+# ===========================================================================
+# Generic stuff
+# ===========================================================================
+
+# function to only execute the passed command if necessary
+# >'< substitution is for echo to work, >$< substitution to preserve $ when reloading .cmd file
+# note: when using inline perl scripts [perl -e '...$$t=1;...'] in $(cmd_xxx) double $$ your perl vars
+
+if_changed = $(if $(strip $? \
+		          $(filter-out $(cmd_$(1)),$(cmd_$@))\
+			  $(filter-out $(cmd_$@),$(cmd_$(1)))),\
+	@set -e; \
+	$(if $($(quiet)cmd_$(1)),echo '  $(subst ','\'',$($(quiet)cmd_$(1)))';) \
+	$(cmd_$(1)); \
+	echo 'cmd_$@ := $(subst $$,$$$$,$(subst ','\'',$(cmd_$(1))))' > $(@D)/.$(@F).cmd)
+
+
+
+if_changed_dep = $(if $(strip $? $(filter-out FORCE $(wildcard $^),$^)\
+		          $(filter-out $(cmd_$(1)),$(cmd_$@))\
+			  $(filter-out $(cmd_$@),$(cmd_$(1)))),\
+	@set -e; \
+	$(if $($(quiet)cmd_$(1)),echo '  $(subst ','\'',$($(quiet)cmd_$(1)))';) \
+	$(cmd_$(1)); \
+	echo 'cmd_$@ := $(subst $$,$$$$,$(subst ','\'',$(cmd_$(1))))' > $(@D)/.$(@F).cmd; \
+	echo -n '$(obj)/' >> $(@D)/.$(@F).cmd; \
+	cat $(depfile)    >> $(@D)/.$(@F).cmd; \
+	rm -f $(depfile); )
+
+# The temporary file to save gcc -MD generated dependencies must not
+# contain a comma
+depfile = $(subst $(comma),_,$(@D)/.$(@F).d)
+
+c_flags        = -Wp,-MD,$(depfile) $(CFLAGS) $(LOCAL_CFLAGS)  $(EXTRA_CFLAGS) $(CFLAGS_$(*F).o) 
+a_flags        = -Wp,-MD,$(depfile) $(AFLAGS)  $(EXTRA_AFLAGS) $(AFLAGS_$(*F).o) 
+ld_flags       = $(LDFLAGS) $(LDFLAGS_$(@F)) 
+
+pathsearch        = $(firstword $(wildcard $(addsuffix /$(1),$(subst :, ,$(PATH)))))
+pathsearch-exit   = $(if $(strip $(call pathsearch,$(1))),,@echo $(2);exit 1 )
+pathsearch-return = $(strip $(call pathsearch,$(1)))
+
+
+

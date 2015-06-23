@@ -1,0 +1,27 @@
+
+`define HEADER_VENDOR_ID    16'h0000
+`define HEADER_DEVICE_ID    16'h0000
+`define HEADER_REVISION_ID  8'h00
+
+`define ETH_WISHBONE_B3
+
+`define ETH_TX_FIFO_CNT_WIDTH  8_log2%
+`define ETH_TX_FIFO_DEPTH      8
+
+`define ETH_RX_FIFO_CNT_WIDTH  4
+`define ETH_RX_FIFO_DEPTH      8
+
+`define ETH_BURST_CNT_WIDTH    3
+`define ETH_BURST_LENGTH       4
+
+
+`define FPGA
+`define XILINX
+`define WBW_ADDR_LENGTH 7
+`define WBR_ADDR_LENGTH 7
+`define PCIW_ADDR_LENGTH 7
+`define PCIR_ADDR_LENGTH 7
+`define PCI_FIFO_RAM_ADDR_LENGTH 8 
+`define WB_FIFO_RAM_ADDR_LENGTH 8   
+
+
