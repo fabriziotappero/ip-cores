@@ -1,0 +1,129 @@
+BUILDING THE BIOS
+-----------------
+
+TO BUILD PATCHED INFORM 6
+
+Clone the git repository of...
+https://github.com/charcole/Inform6.git
+
+git checkout inform6b
+clang -O3 *.c -o inform6b.out
+
+
+ASSEMBLE THE ROM
+
+Obtain 4 Z machine V3 games that are less than 120Kb. Update the roms array in
+combinedata.c to reference the games you are using. The first game in the
+array must be around 90Kb (like Zork I) as the icons are stored in this space.
+ 
+cd bios
+clang makefont.c -o makefont.out && ./makefont.out
+clang -O3 compressicon.c -o compressicon.out && ./compressicon.out 
+clang -O3 combinedata.c -o combinedata.out && ./combinedata.out
+inform6b.out -v3 -t -l -y bios.inf
+
+To alter font, load zfont2.xcf in the GIMP. Alter the image as needed. Bottom
+row is for specifying how wide each character should be. Save image as
+zfont2.h. Recompile and run makefont.out.
+
+To alter icons, create an image 100x480 in the GIMP. Make indexed using 128
+colour palette. Save as icons.h. Recompile and run compressicon then
+combinedata. The compression ratio achieved must be better than around 60% to
+fit after Zork I.
+
+
+
+SIMULATING
+----------
+
+I used: Icarus-0.8.1-2005Sep12
+
+Make sure you'll built the BIOS and it's in the same directory you are going
+to run the Verilog simulation in.
+
+iverilog z3.vl && ./a.out
+
+If you want to run passed first request for input then touch.txt can be
+generated using TouchGenerator in the utilities. Using this a script can be
+provided which can be typed automatically during the simulation.
+
+To check screen output Screen (in utilties) can be run on the output from
+a.out. You may have to remove this section from the z3.vl...
+
+		if (b.operNum==`OP_VAR && b.op==`OPVAR_BLIT1 && b.phase==0 && b.state==`STATE_DO_OP) begin
+			b.operand[1]=1;
+		end
+
+Another way of checking output is to look at ram.dat. At the end it contains
+the scroll back buffer from the BIOS decoded and can be viewed in a text
+editor.
+
+
+
+RUNNING ON HARDWARE
+-------------------
+
+THE HARDWARE
+
+A "EP2C5 Cyclone II Mini Board" AKA "CycloneII EP2C5T144 Learning Board".
+These contain an EP2C5T144 which is an Cyclone II FPGA with around 4600 LEs.
+They are very reasonably priced on eBay (~$10).
+
+'2.4" TFT LCD Shield' by http://mcufriend.com was used as a screen. Again very
+cheap off eBay (~$3). It's a colour screen with resistive touch screen.
+
+RS Part No. Part No.		Description									Price
+7118029		A29L040-70F 	Parallel FLASH 4MB, 512Kx8, 3V, DIP32	    £1.24
+7444542		AS6C1008-55PCN	SRAM,1M,128Kx8,55ns,3V,Low Power,DIP32	    £1.65
+6696064		MCP3008-I/P		A/D Converter 10Bit 8-ch 2.7V SPI PDIP16	£1.53
+
+
+TO PROGRAM THE FPGA
+
+Obtain Altera Quantus II 13.0sp1. I believe this was the last version to
+support Cyclone II. Open project altera/ZMachine.qpf and hit compile.
+Nb. ZMachine.v is identical to z3.vl.
+
+
+TO PROGRAM THE ROM
+
+Using a Minipro TL866CS
+
+minipro -w rom.z3 -p "A29L040 @DIP32"
+
+
+
+OPTIONAL EXTRAS
+---------------
+
+TO BUILD THE BENCHMARK
+
+inform6.out -v3 -t -l -y benchmark.inf \$MAX_STATIC_DATA=20000
+
+Nb. This is the unpatched version of Inform 6.
+
+You can include this in as one of the games in combinedata.c.
+
+
+TO BUILD UTILITIES
+
+Z-Ops: High level emulator. Useful for working on the BIOS.
+clang -framework SDL2 -F/Users/charlie/Library/Frameworks
+-I/Users/charlie/Library/Frameworks/SDL2.framework/Headers -I../../lib -O3 -g zops.c ../../lib/cclib64.a -o zops.out
+
+16BitColor: Takes hex colours and turns them into 16 bit needed by screen
+eg. ./16bitcolor.out 0xffe1a2
+clang 16bitcolor.c -o 16bitcolor.out
+
+TouchGenerator: Takes script2.txt and generates a list of simulated touch data
+to type out the script. Used to automatically test the simulation.
+clang touchgenerator.c -o touchgenerator.out
+
+MakeGradient: Makes gradient for Mandelbrot generator easter egg. Image is
+from gradient.h saved from the GIMP as a header in indexed mode. Output needs
+pasting into bios.inf.
+clang -O3 makegradient.c -o makegradient.out && ./makegradient.out
+
+Screen: Takes the output from the simulator and draws the resultant screen
+output. Outdated now, use zops instead.
+clang -framework SDL2 -F/Users/charlie/Library/Frameworks -I/Users/charlie/Library/Frameworks/SDL2.framework/Headers screen.c -o screen.out

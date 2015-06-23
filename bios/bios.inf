@@ -1,0 +1,1626 @@
+Constant Border       = 4;
+Constant ScrWidth     = 240-Border+1;
+Constant ScrHeight    = 320;
+Constant BufferHeight = 630;
+Constant LineStride   = 30;
+Constant LineStrideW  = 15;
+Constant TextHeight   = 10;
+Constant KeyboardStartLine		= 240;
+Constant KeyboardTextSpacing	= 20;
+Constant KeyboardSepSpacing		= 5;
+Constant StatusHeight = 10;
+!                                    S c o r e : 0     M o v e s : 0
+Constant ScoreXOffset = (240-Border-(4+5+4+3+4+2+4)-(3+6+4+4+4+4+2+4));
+
+Constant DictionaryOff = 8;
+
+Constant cAbbrev      = 0;
+Constant cEncodO      = 2;
+Constant cEncodB      = 4;
+Constant cScrenX	  = 8;
+Constant cScrenY	  = 10;
+Constant cFontO		  = 12;
+Constant cFontB		  = 14;
+Constant cBitMpW	  = 16;
+Constant cScroll	  = 18;
+Constant cTextO		  = 20;
+Constant cTextB		  = 22;
+Constant cTextSep	  = 24;
+Constant cScrollStart = 26;
+Constant cLastScroll  = 28;
+Constant MaxTextSize  = $400;
+
+Constant contextW     = $D800; ! $1B000
+
+! Code should start at $1E580
+! Font + Encoding data is directly before
+! Game must be smaller than $1E000 (120Kb) to fit in BIOS
+
+! BitMap buffer is at the top of the high RAM (18.75Kb)
+! Scratch buffer is below the bitmap and is 1Kb
+! Context structure is just below that
+! Bottom of high RAM are the stacks growing up
+
+[Main;
+! Used as a table to pick out addresses of functions
+SysInit();
+SysPrint();
+SysPrintChar();
+SysPrintNum();
+SysRead();
+SysShowStatus();
+SysQuit();
+SysException();
+];
+
+[DecodeText
+inputO inputW !inputs
+outputO outputB encodingO encodingB alpha charWord c char charOut; !temps
+
+outputO=cTextO==>contextW;
+outputB=cTextB==>contextW;
+encodingO=cEncodO==>contextW;
+encodingB=cEncodB==>contextW;
+do
+{
+	charWord = inputO-->inputW;
+	for (c=0: c<3: c++)
+	{
+		if (c==0) char=(charWord&$7c00)/1024;
+		else if (c==1) char=(charWord&$3e0)/32;
+		else char=charWord&31;
+
+		charOut=-1;
+		if (alpha<=2 && char<=5)
+		{
+			if (char==0)
+			{
+				charOut=' ';
+				alpha=0;
+			}
+			else
+			{
+				if (char>=4)
+					alpha=char-3;
+				else
+					alpha=char+2;
+			}
+		}
+		else if (char==6 && alpha==2)
+		{
+			alpha=6;
+		}
+		else
+		{
+			if (alpha<=2)
+			{
+				charOut=encodingO->(encodingB+26*alpha+char-6);
+				alpha=0;
+			}
+			else if (alpha<=5)
+			{
+				cTextB==>contextW=outputB;
+				outputB=DecodeText(0, (cAbbrev==>contextW)-->(32*(alpha-3)+char));
+				outputB=cTextB==>contextW;
+				alpha=0;
+			}
+			else if (alpha==6)
+			{
+				alpha=32+char*32;
+			}
+			else
+			{
+				charOut=(alpha-32)|char;
+				alpha=0;
+			}
+		}
+		if (charOut>=0)
+		{
+			outputO=>outputB=charOut;
+			outputB++;
+		}
+	}
+	inputW++;
+}
+until (charWord<0);
+outputO=>outputB=0;
+
+cTextB==>contextW=outputB;
+];
+
+[TextToConsole
+textO textB
+fontO fontB bitmapW char ptr a b w x y checkWrap firstLine;
+
+x=cScrenX==>contextW;
+y=cScrenY==>contextW;
+fontO=cFontO==>contextW;
+fontB=cFontB==>contextW;
+bitmapW=cBitMpW==>contextW;
+char=textO=>textB;
+if (x~=Border)
+	checkWrap=1;
+firstLine=1;
+while (char)
+{
+	if (char<=32)
+	{
+		checkWrap=1;
+	}
+	else if (checkWrap)
+	{
+		w=x;
+		ptr=textB;
+		while (textO=>ptr>32)
+		{
+			w=w+(fontO->(fontB+(textO=>ptr)*TextHeight));
+			ptr++;
+		}
+		if (w>ScrWidth)
+		{
+			x=ScrWidth+1;
+		}
+		checkWrap=0;
+	}
+	ptr=fontB+char*TextHeight;
+	w=fontO->ptr;
+	if (x+w>ScrWidth || char==10)
+	{
+		y=y+TextHeight;
+		if (y>BufferHeight-TextHeight)
+			y=0;
+		if (y>(KeyboardStartLine-StatusHeight)-TextHeight || cScrollStart==>contextW)
+		{
+			cScrollStart==>contextW=1;
+			a=cScroll==>contextW;
+			a=a+TextHeight;
+			if (a>=BufferHeight)
+				a=0;
+			if (a==cLastScroll==>contextW)
+			{
+				cScrenY==>contextW=y;
+				b=UpdateScreen();
+				b=GetKey();
+			}
+			cScroll==>contextW=a;
+		}
+		a=y*LineStride;
+		b=LineStride*5;
+		while (b)
+		{
+			a==>bitmapW=0;
+			a=a+2;
+			b--;
+		}
+		x=Border;
+		firstLine=0;
+	}
+	if (x~=Border || char>32 || firstLine)
+	{
+		if (cTextSep==>contextW==0 || char==124)
+		{
+			a=7-(x&7);
+			b=2;
+			while (a)
+			{
+				b=b*2;
+				a--;
+			}
+			a=x/8+y*LineStride;
+			for (char=0: char<9: char++)
+			{
+				ptr++;
+				a==>bitmapW=(a==>bitmapW)|((fontO->ptr)*b);
+				a=a+LineStride;
+			}
+		}
+		x=x+w;
+	}
+	textB++;
+	char=textO=>textB;
+}
+cScrenX==>contextW=x;
+cScrenY==>contextW=y;
+];
+
+[UpdateScreen
+ptr size sizeW bitmapW scroll; !temps
+	bitmapW=cBitMpW==>contextW;
+	scroll=cScroll==>contextW;
+	cLastScroll==>contextW=cScrenY==>contextW;
+	@write_reg 32 0;
+	@write_reg 33 0;
+	@blit1 0 LineStride $49c2 $49c2;
+	@write_reg 32 0;
+	@write_reg 33 1;
+	ptr=bitmapW+(LineStrideW*BufferHeight);
+	sizeW=LineStride*(StatusHeight-1);
+	@blit1 ptr sizeW $49c2 $ff14;
+	@write_reg 32 0;
+	@write_reg 33 StatusHeight;
+	ptr=bitmapW+(LineStrideW*scroll);
+	sizeW=LineStride*(KeyboardStartLine-StatusHeight);
+	if (scroll > BufferHeight - (KeyboardStartLine-StatusHeight))
+	{
+		size=BufferHeight-scroll;
+		sizeW=LineStride*size;
+		@blit1 ptr sizeW $ff14 $49c2;
+		ptr=bitmapW;
+		size=size+StatusHeight;
+		@write_reg 32 0;
+		@write_reg 33 size;
+		sizeW=LineStride*(KeyboardStartLine-size);
+	}
+	@blit1 ptr sizeW $ff14 $49c2;
+];
+
+[InitScreenRegs;
+@write_reg $0000 $0000; ! Setting primes the screen for data
+@write_reg $0001 $0100;
+@write_reg $0002 $0700;
+@write_reg $0003 $1030;
+@write_reg $0008 $0302;
+@write_reg $0009 $0000;
+@write_reg $000A $0008;
+@write_reg $0010 $0790;
+@write_reg $0011 $0005;
+@write_reg $0012 $0000;
+@write_reg $0013 $0000;
+@write_reg $0010 $12B0;
+@write_reg $0011 $0007;
+@write_reg $0012 $008C;
+@write_reg $0013 $1700;
+@write_reg $0029 $0022;
+@write_reg $0030 $0000;
+@write_reg $0031 $0505;
+@write_reg $0032 $0205;
+@write_reg $0035 $0206;
+@write_reg $0036 $0408;
+@write_reg $0037 $0000;
+@write_reg $0038 $0504;
+@write_reg $0039 $0206;
+@write_reg $003C $0206;
+@write_reg $003D $0408;
+@write_reg $0050 $0000;
+@write_reg $0051 $00EF;
+@write_reg $0052 $0000;
+@write_reg $0053 $013F;
+@write_reg $0060 $A700;
+@write_reg $0061 $0001;
+@write_reg $0090 $0033;
+@write_reg $0081 $0000;
+@write_reg $0082 $0000;
+@write_reg $0083 $013F;
+];
+
+[InitContext;
+cAbbrev==>contextW=$18-->0;
+cEncodO==>contextW=$FFFF; !1E500
+cEncodB==>contextW=$E501;
+cScrenX==>contextW=Border;
+!cScrenY==>contextW=0;
+cFontO ==>contextW=$FFFF; ! $1E000
+cFontB ==>contextW=$E001;
+cBitMpW==>contextW=-(BufferHeight+StatusHeight)*LineStrideW;
+!cScroll==>contextW=0;
+cTextO==>contextW=cBitMpW==>contextW;
+cTextB==>contextW=cBitMpW==>contextW-MaxTextSize;
+!cTextSep==>contextW=0;
+!cScrollStart==>contextW=0;
+!cLastScroll==>contextW=0;
+];
+
+[SysPrint
+printO printW;
+printW=DecodeText(printO&1, printW);
+if (printO&2) ! Doing print_ret so need to add a newline
+{
+	printO=cTextO==>contextW;
+	printW=cTextB==>contextW;
+	printO=>printW=10;
+	printW++;
+	printO=>printW=0;
+}
+cTextB==>contextW=(cBitMpW==>contextW-MaxTextSize); ! reset buffer as Decode modifies it
+printW=TextToConsole(cTextO==>contextW, cTextB==>contextW);
+rtrue;
+];
+
+[SysPrintChar
+char
+textO textB;
+textO=cTextO==>contextW;
+textB=cTextB==>contextW;
+textO=>textB=char;
+textB++;
+textO=>textB=0;
+char=TextToConsole(textO, textB-1);
+rtrue;
+];
+
+[SysPrintNum
+num
+digit writeStarted demon temp;
+demon=10000;
+if (num<0)
+{
+	temp=SysPrintChar('-');
+	demon=-demon;
+}
+while (1)
+{
+	digit=num/demon;
+	if (digit<0) ! Not sure why I need to do this but fixes -32678
+		digit=-digit;
+	if (digit>0 || writeStarted || demon==1 || demon==-1)
+	{
+		temp=SysPrintChar('0'+digit);
+		writeStarted=1;
+		if (demon==1 || demon==-1)
+			break;
+	}
+	num=num-digit*demon;
+	demon=demon/10;	
+}
+rtrue;
+];
+
+[DrawKeyboard
+size ptr line i;
+! Use print system to make keyboard bitmaps then blit to screen
+for (: i<2: i++)
+{
+	cTextSep==>contextW=i;
+	@print "  q   |  w   |   e   |   r   |   t   |   y   |   u   |    i   |   o   |   p^";
+	@print "      a   |   s   |   d   |   f   |   g   |   h   |   j   |   k   |   l^";
+	@print "          z   |   x   |   c   |   v   |   b   |   n   |  m   |   ,^";
+	@print "         Delete         |          Space         |          Enter^";
+}
+cTextSep==>contextW=0;
+@write_reg 32 0;
+size=LineStride*TextHeight;
+ptr=cBitMpW==>contextW;
+i=ptr+4*TextHeight*LineStrideW;
+line=KeyboardStartLine+1+KeyboardSepSpacing;
+while (ptr<i)
+{
+	@write_reg 33 line;
+	@blit1 ptr size $22b0 $d75f;
+	ptr=ptr+TextHeight*LineStrideW;
+	line=line+KeyboardTextSpacing;
+}
+size=LineStride*KeyboardSepSpacing;
+line=KeyboardStartLine+1;
+i=ptr+4*TextHeight*LineStrideW;
+while (ptr<i)
+{
+	@write_reg 33 line;
+	@blit1 ptr size $22b0 $d75f;
+	line=line+TextHeight+KeyboardSepSpacing-1;
+	@write_reg 33 line;
+	@blit1 ptr size $22b0 $d75f;
+	line=line+KeyboardSepSpacing+1;
+	ptr=ptr+TextHeight*LineStrideW;
+}
+line=KeyboardStartLine;
+i=line+4*(TextHeight+2*KeyboardSepSpacing);
+size=LineStride;
+while (line<i)
+{
+	@write_reg 33 line;
+	@blit1 ptr size $d75f $d75f;
+	line=line+TextHeight+2*KeyboardSepSpacing;
+}
+ptr=cBitMpW==>contextW;
+i=ptr+LineStrideW*TextHeight*8;
+while (ptr<i)
+{
+	0==>ptr=0;
+	ptr++;
+}
+cScrenY==>contextW=0;
+];
+
+[GameSelect
+palette
+imageO imageP c col count p x y winW winWMax;
+
+c=320;
+@write_reg 32 0;
+@write_reg 33 0;
+while (c)
+{
+	p=240;
+	while (p)
+	{
+		col=0;
+		if ((c+p)&7 && (c-p)&7)
+			col=((0-->(palette+c))*(0-->(palette+(p+40))))&$7E0;
+		p--;
+		@write_reg 34 col;
+	}
+	c--;
+	y++;
+}
+palette=palette+320;
+
+imageP=(palette+128)*2+1;
+imageO=$FFFF;
+p=4;
+while (p)
+{
+	winW=127;
+	winWMax=226;
+	if (p&1)
+	{
+		winW=13;
+		winWMax=112;
+	}
+	y=167;
+	if (p&2)
+	{
+		y=33;
+	}
+	@write_reg $0050 winW;
+	@write_reg $0051 winWMax;
+	@write_reg 32 winW;
+	@write_reg 33 y;
+	count=100*120;
+	while (count>0)
+	{
+		c=imageO->imageP;
+		col=0-->(palette+(c&$7F));
+		imageP++;
+		if (c&$80)
+		{
+			c=imageO->imageP;
+			imageP++;
+			count=count-c;
+			while (c)
+			{
+				@write_reg 34 col;
+				c--;
+			}
+		}
+		else
+		{
+			@write_reg 34 col;	
+			count--;
+		}
+	}
+	p--;
+}
+@write_reg $0050 $0000;
+@write_reg $0051 $00EF;
+@write_reg $0007 $0133; ! Turn on the screen
+	
+do !wait for touch
+{
+	@get_touch $93 -> x;
+	if (x<1000)
+		y--;
+	else
+		y=10;
+} until (y==0);
+@get_touch $95 -> x; ! x
+@get_touch $1A -> y; ! y
+p=0;
+if (x>510)
+	p++;
+if (y>508)
+	p=p+2;
+
+if (p>0)
+	@switch_bank p;
+];
+
+[MandelbrotPalette;
+@db 0;
+@db $f800; @db $fb80; @db $f800; @db $fc00;
+@db $f800; @db $fc00; @db $f800; @db $fc00;
+@db $ff80; @db $df80; @db $bf80; @db $9f80;
+@db $7f80; @db $5f80; @db $3f80; @db $1f80;
+@db $1f81; @db $1f85; @db $1f89; @db $1f8d;
+@db $1f91; @db $1f96; @db $1f9a; @db $1f9e;
+@db $1d9f; @db $191f; @db $151f; @db $111f;
+@db $0d1f; @db $091f; @db $049f; @db $009f;
+];
+
+[Mandelbrot
+x y xtemp ytemp x0 y0 x00 y00 i;
+@write_reg 32 0;
+@write_reg 33 StatusHeight;
+y0=60;
+do
+{
+	x0=-120;
+	y00=y0*40;
+	do
+	{
+		xtemp=0;
+		ytemp=0;
+		y=0;
+		i=0;
+		x00=x0*20;
+		do
+		{
+			i++;
+			xtemp=xtemp-ytemp+y00;
+			y=(x*y+x00)/32;
+			if (y>=2*64 || y<=-2*64)
+				break;
+			x=xtemp/64;
+			if (x>=2*64 || x<=-2*64)
+				break;
+			xtemp=x*x;
+			ytemp=y*y;
+		} until ( xtemp + ytemp >= 64*64*4 || i>=32);
+		i=1-->(i+MandelbrotPalette);
+		@write_reg 34 i;
+		x0++;
+	} until (x0>=120);
+	y0--;
+} until (y0==60-(KeyboardStartLine-StatusHeight));
+@write_reg $0007 $0133; ! Turn on the screen
+x=GetKey();
+];
+
+[SpaceInvadersSpriteData;
+!squid1 Offset:0
+@db 8*(8|16);
+@db 8*(4|8|16|32);
+@db 8*(2|4|8|16|32|64);
+@db 8*(1|2|8|16|64|128);
+@db 8*(1|2|4|8|16|32|64|128);
+@db 8*(4|32);
+@db 8*(2|8|16|64);
+@db 8*(1|4|32|128);
+!ant1 Offset:16
+@db 4*(4|256);
+@db 4*(8|128);
+@db 4*(4|8|16|32|64|128|256);
+@db 4*(2|4|16|32|64|256|512);
+@db 4*(1|2|4|8|16|32|64|128|256|512|1024);
+@db 4*(1|4|8|16|32|64|128|256|1024);
+@db 4*(1|4|256|1024);
+@db 4*(8|16|64|128);
+!bug1 Offset:32
+@db 4*(16|32|64|128);
+@db 4*(2|4|8|16|32|64|128|256|512|1024);
+@db 4*(1|2|4|8|16|32|64|128|256|512|1024|2048);
+@db 4*(1|2|4|32|64|512|1024|2048);
+@db 4*(1|2|4|8|16|32|64|128|256|512|1024|2048);
+@db 4*(4|8|16|128|256|512);
+@db 4*(2|4|32|64|512|1024);
+@db 4*(4|8|256|512);
+!squid2 Offset:48
+@db 8*(8|16);
+@db 8*(4|8|16|32);
+@db 8*(2|4|8|16|32|64);
+@db 8*(1|2|8|16|64|128);
+@db 8*(1|2|4|8|16|32|64|128);
+@db 8*(2|8|16|64);
+@db 8*(1|128);
+@db 8*(2|64);
+!ant2 Offset:64
+@db 4*(4|256);
+@db 4*(1|8|128|1024);
+@db 4*(1|4|8|16|32|64|128|256|1024);
+@db 4*(1|2|4|16|32|64|256|512|1024);
+@db 4*(1|2|4|8|16|32|64|128|256|512|1024);
+@db 4*(2|4|8|16|32|64|128|256|512);
+@db 4*(4|256);
+@db 4*(2|512);
+!bug2 Offset:80
+@db 4*(16|32|64|128);
+@db 4*(2|4|8|16|32|64|128|256|512|1024);
+@db 4*(1|2|4|8|16|32|64|128|256|512|1024|2048);
+@db 4*(1|2|4|32|64|512|1024|2048);
+@db 4*(1|2|4|8|16|32|64|128|256|512|1024|2048);
+@db 4*(8|16|128|256);
+@db 4*(4|8|32|64|256|512);
+@db 4*(1|2|1024|2048);
+!ship Offset:96
+@db 2*(64);
+@db 2*(32|64|128);
+@db 2*(32|64|128);
+@db 2*(2|4|8|16|32|64|128|256|512|1024|2048);
+@db 2*(1|2|4|8|16|32|64|128|256|512|1024|2048|4096);
+@db 2*(1|2|4|8|16|32|64|128|256|512|1024|2048|4096);
+@db 2*(1|2|4|8|16|32|64|128|256|512|1024|2048|4096);
+@db 2*(1|2|4|8|16|32|64|128|256|512|1024|2048|4096);
+!explosion Offset:112
+@db 4*(16|256);
+@db 4*(2|32|128|2048);
+@db 4*(4|1024);
+@db 4*(8|512);
+@db 4*(1|2|2048); !|4096); Should really but messes with clear
+@db 4*(8|512);
+@db 4*(4|32|128|1024);
+@db 4*(2|16|256|2048);
+!ufo Offset:128
+@db $03c0;
+@db $0ff0;
+@db $3ffc;
+@db $6db6;
+@db $ffff;
+@db $3bdc;
+@db $1008;
+!base Offset:142
+@db $0FFF; @db $C000;
+@db $1FFF; @db $E000;
+@db $3FFF; @db $F000;
+@db $7FFF; @db $F800;
+@db $FFFF; @db $FC00;
+@db $FFFF; @db $FC00;
+@db $FFFF; @db $FC00;
+@db $FFFF; @db $FC00;
+@db $FFFF; @db $FC00;
+@db $FFFF; @db $FC00;
+@db $FFFF; @db $FC00;
+@db $FFFF; @db $FC00;
+@db $FE03; @db $FC00;
+@db $FC01; @db $FC00;
+@db $F800; @db $FC00;
+@db $F800; @db $FC00;
+];
+
+[SpaceInvaders
+sprites x y i k s xd u c sx t p l ud j;
+
+!copy sprite data
+sprites=contextW-MaxTextSize/2;
+i=SpaceInvadersSpriteData;
+k=i+71;
+c=sprites;
+while (i<k)
+{
+	0==>c=1-->i;
+	i++;
+	c++;
+}
+!copy 4x bases as will get destroyed
+c=sprites+135;
+k=i+32;
+t=4;
+while (t)
+{
+	i=SpaceInvadersSpriteData+71;
+	while (i<k)
+	{
+		0==>c=1-->i;
+		i++;
+		c++;
+	}
+	t--;
+}
+
+s=sprites;
+k=s+5;
+t=26;
+c=234;
+while (s<k)
+{
+	190==>s=0; !dying
+	200==>s=8; !startX
+	210==>s=t; !startY
+	220==>s=$7ff; !alive
+	c==>sprites=0; !bullet direction
+	s++;
+	t=t+16;
+	c=c+6;
+}
+184==>sprites=0; ! dead timer
+186==>sprites=0; ! ufo dead timer
+188==>sprites=255; ! ufo position
+
+@write_reg $0050 0;
+@write_reg $0051 $EF;
+@write_reg 32 0;
+@write_reg 33 StatusHeight;
+@blit1 0 6900 0 0;
+xd=2;
+sx=115;
+l=3;
+ud=1;
+while (1)
+{
+	if (random(50)==1 && ~~184==>sprites)
+	{
+		x=random(11)-1;
+		k=x;
+		t=1;
+		while (k)
+		{
+			t=t*2;
+			k--;
+		}
+		s=228;
+		y=0;
+		for (k=0: k<5: k++)
+		{
+			if (s==>sprites&t)
+			{
+				x=(s-20)==>sprites+16*x;
+				y=(s-10)==>sprites+6;
+				break;
+			}
+			s=s-2;
+		}
+		if (y)
+		{
+			for (k=0: k<4: k++)
+			{
+				s=236+6*k;
+				if (~~(s+4)==>sprites)
+				{
+					s==>sprites=x+8;
+					(s+2)==>sprites=y;
+					(s+4)==>sprites=1;
+					break;
+				}
+			}
+		}
+	}
+
+	x=188==>sprites;
+	if (x<240-16)
+	{
+		i=2;
+		while (i)
+		{
+			@write_reg $0050 x;
+			@write_reg 32 x;
+			y=x+15;
+			@write_reg $0051 y;
+			@write_reg 33 16;
+			i--;
+			if (i)
+			{
+				@blit1 0 14 0 0;
+				x++;
+				188==>sprites=x;
+				if (x>=240-16)
+					break;
+			}
+			else
+			{
+				s=sprites+64;
+				x=186==>sprites;
+				k=$f800;
+				if (x)
+				{
+					s=sprites+56;
+					x--;
+					186==>sprites=x;
+					if (~~x)
+					{
+						188==>sprites=255;
+						k=0;
+					}
+				}
+				@blit1 s 14 0 k;
+			}
+		}
+	}
+	else if (random(2000)==1)
+	{
+		188==>sprites=0;
+	}
+
+	ud--;
+	if (ud<=0)
+	{
+		k=0;	
+		do
+		{
+			u--;
+			if (u<0)
+				u=4;
+			x=220==>(sprites+u);
+			k++;
+		} until (x || k>5);
+		if (~~x)
+		{
+			break; ! all enemies dead
+		}
+		if (x&$007)
+			ud++;
+		if (x&$038)
+			ud++;
+		if (x&$1C0)
+			ud++;
+		if (x&$600)
+			ud++;
+		k=5;
+		while (k)
+		{
+			k--;
+			t=220==>(sprites+k);
+			if (t)
+				j=k;
+			x=x|t;
+		}
+		k=x;
+		c=8;
+		while (~~(x&1))
+		{
+			c=c-16;
+			x=x/2;
+		}
+		t=54;
+		while (~~(k&$400))
+		{
+			k=k*2;
+			t=t+16;
+		}
+		x=200==>(sprites+u)+xd;
+		if (x>t || x<c)
+		{
+			y=210==>(sprites+u);
+			@write_reg $0050 0;
+			@write_reg $0051 $EF;
+			@write_reg 32 0;
+			@write_reg 33 y;
+			@blit1 0 240 0 0;
+			210==>(sprites+u)=y+10;
+			if (u==j)
+				xd=-xd;
+			if (y>202) !touched the ship row
+			{
+				if (~~184==>sprites)
+				{
+					184==>sprites=150;
+				}
+				l=0;
+			}
+		}
+		200==>(sprites+u)=x;
+	}
+	s=sprites+135;
+	for (k=0: k<4: k++)
+	{
+		x=35+k*50;
+		@write_reg $50 x;
+		@write_reg 32 x;
+		x=x+31;
+		@write_reg $51 x;
+		@write_reg 33 195;
+		@blit1 s 64 0 $7E0;
+		s=s+32;
+	}
+	for (k=0: k<5: k++)
+	{
+		x=200==>(sprites+k);
+		y=210==>(sprites+k);
+		p=220==>(sprites+k);
+		c=y/8;
+		c=(31-c)*32*64+c+1;
+		s=sprites;
+		if (x&2)
+			s=s+24;
+		if (k>=3)
+			s=s+16;
+		else if (k>=1)
+			s=s+8;
+		t=1;
+		for (i=0: i<11: i++)
+		{
+			@write_reg $0050 x;
+			@write_reg 32 x;
+			@write_reg 33 y;
+			x=x+15;
+			@write_reg $0051 x;
+			x++;
+			if (p&t)
+			{
+				j=190==>(sprites+k);
+				if (j&t)
+				{
+					if (j&$8000)
+					{
+						@blit1 s 16 0 0;
+						p=p&~t;
+					}
+					else
+					{
+						j=sprites+56;
+						@blit1 j 16 0 c;
+					}
+				}
+				else
+				{
+					@blit1 s 16 0 c;
+				}
+			}
+			t=t*2;
+		}
+		220==>(sprites+k)=p;
+		p=190==>(sprites+k);
+		if (p)
+		{
+			if (p&$8000)
+				p=0;
+			else
+				p=p+$1000;
+			190==>(sprites+k)=p;
+		}
+	}
+	s=230;
+	for (j=-3: j<5: j++)
+	{
+		k=j;
+		if (k<0)
+			k=0;
+		x=(s+4)==>sprites;
+		if (x)
+		{
+			y=(s+2)==>sprites;
+			i=s==>sprites;	
+			@write_reg 32 i;
+			@write_reg $50 i;
+			@write_reg $51 i;
+			@write_reg 33 y;
+			@write_reg 34 0;
+			@write_reg 34 0;
+			if (x>0)
+			{
+				@write_reg 34 0;
+				@write_reg 34 0;
+			}
+			if (k) !not player bullet
+			{
+				if (234==>sprites)
+				{
+					t=232==>sprites;
+					if (y<=t && y+4>=t)
+					{
+						t=230==>sprites;
+						if (i<=t+2 && i>=t-2)
+						{
+							! two bullets hit
+							234==>sprites=0;
+							(s+4)==>sprites=0;
+							! erase player bullet
+							@write_reg 32 t;
+							@write_reg $50 t;
+							@write_reg $51 t;
+							t=232==>sprites;
+							@write_reg 33 t;
+							@write_reg 34 0;
+							@write_reg 34 0;
+						}
+					}
+				}
+			}
+			y=y+x;
+			(s+2)==>sprites=y;
+			if (x<0)
+			{
+				for (i=0: i<5: i++)
+				{
+					t=210==>(sprites+i);
+					if (y>=t && y<t+6)
+					{
+						t=s==>sprites-200==>(sprites+i);
+						if (t>=0 && t<11*16)
+						{
+							p=1;
+							c=0;
+							while (t>16)
+							{
+								p=p*2;
+								t=t-16;
+								c=c+16;
+							}
+							if (t>2 && t<14)
+							{
+								if (220==>(sprites+i)&p)
+								{
+									190==>(sprites+i)=190==>(sprites+i)|p;
+									(s+4)==>sprites=0;
+									p=200==>(sprites+i)+c;
+									t=210==>(sprites+i);
+									break;
+								}
+							}
+						}
+					}
+				}
+			}
+			if (y>=195 && y<195+16)
+			{
+				t=s==>sprites-35;
+				if (t>=0 && t<4*50)
+				{
+					i=t/50;
+					t=t-i*50;
+					if (t<22)
+					{
+						k=(270-1)+(64*i)+(4*(y-195));
+						t=t+7;
+						while (t>=12)
+						{
+							t=t-8;
+							k=k++;
+						}
+						p=1;
+						t=15-t;
+						while (t)
+						{
+							t--;
+							p=p*2;
+						}
+						t=k==>sprites;
+						if (t&p)
+						{
+							p=p/8;
+							k==>sprites=t&~(p*(1|2|4|8|16));
+							if (y<195+15)
+								(k+4)==>sprites=(k+4)==>sprites&~(p*(2|4|8));
+							if (y<195+14)
+								(k+8)==>sprites=(k+8)==>sprites&~(p*(1|4|16));
+							if (y>195)
+								(k-4)==>sprites=(k-4)==>sprites&~(p*(2|4|8));
+							if (y>196)
+								(k-8)==>sprites=(k-8)==>sprites&~(p*(1|4|16));
+							(s+4)==>sprites=0;
+						}
+					}
+				}
+			}
+			i=s==>sprites;
+			if (x>0 && i>sx+1 && i<sx+15 && y>=220 && y<217+8)
+			{
+				(s+4)==>sprites=0;
+				if (~~184==>sprites)
+				{
+					184==>sprites=150;
+					l--;
+				}
+			}
+			;
+			if (x<0 && y>=16 && y<=16+7 && i>=188==>sprites && i<188==>sprites+16)
+			{
+				(s+4)==>sprites=0;
+				186==>sprites=8;
+			}
+			if (y>=217+8 || y<=StatusHeight)
+				(s+4)==>sprites=0;
+			if ((s+4)==>sprites)
+			{
+				@write_reg 33 y;
+				@write_reg 34 $7E0;
+				@write_reg 34 $7E0;
+				if (x>0)
+				{
+					@write_reg 34 $7E0;
+					@write_reg 34 $7E0;
+				}
+			}
+		}
+		if (j>=0)
+			s=s+6;
+	}
+	if (~~184==>sprites)
+	{
+		@get_touch $93 -> x;
+		if (x<1000)
+		{
+			@get_touch $1A -> y; ! y
+			if (y<720)
+			{
+				@get_touch $95 -> x; ! x
+				x=x-90;
+				x=x*2;
+				x=x/7;
+				x=x-7;
+				if (x>sx)
+					sx++;
+				else
+					sx--;
+			}
+			else if (234==>sprites==0)
+			{
+				230==>sprites=sx+8;
+				232==>sprites=217;
+				234==>sprites=-1;
+			}
+		}
+	}
+	@write_reg $0050 sx;
+	@write_reg 32 sx;
+	x=sx+15;
+	@write_reg $0051 x;
+	@write_reg 33 218;
+	s=sprites+96/2;
+	k=$7e0;
+	if (184==>sprites)
+	{
+		if (184==>sprites>130)
+			s=sprites+56;
+		else
+			k=0;
+		184==>sprites=184==>sprites-1;
+	}
+	else if (l<=0)
+	{
+		break;
+	}
+	@blit1 s 16 0 k;
+
+	s=sprites+96/2;
+	for (k=0: k<3: k++)
+	{
+		x=10+16*k;
+		@write_reg $0050 x;
+		@write_reg 32 x;
+		x=x+15;
+		@write_reg $0051 x;
+		@write_reg 33 230;
+		if (k<l)
+			@blit1 s 16 0 $7E0;
+		else
+			@blit1 s 16 0 0;
+	}
+
+	x=7500; !Delay to keep game from running too fast
+	do
+	{
+		x--;
+	} until (~~x);
+	@write_reg $0007 $0133; ! Turn on the screen
+}
+@write_reg $0050 0;
+@write_reg $0051 $EF;
+if (l>0)
+	@print "You win!^^";
+else
+	@print "Bad luck.^^";
+];
+
+[SysInit
+temp;
+temp=InitContext();
+temp=InitScreenRegs();
+if (~~($FFFF->$E580))
+	temp=GameSelect($B400);
+temp=DrawKeyboard();
+@new_line;
+! Set flags
+0->1=(0->1&$8f)|$40; ! Status line availible, Screen splitting not availible + variable pitch font
+0->10=0->10&$fe; ! Transcripting off
+];
+
+[FindInDictionary
+text parse
+encodingO encodingB textO textB count limit i a c;
+
+encodingO=cEncodO==>contextW;
+textO=cTextO==>contextW;
+textB=cTextB==>contextW;
+limit=textB+6;
+
+i=6;
+while (i)
+{
+	i--;
+	textO=>(textB+i)=5;
+}
+
+count=parse->2;
+text=text+parse->3;
+
+while (count && textB<limit)
+{
+	c=text->0;
+	text++;
+	count--;
+	if (c==32)
+	{
+		textO=>textB=0;
+		textB++;
+	}
+	else
+	{
+		i=0;
+		a=3;
+		encodingB=cEncodB==>contextW;
+		while (c~=encodingO->encodingB)
+		{
+			encodingB++;
+			i++;
+			if (i==26)
+			{
+				if (a==5)
+					break;
+				a++;
+				i=0;
+			}
+		}
+		if (a>3)
+		{
+			textO=>textB=a;
+			textB++;
+		}
+		if (i==26)
+		{
+			textO=>textB=6;
+			textB++;
+			textO=>textB=(c/32)&$1F;
+			textB++;
+			textO=>textB=c&$1F;
+			textB++;
+		}
+		else
+		{
+			textO=>textB=6+i;
+			textB++;
+		}
+	}
+}
+
+textB=cTextB==>contextW;
+a=textO=>(textB  )*1024+textO=>(textB+1)*32+textO=>(textB+2);
+c=textO=>(textB+3)*1024+textO=>(textB+4)*32+textO=>(textB+5);
+c=c|$8000;
+
+i=DictionaryOff-->0;
+parse-->0=0;
+i=i+i->0+1;
+limit=i->0;
+i++;
+count=i-->0;
+i=i+2;
+while (count)
+{
+	if (i-->0==a && i-->1==c)
+	{
+		parse-->0=i;
+		break;
+	}
+	i=i+limit;
+	count--;
+}
+];
+
+[UpdateStatus
+x y scoreX;
+
+x=cBitMpW==>contextW+BufferHeight*LineStrideW;
+y=StatusHeight*LineStrideW;
+while (y)
+{
+	0==>x=0;
+	x++;
+	y--;
+}
+
+x=cScrenX==>contextW;
+y=cScrenY==>contextW;
+cScrenX==>contextW=Border;
+cScrenY==>contextW=BufferHeight;
+@print_obj sys__glob0;
+scoreX=ScoreXOffset;
+if (sys__glob1>=1000)
+	scoreX=scoreX-12;
+else if (sys__glob1>=100)
+	scoreX=scoreX-8;
+else if (sys__glob1>=10)
+	scoreX=scoreX-4;
+if (sys__glob2>=1000)
+	scoreX=scoreX-12;
+else if (sys__glob2>=100)
+	scoreX=scoreX-8;
+else if (sys__glob2>=10)
+	scoreX=scoreX-4;
+cScrenX==>contextW=scoreX;
+print "Score:";
+@print_num sys__glob1;
+print " Moves:";
+@print_num sys__glob2;
+cScrenX==>contextW=x;
+cScrenY==>contextW=y;
+];
+
+[GetKey
+x y
+startY scrollStart scrollLimit scroll;
+			
+startY=1024;
+scrollLimit=cScroll==>contextW;
+while (1)
+{
+	scrollStart=scroll;
+	do !wait for not-touch
+	{
+		if (startY~=1024)
+		{
+			@get_touch $1A -> y; ! y
+			scroll=scrollStart+(startY-y)/3;
+			if (scroll>0)
+			{
+				scroll=0;
+			}
+			else if (scroll<-BufferHeight+KeyboardStartLine-StatusHeight)
+			{
+				scroll=-BufferHeight+KeyboardStartLine-StatusHeight;
+			}
+			cScroll==>contextW=((scrollLimit+scroll+BufferHeight+BufferHeight)%BufferHeight);
+			x=UpdateScreen();
+		}
+		@get_touch $93 -> x;
+	} until (x>=1000);
+	y=10;
+	do !wait for touch
+	{
+		@get_touch $93 -> x;
+		if (x<1000)
+			y--;
+		else
+			y=10;
+	} until (y==0);
+	startY=1024;
+	@get_touch $95 -> x; ! x
+	@get_touch $1A -> y; ! y
+	if (y>=870)
+	{
+		if (x<=374)	! delete
+			return 0;
+		if (x<=649)
+			return ' ';
+		return 10;
+	}
+	else if (y>=820)
+		{
+			if (x<=256)
+				return 'z';
+			if (x<=340)
+				return 'x';
+			if (x<=423)
+				return 'c';
+			if (x<=506)
+				return 'v';
+			if (x<=590)
+				return 'b';
+			if (x<=673)
+				return 'n';
+			if (x<=753)
+				return 'm';
+			return ',';
+		}
+	else if (y>=770)
+	{
+		if (x<=215)
+			return 'a';
+		if (x<=298)
+			return 's';
+		if (x<=381)
+			return 'd';
+		if (x<=465)
+			return 'f';
+		if (x<=548)
+			return 'g';
+		if (x<=631)
+			return 'h';
+		if (x<=711)
+			return 'j';
+		if (x<=794)
+			return 'k';
+		return 'l';
+	}
+	else if (y>=720)
+	{
+		if (x<=173)
+			return 'q';
+		if (x<=253)
+			return 'w';
+		if (x<=336)
+			return 'e';
+		if (x<=416)
+			return 'r';
+		if (x<=499)
+			return 't';
+		if (x<=583)
+			return 'y';
+		if (x<=666)
+			return 'u';
+		if (x<=753)
+			return 'i';
+		if (x<=836)
+			return 'o';
+		return 'p';
+	}
+	else
+	{
+		startY=y;
+	}
+}
+];
+
+[EraseConsole
+sx sy
+i ptr endptr bitmapW mask;
+
+bitmapW=cBitMpW==>contextW;
+
+i=sx;
+mask=1;
+while (sx&15)
+{
+	mask=mask*2;
+	sx++;
+}
+mask=~(mask-1);
+sx=i/16;
+
+while (sy<=cScrenY==>contextW)
+{
+	for (i=0: i<10: i++)
+	{
+		ptr=(sy+i)*LineStride+sx+sx;
+		endptr=(sy+i+1)*LineStride;
+		ptr==>bitmapW=ptr==>bitmapW&mask;
+		ptr=ptr+2;
+		while (ptr<endptr)
+		{
+			ptr==>bitmapW=0;
+			ptr=ptr+2;
+		}
+	}
+	sx=0;
+	sy=sy+10;
+	mask=0;
+}
+];
+
+[SysRead
+parse text
+count i c sep dict readingWord parse0 temp;
+
+temp=UpdateStatus();
+temp=UpdateScreen();
+@write_reg $0007 $0133; ! Turn on the screen
+
+c=cScrenX==>contextW;
+sep=cScrenY==>contextW;
+dict=cScroll==>contextW;
+
+do
+{
+	i++;
+	text->i=GetKey();
+	if (text->i==0)
+	{
+		if (i>=2)
+			i=i-2;
+		else
+			i--;
+	}
+	temp=EraseConsole(c,sep);
+	cScrenX==>contextW=c;
+	cScrenY==>contextW=sep;
+	cScroll==>contextW=dict;
+	text->(i+1)=0;
+	temp=TextToConsole(1, text);
+	temp=UpdateScreen();
+} until (i && text->i==10);
+text->i=0;
+text->0=(i-1);
+
+i=0;
+if (text->0==10)
+{
+	if (text->1=='m' && text->2=='a' && text->3=='n' && text->4=='d' && text->5=='e'
+	 && text->6=='l' && text->7=='b' && text->8=='r' && text->9=='o' && text->10=='t')
+	{
+		parse0=Mandelbrot();
+		i=1;
+	}
+}
+else if (text->0==6)
+{
+	if (text->1=='i' && text->2=='n' && text->3=='v' && text->4=='a' && text->5=='d' && text->6=='e')
+	{
+		parse0=SpaceInvaders();
+		i=1;
+	}
+}
+if (i)
+{
+	text->0=4;
+	text->1='w';
+	text->2='a';
+	text->3='i';
+	text->4='t';
+	text->5=0;
+}
+
+parse0=parse;
+parse++;
+parse++;
+
+parse0->1=0;
+count=text->0;
+i=1;
+while (count)
+{
+	c=text->i;
+	if (c==32)
+	{
+		sep=-1;
+	}
+	else
+	{
+		dict=DictionaryOff-->0;
+		sep=dict->0;
+		while (sep)
+		{
+			if (c==dict->sep)
+				break;
+			sep--;
+		}
+	}
+	if (readingWord)
+	{
+		if (sep)
+		{
+			parse0->1=parse0->1+1;
+			parse->2=i-parse->3;
+			temp=FindInDictionary(text, parse);
+			parse=parse+4;
+			readingWord=0;
+			if (sep>0)
+			{
+				parse->3=i;
+				readingWord=1;
+			}
+		}
+	}
+	else if (sep>=0)
+	{
+		parse->3=i;
+		readingWord=1;
+	}
+	count--;
+	i++;
+}
+if (readingWord)
+{
+	parse0->1=parse0->1+1;
+	parse->2=i-parse->3;
+	temp=FindInDictionary(text, parse);
+}
+];
+
+[SysShowStatus
+temp;
+temp=UpdateStatus();
+temp=UpdateScreen();
+];
+
+[PressKeyToReboot
+temp;
+@print "Press any key to reboot]";
+temp=UpdateScreen();
+temp=GetKey();
+@switch_bank 0;
+];
+
+[SysQuit
+temp;
+@print "^[Quit. ";
+temp=PressKeyToReboot();
+];
+
+[SysException
+pc oper0 oper1;
+@print "^[Exception PC/2=";
+@print_num pc;
+@print " OP0=";
+@print_num oper0;
+@print " OP1=";
+@print_num oper1;
+@print "]^[";
+pc=PressKeyToReboot();
+];
