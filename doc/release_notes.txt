@@ -1,0 +1,36 @@
+V2.1	- Updates contributed by Tim Brooks. 
+
+- To resolve the mac address of an IP address off the local network, I believe the "Who-has" has to be sent to the IP address of the default gateway (or router). For that to happen ARP has to know the address of the default gateway and the net mask.
+In the tar ball I've attached, I modified ARP_req.vhd to provide this functionality. I may be useful to you or someone else who downloads the core... also updated the tb to check this.
+- Bugs fixed by Tim Brooks:
+-- In IPV4_TX, I've removed signal "mac_data_out_ready_reg". It was causing tx_count to be wrong by 1 at the end of a transfer where mac_data_out_ready when low during the transfer. IP_tx_tb didn't catch it. I use Xilinx Isim and it  seems that "wait for clk_period" causes signals to change, in effect, just before the clock. I replaced with wait until clk = '1' thorough that test-bench, which assure that the signal changes as if it where clocked. You may want to check this with your simulator and, if you have similar results, you may want to change "wait for clk_period" to "wait until clk = '1'" throughout your test-benches...
+-- In ARP_req.vhd, the statements on lines 192&193 would cause the cache to be updated and "got_mac" signal to go high on the next clock, even if the received IP address resolved was not what was asked for.
+-- This was also masked by the fact that the test-bench checks "to early" for the "Got_mac" signal staying low (or going high for that matter). For T7.2, I've moved the Assert statements to the same clock period as the data_in_last signal going low. probably should be done for other tests as well
+-- ARP_rx, in my system, from the soft Ethernet core, data_in_last usually occurs when rx_count = 41. this means that rx_state never goes to process_arp. I've modified this so that it is processed on rx_count = 41 and outside of the "else" statement of data_in_last = 1 catch.
+-- arp_tx. Replies should not be broadcast. I replaced the hard coded FFs in the destination mac field with target.mac, having it set to all 1s as default.
+-- There are 2 places that were causing timing problems for my spartan 6 setup. read_result in ARP_store_br. I just added a pipeline stage and that problem went away.
+        in ipv4_rx, putting the decision as to whether the packet is for and should be processed in case rx_count = 0013 was a problem.  I've spread that decision over 0010 to 0013 as it was before the broadcast address test was added. setting or clearing Set_is_broadcast is still in rx_count= 0013.
+---------------------------------------------------------------------
+
+
+V1.3	- Added ARP timeout and ability to reset the ARP IP/MAC cache
+	Migration notes: v1.2 to v1.3 - UDP_complete_nomac and IP_Complete_nomac have generics
+	to specify clock rate and ARP timeout, and an additional control input.
+	The generics can be left at their default values, the control input should have clear_cache set to '0'.
+---------------------------------------------------------------------
+
+
+V1.2	- Added handling for receipt of IP pkts with broadcast address ff.ff.ff.ff. Added is_broadcast flag
+	  to IP RX hdr.
+	- Added ability to transmit IP pkts to broadcast address.
+	Migration Notes: V1.1 to V1.2 - IP_RX_HDR has an additional output signal to indicate the IP pkt
+	was received on the broadcast address.
+---------------------------------------------------------------------
+
+V1.1 - Added mac_tx_tfirst output to assist coupling to MAC layers that require a start of frame indication.
+	Migration Notes: V1.0 to V1.1
+		- The entity declaration for UDP_Complete_nomac and IP_Complete_nomac have changed.
+		- if you dont need to use the new mac_tx_tfirst output, leave it open.
+---------------------------------------------------------------------
+
+V1.0 - initial release
