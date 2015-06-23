@@ -1,0 +1,637 @@
+options {
+ STATIC = false;
+}
+
+PARSER_BEGIN(LL_Virtex5)
+/*
+@LICENSE@
+*/
+package edu.byu.cc.plieber.fpgaenet.debug.llparse;
+import java.lang.*;
+import java.util.*;
+
+/**
+ * The Xilinx Logical Allocation file (.ll file) parser for Virtex2
+ * FPGAs. The parser fills two <code>Hashtable</code> objects with the
+ * readback bitstream information for state elements in the Virtex5
+ * design.  One <code>Hashtable</code> is filled with RAM bitstream
+ * information keyed on physical location (block name) while the
+ * second holds the bitstream information for flip-flops keyed on
+ * physical location (block name).  The grammar is not published but
+ * was developed from looking at the file format.
+ *
+ * @author Paul Graham
+ * @author Peter Lieber */
+public class LL_Virtex5 {
+
+  /** 
+   * A <code>HashTable</code> to allow quick access to {@link
+   * RAMGroup} objects based on block name and RAM type. The
+   * <code>RAMGroup</code> objects contain {@link RAMRBEntry} objects
+   * which hold the actual bitstream offsets.  */
+  Hashtable<String, RAMGroup > RAMGroupHash;
+
+  /** 
+   * A <code>Hashtable</code> of {@link LatchRBEntry} objects to allow
+   * quick access based on block name and latch type.  The
+   * <code>LatchRBEntry</code> is used for flip-flops and stores
+   * bitstream offset information. */
+  Hashtable<String, LatchRBEntry > NetHashBlock;
+
+  /** The number of nets associated with latches in the .ll file */
+  int netCount;
+
+  /** The number of RAM entries in the .ll file */
+  int ramCount;
+
+  /** 
+   * Indicates whether the LL file provides absolute offsets. First
+   * needed with the Xilinx 4.1 ISE tools*/
+  boolean absOffsets;
+
+  /** 
+   * Instances and initializes the parser and parses the input from
+   * <code>System.in</code>
+   *
+   * @param args Command line arguments (ignored by the method)
+   * */
+  public static void main(String args[]) throws ParseException {
+    LL_Virtex5 parser = new LL_Virtex5(System.in);
+    parser.initTables();
+    parser.parseLL();
+  }
+
+  /**
+   * Initializes the <code>Hashtables</code> and counts.  */
+  public void initTables() {
+    RAMGroupHash = new Hashtable<String, RAMGroup >();
+    NetHashBlock = new Hashtable<String, LatchRBEntry >();
+    netCount = 0;
+    ramCount = 0;
+    absOffsets = false;
+  }
+
+  /**
+   * Returns a reference to the <code>RAMGroupHash</code>, which holds
+   * a {@link RAMGroup} object for each RAM in the .ll file keyed on
+   * the location of the RAM and the RAM type (F, G, M, or B).
+   *
+   * @return Reference to <code>RAMGroupHash</code> */
+  public Hashtable<String, RAMGroup > getRAMGroupHash() {
+    return RAMGroupHash;
+  }
+
+  /**
+   * Returning a reference to the <code>NetHashBlock</code>, which
+   * holds a {@link LatchRBEntry} for each flip-flop in the .ll file
+   * keyed on the location and the latch type (XQ, YQ, etc.)
+   *
+   * @return Reference to <code>NetHashBlock</code> */
+  public Hashtable<String, LatchRBEntry > getNetHashBlock() {
+    return NetHashBlock;
+  }
+
+  /**
+   * Returns true if the LL file provides absolute offsets and false
+   * otherwise.  Absolute readback bitstream offsets started appearing
+   * in the Xilinx ISE 4.1i series of tools.
+   *
+   * @return <code>true</code> if absolute offsets are provide,
+   * <code>false</code> otherwise.  */
+  public boolean hasAbsoluteOffsets() {
+    return absOffsets;
+  }
+}
+
+PARSER_END(LL_Virtex5)
+
+SKIP :
+{
+  " "
+|
+  "\t"
+|
+  ";" : IN_LINE_COMMENT
+}
+
+<IN_LINE_COMMENT> SKIP:
+{
+    "\n" : DEFAULT
+}
+
+<IN_LINE_COMMENT> MORE:
+{
+    < ~[] >
+}
+
+TOKEN :
+{
+  < NUM: ( ["0"-"9"] )+ >
+|
+  < HEXNUM: "0x" ( ["0"-"9","a"-"f","A"-"F"] )+ >
+|
+  < EQUAL: "=" >
+|
+  < TYPE : "Type" >
+|
+  < LUT : ["A","B","C","D"] >
+|
+  < BLOCKRAM : "B" >
+|
+  < SLICEBLOCK : "SLICE_X" (["0"-"9"])+ "Y" (["0"-"9"])+ >
+|
+  < BRAMBLOCK : "RAMB36_X" (["0"-"9"])+ "Y" (["0"-"9"])+ >
+|
+  < GTPBLOCK : "GTP_DUAL_X" (["0"-"9"])+ "Y" (["0"-"9"])+ >
+|
+  < DCMBLOCK : "DCM_ADV_X" (["0"-"9"])+ "Y" (["0"-"9"])+ >
+|
+  < PINBLOCK : ["A"-"Z"] (["A"-"Z"])? ["0"-"9"] (["0"-"9"])? >
+|
+  < AQ : "AQ">
+|
+  < BQ : "BQ">
+|
+  < CQ : "CQ">
+|
+  < DQ : "DQ">
+|
+  < Q1 : "Q1">
+|
+  < Q2 : "Q2">
+|
+  < I : "I">
+|
+  < O : "O">
+|
+  < DO : "DO" ["A","B"] ["0"-"9"] (["0"-"9"])? >
+|
+  < COLON : ":" >
+|
+  < LANGLE: "<" >
+|
+  < RANGLE: ">" >
+|
+  < LBRACKET: "[" >
+|
+  < RBRACKET: "]" >
+|
+  < REVISION : "Revision">
+|
+  < BIT : "Bit" >
+| 
+  < BLOCK : "Block" >
+|
+  < LATCH : "Latch" >
+|
+  < RAM : "Ram" >
+|
+  < ROM : "Rom" >
+|
+  < NET: "Net" >
+|
+  < YES: "YES">
+|
+  < NO: "NO">
+|
+  < COMPARE: "COMPARE">
+|
+  < INFO: "Info">
+|
+  < ID: ["a"-"z","A"-"Z"] (["a"-"z","A"-"Z","_","/","0"-"9","-",".","$"])* >
+| 
+  < NETEXT: ["/","_"](["a"-"z","A"-"Z","_","/","0"-"9","-","."])+ >
+}
+
+/**
+ * Defines the various flip-flop types and returns the type as
+ * a <code>String</code>.
+ *
+ * @return <code>String</code> for flip-flop type. */
+String LatchType() :
+{ }
+{
+<AQ> { return token.toString();}
+|<BQ> { return token.toString();}
+|<CQ> { return token.toString();}
+|<DQ> { return token.toString();}
+|<Q1> { return token.toString();}
+|<Q2> { return token.toString();}
+|<I> { return token.toString();}
+|<O> { return token.toString();}
+}
+
+/**
+ * Initiates the parsing of an <code>.ll</code> file and prints out
+ * statistics about the number of flip-flops (latches) and RAMs it
+ * found.*/
+void parseLL() :
+{ }
+{
+  Revision() ( BitStreamEntry() | InfoEntry() )* <EOF>
+
+{
+  System.out.println("Total Block/Latch Entries: "+ 
+                     Integer.toString(NetHashBlock.size())+ " Total Nets:" +
+                     Integer.toString(netCount));
+  System.out.println("Number of RAMGroup Entries: "+ 
+                     Integer.toString(RAMGroupHash.size())+ 
+                     " Total RAM entries:" + Integer.toString(ramCount));
+  System.out.flush();
+}
+}
+
+/**
+ * Parses the revision information for the .ll file.
+ */
+void Revision() :
+{ }
+{ 
+    <REVISION> <NUM> ("\r" | "\n" | "\r\n")
+}
+
+/**
+ * Parses the entire clause having the type of the flip-flop and
+ * returns the flip-flop type as a String.  
+ *
+ * @return Flip-flop type as <code>String</code>. */
+String Latch() :
+{ String latchtype; }
+{
+  <LATCH> <EQUAL> latchtype=LatchType() {return latchtype;}
+}
+
+/**
+ * Parses the net names associated with latches and stores a
+ * <code>LatchRBEntry</code> object in the <code>NetHashBlock
+ * Hashtable</code>.  The method handles both angle brackets ("<>")
+ * and square brackets ("[]") for net names.  In some strange
+ * circumstances, it was necessary to handle names which extended
+ * beyond the array naming construct (in other words, there was still
+ * part of the name after the last "]" or ">").  In these cases, the
+ * names are considered atomic (not multi-bit), so the index variable
+ * is reset to "-1".
+ *
+ * @param offset The first offset provided by the LL file for this
+ *               flip-flop; it is actually a junk bit in the readback
+ *               bitstream.
+ *
+ * @param frame The frame number for this flip-flops readback data
+ *              provided by the LL file.
+ *
+ * @param frameOffset The offset within the frame for this flip-flop's
+ *                    readback data provided by the LL file.
+ *
+ * @param block The block's name and location. 
+ *
+ * @param latchType The type of the flip-flop.
+ **/
+void NetName(int offset, int frame, int frameOffset, String block, String latchType) :
+{
+  String netname; 
+  int index=-1;
+  boolean extended=false;
+  LatchRBEntry lrbe;
+}
+{
+  <ID> { netname = token.toString();}
+[(<LANGLE> 
+  <NUM> { index = Integer.parseInt(token.toString()); }
+  <RANGLE> 
+  [<NETEXT> 
+   { netname = new String(netname+"<"+Integer.toString(index)+">"+token.toString()); 
+     index = -1;
+     extended = true;
+   } ]
+| <LBRACKET> 
+  <NUM> { index = Integer.parseInt(token.toString());}
+  <RBRACKET> 
+ [<NETEXT> 
+   { netname = new String(netname+"["+Integer.toString(index)+"]"+token.toString()); 
+     index = -1;
+     extended = true;
+   } ]
+)]
+ {
+	if(!block.equals("DUMMY")) {
+	  lrbe = new LatchRBEntry(offset,frame,frameOffset,block,latchType,netname,index);
+          netCount++;
+          NetHashBlock.put(block+latchType, lrbe);
+        }
+ }
+}
+
+/**
+ * Parses the entire "Net=..." clause.
+ *
+ * @param offset The first offset provided by the LL file for this
+ *               flip-flop; it is actually a junk bit in the readback
+ *               bitstream.
+ *
+ * @param frame The frame number for this flip-flops readback data
+ *              provided by the LL file.
+ *
+ * @param frameOffset The offset within the frame for this flip-flop's
+ *                    readback data provided by the LL file.
+ *
+ * @param block The block's name and location. 
+ *
+ * @param latchType The type of the flip-flop.
+ */
+void Net(int offset, int frame, int frameOffset, String block, String latchType) :
+{ }
+{
+  <NET> <EQUAL> NetName(offset,frame,frameOffset,block,latchType)
+}
+
+/**
+ * Parses the "Ram=..." clauses of the RAM LL entries for lut rams and enters the
+ * data into the <code>RAMGroupHash</code>. Since a certain RAM may
+ * already have a <code>RAMGroup</code> entry in the
+ * <code>RAMGroupHash</code>, the method performs a lookup first to
+ * see if the RAM's <code>RAMGroup</code> entry exists.  If the entry
+ * exists, the method adds a <code>RAMRBEntry</code> to the
+ * <code>RAMGroup</code> which was found.  Otherwise, the method
+ * creates a new <code>RAMGroup</code> and adds an
+ * <code>RAMRBEntry</code> to it. This method handles both LUT RAMs
+ * and BlockRAMs.
+ *
+ * @param offset The first offset provided by the LL file for this
+ *               flip-flop; it is actually a junk bit in the readback
+ *               bitstream.
+ *
+ * @param frame The frame number for this flip-flops readback data
+ *              provided by the LL file.
+ *
+ * @param frameOffset The offset within the frame for this flip-flop's
+ *                    readback data provided by the LL file.
+ *
+ * @param block The block's name and location.  */
+void SliceRam(int offset, int frame, int frameOffset, String block) :
+{ String lutType;
+  int address; 
+  RAMGroup rg;
+  RAMRBEntry rrb;
+  String key;
+}
+{
+  <RAM> <EQUAL> 
+  <LUT> {lutType = token.toString();} 
+   <COLON> <NUM> 
+  {
+    try {
+      address = Integer.parseInt(token.toString());
+      rrb = new RAMRBEntry(offset,frame,frameOffset,block,lutType,address);
+      ramCount++;
+      key = new String(block+"."+lutType);
+      rg = (RAMGroup)RAMGroupHash.get(key);
+      if(rg == null) {
+        RAMGroupHash.put(key,new RAMGroup(rrb));
+      }
+      else {
+        rg.addRAMEntry(rrb);
+      }
+    }
+    catch (RAMTypeException rte) {
+      System.out.println("Caught Exception: " + rte.toString());
+      System.out.println("Wrong RAM Type: Are you using the proper part type? (Virtex5)");
+      rte.printStackTrace();
+    }
+  }
+}
+
+/**
+ * Parses the "Ram=..." clauses of the RAM LL entries for BRAMs and enters the
+ * data into the <code>RAMGroupHash</code>. Since a certain RAM may
+ * already have a <code>RAMGroup</code> entry in the
+ * <code>RAMGroupHash</code>, the method performs a lookup first to
+ * see if the RAM's <code>RAMGroup</code> entry exists.  If the entry
+ * exists, the method adds a <code>RAMRBEntry</code> to the
+ * <code>RAMGroup</code> which was found.  Otherwise, the method
+ * creates a new <code>RAMGroup</code> and adds an
+ * <code>RAMRBEntry</code> to it. This method handles both LUT RAMs
+ * and BlockRAMs.
+ *
+ * @param offset The first offset provided by the LL file for this
+ *               flip-flop; it is actually a junk bit in the readback
+ *               bitstream.
+ *
+ * @param frame The frame number for this flip-flops readback data
+ *              provided by the LL file.
+ *
+ * @param frameOffset The offset within the frame for this flip-flop's
+ *                    readback data provided by the LL file.
+ *
+ * @param block The block's name and location.  */
+void BRam(int offset, int frame, int frameOffset, String block) :
+{ String lutType;
+  int address; 
+  RAMGroup rg;
+  RAMRBEntry rrb;
+  String key;
+}
+{
+  <RAM> <EQUAL> 
+  <LUT> {lutType = token.toString();} 
+  <COLON> <ID> 
+  {
+    try {
+      String bitAddress = token.toString();
+      // We need to skip the PARBIT prefix used for block ram parity bits
+      if( bitAddress.charAt(0) == 'P' )
+	address = Integer.parseInt(bitAddress.substring(6));
+      // We need to skip the BIT prefix used for block ram data bits
+      else
+        address = Integer.parseInt(bitAddress.substring(3));
+      rrb = new RAMRBEntry(offset,frame,frameOffset,block,lutType,address);
+      ramCount++;
+      key = new String(block+"."+lutType);
+      rg = (RAMGroup)RAMGroupHash.get(key);
+      if(rg == null) {
+        RAMGroupHash.put(key,new RAMGroup(rrb));
+      }
+      else {
+        rg.addRAMEntry(rrb);
+      }
+    }
+    catch (RAMTypeException rte) {
+      System.out.println("Caught Exception: " + rte.toString());
+      System.out.println("Wrong RAM Type: Are you using the proper part type? (Virtex2, XC4K, etc.)");
+      rte.printStackTrace();
+    }
+  }
+}
+
+/**
+ * Parses "Rom=..." entries, but doesn't do anything with them.
+ */
+void Rom() :
+{ }
+{
+  <ROM> <EQUAL> <LUT> <COLON> <NUM>
+}
+
+/**
+ * Parses "YES/NO" clauses.
+ */
+void YesNo():
+{ }
+{
+  <YES>
+|
+  <NO>
+}
+
+/**
+ * Parses "COMPARE=..." clauses, which are otherwise ignored.
+ */
+void Compare() :
+{ }
+{
+  <COMPARE> <EQUAL> YesNo()
+}
+
+/**
+ * Parses the "attributes" of a state bit in the readback bitstream,
+ * which define whether it belongs to a flip-flop, a RAM, or a ROM and
+ * other related information.  This is really the core of the parsing work.
+ *
+ * @param offset The first offset provided by the LL file for this
+ *               flip-flop; it is actually a junk bit in the readback
+ *               bitstream.
+ *
+ * @param frame The frame number for this flip-flops readback data
+ *              provided by the LL file.
+ *
+ * @param frameOffset The offset within the frame for this flip-flop's
+ *                    readback data provided by the LL file.
+ *
+ * @param block The block's name and location.  */
+void SliceAttributes(int offset, int frame, int frameOffset, String block) :
+{ String latchType;}
+{
+latchType=Latch() (Net(offset, frame, frameOffset, block, latchType))?  (Compare())? 
+|
+SliceRam(offset,frame,frameOffset,block)  (Compare())?
+|
+Rom()  (Compare())?
+}
+
+/**
+ * Parses the "attributes" of a state bit in the readback bitstream,
+ * which define whether it belongs to a flip-flop, a RAM, or a ROM and
+ * other related information.  This is really the core of the parsing work.
+ *
+ * @param offset The first offset provided by the LL file for this
+ *               flip-flop; it is actually a junk bit in the readback
+ *               bitstream.
+ *
+ * @param frame The frame number for this flip-flops readback data
+ *              provided by the LL file.
+ *
+ * @param frameOffset The offset within the frame for this flip-flop's
+ *                    readback data provided by the LL file.
+ *
+ * @param block The block's name and location.  */
+void PinAttributes(int offset, int frame, int frameOffset, String block) :
+{ String latchType;}
+{
+latchType=Latch() (Net(offset, frame, frameOffset, block, latchType))?  (Compare())? 
+}
+
+/**
+ * Parses the "attributes" of a state bit in the readback bitstream,
+ * which define whether it belongs to a flip-flop, a RAM, or a ROM and
+ * other related information.  This is really the core of the parsing work.
+ *
+ * @param offset The first offset provided by the LL file for this
+ *               flip-flop; it is actually a junk bit in the readback
+ *               bitstream.
+ *
+ * @param frame The frame number for this flip-flops readback data
+ *              provided by the LL file.
+ *
+ * @param frameOffset The offset within the frame for this flip-flop's
+ *                    readback data provided by the LL file.
+ *
+ * @param block The block's name and location.  */
+void BramAttributes(int offset, int frame, int frameOffset, String block) :
+{ }
+{
+BRam(offset,frame,frameOffset,block)  (Compare())?
+}
+
+
+
+/**
+ * Parses the information regarding location of the IOB/SLICE/BLOCKRAM
+ * and returns the information as a <code>String</code>. 
+ *
+ * @return The Virtex2 block location string (for example, "A21",
+ *         "CLB_R8C55", "RAMB4_R7C0").
+ **/
+String Block(int offset, int frame, int frameOffset) :
+{
+  String block;
+}
+{
+  <BLOCK> <EQUAL>
+  (
+    <SLICEBLOCK>
+  {block = token.toString();}
+  SliceAttributes(offset,frame,frameOffset,block) ("\r" | "\n" | "\r\n")
+| 
+  	<BRAMBLOCK>
+  	{block = token.toString();}
+  BramAttributes(offset,frame,frameOffset,block) ("\r" | "\n" | "\r\n")
+| 
+  	( <GTPBLOCK> | <DCMBLOCK> )
+  	{block = token.toString();}
+	  <TYPE> <EQUAL> < ID > ("\r" | "\n" | "\r\n")
+| 
+  	<PINBLOCK>
+  	{block = token.toString();}
+  PinAttributes(offset,frame,frameOffset,block) ("\r" | "\n" | "\r\n")
+){   return block;
+ }
+}
+
+
+/**
+ * Parses an entire readback bitstream location entry for a state
+ * element. */
+void BitStreamEntry() :
+{ int offset,frame,frameOffset;
+  String block;
+}
+{
+  <BIT> <NUM> {offset = Integer.parseInt(token.toString());}
+  (<NUM> {frame = Integer.parseInt(token.toString()); }
+  |<HEXNUM> {frame = Integer.decode(token.toString()).intValue(); absOffsets=true;})
+  <NUM> {frameOffset = Integer.parseInt(token.toString()); }
+  block = Block(offset, frame, frameOffset) 
+}
+
+/**
+ * Parses the value of any the informational entries in the LL
+ * file. The information is ignored. */
+void InfoValue() :
+{ }
+{
+ <ID>
+|
+<NUM>
+}
+
+/**
+ * Parses any entries in the LL file which do not directly associate
+ * state elements with readback bitstream locations.  These entries
+ * describe some of the bitstream generation options used for the
+ * bitstream. */
+void InfoEntry() :
+{}
+{
+  <INFO> <ID> <EQUAL> InfoValue() ("\r" | "\n" | "\r\n")
+}
+
+
