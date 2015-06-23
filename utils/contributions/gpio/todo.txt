@@ -1,0 +1,38 @@
+I still have some important hints to you regarding this.
+
+minsoc_top.v: on line 817 you should also include:
+assign wb_gpio_err_o = 1'b0; (otherwise simulation might drive crazy and prob real life if it doesn't "automatically" be set to 0.
+
+You probably missed it since these are gathered together around line 358 for uart, spi and start_up. And I forgot myself to add it for Ethernet.
+
+On gpio_defines.v, the GPIO_IOS definition I'd set directly to 32. Instantiation would be instead of GPIO_IOS + 1, GPIO_IOS only. Is there any problem regarding this? The definitions generally are more human friendly than coding, so the register definitions of reg [GPIOS_IOS-1:0] which considers 0 to be something is let for the implementation. That's more or less standard I'd say. It is the same as when you define the address width on minsoc_defines.v you define it and I implement it considering the necessary -1s.
+
+GPIO_LINES32 instead of GPIO_LINES31.
+
+I'd substitute the whole minsoc_spartan_3a_starter_kit_ios.v. Instead of it, place a bidirectional port on minsoc_top if GPIO is enabled.
+`ifdef GPIO
+, gpio_io
+`endif
+
+//
+// GPIO
+//
+inout [GPIO_IOS-1:0] gpio_io;
+
+//
+// GPIO tri-state
+//
+// I hope this works without generate, otherwise it is also easy but I'd first try this way
+integer iterate;
+for (iterate = 0; iterate < GPIO_IOS; iterate = iterate + 1)
+    assign gpio_io[iterate] = ext_pad_oe_o[iterate] ? ext_pad_o[iterate] : 1'bZ;
+
+assign ext_pad_i = gpio_io;
+
+And then only define the pins for the inout port on the ucf file. Like this:
+NET "gpio_io(31)" LOC = "a1(pin number)" | DRIVE = 12 | SLEW = SLOW;
+NET "gpio_io(30)" LOC = "a1(pin number)" | DRIVE = 12 | SLEW = SLOW;
+...
+NET "gpio_io(0)" LOC = "a1(pin number)" | DRIVE = 12 | SLEW = SLOW;
+
+After that you only need the definition GPIO on minsoc_defines.v. Of course, interrupt and address you also still need. 

@@ -1,0 +1,231 @@
+/*
+ * Examples of Synopsys Design Compiler
+ * synthesis script for OR1200 IP core
+ *
+ */
+
+TOPLEVEL = or1200_top
+TECH = vs_umc18 	/* vs_umc18, art_umc18 */
+CLK = clk_i
+RST = rst_i
+CLK_PERIOD = 5		/* 200 MHz */
+MAX_AREA = 0		/* Push hard */
+DO_UNGROUP = no 	/* yes, no */
+DO_VERIFY = no		/* yes, no */
+CLK_UNCERTAINTY = 0.1   /* 100 ps */
+DFF_CKQ = 0.2		/* Clk to Q in technology time units */
+DFF_SETUP = 0.1		/* Setup time in technology time units */
+
+/* Starting timestamp */
+sh date
+
+/*
+ * Set some basic variables related to environment
+ *
+ */
+
+/* Enable Verilog HDL preprocessor */
+hdlin_enable_vpp = true
+
+/* Set log path */
+LOG_PATH = "../log/"
+
+/* Set gate-level netlist path */
+GATE_PATH = "../out/"
+
+/* Set RAMS_PATH */
+RAMS_PATH = "../../../lib/"
+
+/* Set RTL source path */
+RTL_PATH = { "../../../rtl/verilog/" }
+
+/* Optimize adders */
+synlib_model_map_effort = high
+hlo_share_effort = low
+
+STAGE = final
+
+/*
+ * Load libraries
+ *
+ */
+
+/* Search paths */
+search_path = {. /libs/Artisan/aci/sc-x/synopsys/ } + \
+                { /libs/Artisan/aci/sc-x/symbols/synopsys/ } + \
+                { /libs/art_rams/ } + \
+                { /libs/vs_rams/ /usr/dc/libraries/syn/ } + \
+		{ /libs/Virtual_silicon/UMCL18U250D2_2.1/design_compiler/ }
+
+/* Synthetic libraries */
+snps = get_unix_variable("SYNOPSYS")
+synthetic_library = { \
+           snps + "/libraries/syn/dw01.sldb" \
+           snps + "/libraries/syn/dw02.sldb" \
+           snps + "/libraries/syn/dw03.sldb" \
+           snps + "/libraries/syn/dw04.sldb" \
+           snps + "/libraries/syn/dw05.sldb" \
+           snps + "/libraries/syn/dw06.sldb" \
+           snps + "/libraries/syn/dw07.sldb" }
+
+/* Set Artisan Sage-X UMC 0.18u standard cell library */
+if (TECH == "art_umc18") {
+	target_library = { slow.db \
+                        vs_hdsp_2048x32_wc_1.08V_125C.db \
+                        vs_hdsp_2048x8_tc_1.2V_25C.db \
+                        vs_hdsp_512x20_wc_1.08V_125C.db \
+                        vs_hdsp_64x14_wc_1.08V_125C.db \
+                        vs_hdsp_64x22_wc_1.08V_125C.db \
+                        vs_hdsp_64x24_wc_1.08V_125C.db \
+                        vs_hdtp_64x32_wc_1.08V_125C.db \
+                        }
+	symbol_library = { umc18.sdb }
+}
+
+/* Set Virtual Silicon UMC 0.18u standard cell library */
+if (TECH == "vs_umc18") {
+	target_library = { umcl18u250t2_wc.db \
+                        vs_hdsp_2048x32_wc_1.08V_125C.db \
+                        vs_hdsp_2048x8_wc_1.08V_125C.db \
+                        vs_hdsp_512x20_wc_1.08V_125C.db \
+                        vs_hdsp_64x14_wc_1.08V_125C.db \
+                        vs_hdsp_64x22_wc_1.08V_125C.db \
+                        vs_hdsp_64x24_wc_1.08V_125C.db \
+                        vs_hdtp_64x32_wc_1.08V_125C.db \
+                        }
+	symbol_library = { umcl18u250t2.sdb }
+}
+
+link_library = target_library + synthetic_library
+
+
+/*
+ * Load HDL source files
+ *
+ */
+include ../bin/read_design.inc		> LOG_PATH + read_design_ + TOPLEVEL + .log
+
+/* Set design top */
+current_design TOPLEVEL
+
+/* Link all blocks and uniquify them */
+link
+uniquify
+check_design				> LOG_PATH + check_design_ + TOPLEVEL + .log
+
+/*
+ * Apply constraints
+ *
+ */
+if (TECH == "vs_umc18") {
+	DFF_CELL = DFFPQ2
+	LIB_DFF_D = umcl18u250t2_wc/DFFPQ2/D
+	OPER_COND =  WORST
+} else if (TECH == "art_umc18") {
+	DFF_CELL = DFFHQX2
+	LIB_DFF_D = slow/DFFHQX2/D
+	OPER_COND =  slow
+} else {
+	echo "Error: Unsupported technology"
+	exit
+}
+
+
+/* Clocks constraints */
+create_clock dwb_clk_i -period CLK_PERIOD
+create_clock iwb_clk_i -period CLK_PERIOD
+create_clock CLK -period CLK_PERIOD
+set_clock_skew all_clocks() -uncertainty CLK_UNCERTAINTY
+set_dont_touch_network all_clocks()
+
+/* Reset constraints */
+set_driving_cell -none RST
+set_drive 0 RST
+set_dont_touch_network RST
+
+/* All inputs except reset and clock */
+all_inputs_wo_rst_clk = all_inputs() - CLK - RST
+
+/* Set output delays and load for output signals
+ *
+ * All outputs are assumed to go directly into
+ * external flip-flops for the purpose of this
+ * synthesis
+ */
+set_output_delay DFF_SETUP -clock CLK all_outputs()
+set_load load_of(LIB_DFF_D) * 4 all_outputs()
+
+/* Input delay and driving cell of all inputs
+ *
+ * All these signals are assumed to come directly from
+ * flip-flops for the purpose of this synthesis
+ *
+ */
+set_input_delay DFF_CKQ -clock CLK all_inputs_wo_rst_clk
+set_driving_cell -cell DFF_CELL -pin Q all_inputs_wo_rst_clk
+
+/* Set design fanout */
+/*
+set_max_fanout 10 TOPLEVEL
+*/
+
+/* Optimize all near-critical paths to give extra slack for layout */
+c_range = CLK_PERIOD * 0.10
+group_path -critical_range c_range -name CLK -to CLK
+
+/* Operating conditions */
+set_operating_conditions OPER_COND
+
+/* Lets do basic synthesis */
+if (DO_UNGROUP == "yes") {
+	ungroup -all
+}
+
+set_ultra_optimization -f
+compile_new_optimization = true
+/*
+set_structure -boolean false -timing true
+set_flatten -effort medium -minimize single_output
+*/
+
+/*
+set_flatten false
+*/
+
+/*
+ compile -boundary_optimization -map_effort medium -ungroup_all
+*/
+ compile -boundary_optimization -map_effort high -auto_ungroup
+
+
+/*
+compile -map_effort low
+*/
+
+/* Save current design using synopsys format */
+write -hierarchy -format db -output GATE_PATH + STAGE + _ + TOPLEVEL + .db
+
+/* Save current design using verilog format */
+write -hierarchy -format verilog -output GATE_PATH + STAGE + _ + TOPLEVEL + .v
+
+/* Basic reports */
+report_area                     > LOG_PATH + STAGE + _ + TOPLEVEL + _area.log
+report_timing -nworst 10        > LOG_PATH + STAGE + _ + TOPLEVEL + _timing.log
+report_hierarchy                > LOG_PATH + STAGE + _ + TOPLEVEL + _hierarchy.log
+report_resources                > LOG_PATH + STAGE + _ + TOPLEVEL + _resources.log
+report_references               > LOG_PATH + STAGE + _ + TOPLEVEL + _references.log
+report_constraint               > LOG_PATH + STAGE + _ + TOPLEVEL + _constraint.log
+report_ultra_optimizations      > LOG_PATH + STAGE + _ + TOPLEVEL + _ultra_optimizations.log
+/*
+report_power                    > LOG_PATH + STAGE + _ + TOPLEVEL + _power.log
+*/
+
+
+/* Verify design */
+if (DO_VERIFY == "yes") {
+	compile -no_map -verify		> LOG_PATH + verify_ + TOPLEVEL + .log
+}
+
+/* Finish */
+sh date
+exit

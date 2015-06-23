@@ -1,0 +1,116 @@
+#!/bin/bash
+
+#new boards have to udpate this
+BOARD=nexys3						#this has to have the name of the directory this file is in
+DEVICE_PART='xc6slx16-3csg324'
+CONSTRAINT_FILE='nexys3_master.ucf'
+#~new boards update
+
+#system workings
+MINSOC_DIR=`pwd`/../..
+BACKEND_DIR=$MINSOC_DIR/backend
+SYN_DIR=$MINSOC_DIR/syn
+SYNSRC_DIR=$MINSOC_DIR/prj/xilinx
+SYNSUPPORT_DIR=$SYN_DIR/buildSupport
+MAKEFILE_DIR=$SYN_DIR/xilinx
+
+SYN_FILES=(ethmac.xst uart_top.xst adbg_top.xst or1200_top.xst minsoc_top.xst)
+MAKEFILE=Makefile
+
+FIND_PART='DEVICE_PART'
+FIND_CONSTRAINT='CONSTRAINT_FILE'
+
+BOARD_DIR=$BACKEND_DIR/$BOARD
+BOARD_FILES=(board.h orp.ld minsoc_defines.v minsoc_bench_defines.v gcc-opt.mk $CONSTRAINT_FILE)
+
+in_minsoc=`pwd | grep minsoc/backend/${BOARD}$`
+if [ -z $in_minsoc ]
+then
+	echo ""
+	echo "			!!!WARNING!!!"
+	echo "This script cannot be run if not in a board directory inside minsoc/backend,"
+	echo "because it relies on the directory structure of the minsoc system."
+	echo ""
+	echo "Possibly your minsoc directory is named differently, minsoc_trunk for example."
+	echo "Its name must be minsoc only."
+	echo ""
+    exit 1
+fi
+
+echo ""
+echo "This script sets up the SoC for simulations and synthesis."
+echo ""
+echo "In order to do so, SoC board's specific files for firmware compilation, "
+echo "testbench generation and synthesis are configured."
+echo "Firmware and testbench looks for board specific files under $BACKEND_DIR."
+echo "Synthesis work under $SYN_DIR."
+echo ""
+echo ""
+
+echo "Copying board specific SoC files from $BOARD_DIR to $BACKEND_DIR directory."
+echo "__________________________________________________________________________"
+echo ""
+for file in "${BOARD_FILES[@]}"
+do
+    if [ $file != NONE ]
+    then
+        echo "Copying $file, to backend directory..."
+        cp $BOARD_DIR/$file $BACKEND_DIR
+    fi
+done
+echo ""
+echo ""
+
+echo "Generating project files for simulation and synthesis..."
+echo "__________________________________________________________________________"
+echo ""
+make -C $MINSOC_DIR/prj
+echo "Generation complete."
+echo ""
+echo ""
+
+if [ $CONSTRAINT_FILE == 'NONE' ]
+then
+    echo "Skipping synthesis preparation. Standard implementation can only be simulated."
+    echo ""
+    echo ""
+else
+    echo "Device part for files under $SYNSRC_DIR will be patched and stored "
+    echo "temporarily." 
+    echo "Afterwards, they are copied to $SYNSUPPORT_DIR."
+    echo "__________________________________________________________________________"
+    echo ""
+    for file in "${SYN_FILES[@]}"
+    do
+        echo "Updating synthesis file, $file..."
+        echo "Copying $file to synthesis directory..."
+        echo ""
+        sed "s/$FIND_PART/$DEVICE_PART/g" $SYNSRC_DIR/$file > TMPFILE
+        sed "s/$FIND_CONSTRAINT/$CONSTRAINT_FILE/g" TMPFILE > TMPFILE2 && mv TMPFILE2 $SYNSUPPORT_DIR/$file
+        rm TMPFILE
+    done
+
+    echo "Updating Makefile file under $MAKEFILE_DIR..."
+    echo "Copying Makefile to synthesis directory, $SYN_DIR..."
+    echo ""
+    sed "s/$FIND_PART/$DEVICE_PART/g" $MAKEFILE_DIR/$MAKEFILE > TMPFILE
+    sed "s/$FIND_CONSTRAINT/$CONSTRAINT_FILE/g" TMPFILE > TMPFILE2 && mv TMPFILE2 $SYN_DIR/$MAKEFILE
+    rm TMPFILE
+    cp $MAKEFILE_DIR/setup.bat $SYN_DIR/setup.bat
+    echo ""
+    echo ""
+fi
+
+#Precompiling firmwares
+echo "Precompiling delivered libraries and firmwares..."
+make -C ../../sw/utils
+make -C ../../sw/support
+make -C ../../sw/drivers
+make -C ../../sw/uart
+make -C ../../sw/jsp
+make -C ../../sw/eth
+echo "done."
+echo ""
+echo ""
+
+echo "Configuration done."

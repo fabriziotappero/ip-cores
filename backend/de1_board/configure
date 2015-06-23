@@ -1,0 +1,124 @@
+#!/bin/bash
+
+#new boards have to udpate this
+BOARD=de1_board						#this has to have the name of the directory this file is in
+DEVICE_PART=EP2C20F484C7
+CONSTRAINT_FILE='de1_board.ucf'
+FAMILY_PART="Cyclone II"
+#~new boards update
+
+#system workings
+MINSOC_DIR=`pwd`/../..
+BACKEND_DIR=$MINSOC_DIR/backend
+SYN_DIR=$MINSOC_DIR/syn
+SYNSRC_DIR=$MINSOC_DIR/prj/altera
+SYNSUPPORT_DIR=$SYN_DIR/buildSupport
+MAKEFILE_DIR=$SYN_DIR/altera
+
+PROJECT_FILE=minsoc_top.qsf
+
+SYN_FILES=(adbg_top.vprj jtag_top.vprj or1200_top.vprj uart_top.vprj minsoc_top.vprj altera_virtual_jtag.vhdprj)
+MAKEFILE=Makefile
+
+FIND_PART='DEVICE_PART'
+FIND_FAMILY='FAMILY_PART'
+FIND_VERSION='SW_VERSION'
+FIND_CONSTRAINT='CONSTRAINT_FILE'
+
+BOARD_DIR=$BACKEND_DIR/$BOARD
+BOARD_FILES=(board.h orp.ld minsoc_defines.v minsoc_bench_defines.v gcc-opt.mk $CONSTRAINT_FILE)
+
+in_minsoc=`pwd | grep minsoc/backend/${BOARD}$`
+if [ -z $in_minsoc ]
+then
+	echo ""
+	echo "			!!!WARNING!!!"
+	echo "This script cannot be run if not in a board directory inside minsoc/backend,"
+	echo "because it relies on the directory structure of the minsoc system."
+	echo ""
+	echo "Possibly your minsoc directory is named differently, minsoc_trunk for example."
+	echo "Its name must be minsoc only."
+	echo ""
+	exit 1
+fi
+
+echo ""
+echo "This script sets up the SoC for simulations and synthesis."
+echo ""
+echo "In order to do so, SoC board's specific files for firmware compilation, "
+echo "testbench generation and synthesis are configured."
+echo "Firmware and testbench looks for board specific files under $BACKEND_DIR."
+echo "Synthesis work under $SYN_DIR."
+echo ""
+echo ""
+
+echo "Copying board specific SoC files from $BOARD_DIR to $BACKEND_DIR directory."
+echo "__________________________________________________________________________"
+echo ""
+for file in "${BOARD_FILES[@]}"
+do
+    if [ $file != NONE ]
+    then
+        echo "Copying $file, to backend directory..."
+        cp $BOARD_DIR/$file $BACKEND_DIR
+    fi
+done
+
+echo "Generating project files for simulation and synthesis..."
+echo "__________________________________________________________________________"
+echo ""
+make -C $MINSOC_DIR/prj
+echo "Generation complete."
+echo ""
+echo ""
+
+if [ $CONSTRAINT_FILE == 'NONE' ]
+then
+    echo "Skipping synthesis preparation. Standard implementation can only be simulated."
+    echo ""
+    echo ""
+else
+    echo "Device part and family for files under $SYNSRC_DIR will patched and stored "
+    echo "temporarily." 
+    echo "Afterwards, they are copied to $SYNSUPPORT_DIR."
+    echo "__________________________________________________________________________"
+    echo ""
+    sed "s/$FIND_PART/$DEVICE_PART/g" $MAKEFILE_DIR/$PROJECT_FILE > TMPFILE
+    sed "s/$FIND_FAMILY/$FAMILY_PART/g" TMPFILE > TMPFILE2
+    #sed "s/$FIND_VERSION/$SW_VERSION/g" TMPFILE> TMPFILE
+    echo "Adding settings from constraint file..."
+    cat $CONSTRAINT_FILE >> TMPFILE2
+
+    echo "Generating quartus settings from prj files in $SYNSRC_DIR"
+    for file in "${SYN_FILES[@]}"
+    do
+        echo "Adding settings from file $file..."
+    	cat $SYNSRC_DIR/$file >> TMPFILE2 
+    done
+    mv TMPFILE2 $SYNSUPPORT_DIR/$PROJECT_FILE
+    rm TMPFILE
+    echo ""
+    echo "Generated quartus settings file in $SYNSUPPORT_DIR/$PROJECT_FILE"
+    echo ""
+
+    echo "Copying Makefile from $MAKEFILE_DIR to synthesis directory, $SYN_DIR..."
+    cp $MAKEFILE_DIR/$MAKEFILE $SYN_DIR/$MAKEFILE
+    cp $MAKEFILE_DIR/setup.bat $SYN_DIR/setup.bat
+    echo "For synthesis help go to $SYN_DIR and type \"make\"."
+    echo ""
+    echo ""
+fi
+
+#Precompiling firmwares
+echo "Precompiling delivered libraries and firmwares..."
+make -C ../../sw/utils
+make -C ../../sw/support
+make -C ../../sw/drivers
+make -C ../../sw/uart
+make -C ../../sw/jsp
+make -C ../../sw/eth
+echo "done."
+echo ""
+echo ""
+
+echo "Configuration done."

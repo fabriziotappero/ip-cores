@@ -1,0 +1,1968 @@
+OpenRISC 1200 IP Core Specification (Preliminary Draft)
+=======================================================
+:doctype: book
+
+////
+Revision history
+Note: When adding new entries, strictly follow the format of the existing ones.
+
+Rev.	| Date		| Author	| Description
+__vstart__
+v0.1	| 28/3/01	| Damjan Lampret	| First Draft
+
+v0.2	| 16/4/01	| Damjan Lampret	| First time published
+
+v0.3	| 29/4/01	| Damjan Lampret	| All chapters almost
+finished. Some bugs hidden waiting for an update. Awaiting feedback.
+
+v0.4	| 16/5/01	| Damjan Lampret	| Synchronization with
+OR1K Arch Manual
+
+v0.5	| 24/5/01	| Damjan Lampret	| Fixed bugs
+
+v0.6	| 28/5/01	| Damjan Lampret	| Changed some SPR addresses.
+
+v0.7	| 06/9/01	| Damjan Lampret	| Simplified debug unit.
+
+v0.8	| 30/08/10	| Julius Baxter		| Adding information about FPU
+implementation, data cache write-back capability. PIC behavior update.
+Instruction list update. Update of bits in config registers, bringing into
+line with latest OR1200 - not entirely complete.
+
+v0.9	| 12/9/10	| Julius Baxter		| Clarified supported parts of
+OR1K instruction set. Updated core clock input information.
+Fixed up reference to instruction execute stage cycle table.
+Added divide cycles to execute stage cycle table.
+
+0.10	| 1/11/10	| Julius Baxter		| Added FF1/FL1 instructions to
+supported instructions table.
+
+v0.11	| 19/1/11	| Julius Baxter	| Cache information update.
+Wishbone behavior clarification. Serial integer multiply/divide update.
+Reset address clarification
+
+v0.12	| 13/9/11	| Julius Baxter	| Addition of extension instructions
+l.extbs, l.extbz, l.exths, l.exthz, l.extws and l.extwz. Range exception 
+support, overflow bit in supervision register.
+
+v0.13	| 27/5/12	| Julius Baxter	| Addition of support for delay-slot
+exception indicator bit in supervision register
+__vend__
+////
+
+Introduction
+------------
+Purpose of this document is to define specifications of the OpenRISC 1200
+implementation. This specification defines all implementation specific
+variables that are not part of the general architecture specification. This
+includes type and size of data and instruction caches, type and size of data
+and instruction MMUs, details of all execution pipelines, implementation
+of exception unit, interrupt controller and other supplemental units.
+This document does not cover general architecture topics like instruction set,
+memory addressing modes and other architectural definitions. See
+<<or1000_manual>> for more information about architecture.
+
+OpenRISC Family
+~~~~~~~~~~~~~~~
+(((OpenRISC,Family)))
+OpenRISC 1000 is architecture for a family of free, open source RISC processor
+cores. As architecture, OpenRISC 1000 allows for a spectrum of chip and
+system implementations at a variety of price/performance points for a range of
+applications. It is a 32/64-bit load and store RISC architecture designed with
+emphasis on performance, simplicity, low power requirements, scalability and
+versatility. OpenRISC 1000 architecture targets medium and high performance
+networking, embedded, automotive and portable computer environments.
+
+image::img/or_family.gif[scaledwidth="50%",align="center"]
+
+All OpenRISC implementations, whose first digit in identification number
+is  1 , belong to OpenRISC 1000 family. Second digit defines which features
+of OpenRISC 1000 architecture are implemented and in which way they are
+implemented. Last two digits define how an implementation is configured
+before it is used in a real application.
+
+However, at present the OR1200 is the only major RTL implementation of the
+OR1K architecture spec, and the OR1200 name has stuck, despite the high level
+of reconfigurability possible that would, strictly speaking, mean the core
+is either a OR1000, OR1300, etc. So, despite the various features that may
+or may not be implemented, the core is still only referred to as the OR1200.
+
+OpenRISC 1200
+~~~~~~~~~~~~~
+(((OpenRISC,1200)))
+The OR1200 is a 32-bit scalar RISC with Harvard microarchitecture, 5 stage
+integer pipeline, virtual memory support (MMU) and basic DSP capabilities.
+Default caches are 1-way direct-mapped 8KB data cache and 1-way direct-mapped
+8KB instruction cache, each with 16-byte line size. Both caches are
+physically tagged.  By default MMUs are implemented and they are constructed of
+64-entry hash based 1-way direct-mpped data TLB and 64-entry hash based 1-way
+direct-mapped instruction TLB.
+
+Supplemental facilities include debug unit for real-time debugging, high
+resolution tick timer, programmable interrupt controller and power management
+support.  When implemented in a typical 0.18u 6LM process it should provide
+over 300 dhrystone 2.1 MIPS at 300MHz and 300 DSP MAC 32x32 operations, at
+least 20% more than any other competitor in this class. OR1200 in default
+configuration has about 1M transistors.
+
+OR1200 is intended for embedded, portable and networking applications. It can
+successfully compete with latest scalar 32-bit RISC processors in his class
+and can efficiently run any modern operating system.  Competitors include
+ARM10, ARC and Tensilica RISC processors.
+
+Features
+^^^^^^^^
+The following lists the main features of OR1200 IP core:
+
+- All major characteristics of the core can be set by the user
+- High performance of 300 Dhrystone 2.1 MIPS at 300 MHz using 0.18u process
+- High performance cache and MMU subsystems
+- WISHBONE SoC Interconnection Rev. B3 compliant interface
+
+Architecture
+------------
+<<core_arch_fig>> below shows general architecture of OR1200 IP core. It
+consists of several building blocks:
+
+- CPU/FPU/DSP central block
+- Direct-mapped data cache
+- Direct-mapped instruction cache
+- Data MMU based on hash based DTLB
+- Instruction MMU based on hash based ITLB
+- Power management unit and power management interface
+- Tick timer
+- Debug unit and development interface
+- Interrupt controller and interrupt interface
+- Instruction and Data WISHBONE host interfaces
+
+[[core_arch_fig]]
+.Core's Architecture
+image::img/core_arch.gif[scaledwidth="50%",align="center"]
+
+CPU/FPU/DSP
+~~~~~~~~~~~
+((CPU))/((FPU))/((DSP)) is a central part of the OR1200 RISC processor.
+<<cpu_fpu_dsp_fig>> shows basic block diagram of the CPU/DSP. Not pictured
+are the FPU components.  OR1200 CPU/FPU/DSP ony implements sections of
+the ORBIS32 and ORFPX32 instruction set. No ((ORBIS64)), ((ORFBX64)) or
+((ORVDX64)) instructions are implemented in OR1200.
+
+[[cpu_fpu_dsp_fig]]
+.CPU/FPU/DSP Block Diagram
+image::img/cpu_fpu_dsp.gif[scaledwidth="50%",align="center"]
+
+Instruction unit
+^^^^^^^^^^^^^^^^
+The instruction unit implements the basic instruction pipeline, fetches
+instructions from the memory subsystem, dispatches them to available execution
+units, and maintains a state history to ensure a precise exception model
+and that operations finish in order. It also executes conditional branch
+and unconditional jump instructions.
+
+The sequencer can dispatch a sequential instruction on each clock if the
+appropriate execution unit is available. The execution unit must discern
+whether source data is available and to ensure that no other instruction is
+targeting the same destination register.
+
+Instruction unit handles only ((ORBIS32)) and, optionally, a subset of the
+((ORFPX32)) instruction class. Some ((ORFPX32)) and all ((ORFPX3264)) and
+((ORVDX64)) instruction classes are not supported by the OR1200 at present.
+
+General-Purpose Registers
+^^^^^^^^^^^^^^^^^^^^^^^^^
+OpenRISC 1200 implements 32 general-purpose 32-bit ((registers)). OpenRISC 1000
+architecture also support shadow copies of register file to implement fast
+switching between working contexts, however this feature is not implemented
+in current OR1200 implementation.
+
+OR1200 implements general-purpose register file as two synchronous dual-port
+memories with capacity of 32 words by 32 bits per word.
+
+Load/Store Unit
+^^^^^^^^^^^^^^^
+The ((load/store unit (LSU))) transfers all data between the GPRs and the CPU's
+internal bus. It is implemented as an independent execution unit so that stalls
+in memory subsystem only affect master pipeline if there is a data dependency.
+
+The following are LSU's main features:
+
+- all load/store instruction implemented in hardware (atomic instructions
+  included)
+- address entry buffer
+- pipelined operation
+- aligned accesses for fast memory access
+
+When load and store instructions are issued, the LSU determines if all
+operands are available. These operands include the following:
+
+- address register operand
+- source data register operand (for store instructions)
+- destination data register operand (for load instructions)
+
+Integer Execution Pipeline
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+(((Pipeline, Integer Execution)))
+The core implements the following types of 32-bit integer instructions:
+
+- Arithmetic instructions
+- Compare instructions
+- Logical instructions
+- Rotate and shift instructions
+
+Most integer instructions can execute in one cycle. For details about timing
+see <<exec_time_int_table>>.
+
+MAC Unit
+^^^^^^^^
+The ((MAC)) unit executes DSP MAC operations. MAC operations are 32x32 with
+48-bit accumulator. MAC unit is fully pipelined and can accept new MAC
+operation in each new clock cycle.
+
+Floating Point Unit
+^^^^^^^^^^^^^^^^^^^
+(((Floating Point Unit)))
+The ((FPU)) implementation is based on two other FPUs available from
+OpenCores.org. For the comparison and conversion functions, parts were taken
+from the FPU project by Rudolf Usselmann, and for the arithmetic operations,
+the fpu100 project by Jidan Al-Eryani was converted to Verilog HDL.
+
+All ((ORFPX32)) instructions except for ((lf.madd.s)) and ((lf.rem.s)) are
+supported when the FPU is enabled in the OR1200 configuration.
+
+System Unit
+^^^^^^^^^^^
+The ((system unit)) connects all other signals of the CPU/FPU/DSP that are not
+connected through instruction and data interfaces. It also implements all
+system special-purpose registers (e.g. supervisor register).
+
+Exceptions
+^^^^^^^^^^
+Core exceptions can be generated when an exception condition occurs.
+((Exception sources)) in OR1200 include the following:
+
+- External interrupt request
+- Certain memory access condition
+- Internal errors, such as an attempt to execute unimplemented opcode
+- System call
+- Internal exception, such as breakpoint exceptions
+- Arithmetic overflow
+
+((Exception handling)) is transparent to user software and uses the same
+mechanism to handle all types of exceptions. When an exception is taken,
+control is transferred to an exception handler at an offset defined by for
+the type of exception encountered. Exceptions are handled in supervisor mode.
+
+Exceptions caused by instructions in a delay slot will set the supervision
+register's DSX bit.
+
+Data Cache
+~~~~~~~~~~
+The default configuration of OR1200 data ((cache)) is 8-Kbyte, 1-way
+direct-mapped data cache, which allows rapid core access to data. However
+data cache can be configured according to <<data_confs_or1200_table>>.
+
+[[data_confs_or1200_table]]
+.Possible Data Cache Configurations of OR1200
+[width="60%",options="header"]
+|======================================================
+|					| Direct mapped
+| 16B/line, 256 lines, 1 way		| 4KB
+| 16B/line, 512 lines, 1 way		| *8KB (default)*
+| 16B/line, 1024 lines, 1 way		| 16KB
+| 32B/line, 1024 lines, 1 way		| 32KB
+|======================================================
+
+It is possible to operate the data cache with write-through or write-back
+strategies, however write-back is currently experimental.
+
+Features:
+
+- data cache is separate from instruction cache (Harvard architecture)
+- data cache implements a least-recently used (LRU) replacement algorithm
+  within each set
+- the cache directory is physically addressed. The physical address tag is
+  stored in the cache directory
+- write-through or write-back operation
+- entire cache can be disabled, lines invalidated, flushed or forced to be
+  written back, by writing to cache special purpose registers
+
+On a miss, and appropriate conditions, the cache line is filled or emptied
+(written back) with 16-byte bursts. The burst fill is performed as a
+critical-word-first operation; the critical word is simultaneously written
+to the cache and forwarded to the requesting unit, thus minimizing stalls
+due to cache fill latency. Data cache provides storage for cache tags and
+performs cache line replacement function.
+
+Data cache is tightly coupled to external interface to allow efficient
+access to the system memory controller.
+
+The data cache supplies data to the GPRs by means of a 32-bit interface
+to the load/store unit. The LSU provides all logic required to calculate
+effective addresses, handles data alignment to and from the data cache,
+and provides sequencing for load and store operations. Write operations to
+the data cache can be performed on a byte, half-word or word basis.
+
+image::img/data_cache_diag.gif[scaledwidth="50%",align="center"]
+
+Each line contains four contiguous words from memory that are loaded from
+a cache line aligned boundary. As a result, cache lines are aligned with
+page boundaries.
+
+Instruction Cache
+~~~~~~~~~~~~~~~~~
+The default configuration of OR1200 instruction ((cache)) is 8-Kbyte, 1-way
+direct mapped instruction cache, which allows rapid core access to
+instructions. However instruction cache can be configured according to
+<<inst_confs_or1200_table>>.
+
+[[inst_confs_or1200_table]]
+.Possible Instruction Cache Configurations of OR1200
+[width="60%",options="header"]
+|==============================================
+|				| Direct mapped
+| 16B/line, 32 lines, 1 way	| 512B
+| 16B/line, 256 lines, 1 way	| 4KB
+| 16B/line, 512 lines, 1 way	| *8KB (Default)*
+| 16B/line, 1024 lines, 1 way	| 16KB
+| 32B/line, 1024 lines, 1 way	| 32KB
+|==============================================
+
+Features:
+
+- instruction cache is separate from data cache (Harvard architecture)
+  (((Architecture,Harvard)))
+- instruction cache implements a least-recently used (LRU) replacement
+  algorithm within each set
+  ((LRU))
+- the ((cache directory)) is physically addressed. The physical address tag is
+  stored in the cache directory
+- it can be disabled or invalidated by writing to cache special purpose
+  registers
+
+On a miss, the cache is filled in with 16-byte bursts. The burst fill
+is performed as a critical-word-first operation; the critical word is
+simultaneously written to the cache and forwarded to the requesting unit,
+thus minimizing stalls due to cache fill latency. Instruction cache provides
+storage for cache tags and performs cache line replacement function.
+
+Instruction cache is tightly coupled to external interface to allow efficient
+access to the system memory controller.
+
+The instruction cache supplies instructions to the instruction sequencer by
+means of a 32-bit interface to the instruction fetch subunit. The instruction
+fetch subunit provides all logic required to calculate effective addresses.
+
+image::img/inst_cache_diag.gif[scaledwidth="50%",align="center"]
+
+Each line contains four contiguous words from memory that are loaded from
+a line-size  aligned boundary. As a result, cache lines are aligned with
+page boundaries.
+
+Data MMU
+~~~~~~~~
+(((MMU, Data)))
+The OR1200 implements a ((virtual memory management)) scheme that
+provides memory access protection and effective-to-physical address
+translation. ((Protection)) granularity is as defined by OpenRISC 1000
+architecture - 8-Kbyte and 16-Mbyte pages.
+
+[[data_tlb_confs_or1200_table]]
+.Possible Data TLB Configurations of OR1200
+[width="60%",options="header"]
+|======================================
+|			| Direct mapped
+| 16 entries per way	| 16 DTLB entries
+| 32 entries per way	| 32 DTLB entries
+| 64 entries per way	| *64 DTLB entries (default)*
+| 128 entries per way	| 128 DTLB entries
+|======================================
+
+Features:
+
+* data MMU is separate from instruction MMU
+* page size 8-Kbyte
+* comprehensive page protection scheme
+* direct mapped hash based translation lookaside buffer (DTLB) with the
+  default of 1 way and the following features:
+** miss and fault exceptions
+** software tablewalk
+** high performance because of hashed based design
+** variable number DTLB entries with default of 64 per each way
+
+image::img/tlb_diag.gif[scaledwidth="50%",align="center"]
+
+The MMU hardware supports two-level software tablewalk.
+
+Instruction MMU
+~~~~~~~~~~~~~~~
+(((MMU, Instruction)))
+The OR1200 implements a virtual memory management scheme that provides memory
+access protection and effective-to-physical address translation. Protection
+granularity is as defined by OpenRISC 1000 architecture - 8-Kbyte and
+16-Mbyte pages.
+
+[[inst_tlb_confs_or1200_table]]
+.Possible Instruction TLB Configurations of OR1200
+[width="60%",options="header"]
+|======================================
+|			| Direct mapped
+| 16 entries per way	| 16 DTLB entries
+| 32 entries per way	| 32 DTLB entries
+| 64 entries per way	| *64 DTLB entries (default)*
+| 128 entries per way	| 128 DTLB entries
+|======================================
+
+Features:
+
+* instruction MMU is separate from data MMU
+* pages size 8-Kbyte
+* comprehensive page protection scheme
+* 1 way direct-mapped hash based translation lookaside buffer (ITLB) with the
+  following features:
+** miss and fault exceptions
+** software tablewalk
+** high performance because of hashed based design
+** Variable number of ITLB entries with default of 64 entries per way
+
+image::img/inst_mmu_diag.gif[scaledwidth="50%",align="center"]
+
+The MMU hardware supports two-level software tablewalk.
+
+Programmable Interrupt Controller
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The ((interrupt)) controller receives interrupts from external sources and
+forwards them as low or high priority interrupt exception to the CPU core.
+
+[[interrupt_controller_fig]]
+.Block Diagram of the Interrupt Controller
+image::img/interrupt_controller.gif[scaledwidth="50%",align="center"]
+
+Programmable interrupt controller has three special-purpose registers and 32
+interrupt inputs. Interrupt input 0 and 1 are always enabled and connected
+to high and low priority interrupt input, respectively.
+
+30 other interrupt inputs can be masked and assigned low or high priority
+through programming special-purpose registers.
+
+Tick Timer
+~~~~~~~~~~
+OR1200 implements tick ((timer)) facility. Basically this is a timer that is
+clocked by RISC clock and is used by the operating system to precisely
+measure time and schedule system tasks.
+
+OR1200 precisely follow architectural definition of the tick timer facility:
+
+* Maximum timer count of 2^32 clock cycles
+* Maximum time period of 2^28 clock cycles between interrupts
+* Maskable tick timer interrupt
+* Single run, restartable or continues timer
+
+Tick timer operates from independent clock source so that doze power management
+mode can be implemented.
+
+Power Management Support
+~~~~~~~~~~~~~~~~~~~~~~~~
+To optimize ((power consumption)), the OR1200 provides ((low-power)) modes that
+can be used to dynamically activate and deactivate certain internal modules.
+
+OR1200 has three major features to minimize power consumption:
+
+* Slow and Idle Modes (SW controlled clock freq reduction)
+* Doze and Sleep Modes (interrupt wake-up)
+
+[[power_consumption_table]]
+.Power Consumption
+[width="60%",options="header"]
+|===================================================================
+| Power Minimization Feature	| Approx Power Consumption Reduction
+| Slow and Idle mode		| 2x - 10x
+| Doze mode			| 100x
+| Sleep mode			| 200x
+| Dynamic clock gating		| N/A
+|===================================================================
+
+Slow down mode takes advantage of the low-power dividers in external clock
+generation circuitry to enable full functionality, but at a lower frequency
+so that a power consumption is reduced.  PMR[SDF] 4 bits are broadcasted on
+pm_clksd and external clock generation for the RISC should adapt RISC clock
+frequency according to the value on pm_clksd.
+
+When software initiates the doze mode, software processing on the core
+suspends. The clocks to the RISC internal modules are disabled except to
+the tick timer. However any other on-chip blocks can continue to function
+as normal.  The OR1200 will leave doze mode and enter normal mode when a
+pending interrupt occurs.
+
+In sleep mode, all OR1200 internal units are disabled and clocks
+gated. Optionally implementation may choose to lower the operating voltage
+of the OR1200 core.  The OR1200 should leave sleep mode and enter normal
+mode when a pending interrupt occurs.
+
+Dynamic ((Clock gating)) (unit clock gating on clock by clock basis) is not
+supported by OR1200.
+
+Debug unit
+~~~~~~~~~~
+((Debug unit)) assists software developers to debug their systems. It provides
+support only for basic debugging and does not have support for more advanced
+debug features of OpenRISC 1000 architecture such as watchpoints, breakpoints
+and program-flow control registers.
+
+[[debug_unit_fig]]
+.Block Diagram of Debug Unit
+image::img/debug_unit_diag.gif[scaledwidth="50%",align="center"]
+
+Watchpoints and breakpoints are events triggered by program- or data-flow
+matching the conditions programmed in the debug registers. Breakpoints
+unlike watchpoints also suspend execution of the current program-flow and
+start breakpoint exception.
+
+Clocks & Reset
+~~~~~~~~~~~~~~
+The OR1200 core has a ((clock)) input each for the instruction and data Wishbone
+interface logic, and for the CPU core. Clock input clk_cpu clocks everything
+inside the Wishbone interfaces. Data Wishbone interface is clocked by
+dwb_clk_i, instruction Wishbone interface is clocked by iwb_clk_i.
+
+OR1200 has asynchronous ((reset)) signal. Reset signal rst, when asserted high,
+immediately resets all flip-flops inside OR1200. When deasserted, OR1200
+will start reset exception.
+
+WISHBONE Interfaces
+~~~~~~~~~~~~~~~~~~~
+Two ((WISHBONE)) interfaces connect OR1200 core to external peripherals and
+external memory subsystem. They are WISHBONE SoC Interconnection specification
+Rev. B3 compliant. The implementation implements a 32-bit bus width and does
+not support other bus widths.
+
+Wishbone registered-feedback incrementing burst accesses occur when not
+disabled, and cache lines are filled. The burst size (beats) is determined
+by the cache line size.
+
+image::img/wb_compatible.png[scaledwidth="30%",align="center"]
+
+Operation
+---------
+This section describes the operation of the OR1200 core. For operations
+that pertain to the architectural definitions, see <<or1000_manual>>.
+
+Reset
+~~~~~
+OR1200 has one asynchronous ((reset)) signal that can be used by a soft and hard
+reset on a higher system hierarchy levels.
+
+[[powerup_sequence_fig]]
+.Power-Up and Reset Sequence
+image::img/powerup_seq.gif[scaledwidth="70%",align="center"]
+
+<<powerup_sequence_fig>> shows how asynchronous reset is applied after
+powering up the OR1200 core. Reset is connected to asynchronous reset of
+almost all flip-flops inside RISC core. Special care must be taken to ensure
+hold and setup times of all flip-flops compared to main RISC clock.
+
+If system implements gated clocks, then clock gating can be used to ensure
+proper reset timing.
+
+[[powerup_sequence_gatedclk_fig]]
+.Power-Up and Reset Sequence w/ Gated Clock
+image::img/powerup_seq_gatedclk.gif[scaledwidth="70%",align="center"]
+
+The address the PC assumes at hard reset (assertion of external reset signal)
+is definable at synthesis time, via the OR1200_BOOT_ADR define. This is not
+to be confused with the ability to set the exception prefix address with
+the EPH bit.
+
+CPU/FPU/DSP
+~~~~~~~~~~~
+((CPU))/((FPU))/((DSP)) is implementation of the 32-bit part of the OpenRISC
+1000 architecture and only a subset of all features is implemented.
+
+Instructions
+^^^^^^^^^^^^
+(((OpenRISC 1200, Instruction List)))
+The following table lists the instructions implemented in the OR1200. Those
+optionally implemented are indicated as such.
+
+// The table below is split into several columns for readability by the
+// preprocessing script. It is better to have this automated because
+// given the pseudo-lexicographical ordering, adding a new instruction
+// would require manual changes in all subsequent columns, which is
+// tedious and error-prone.
+//
+// When changing the column headers, remember to change the script accordingly.
+
+[[instructions_table]]
+.Instructions implemented in OR1200
+[width="95%",options="header"]
+|=================================
+| Instruction mnemonic	| Optional
+| ((l.add))		|
+| ((l.addc))		| Yes
+| ((l.addi))		|
+| ((l.and))		|
+| ((l.andi))		|
+| ((l.bf))		|
+| ((l.bnf))		|
+| ((l.div))		| Yes
+| ((l.extbs))		| Yes
+| ((l.extbz))		| Yes
+| ((l.exths))		| Yes
+| ((l.exthz))		| Yes
+| ((l.extws))		| Yes
+| ((l.extwz))		| Yes
+| ((l.ff1))		| Yes
+| ((l.fl1))		| Yes
+| ((l.j))		|
+| ((l.jal))		|
+| ((l.jalr))		|
+| ((l.jr))		|
+| ((l.lbs))		|
+| ((l.lbz))		|
+| ((l.lhs))		|
+| ((l.lhz))		|
+| ((l.lws))		|
+| ((l.lwz))		|
+| ((l.mac))		| Yes
+| ((l.maci))		| Yes
+| ((l.macrc))		| Yes
+| ((l.mfspr))		|
+| ((l.movhi))		|
+| ((l.msb))		| Yes
+| ((l.mtspr))		|
+| ((l.mul))		| Yes
+| ((l.muli))		| Yes
+| ((l.nop))		|
+| ((l.or))		|
+| ((l.ori))		|
+| ((l.rfe))		|
+| ((l.rori))		|
+| ((l.sb))		|
+| ((l.sfeq))		|
+| ((l.sfges))		|
+| ((l.sfgeu))		|
+| ((l.sfgts))		|
+| ((l.sfgtu))		|
+| ((l.sfleu))		|
+| ((l.sflts))		|
+| ((l.sfltu))		|
+| ((l.sfne))		|
+| ((l.sh))		|
+| ((l.sll))		|
+| ((l.slli))		|
+| ((l.sra))		|
+| ((l.srai))		|
+| ((l.srl))		|
+| ((l.srli))		|
+| ((l.sub))		| Yes
+| ((l.sw))		|
+| ((l.sys))		|
+| ((l.trap))		|
+| ((l.xor))		|
+| ((l.xori))		|
+| ((lf.add.s))		| Yes
+| ((lf.div.s))		| Yes
+| ((lf.ftoi.s))		| Yes
+| ((lf.itof.s))		| Yes
+| ((lf.mul.s))		| Yes
+| ((lf.sfeq.s))		| Yes
+| ((lf.sfge.s))		| Yes
+| ((lf.sfgt.s))		| Yes
+| ((lf.sfle.s))		| Yes
+| ((lf.sflt.s))		| Yes
+| ((lf.sfne.s))		| Yes
+| ((lf.sub.s))		| Yes
+|=================================
+
+For a complete description of each instruction's format refer to
+<<or1000_manual>>.
+
+Instruction Unit
+^^^^^^^^^^^^^^^^
+((Instruction unit)) generates instruction fetch effective address and fetches
+instructions from instruction cache. Each clock cycle one instruction can
+be fetched. Instruction fetch EA is further translated into physical address
+by IMMU.
+
+General-Purpose Registers
+^^^^^^^^^^^^^^^^^^^^^^^^^
+((General-purpose register)) file can supply two read operands each clock cycle
+and store one result in a destination register.
+
+GPRs can be also read and written through development interface.
+
+Load/Store Unit
+^^^^^^^^^^^^^^^
+((LSU)) can execute one load instruction every two clock cycles assuming load
+instruction have a hit in the data cache. Execution of store instructions
+takes one clock cycle assuming they have a hit in the data cache.
+
+LSU performs calculation of the load/store effective address. EA is further
+translated into physical address by DMMU.
+
+Load/store effective address and load and store data can be also accessed
+through development interface.
+
+Integer Execution Pipeline
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+(((Pipeline, Integer Execution)))
+The core implements the following types of 32-bit integer instructions:
+
+* Arithmetic instructions
+* Compare instructions
+* Logical instructions
+* Rotate and shift instructions
+
+[[exec_time_int_table]]
+.Execution Time of Integer Instructions
+[width="70%",options="header"]
+|================================================
+| Instruction Group	| Clock Cycles to Execute
+| Arithmetic except Multiply/Divide	| 1
+| Multiply				| 3
+| Divide				| 32
+| Compare				| 1
+| Logical				| 1
+| Rotate and Shift			| 1
+| Others				| 1
+|================================================
+
+<<exec_time_int_table>> lists execution times for instructions executed by
+integer execution pipeline. Most instructions are executed in one clock cycle.
+
+Integer multiply can be either serial or parallel implementations. Serial
+operations require one clock cycle per bit of operand, which is 32-cycles
+on the OR1200. At present no synthesis tools support division operators,
+and so the serial option must be used.
+
+MAC Unit
+^^^^^^^^
+((MAC)) unit executes l.mac instructions. MAC unit implements 32x32 fully
+pipelined multiplier and 48-bit accumulator. MAC unit can accept one new
+l.mac instruction each clock cycle.
+
+Care should be taken when executing l.macrc (MAC read and clear) too soon
+after the final l.mac instruction as the operation may still be underway
+and the result will not be valid in time. It is recommended at least 3 other
+instructions (or just l.nops) are inserted between the final l.mac and l.macrc.
+
+Floating Point Unit
+^^^^^^^^^^^^^^^^^^^
+The ((floating point unit)) has a mechanism to stall the processor pipeline
+until processing has completed.
+
+The following table indicates the number of cycles per operation
+
+[[exec_time_fp_table]]
+.Execution time of floating point instructions
+[width="60%",options="header"]
+|=======================
+| Operation	| Cycles
+| Add/subtract	| 10
+| Multiply	| 38
+| Divide	| 37
+| Compare	| 2
+| Convert	| 7
+|=======================
+
+System Unit
+^^^^^^^^^^^
+((System unit)) implements system control and status special-purpose registers
+and executes all l.mtspr/l.mfspr instructions.
+
+Exceptions
+^^^^^^^^^^
+The core implements a precise ((exception model)). This means that when an
+exception is taken, the following conditions are met:
+
+* Subsequent instructions in program flow are discarded
+* Previous instructions finish and write back their results
+* The address of faulting instruction is saved in EPCR registers and the
+  machine state is saved to ESR registers
+* If the exception occurred in a delay slot, the DSX bit of the SR is set
+
+[[exceptions_table]]
+.List of Implemented ((Exceptions))
+[width="95%",options="header"]
+|===========================================================
+| Exception Type	| Vector Offset	| Causing Conditions
+| Reset			| 0x100	| Caused by reset.
+| Bus Error		| 0x200	| Caused by an attempt to access invalid
+  physical address.
+| Data Page Fault	| 0x300	| Generated artificially by DTLB miss exception
+  handler when no matching PTE found in page tables or page protection
+  violation for load/store operations.
+| Instruction Page Fault| 0x400	| Generated artificially by ITLB miss exception
+  handler when no matching PTE found in page tables or page protection violation
+  for instruction fetch.
+| Low Priority External Interrupt	| 0x500	| Low priority external
+  interrupt asserted.
+| Alignment	| 0x600	| Load/store access to naturally not aligned location.
+| Illegal Instruction	| 0x700	| Illegal instruction in the instruction stream.
+| High Priority External Interrupt	| 0x800	| High priority external
+  interrupt asserted.
+| D-TLB Miss	| 0x900	| No matching entry in DTLB (DTLB miss).
+| I-TLB Miss	| 0xA00	| No matching entry in ITLB (ITLB miss).
+| Range		| 0xB00	| If programmed in the SR, the setting of  SR[OV], 
+  usually by an arithmetic instruction, causes a range exception.
+| System Call	| 0xC00	| System call initiated by software.
+| Floating point exception	| 0xD00	| FP operation caused flags in FPCSR to
+  become set.
+| Trap	| 0xE00	| Trap instruction was decoded
+|===========================================================
+
+The OR1200 exception support does not include support for fast context 
+switching.
+
+Data Cache Operation
+~~~~~~~~~~~~~~~~~~~~
+Data Cache Load/Store Access
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Load/store unit requests data from the data ((cache)) and stores them into
+the general-purpose register file and forwards them to integer execution
+units. Therefore LSU is tightly coupled with the data cache.
+
+If there is no data cache line miss nor ((DTLB)) miss, load operations take
+two clock cycles to execute and store operations take one clock cycle to
+execute. LSU does all the data alignment work.
+
+Data can be written to the data cache on a word, half-word or byte basis. Since
+data cache only operates in write-through mode, all writes are immediately
+written back to main memory or to the next level of caches.
+
+[[wb_write_fig]]
+.WISHBONE Write Cycle
+image::img/wb_write.gif[scaledwidth="70%",align="center"]
+
+<<wb_write_fig>> shows how a ((write-through)) cycle on data WISHBONE interface
+is performed when a store instruction hits in the data cache.  If +dwb_ERR_I+
+or +dwb_RTY_I+ is asserted instead of usual +dwb_ACK_I+, bus error exception
+is invoked.
+
+Data Cache Line Fill Operation
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+When executing load instruction and a cache miss occurs, depending on whether
+the cache uses ((write-through)) or ((write-back)) strategy and the line
+is clean or invalid, a 4 beat sequential read burst with critical word
+first is performed. If the strategy is write-back and the line is dirty,
+the line is first written back to memory. The critical word is forwarded to
+the load/store unit to minimize performance loss because of the cache miss.
+
+[[wb_read_fig]]
+.WISHBONE Block Read Cycle
+image::img/wb_read.gif[scaledwidth="70%",align="center"]
+
+<<wb_read_fig>> shows how a cache line is read in WISHBONE read block cycle
+composed out of four read transfers.  If +dwb_ERR_I+ or +dwb_RTY_I+ is asserted
+instead of usual +dwb_ACK_I+, bus error exception is invoked.
+
+When executing a store instruction with the cache in write-through strategy,
+and a cache miss occurs, the write is simply put on the bus and no caching
+occurs. If it is a miss and the cache is in write back strategy and the line
+is valid and clean or invalid,  a 4 beat sequential read burst to fill the
+line is performed, and the the write to cache occurs. If storing and a cache
+miss occurs, and the desired line is valid and dirty, it is first written
+back to memory before the desired line is read.
+
+[[wb_rw_fig]]
+.WISHBONE Block Read/Write Cycle
+image::img/wb_rw.gif[scaledwidth="70%",align="center"]
+
+<<wb_rw_fig>> shows how a cache line is read in WISHBONE read block cycle
+followed by a write transfer.  If +dwb_ERR_I+ or +dwb_RTY_I+ is asserted instead
+of usual +dwb_ACK_I+, bus error exception is invoked.
+
+Cache/Memory Coherency
+^^^^^^^^^^^^^^^^^^^^^^
+Data cache in OR1200 operates in either write-through or write-back mode,
+definable at synthesis time, for default use, and runtime when DMMU is
+used. There is currently no ((coherency)) support between local data cache and
+caches of other processors.
+
+Data Cache Enabling/Disabling
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Data cache is disabled at power up. Entire data cache can be enabled by setting
+bit SR[DCE] to one. Before data cache is enabled, it must be invalidated.
+
+Data Cache Invalidation
+^^^^^^^^^^^^^^^^^^^^^^^
+Data cache in OR1200 does not support ((invalidation)) of entire data
+cache. Normal procedure to invalidate entire data cache is to cycle through
+all data cache lines and invalidate each line separately.
+
+Data Cache Locking
+^^^^^^^^^^^^^^^^^^
+Data cache implements way ((locking)) bits in data cache control register
+DCCR. Bits LWx lock individual ways when they are set to one.
+
+Data Cache Line Prefetch
+^^^^^^^^^^^^^^^^^^^^^^^^
+Data cache line ((prefetch)) is optional in the OpenRISC 1000 architecture and
+is not implemented in OR1200.
+
+Data Cache Line ((Flush))
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Operation is performed by writing effective address to the DCBFR register.
+
+When a cache line is valid and clean, or the cache is in write-through
+strategy, the line is invalidated and no write-back occurs.
+
+Data Cache Line Invalidate
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+Data cache line ((invalidate)) invalidates a single data cache line. Operation
+is performed by writing effective address to the DCBIR register.  If cache
+is in write-back strategy, it is best to use the line flush function.
+
+Data Cache Line ((Write-back))
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Operation is performed by writing effective address to the DCBWR register.
+
+If cache is in ((write-through)) strategy, this operation is ignored as no
+lines will be cached and dirty, capable of being written back.
+
+Data Cache Line ((Lock))
+^^^^^^^^^^^^^^^^^^^^^^^^
+Locking of individual data cache lines is not implemented in OR1200.
+
+Data Cache ((inhibit)) with address bit 31 set
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+If DMMU is disabled, by default all addresses with bit 31 of the address
+asserted high will cause the data cache to be inhibited, meaning no reads
+or writes are cached.
+
+If the ((DMMU)) is enabled, it is possible for any address to be inhibited
+or not, and in these modes the cache behaves accordingly.
+
+Instruction ((Cache)) Operation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Instruction Cache Instruction ((Fetch)) Access
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Instruction unit requests instruction from the instruction cache and forwards
+them to the instruction queue inside instruction unit. Therefore instruction
+unit is tightly coupled with the instruction cache.
+
+If there is no instruction cache line ((miss)) nor ITLB miss, instruction fetch
+operation takes one clock cycle to execute.
+
+Instruction cache cannot be explicitly modified like data cache can be with
+store instructions.
+
+Instruction Cache Line Fill Operation
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+On a cache miss, a 4 beat sequential read burst with critical word first is
+performed. Critical word is forwarded to the instruction unit to minimize
+performance loss because of the cache miss.
+
+[[wb_block_read_fig]]
+.WISHBONE Block Read Cycle
+image::img/wb_block_read.gif[scaledwidth="70%",align="center"]
+
+<<wb_block_read_fig>> shows how a cache line is read in WISHBONE read block
+cycle composed out of four read transfers.  If +iwb_ERR_I+ or +iwb_RTY_I+ is
+asserted instead of usual +dwb_ACK_I+, bus error exception is invoked.
+
+Cache/Memory ((Coherency))
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+OR1200 is not intended for use in multiprocessor environments. Therefore no
+support for coherency between local instruction cache and caches of other
+processors or main memory is implemented.
+
+Instruction Cache Enabling/Disabling
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Instruction cache is disabled at power up. Entire instruction cache can be
+enabled by setting bit SR[ICE] to one. Before instruction cache is enabled,
+it must be invalidated.
+
+Instruction Cache ((Invalidation))
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Instruction cache in OR1200 does not support invalidation of entire instruction
+cache. Normal procedure to invalidate entire instruction cache is to cycle
+through all instruction cache lines and invalidate each line separately.
+
+Instruction Cache Locking
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Instruction cache implements way locking bits in instruction cache control
+register ICCR. Bits LWx lock individual ways when they are set to one.
+
+Instruction Cache Line ((Prefetch))
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Instruction cache line prefetch is optional in the OpenRISC 1000 architecture
+and is not implemented in OR1200.
+
+Instruction Cache Line ((Invalidate))
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Instruction cache line invalidate invalidates a single instruction cache
+line. Operation is performed by writing effective address to the ICBIR
+register.
+
+Instruction ((Cache Line Lock))
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Locking of individual instruction cache lines is not implemented in OR1200.
+
+Data MMU
+~~~~~~~~
+Translation Disabled
+^^^^^^^^^^^^^^^^^^^^
+Load/store address translation can be disabled by clearing bit SR[DME]. If
+translation is disabled, then physical address used to access data cache
+and optionally provided on +dwb_ADDR_O+, is the same as load/store effective
+address.
+(((Address Translation,Data)))
+
+Translation Enabled
+^^^^^^^^^^^^^^^^^^^
+Load/store address translation can be enabled by setting bit SR[DME]. If
+translation is enabled, it provides load/store effective address to physical
+address translation and page protection for memory accesses.
+(((Address Translation,Data)))
+
+[[addr_translation_fig]]
+.32-bit Address Translation Mechanism using Two-Level Page Table
+image::img/addr_translation.gif[scaledwidth="70%",align="center"]
+
+In OR1200 case, ((page tables)) must be managed by operating system's virtual
+memory management subsystem. <<addr_translation_fig>> shows address translation
+using two-level page table. Refer to <<or1000_manual>> for one-level page
+table address translation as well as for details about address translation
+and page table content.
+
+((DMMUCR)) and Flush of Entire ((DTLB))
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+DMMUCR is not implemented in OR1200. Therefore page table base pointer (PTBP)
+must be stored in software variable. Flush of entire DTLB must be performed
+by software flush of every DTLB entry separately. Software flush is performed
+by manually writing  bits from the TLB entries back to PTEs.
+
+Page Protection
+^^^^^^^^^^^^^^^
+After a virtual address is determined to be within a page covered by the
+valid PTE, the access is validated by the memory protection mechanism. If
+this protection mechanism prohibits the access, a data page fault exception
+is generated.
+(((Page Protection,Data)))
+
+The memory protection mechanism allows selectively granting read access
+and write access for both supervisor and user modes. The page protection
+mechanism provides protection at all page level granularities.
+
+[[protection_attrs_ldst_table]]
+.Protection Attributes for Load/Store Accesses
+[width="70%",options="header"]
+|================================
+| Protection attribute	| Meaning
+| DTLBWyTR[SREx]	| Enable load operations in supervisor mode to the
+  page.
+| DTLBWyTR[SWEx]	| Enable store operations in supervisor mode to the
+  page.
+| DTLBWyTR[UREx]	| Enable load operations in user mode to the page.
+| DTLBWyTR[UWEx]	| Enable store operations in user mode to the page.
+|================================
+
+<<protection_attrs_ldst_table>> lists page protection attributes defined in
+DTLBWyTR pregister. For the individual page appropriate strategy out of
+seven possible strategies programmed with the PPI field of the PTE. Because
+OR1200 does not implement DMMUPR, translation of PTE[PPI] into suitable set
+of protection bits must be performed by software and written into DTLBWyTR.
+
+((DTLB)) Entry Reload
+^^^^^^^^^^^^^^^^^^^^^
+OR1200 does not implement DTLB entry reloads in hardware. Instead software
+routine must be used to search page table for correct page table entry (PTE)
+and copy it into the DTLB. Software is responsible for maintaining accessed
+and dirty bits in the page tables.
+
+When LSU computes load/store effective address whose physical address is
+not already cached by DTLB, a DTLB miss exception is invoked.
+
+DTLB reload routine must load the correct ((PTE)) to correct ((DTLBWyMR))
+and ((DTLBWyTR)) register from one of possible DTLB ways.
+
+DTLB Entry Invalidation
+^^^^^^^^^^^^^^^^^^^^^^^
+Special-purpose register DTLBEIR must be written with the effective address
+and corresponding DTLB entry will be invalidated in the local DTLB.
+
+Locking DTLB Entries
+^^^^^^^^^^^^^^^^^^^^
+Since all DTLB entry reloads are performed in software, there is no hardware
+locking of DTLB entries. Instead it is up to the software reload routine to
+avoid replacing some of the entries if so desired.
+
+Page Attribute - Dirty (D)
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+Dirty (D) attribute is not implemented in OR1200 DTLB. It is up to the
+operating system to generate dirty attribute bit with page protection
+mechanism.
+(((Page Attributes,Data)))
+
+Page Attribute - Accessed (A)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Accessed (A) attribute is not implemented in OR1200 DTLB. It is up to the
+operating system to generate accessed attribute bit with page protection
+mechanism.
+(((Page Attributes,Data)))
+
+Page Attribute - Weakly Ordered Memory (WOM)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Weakly ordered memory (WOM) attribute is not needed in OR1200 because all
+memory accesses are serialized and therefore this attribute is not implemented.
+(((Page Attributes,Data)))
+
+Page Attribute - Write-Back Cache (WBC)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Write-back cache (WBC) attribute is not implemented as the data cache cannot
+be configured at run time to be write-back enabled if write-through strategy
+was selected at synthesis-time.
+(((Page Attributes,Data)))
+
+Page Attribute - Caching-Inhibited (CI)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Caching-inhibited (CI) attribute is not implemented in OR1200 DTLB. Cached
+and uncached regions are divided by bit 30 of data effective address.
+(((Page Attributes,Data)))
+
+[[data_cached_regions_table]]
+.Cached and uncached regions
+[width="70%",options="header"]
+|===============================
+| Effective Address	| Region
+| 0x00000000 - 0x3FFFFFFF	| Cached
+| 0x40000000 - 0x7FFFFFFF	| Uncached
+| 0x80000000 - 0xBFFFFFFF	| Cached
+| 0xC0000000 - 0xFFFFFFFF	| Uncached
+|===============================
+
+Uncached accesses must be performed when I/O registers are memory mapped
+and all reads and writes must be always performed directly to the external
+interface and not to the data cache.
+
+Page Attribute - Cache Coherency (CC)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Cache coherency (CC) attribute is not needed in OR1200 because it does not
+implement support for multiprocessor environments and because data cache
+operates only in write-through mode and therefore this attribute is not
+implemented.
+(((Page Attributes,Data)))
+
+((Instruction MMU))
+~~~~~~~~~~~~~~~~~~~
+Translation Disabled
+^^^^^^^^^^^^^^^^^^^^
+Instruction fetch address translation can be disabled by clearing bit
+SR[IME]. If translation is disabled, then physical address used to access
+instruction cache and optionally provided on iwb_ADDR_O, is the same as
+instruction fetch effective address.
+(((Address Translation,Instruction)))
+
+Translation Enabled
+^^^^^^^^^^^^^^^^^^^
+Instruction fetch address translation can be enabled by setting bit
+SR[IME]. If translation is enabled, it provides instruction fetch effective
+address to physical address translation and page protection for instruction
+fetch accesses.
+(((Address Translation,Instruction)))
+
+[[addr_translation_rep_fig]]
+.32-bit Address Translation Mechanism using Two-Level Page Table
+image::img/addr_translation.gif[scaledwidth="70%",align="center"]
+
+In OR1200 case, page tables must be managed by operating system s virtual
+memory management subsystem. <<addr_translation_rep_fig>> shows address
+translation using two-level page table. Refer to <<or1000_manual>> for
+one-level page table address translation as well as for details about address
+translation and page table content.
+
+((IMMUCR)) and ((Flush)) of Entire ITLB
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+IMMUCR is not implemented in OR1200. Therefore page table base pointer (PTBP)
+must be stored in software variable. Flush of entire ITLB must be performed
+by software flush of every ITLB entry separately. Software flush is performed
+by manually writing bits from the TLB entries back to PTEs.
+
+Page Protection
+^^^^^^^^^^^^^^^
+After a virtual address is determined to be within a page covered by the
+valid PTE, the access is validated by the memory protection mechanism. If
+this protection mechanism prohibits the access, an instruction page fault
+exception is generated.
+(((Page Protection,Instruction)))
+
+The memory protection mechanism allows selectively granting execute access
+for both supervisor and user modes. The page protection mechanism provides
+protection at all page level granularities.
+
+[[protection_attrs_inst_table]]
+.Protection Attributes for Instruction Fetch Accesses
+[width="70%",options="header"]
+|================================
+| Protection attribute	| Meaning
+| ITLBWyTR[SXEx]	| Enable execute operations in supervisor mode of the
+  page.
+| ITLBWyTR[UXEx]	| Enable execute operations in user mode of the page.
+|================================
+
+<<protection_attrs_inst_table>> lists page protection attributes defined
+in ITLBWyTR pregister. For the individual page appropriate strategy out
+of seven possible strategies programmed with PPI field of the PTE. Because
+OR1200 does not implement IMMUPR, translation of PTE[PPI] into suitable set
+of protection bits must be performed by software and written into ITLBWyTR.
+
+((ITLB)) Entry Reload
+^^^^^^^^^^^^^^^^^^^^^
+OR1200 does not implement ITLB entry reloads in hardware. Instead software
+routine must be used to search page table for correct page table entry (PTE)
+and copy it into the ITLB. Software is responsible for maintaining accessed
+bit in the page tables.
+
+When LSU computes instruction fetch effective address whose physical address
+is not already cached by ITLB, an ITLB miss exception is invoked.
+
+ITLB reload routine must load the correct PTE to correct ITLBWyMR and ITLBWyTR
+register from one of possible ITLB ways.
+
+ITLB Entry Invalidation
+^^^^^^^^^^^^^^^^^^^^^^^
+Special-purpose register ITLBEIR must be written with the effective address
+and corresponding ITLB entry will be invalidated in the local ITLB.
+
+Locking ITLB Entries
+^^^^^^^^^^^^^^^^^^^^
+Since all ITLB entry reloads are performed in software, there is no hardware
+locking of ITLB entries. Instead it is up to the software reload routine to
+avoid replacing some of the entries if so desired.
+
+Page Attribute - Dirty (D)
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+Dirty (D) attribute resides in the PTE but it is not used by the IMMU.
+(((Page Attributes,Instruction)))
+
+Page Attribute - Accessed (A)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Accessed (A) attribute is not implemented in OR1200 ITLB. It is up to the
+operating system to generate accessed attribute bit with page protection
+mechanism.
+(((Page Attributes,Instruction)))
+
+Page Attribute - Weakly Ordered Memory (WOM)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Weakly ordered memory (WOM) attribute is not needed in OR1200 because all
+instruction fetch accesses are serialized and therefore this attribute is
+not implemented.
+(((Page Attributes,Instruction)))
+
+Page Attribute - Write-Back Cache (WBC)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Write-back cache (WBC) attribute resides in the PTE but it is not used by
+the IMMU.
+(((Page Attributes,Instruction)))
+
+Page Attribute - Caching-Inhibited (CI)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Caching-inhibited (CI) attribute is not implemented in OR1200 ITLB. Cached
+and uncached regions are divided by bit 30 of instruction effective address.
+(((Page Attributes,Instruction)))
+
+[[inst_cached_regions_table]]
+.Cached and uncached regions
+[width="70%",options="header"]
+|===============================
+| Effective Address	| Region
+| 0x00000000 - 0x3FFFFFFF	| Cached
+| 0x40000000 - 0x7FFFFFFF	| Uncached
+| 0x80000000 - 0xBFFFFFFF	| Cached
+| 0xC0000000 - 0xFFFFFFFF	| Uncached
+|===============================
+
+Page Attribute - Cache Coherency (CC)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Cache coherency (CC) attribute resides in the PTE but it is not used by
+the IMMU.
+(((Page Attributes,Instruction)))
+
+((Programmable Interrupt Controller))
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+PICMR special-purpose register is used to mask or unmask up to 30 programmable
+interrupt sources. PICPR special-purpose register is used to assign low or
+high priority to maximum of 30 interrupt sources.
+
+PICSR special-purpose register is used to determine status of each interrupt
+input. Bits in PICSR represent status of the interrupt inputs and the
+actual interrupt must be cleared in the device that is the source of a
+pending interrupt.
+
+The ((PIC)) implementation in the OR1200  differs from the architecture
+specification. The PIC instead offers a latched level-sensitive interrupt.
+
+Once an interrupt line is latched (i.e. its value appears in PICSR), no
+new interrupts can be triggered for that line until its bit in PICSR is
+cleared. The usual sequence for an interrupt handler is then as follows.
+
+. Peripheral asserts interrupt, which is latched and triggers handler.
+. Handler processes interrupt.
+. Handler notifies peripheral that the interrupt has been processed (typically
+  via a memory mapped register).
+. Peripheral deasserts interrupt.
+. Handler clears corresponding bit in PICSR and returns.
+
+It is assumed that the peripheral will de-assert its interrupt promptly
+(within 1-2 cycles). Otherwise on exiting the interrupt handler, having
+cleared PICSR, the level sensitive interrupt will immediately retrigger.
+
+((Tick Timer))
+~~~~~~~~~~~~~~
+Tick timer facility is enabled with TTMR[M]. TTCR is incremented with each
+clock cycle and a high priority interrupt can be asserted whenever lower 28
+bits of TTCR match TTMR[TP] and TTMR[IE] is set.
+
+TTCR restarts counting from zero when match event happens and TTMR[M] is
+0x1. If TTMR[M] is 0x2, TTCR is stoped when match event happens and TTCR
+must be changed to start counting again. When TTMR[M] is 0x3, TTCR keeps
+counting even when match event happens.
+
+((Power Management))
+~~~~~~~~~~~~~~~~~~~~
+((Clock Gating)) and Frequency Changing Versus CPU Stalling
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+If system doesn t support clock gating and if changing clock frequency in
+slow down mode is not possible, CPU can be stalled for certain number of
+clock cycles. This is much lower benefit on power consumption however it
+still reduces power consumption.
+
+Slow Down Mode
+^^^^^^^^^^^^^^
+Slow down mode is software controlled with the 4-bit value in PMR[SDF]. Lower
+value specifies higher expected performance from the processor core. Usually
+PMR[SDF] is dynamically set by the operating system s idle routine, that
+monitors the usage of the processor core.
+(((Mode,Slow Down)))
+
+PMR[SDF] is broadcast on +pm_clksd+. External clock generator should adjust
+clock frequency according to the value of +pm_clksd+. Exact slow down factors
+are not defined but 0xF should go all the way down to 32.768 KHz.
+
+With +pm_clksd+ equal to 0xF, +pm_lvolt+ is asserted. This is an indication for
+the external power supply to lower the voltage.
+
+Doze Mode
+^^^^^^^^^
+To switch to doze mode, software should set the PMR[DME]. Once an interrupt
+is received by the programmable interrupt controller (PIC), +pm_wakeup+
+is asserted and external clock generation circuitry should enable all
+clocks. Once clocks are running RISC is switched back again to the normal
+mode and PMR[DME] is cleared.
+(((Mode,Doze)))
+
+When doze mode is enabled, +pm_dc_gate+, +pm_ic_gate+, +pm_dmmu_gate+,
++pm_immu_gate+ and +pm_cpugate+ are asserted. As a result all clocks except
++clk_tt+ should be gated by external clock generation circuitry.
+
+Sleep Mode
+^^^^^^^^^^
+To switch to sleep mode, software should set the PMR[SME]. Once an interrupt
+is received by the programmable interrupt controller (PIC), +pm_wakeup+ is
+asserted and external clock generation should enable all clocks. Once clocks
+are running, RISC is switched back again to the normal mode and PMR[SME]
+is cleared.
+(((Mode,Sleep)))
+
+When sleep mode is enabled, +pm_dc_gate+, +pm_ic_gate+, +pm_dmmu_gate+,
++pm_immu_gate+, +pm_cpu_gate+ and +pm_tt_gate+ are asserted. As a result
+all clocks including +clk_tt+ should be gated by external clock generation
+circuitry.
+
+In sleep mode, +pm_lvolt+ is asserted. This is an indication for the external
+power supply to lower the voltage.
+
+Clock Gating
+^^^^^^^^^^^^
+((Clock gating)) feature is not implemented in OR1200 power management.
+
+Disabled Units Force Clock Gating
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Units that are disabled in special-purpose register SR, have their clock
+gate signals asserted. Cleared bits SR[DCE], SR[ICE], SR[DME] and SR[IME]
+directly force assertion of +pm_dc_gate+, +pm_ic_gate+, +pm_dmmu_gate+
+and +pm_immu_gate+.
+
+((Debug Unit))
+~~~~~~~~~~~~~~
+Debug unit can be controlled through development interface or it can operate
+independently programmed and handled by the RISC s resident debug software.
+
+((Watchpoints))
+^^^^^^^^^^^^^^^
+OR1200 debug unit does not implement OR12000 architecture watchpoints.
+
+((Breakpoint)) Exception
+^^^^^^^^^^^^^^^^^^^^^^^^
+Which breakpointDMR2[WGB] bits specify which watchpoints invoke breakpoint
+exception. By invoking breakpoint exception, target resident debugger can
+be built.
+
+Breakpoint is broadcast on development interface on +dbg_bp_o+.
+
+((Development Interface))
+~~~~~~~~~~~~~~~~~~~~~~~~~
+NOTE: The information in this section is to be reviewed. It is the author's
+opinion that the debug interface is now largely provided by the SPR mappings,
+and no special sideband functions exist aside from stalling and resetting
+the core.
+
+An additional _development and debug interface IP_ core may be used to connect
+OpenRISC 1200 to standard debuggers using IEEE.1149.1 (JTAG) protocol.
+
+((Debugging)) Through ((Development Interface))
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+The DSR special-purpose register specifies which exceptions cause the core
+to stop the execution of the exception handler and turn over control to
+development interface. It can be programmed by the resident debug software
+or by the development interface.
+
+The DRR special-purpose register is specifies which event caused the core to
+stop the execution of program flow and turned over control to the development
+interface. It should be cleared by the resident debug software or by the
+development interface.
+
+The DIR special-purpose register is not implemented.
+
+Reading PC, Load/Store EA, Load Data, Store Data, Instruction
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Crucial information like ((program counter)) (PC), load/store effective
+address (LSEA), load data, store data and current instruction in execution
+pipeline can be asynchronously read through the development interface.
+
+[[dev_commands_table]]
+.Development Interface Operation Commands
+[width="70%",options="header"]
+|========================
+| dbg_op_i[2:0]	| Meaning
+| 0x0		| Reading Program Counter (PC)
+| 0x1		| Reading Load/Store Effective Address
+| 0x2		| Reading Load Data
+| 0x3		| Reading Store Data
+| 0x4		| Reading SPR
+| 0x5		| Writing SPR
+| 0x6		| Reading Instruction in Execution Pipeline
+| 0x7		| Reserved
+|========================
+
+<<dev_commands_table>> lists operation commands that control what is read
+or written through development interface. All reads except reads and writes
+of SPRs are asynchronous.
+
+Reading and Writing SPRs Through Development Interface
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+For reads and write to SPRs +dbg_op_i+ must be set to 0x4 and 0x5,
+respectively.
+
+[[dev_interface_cycles_fig]]
+.Development Interface Cycles
+image::img/dev_interface_cycles.gif[scaledwidth="70%",align="center"]
+
+<<dev_interface_cycles_fig>> shows development interface cycles. Writes must
+be synchronous to the main RISC clock positive edge and should take one clock
+cycle. Reads must take two clock cycles because access to synchronous cache
+lines or to TLB entries introduces one clock cycle of delay.
+
+If required, external debugger can stop the CPU core by asserting
++dbg_stall_i+. This way it can have enough time to read all interesting
+registers from the RISC or guarantee that writes into SPRs are performed
+without RISC writing to the same registers.
+
+Tracking ((Data Flow))
+^^^^^^^^^^^^^^^^^^^^^^
+An external debugger can monitor and record data flow inside the RISC for
+debugging purposes and profiling analysis. This is accomplished by monitoring
+status of the load/store unit, load/store effective address and load/store
+data, all available at the development interface.
+
+[[status_ldst_unit_table]]
+.Status of the Load/Store Unit
+[width="70%",options="header"]
+|============================================================
+| dbg_lss_o[3:0]	| Load/Store Instruction in Execution
+| 0x0	| No load/store instruction in execution
+| 0x1	| Reserved for load doubleword
+| 0x2	| Load byte and zero extend
+| 0x3	| Load byte and sign extend
+| 0x4	| Load halfword and zero extend
+| 0x5	| Load halfword and sign extend
+| 0x6	| Load singleword and zero extend
+| 0x7	| Load singleword and sign extend
+| 0x8	| Reserved for store doubleword
+| 0x9	| Reserved
+| 0xA	| Store byte
+| 0xB	| Reserved
+| 0xC	| Store halfword
+| 0xD	| Reserved
+| 0xE	| Store singleword
+| 0xF	| Reserved
+|============================================================
+
+External trace buffer can capture all interesting data flow
+events by analyzing status of the load/store unit available on
++dbg_lss_o+. <<status_ldst_unit_table>> lists different status encoding for
+the load/store unit.
+
+Tracking ((Program Flow))
+^^^^^^^^^^^^^^^^^^^^^^^^^
+An external debugger can monitor and record program flow inside the RISC
+for debugging purposes and profiling analysis. This is accomplished by
+monitoring status of the instruction unit, PC and fetched instruction word,
+all available at the development interface.
+
+[[status_inst_unit_table]]
+.Status of the Instruction Unit
+[width="70%",options="header"]
+|=========================================
+| dbg_is_o[1:0]	| Instruction Fetch Status
+| 0x0	| No instruction fetch in progress
+| 0x1	| Normal instruction fetch
+| 0x2	| Executing branch instruction
+| 0x3	| Fetching instruction in delay slot
+|=========================================
+
+External trace buffer can capture all interesting program flow
+events by analyzing status of the instruction unit available on
++dbg_is_o+. <<status_inst_unit_table>> lists different status encoding for
+the instruction unit.
+
+Triggering ((External Watchpoint Event))
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<<watchpoint_trigger_fig>> shows how development interface can assert
++dbg_ewt_I+ and cause watchpoint event. If programmed, external watchpoint
+event will cause a breakpoint exception.
+
+[[watchpoint_trigger_fig]]
+.Assertion of External Watchpoint Trigger
+image::img/watchpoint_trigger.gif[scaledwidth="70%",align="center"]
+
+((Registers))
+-------------
+This section describes all registers inside the OR1200 core. Shifting _GRP_
+number 11 bits left and adding _REG_ number computes the address of each
+special-purpose register. All registers are 32 bits wide from software
+perspective. _USER MODE_ and _SUPV MODE_ specify the valid access types for
+each register in user mode and supervisor mode of operation. R/W stands for
+read and write access and R stands for read only access.
+
+((Registers list))
+~~~~~~~~~~~~~~~~~~
+[[regs_table]]
+.List of All Registers
+[width="95%",options="header"]
+|============================================================================
+| Grp #	| Reg #	| Reg Name	| USER MODE	| SUPV MODE	| Description
+| 0	| 0	| ((VR))	| -		| R	| Version Register
+| 0	| 1	| ((UPR))	| -		| R	| Unit Present Register
+| 0	| 2	| ((CPUCFGR))	| -		| R	| CPU Configuration Register
+| 0	| 3	| ((DMMUCFGR))	| -		| R	| Data MMU Configuration Register
+| 0	| 4	| ((IMMUCFGR))	| -		| R	| Instruction MMU Configuration Register
+| 0	| 5	| ((DCCFGR))	| -		| R	| Data Cache Configuration Register
+| 0	| 6	| ((ICCFGR))	| -		| R	| Instruction Cache Configuration Register
+| 0	| 7	| ((DCFGR))	| -		| R	| Debug Configuration Register
+| 0	| 16	| ((PC))	| -		| R/W	| PC mapped to SPR space
+| 0	| 17	| ((SR))	| -		| R/W	| Supervision Register
+| 0	| 20	| ((FPCSR))	| -		| R/W	| FP Control Status Register
+| 0	| 32	| ((EPCR0))	| -		| R/W	| Exception PC Register
+| 0	| 48	| ((EEAR0))	| -		| R/W	| Exception EA Register
+| 0	| 64	| ((ESR0))	| -		| R/W	| Exception SR Register
+| 0	| 1024-1055	| ((GPR0-GPR31))	| -	| R/W	| GPRs mapped to SPR space
+| 1	| 2		| ((DTLBEIR))	| -	| W	| Data TLB Entry Invalidate Register
+| 1	| 1024-1151	| ((DTLBW0MR0-DTLBW0MR127))	| -	| R/W	| Data TLB Match Registers Way 0
+| 1	| 1536-1663	| ((DTLBW0TR0-DTLBW0TR127))	| -	| R/W	| Data TLB Translate Registers Way 0
+| 2	| 2		| ((ITLBEIR))	| -	| W	| Instruction TLB Entry Invalidate Register
+| 2	| 1024-1151	| ((ITLBW0MR0-ITLBW0MR127))	| -	| R/W	| Instruction TLB Match Registers Way 0
+| 2	| 1536-1663	| ((ITLBW0TR0-ITLBW0TR127))	| -	| R/W	| Instruction TLB Translate Registers Way 0
+| 3	| 0	| ((DCCR))	| -		| R/W	| DC Control Register
+| 3	| 2	| ((DCBFR))	| W		| W	| DC Block Flush Register
+| 3	| 3	| ((DCBIR))	| W		| W	| DC Block Invalidate Register
+| 3	| 4	| ((DCBWR))	| W		| W	| DC Block Write-back register
+| 4	| 0	| ((ICCR))	| -		| R/W	| IC Control Register
+| 4	| 256	| ((ICBIR))	| W		| W	| IC Block Invalidate Register
+| 5	| 256	| ((MACLO))	| R/W		| R/W	| MAC Low
+| 5	| 257	| ((MACHI))	| R/W		| R/W	| MAC High
+| 6	| 16	| ((DMR1))	| -		| R/W	| Debug Mode Register 1
+| 6	| 17	| ((DMR2))	| -		| R/W	| Debug Mode Register 2
+| 6	| 20	| ((DSR))	| -		| R/W	| Debug Stop Register
+| 6	| 21	| ((DRR))	| -		| R/W	| Debug Reason Register
+| 8	| 0	| ((PMR))	| -		| R/W	| Power Management Register
+| 9	| 0	| ((PICMR))	| -		| R/W	| PIC Mask Register
+| 9	| 2	| ((PICSR))	| -		| R/W	| PIC Status Register
+| 10	| 0	| ((TTMR))	| -		| R/W	| Tick Timer Mode Register
+| 10	| 1	| ((TTCR))	| R*		| R/W	| Tick Timer Count Register
+|============================================================================
+
+<<regs_table>> lists all OpenRISC 1000 special-purpose registers implemented
+in OR1200. Registers VR and UPR are described below. For description of
+other registers refer to <<or1000_manual>>.
+
+Register VR description
+~~~~~~~~~~~~~~~~~~~~~~~
+Special-purpose register VR identifies the version (model) and revision
+level of the OpenRISC 1000 processor. It also specifies possible standard
+template on which this implementation is based.
+(((Register,VR)))
+
+[[vr_reg_table]]
+.VR Register
+[width="95%",options="header"]
+|============================================================
+| Bit #	| Access	| Reset	| Short Name	| Description
+| 5:0	| R	| Revision	| REV		| Revision number of this document.
+| 15:6	| R	| 0x0		| -		| Reserved
+| 23:16	| R	| 0x00		| CFG		| Configuration should be read from UPR and configuration registers
+| 31:24	| R	| 0x12		| VER		| Version number for OR1200 is fixed at 0x1200.
+|============================================================
+
+Register UPR description
+~~~~~~~~~~~~~~~~~~~~~~~~
+Special-purpose register UPR identifies the units present in the processor. It
+has a bit for each implemented unit or functionality. Lower sixteen bits
+identify present units defined in the OpenRISC 1000 architecture. Upper
+sixteen bits define present custom units.
+(((Register,UPR)))
+
+[[upr_reg_table]]
+.UPR Register
+[width="95%",options="header"]
+|============================================================
+| Bit #	| Access	| Reset	| Short Name	| Description
+| 0	| R		| 1	| UP		| UPR present
+| 1	| R		| 1	| DCP		| Data cache present[†]
+| 2	| R		| 1	| ICP		| Instruction cache present[†]
+| 3	| R		| 1	| DMP		| Data MMU present[†]
+| 4	| R		| 1	| IMP		| Instruction MMU present[†]
+| 5	| R		| 1	| MP		| MAC present[†]
+| 6	| R		| 1	| DUP		| Debug unit present[†]
+| 7	| R		| 0	| PCUP		| Performance counters unit not present[†]
+| 8	| R		| 1	| PMP		| Power Management Present[†]
+| 9	| R		| 1	| PICP		| Programmable interrupt controller present
+| 10	| R		| 1	| TTP		| Tick timer present
+| 11	| R		| 1	| FPP		| Floating point present[†]
+| 23:12	| R		| X	| -		| Reserved
+| 31:24	| R		| 0xXXXX| CUP		| The user of the OR1200 core adds custom units.
+|============================================================
+[†]: if enabled at synthesis time
+
+Register CPUCFGR description
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Special-purpose register CPUCFGR identifies the capabilities and configuration
+of the CPU.
+(((Register,CPUCFGR)))
+
+[[cpucfgr_reg_table]]
+.CPUCFGR Register
+[width="95%",options="header"]
+|============================================================
+| Bit #	| Access	| Reset	| Short Name	| Description
+| 3:0	| R		| 0x0	| NSGF		| Zero number of shadow GPR files
+| 4	| R		| 0	| HGF		| No half GPR files[†]
+| 5	| R		| 1	| OB32S		| ORBIS32 supported
+| 6	| R		| 0	| OB64S		| ORBIS64 not supported
+| 7	| R		| 1	| OF32S		| ORFPX32 supported[‡]
+| 8	| R		| 0	| OF64S		| ORFPX64 not supported
+| 9	| R		| 0	| OV64S		| ORVDX64 not supported
+|============================================================
+[†]: If disabled at synthesis time
+
+[‡]: If FPU enabled at synthesis time
+
+Register DMMUCFGR description
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Special-purpose register DMMUCFGR identifies the capabilities and configuration
+of the DMMU.
+(((Register,DMMUCFGR)))
+
+[[dmmucfgr_reg_table]]
+.DMMUCFGR Register
+[width="95%",options="header"]
+|============================================================
+| Bit #	| Access	| Reset	| Short Name	| Description
+| 1:0	| R		| 0x0	| NTW		| One DTLB way
+| 4:2	| R		| 0x4 - 0x7	| NTS	| 16, 32, 64 or 128 DTLB sets
+| 7:5	| R		| 0x0	| NAE		| No ATB Entries
+| 8	| R		| 0	| CRI		| No DMMU control register implemented
+| 9	| R		| 0	| PRI		| No protection register implemented
+| 10	| R		| 1	| TEIRI		| DTLB entry invalidate register implemented
+| 11	| R		| 0	| HTR		| No hardware DTLB reload
+|============================================================
+
+Register IMMUCFGR description
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Special-purpose register IMMUCFGR identifies the capabilities and configuration
+of the IMMU.
+(((Register,IMMUCFGR)))
+
+[[immucfgr_reg_table]]
+.IMMUCFGR Register
+[width="95%",options="header"]
+|============================================================
+| Bit #	| Access	| Reset	| Short Name	| Description
+| 1:0	| R		| 0x0	| NTW		| One ITLB way
+| 4:2	| R		| 0x4 - 0x7	| NTS	| 16, 32, 64 or 128 ITLB sets
+| 7:5	| R		| 0x0	| NAE		| No ATB Entries
+| 8	| R		| 0	| CRI		| No IMMU control register implemented
+| 9	| R		| 0	| PRI		| No protection register implemented
+| 10	| R		| 1	| TEIRI		| ITLB entry invalidate register implemented
+| 11	| R		| 0	| HTR		| No hardware ITLB reload
+|============================================================
+
+Register DCCFGR description
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Special-purpose register DCCFGR identifies the capabilities and configuration
+of the data cache.
+(((Register,DCCFGR)))
+
+[[dccfgr_reg_table]]
+.DCCFGR Register
+[width="95%",options="header"]
+|============================================================
+| Bit #	| Access	| Reset	| Short Name	| Description
+| 2:0	| R		| 0x0	| NCW		| One DC way
+| 6:3	| R		| 0x4 - 0x7	| NCS	| 16, 32, 64 or 128 DC sets
+| 7	| R		| 0x0	| CBS		| 16-byte cache block size
+| 8	| R		| 0	| CWS		| Cache write-through strategy[†]
+| 9	| R		| 1	| CCRI		| DC control register implemented
+| 10	| R		| 1	| CBIRI		| DC block invalidate register implemented
+| 11	| R		| 0	| CBPRI		| DC block prefetch register not implemented
+| 12	| R		| 0	| CBLRI		| DC block lock register not implemented
+| 13	| R		| 1	| CBFRI		| DC block flush register implemented
+| 14	| R		| 1	| CBWBRI	| DC block write-back register  implemented[‡]
+|============================================================
+[†]: If disabled at synthesis time
+
+[‡]: If FPU enabled at synthesis time
+
+Register ICCFGR description
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Special-purpose register ICCFGR identifies the capabilities and configuration
+of the instruction cache.
+(((Register,ICCFGR)))
+
+[[iccfgr_reg_table]]
+.ICCFGR Register
+[width="95%",options="header"]
+|============================================================
+| Bit #	| Access	| Reset	| Short Name	| Description
+| 2:0	| R		| 0x0	| NCW		| One IC way
+| 6:3	| R		| 0x4 - 0x7	| NCS	| 16, 32, 64 or 128 IC sets
+| 7	| R		| 0x0	| CBS		| 16-byte cache block size
+| 8	| R		| 0	| CWS		| Cache write-through strategy
+| 9	| R		| 1	| CCRI		| IC control register implemented
+| 10	| R		| 1	| CBIRI		| IC block invalidate register implemented
+| 11	| R		| 0	| CBPRI		| IC block prefetch register not implemented
+| 12	| R		| 0	| CBLRI		| IC block lock register not implemented
+| 13	| R		| 1	| CBFRI		| IC block flush register implemented
+| 14	| R		| 0	| CBWBRI	| IC block write-back register not implemented
+|============================================================
+
+Register DCFGR description
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+Special-purpose register DCFGR identifies the capabilities and configuration
+of the debut unit.
+(((Register,DCFGR)))
+
+[[dcfgr_reg_table]]
+.DCFGR Register
+[width="95%",options="header"]
+|============================================================
+| Bit #	| Access	| Reset	| Short Name	| Description
+| 3:0	| R		| 0x0	| NDP		| Zero DVR/DCR pairs[†]
+| 4	| R		| 0 	| WPCI		| Watchpoint counters not implemented
+|============================================================
+[†]: If hardware breakpoints disabled at synthesis time
+
+((IO ports))
+------------
+OR1200 IP core has several interfaces. <<core_interfaces_fig>> below shows
+all interfaces:
+
+* Instruction and data WISHBONE host interfaces
+* Power management interface
+* Development interface
+* Interrupts interface
+
+[[core_interfaces_fig]]
+.Core's Interfaces
+image::img/core_interfaces.gif[scaledwidth="50%",align="center"]
+
+Instruction WISHBONE Master Interface
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+OR1200 has two master WISHBONE Rev B compliant interfaces. Instruction
+interface is used to connect OR1200 core to memory subsystem for purpose of
+fetching instructions or instruction cache lines.
+
+[[inst_wb_master_table]]
+.Instruction WISHBONE Master Interface' Signals
+[width="95%",options="header"]
+|====================================================
+| Port		| Width	| Direction	| Description
+| ((iwb_CLK_I))	| 1	| Input		| Clock input
+| ((iwb_RST_I))	| 1	| Input		| Reset input
+| ((iwb_CYC_O))	| 1	| Output	| Indicates valid bus cycle (core select)
+| ((iwb_ADR_O))	| 32	| Outputs	| Address outputs
+| ((iwb_DAT_I))	| 32	| Inputs	| Data inputs
+| ((iwb_DAT_O))	| 32	| Outputs	| Data outputs
+| ((iwb_SEL_O))	| 4	| Outputs	| Indicates valid bytes on data bus (during valid cycle it must be 0xf)
+| ((iwb_ACK_I))	| 1	| Input		| Acknowledgment input (indicates normal transaction termination)
+| ((iwb_ERR_I))	| 1	| Input		| Error acknowledgment input (indicates an abnormal transaction termination)
+| ((iwb_RTY_I))	| 1	| Input		| In OR1200 treated same way as iwb_ERR_I.
+| ((iwb_WE_O))	| 1	| Output	| Write transaction when asserted high
+| ((iwb_STB_O))	| 1	| Outputs	| Indicates valid data transfer cycle
+|====================================================
+
+Data WISHBONE Master Interface
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+OR1200 has two master WISHBONE Rev B compliant interfaces. Data interface
+is used to connect OR1200 core to external peripherals and memory subsystem
+for purpose of reading and writing data or data cache lines.
+
+[[data_wb_master_table]]
+.Data WISHBONE Master Interface' Signals
+[width="95%",options="header"]
+|====================================================
+| Port		| Width	| Direction	| Description
+| ((dwb_CLK_I))	| 1	| Input		| Clock input
+| ((dwb_RST_I))	| 1	| Input		| Reset input
+| ((dwb_CYC_O))	| 1	| Output	| Indicates valid bus cycle (core select)
+| ((dwb_ADR_O))	| 32	| Outputs	| Address outputs
+| ((dwb_DAT_I))	| 32	| Inputs	| Data inputs
+| ((dwb_DAT_O))	| 32	| Outputs	| Data outputs
+| ((dwb_SEL_O))	| 4	| Outputs	| Indicates valid bytes on data bus (during valid cycle it must be 0xf)
+| ((dwb_ACK_I))	| 1	| Input		| Acknowledgment input (indicates normal transaction termination)
+| ((dwb_ERR_I))	| 1	| Input		| Error acknowledgment input (indicates an abnormal transaction termination)
+| ((dwb_RTY_I))	| 1	| Input		| In OR1200 treated same way as dwb_ERR_I.
+| ((dwb_WE_O))	| 1	| Output	| Write transaction when asserted high
+| ((dwb_STB_O))	| 1	| Outputs	| Indicates valid data transfer cycle
+|====================================================
+
+System Interface
+~~~~~~~~~~~~~~~~
+System interface connects reset, clock and other system signals to the
+OR1200 core.
+
+[[sys_interface_table]]
+.System Interface Signals
+[width="95%",options="header"]
+|====================================================
+| Port		| Width	| Direction	| Description
+| ((Rst))	| 1	| Input		| Asynchronous reset
+| ((clk_cpu))	| 1	| Input		| Main clock input to the RISC
+| ((clk_dc))	| 1	| Input		| Data cache clock
+| ((clk_ic))	| 1	| Input		| Instruction cache clock
+| ((clk_dmmu))	| 1	| Input		| Data MMU clock
+| ((clk_immu))	| 1	| Input		| Instruction MMU clock
+| ((clk_tt))	| 1	| Input		| Tick timer clock
+|====================================================
+
+Development Interface
+~~~~~~~~~~~~~~~~~~~~~
+Development interface connects external development port to the RISC s internal
+debug facility. Debug facility allows control over program execution inside
+RISC, setting of breakpoints and watchpoints, and tracing of instruction
+and data flows.
+
+[[dev_interface_table]]
+.Development Interface
+[width="95%",options="header"]
+|====================================================
+| Port		| Width	| Direction	| Description
+| ((dbg_dat_o))	| 32	| Output	| Transfer of data from RISC to external development interface
+| ((dbg_dat_i))	| 32	| Input		| Transfer of data from external development interface to RISC
+| ((dbg_adr_i))	| 32	| Input		| Address of special-purpose register to be read or written
+| ((dbg_op_I))	| 3	| Input		| Operation select for development interface
+| ((dbg_lss_o))	| 4	| Output	| Status of load/store unit
+| ((dbg_is_o))	| 2	| Output	| Status of instruction fetch unit
+| ((dbg_wp_o))	| 11	| Output	| Status of watchpoints
+| ((dbg_bp_o))	| 1	| Output	| Status of the breakpoint
+| ((dbg_stall_i))	| 1	| Input	| Stalls RISC CPU core
+| ((dbg_ewt_i))	| 1	| Input		| External watchpoint trigger
+|====================================================
+
+Power Management Interface
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+Power management interface provides signals for interfacing RISC core with
+external power management circuitry. External power management circuitry is
+required to implement functions that are technology specific and cannot be
+implemented inside OR1200 core.
+
+[[pow_mgmt_interface_table]]
+.Power Management Interface
+[width="95%",options="header"]
+|============================================================================
+| Port			| Width	| Direction	| Generation		| Description
+| ((pm_clksd))		| 4	| Output	| Static (in SW)	| Slow down outputs that control reduction of RISC clock frequency
+| ((pm_cpustall))	| 1	| Input		| -			| Synchronous stall of the RISC’s CPU core
+| ((pm_dc_gate))	| 1	| Output	| Dynamic (in HW)	| Gating of data cache clock
+| ((pm_ic_gate))	| 1	| Output	| Dynamic (in HW)	| Gating of instruction cache clock
+| ((pm_dmmu_gate))	| 1	| Output	| Dynamic (in HW)	| Gating of data MMU clock
+| ((pm_immu_gate))	| 1	| Output	| Dynamic (in HW)	| Gating of instruction MMU clock
+| ((pm_tt_gate))	| 1	| Output	| Dynamic (in HW)	| Gating of tick timer clock
+| ((pm_cpu_gate))	| 1	| Output	| Static (in SW)	| Gating of main CPU clock
+| ((pm_wakeup))		| 1	| Output	| Dynamic (in HW)	| Activate all clocks
+| ((pm_lvolt))		| 1	| Output	| Static (in SW)	| Lower voltage
+|============================================================================
+
+Interrupt Interface
+~~~~~~~~~~~~~~~~~~~
+Interrupt interface has interrupt inputs for interfacing external peripheral
+s interrupt outputs to the RISC core. All interrupt inputs are evaluated on
+positive edge of main RISC clock.
+
+[[interrupt_interface_table]]
+.Interrupt Interface
+[width="95%",options="header"]
+|============================================================
+| Port		| Width		| Direction	| Description
+| ((pic_ints))	| PIC_INTS	| Input		| External interrupts
+|============================================================
+
+
+
+[appendix]
+Core HW Configuration
+=====================
+(((Hardware,Configuration)))
+This section describes parameters that are set by the user of the core and
+define configuration of the core. Parameters must be set by the user before
+actual use of the core in simulation or synthesis.
+
+[[core_hw_conf_table]]
+.Core HW configuration table
+[width="95%",options="header"]
+|============================================================
+| Variable Name	| Range		| Default	| Description
+| ((EADDR_WIDTH))	| 32	| 32	| Effective address width
+| ((VADDR_WIDTH))	| 32	| 32	| Virtual address width
+| ((PADDR_WIDTH))	| 24 - 36| 32	| Physical address width
+| ((DATA_WIDTH))	| 32	| 32	| Data width / Operation width
+| ((DC_IMPL))	| 0 - 1		| 1	| Data cache implementation
+| ((DC_SETS))	| 256-1024	| 512	| Data cache number of sets
+| ((DC_WAYS))	| 1		| 1	| Data cache number of ways
+| ((DC_LINE))	| 16 - 32	| 16	| Data cache line size
+| ((IC_IMPL))	| 0 - 1		| 1	| Instruction cache implementation
+| ((IC_SETS))	| 32-1024	| 512	| Instruction cache number of sets
+| ((IC_WAYS))	| 1		| 1	| Instruction cache number of ways
+| ((IC_LINE))	| 16-32		| 16	| Instruction cache line size in bytes
+| ((DMMU_IMPL))	| 0 - 1		| 1	| Data MMU implementation
+| ((DTLB_SETS))	| 64		| 64	| Data TLB number of sets
+| ((DTLB_WAYS))	| 1		| 1	| Data TLB number of ways
+| ((IMMU_IMPL))	| 0 - 1		| 1	| Instruction MMU implementation
+| ((ITLB_SETS))	| 64		| 64	| Instruction TLB number of sets
+| ((ITLB_WAYS))	| 1		| 1	| Instruction TLB number of ways
+| ((PIC_INTS))	| 2 - 32	| 20	| Number of interrupt inputs
+|============================================================
+
+:numbered!:
+
+[bibliography]
+((Bibliography))
+================
+[bibliography]
+- [[[or1000_manual]]] Damjan Lampret et al. 'OpenRISC 1000 System Architecture
+  Manual'. 2004.
+
+[index]
+Index
+=====
+// The index is generated automatically by the DocBook toolchain.
