@@ -1,0 +1,247 @@
+\documentclass[a4paper]{article} \usepackage[dvips]{graphicx}
+\usepackage[margin=2cm,nohead]{geometry} \usepackage{pslatex}
+\usepackage{listings} 
+\setlength{\parindent}{0pt} \setlength{\parskip}{10pt}
+\renewcommand{\familydefault}{\sfdefault}
+\begin{document}
+\author{Michael Cowell} \title{Veristruct: An IEEE1364.1995 (Verilog
+  1995) Preprocessor}
+\maketitle{}
+% \tableofcontents{}
+% \pagebreak{}
+\section{Overview}
+\label{sec:overview}
+Veristruct is an an IEEE1364.1995 preprocessor that adds some C-style
+struct support to the Verilog language. It takes as input Veristruct
+files (with a \texttt{.vs} extension) and struct definition files
+(with a \texttt{.struct} extension). It outputs standard Verilog files
+(with a \texttt{.v} extension). Veristruct files are, for the most
+part, standard Verilog files---but, as well as the normal
+\texttt{nets} and \texttt{regs}, bundled, hierarchical variables can
+be declared and used.
+
+Veristruct can process one veristruct file per invocation (which may
+include many \texttt{.struct} struct definition files).
+
+Veristruct is written in object oriented Perl. Please feel free to fix
+any bugs you find!\footnote{That includes those in this
+  documentation.}
+
+\section{Installation}
+\label{sec:installation}
+First you will have to get Veristruct. A tarball of the latest release
+should be available at the Rachael SPARC
+website\footnote{\texttt{https://www.rachaelsparc.org}}.
+Alternatively, you can check out the source directly with a command
+like:
+$$\hbox{\texttt{svn co 
+    https://www.rachaelsparc.org/repository/projects/tools/veristruct/}}$$
+Note that code in SVN is not guaranteed to produce correct output or
+even run, but you will probably get more features than in the release
+tarball.
+
+Next, you need to add the Veristruct classes to your Perl
+distribution.  One day I might put Veristruct in CPAN and this process
+will be automated, but until then you'll need to do things
+manually. First work out where you want to place the classes. They
+need to be in your Perl include path. You can either add the folder
+that you've got Veristruct in to your Perl include path---or find out
+what's in your \texttt{@INC} (run something like \texttt{perl -e
+  'print join(", ",@INC);'}) and copy the \texttt{Verilog} folder from
+the Veristruct root into one of those directories.
+
+Finally, you need to put the \texttt{veristruct.pl} script (the
+application) somewhere in your shell path. Once again you can either
+change your shell's \texttt{PATH} variable to point to your veristruct
+folder, or copy \texttt{veristruct.pl} to \texttt{/usr/local/bin} or
+something. If you're copying it, you might want to strip \texttt{.pl}
+off of the name (to have a nicer looking command).
+
+\section{Command-line Options}
+\label{sec:options}
+The following table describes each of the Veristruct application's
+command line arguments:
+
+\begin{center}
+  \begin{tabular}{|l|p{10cm}|}
+    \hline \textbf{Argument} & \textbf{Action} \\
+    \hline \texttt{--help}, \texttt{-h} & Prints usage information. \\
+    \hline \texttt{--debug}, \texttt{-d} & Prints debugging information
+    while parsing the input files. This is useful if (for instance) Veristruct
+    fails to parse a syntactically valid file, and you are interested in what
+    mistake it made. Note: this option is intended for developers.\\
+    \hline \texttt{--write}, \texttt{-w} & By default Veristruct will not overwrite
+    an existing file with the same name as the output file. This options causes
+    it to do so.\\
+    \hline \texttt{--infile=file}, \texttt{-i file} & This compulsory argument
+    should be used to specify the input \texttt{.vs} file. Note: the \texttt{.vs} 
+    extension is not compulsory, but is recommended for clarity.\\
+    \hline \texttt{--outfilef=file}, \texttt{-o file} & This compulsory argument
+    should be used to specify the output \texttt{.v} file. Note: the \texttt{.v}
+    extension is not compulsory, but is recommended for clarity.\\
+    \hline \texttt{--libpath=path}, \texttt{-L path} & This argument (which can
+    be used multiple times) should be used to specify the search path
+    used when trying to locate \texttt{.struct} files referenced in the input.
+    It can be either a path, or a comma separated list of paths.\\
+    \hline
+  \end{tabular}
+\end{center}
+
+The command line arguments are not case sensitive, and it is
+sufficient to specify just enough of the command as is unique
+(although this is not recommended, because more commands may be added
+in the future).
+
+\section{Input \& Output Files}
+\label{sec:files}
+Veristruct takes two sorts of input files, \texttt{.vs} (or
+Veristruct) files and \texttt{.struct} (or struct definition)
+files. Following is a description of the two.
+
+\subsection{Veristruct files --- .vs}
+\label{sec:vs_files}
+Veristruct files are, for the most part, standard IEEE1364.1995
+(Verilog) files.  The following extra syntax is allowed:
+
+\begin{itemize}
+\item \textbf{\texttt{`sinclude}}: This extra pre-processor directive
+  can be used to instruct Veristruct to read in a struct definition
+  file. The file to be read in should follow immediately after the
+  token (with possible whitespace, other than line breaks). This
+  directive may be used as many times as desired, to read in any
+  number of \texttt{.struct} files. Note: the directive should not be
+  used inside modules, and surrounding \texttt{`ifdef} directives will
+  \textbf{not} be honoured.
+\item \textbf{\texttt{reg}, \texttt{wire} and port struct
+    declarations}: If any of these Verilog declarations are followed
+  by the name of a defined struct, the next word will interpreted as
+  an instance of that struct. All uses of that variable, throughout
+  the rest of the module (and, in the case of module port lists,
+  earlier in the module as well) will be recognised by Veristruct as
+  struct references, and will be re-written in the output file. Arrays
+  of structs can be declared in the same way that normal vectors are
+  declared (the range should precede the struct name).
+\item \textbf{Struct element references}: Any expression token (or
+  l-value) in the input \texttt{.vs} file of the form
+  \texttt{inst\_name.element} (of arbitrary element depth, and with
+  optional ranges) are recognised and processed by Veristruct. The
+  semantics are the same as in C. Note that slices of struct elements,
+  where the struct is declared as an array, are not allowed as
+  l-values.
+\end{itemize}
+
+Whole structs can only be used as l-values if the expression to the
+right is also a whole struct, of the same type, and nothing else.
+
+Wire declarations can include assignments, as usual.
+
+\subsection{Struct declaration files --- .struct}
+\label{sec:struct_files}
+The EBNF for struct declaration files is:
+
+\texttt{struct\_file := struct\_block \\
+  struct\_block := struct\_defn \{ struct\_block \} \\
+  struct\_defn := \textbf{struct} struct\_name
+  \textbf{\{} elem\_block \textbf{\};} \\
+  elem\_block := elem \textbf{;} \{ elem\_block \} \\
+  elem := wire\_element | signed\_element | struct\_element \\
+  wire\_element := \textbf{wire}((elem\_name \textbf{[} max \textbf{:}
+  min \textbf{]})
+  | (elem\_name) | (elem\_name \textbf{`} define\_string)) \\
+  signed\_element := \textbf{signed}((elem\_name \textbf{[} max
+  \textbf{:} min \textbf{]})
+  | (elem\_name) | (elem\_name \textbf{`} define\_string)) \\
+  struct\_element := struct\_name elem\_name }
+
+The atomic tokens are:
+\begin{itemize}
+\item \texttt{struct\_name}: A valid Verilog variable name. Trying to
+  use ``wire'' (which is illegal anyway) is doubly bad. Double
+  underscores are not allowed (this is not actually enforced, but is a
+  very bad idea).
+\item \texttt{elem\_name}: Similar to above.
+\item \texttt{max}: An integer greater than \texttt{min}.
+\item \texttt{min}: An integer less than \texttt{max}.
+\item \texttt{define\_string}: Any string without whitespace.
+\end{itemize}
+
+The semantics are similar to C. Note the main syntactical difference
+is that a name does not need to be specified twice (as in C, after the
+closing brace). C-style comments are allowed wherever (they are
+stripped out prior to parsing). Line comments count as a line break,
+block comments count as nothing.
+
+\subsection{IEEE1364.1995 (Verilog) file --- .v}
+\label{sec:v_files}
+Veristruct outputs IEEE1364.1995 compliant \texttt{.v} files. Structs
+declarations are expanded into their elements, and struct element
+references are expanded into formally compliant variable names. Double
+underscores are used to indicate depth.
+
+When entire structs are referenced (instance names are used without
+element references) a guess is made as to what is desired. In
+sensitivity lists and module port lists, the name is exploded into its
+constituent elements (and appropriate separator tokens are added). In
+module instance port lists, it is assumed that the module being
+instantiated has multiple ports with the instance name as the base
+(that will be the case if the module was written in Veristruct).
+
+\section{Limitations}
+\label{sec:limitations}
+The following limitations currently exist within Veristruct:
+\begin{itemize}
+\item \textbf{Namespace collisions not detected}: Veristruct currently
+  does no checking for namespace collisions. If you don't use double
+  underscores in your variables names, though, you should be fine.
+\item \textbf{Limited lvalue support}: Slices of some struct elements
+  (and whole structs, in most contexts) cannot be lvalues. Veristruct
+  will return an error when it encounters these.
+\item \textbf{Structs can only be declared in \texttt{.struct} files}:
+  This is a deliberate limitation. It avoids polluting the Verilog
+  syntax even more.
+\item \textbf{\texttt{`ifdef}s ignored}: Because Veristruct is not
+  designed to replace the normal Verilog preprocessor, it does not do
+  its job. As such, you will need to ensure that do not rely on your
+  structs being conditionally included using normal pre-processor
+  directives. There are many ways around this. Ranges in structs can
+  be tick defined, and variable declarations can be surrounded in
+  \texttt{`ifdef}s, which will get honoured later.
+\end{itemize}
+
+\section{Changes}
+\label{sec:changes}
+\textbf{Changes since the 0.1 release}\footnote{References to issue
+  IDs refer to the Rachael SPARC Scarab bug tracking system. Go to
+  \texttt{https://www.rachaelsparc.org/scarab/issues} to see
+  details.}:
+\begin{itemize}
+\item Signed support added (as per the request made by luked in
+  RCHL10).
+\item Bugfixes discussed in RCHL12.
+\end{itemize}
+
+\section{Examples}
+\label{sec:examples}
+\lstset{numbers=left, numberstyle=\tiny, stepnumber=1, numbersep=5pt,
+  basicstyle=\ttfamily, keywordstyle=\ttfamily,
+  identifierstyle=\ttfamily, commentstyle=\ttfamily,
+  stringstyle=\ttfamily, breaklines}
+
+\subsection{Example .struct file}
+\label{sec:ex_struct_file}
+Here is an example .struct file:
+
+\lstinputlisting{../test.struct}
+
+\subsection{Example .vs file}
+\label{sec:ex_vs_file}
+And an example .vs file that uses those structs:
+
+\lstinputlisting{../test.vs}
+
+\subsection{Example .v file}
+\label{sec:ex_v_file}
+Finally, here the the .v file that Veristruct outputs:
+
+\lstinputlisting{../test.v}
+\end{document}
