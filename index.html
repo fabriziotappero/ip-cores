@@ -1,0 +1,222 @@
+<head>
+<link rel="stylesheet" href="../../style.css" type="text/css">
+</head>
+<a href="javascript:history.go(-1)" onMouseOver="self.status=document.referrer;return true">Go Back</a>
+<p align='right'><a href='heap_sorter.tar.gz'>Source code</a></p>
+<body>
+<div class="main">
+ <div class="mid" id="dm">
+  <div class="content" id="dmc">
+   <h2>
+    Details
+   </h2>
+   <p>
+    Name: heap_sorter
+    <br/>
+    Created: Oct 14, 2012
+    <br/>
+    Updated: Oct 15, 2012
+    <br/>
+    SVN Updated: Jul  4, 2013
+    
+    
+    
+    
+    
+    
+   </p>
+   <h2>
+    Other project properties
+   </h2>
+   <p>
+    Category:
+    
+     Arithmetic core
+    
+    <br/>
+    Language:
+    
+     VHDL
+    
+    <br/>
+    Development status:
+    
+     Beta
+    
+    <br/>
+    Additional info:
+    <br/>
+    WishBone Compliant: No
+    <br/>
+    License: BSD
+   </p>
+   <div id="d_Description">
+    <h2>
+     
+     
+     Description
+    </h2>
+    <p id="p_Description">
+     This project implements a sorter able to sort a continuous stream of data, consisting of records labeled with "sort keys".
+     <br/>
+     Sorter sorts one record every two clock cycles.
+     <br/>
+     Sorter is based on the heap sort algorithm. Efficient implementation is assured thanks to the use of internal dual port
+     <br/>
+     RAM in FPGA.
+     <br/>
+     The required size of heap is equal to the expected maximum distance between unsorted records in the data stream.
+    </p>
+   </div>
+   <div id="d_Detailed description">
+    <h2>
+     
+     
+     Detailed description
+    </h2>
+    <p id="p_Detailed description">
+     The sorter implemented in this project is designed for sorting of stream of constant length records.
+     <br/>
+     The main supposed application area are the multichannel data acquisition systems, where data records
+labelled with time stamps are transmitted through multiple channels with different latencies 
+to the data concentrator, which should sort data according to their time stamps and source identifiers
+before sending them to further processing.
+     <br/>
+     Each record contains the "sort key" and the payload.
+In the simplest case, the sort key may be a N-bit bit vector, treated as unsigned integer number.
+     <br/>
+     Of course in case of lengthy data stream, the sort key will reach its maximum
+value of 2^N-1 and then wrap to 0.
+For the sorter it is fully acceptable, as long, as the capacity of the sorter (maximum number of data records
+stored in the sorter) summed with the maximum distance between unsorted records in the input data stream is less than half of the maximum value of the sort-key.
+     <br/>
+     In this case we may compare sort keys of the newly received data record and data records stored in the sorter
+using simple operation:
+     <br/>
+    </p>
+    <p class="u_cmd">
+     signal unsigned sort_key1(N-1 downto 0);
+     <br/>
+     signal unsigned sort_key2(N-1 downto 0);
+     <br/>
+     signal signed sort_key_diff(N-1 downto 0);
+     <br/>
+     [...]
+     <br/>
+     sort_key_diff
+    </p>
+    Correct operation of the sorter requires, that the heap is initially filled with the records labelled
+with smallest possible values of the sort key. Similarly, when all data are sent to the sorter, it is necessary to send to the input of the sorter records with the biggest possible value of sort key.
+
+The "smallest possible" and the "biggest possible" values are implemented using additional bit fields "init" and "valid". This implementation allows as also to mark temporary interruptions in the stream of data, as shown below:
+    <ul>
+     <li>
+      init=1, valid=0 - "initial record"
+      <br/>
+      The sorter is filled with initial records on the beginning of operation. The "initial record" is "smaller" than any data record. On the output of the sorter initial records may be discarded.
+     </li>
+     <li>
+      init=1, valid=1 - "end record"
+      <br/>
+      When all data are transferred to the sorter, you should feed the sorter with "end records" to keep the data flowing through the sorter, and to "flush" last sorted data out of the sorter. The "end record" is "bigger" than any data record. When first "end record" appears on the output, all data are sorted.
+     </li>
+     <li>
+      init=0, valid=1 - "standard data record"
+      <br/>
+      This record contains the useful data. The time-stamp is stored in the "sort-key" and user data in the "payload".
+     </li>
+     <li>
+      init=0, valid=0 - "empty data record"
+      <br/>
+      When in the particular sorting cycle there are no valid data on the input of the sorter, the last data records remain in the sorter. Therefore you may feed the sorter with "empty data records" with sort key equal to to the highest recent sort key, to keep data flowing through the sorter. On the output the "empty data records" may get discarded.
+     </li>
+    </ul>
+    The main entity of the sorter is defined as follows:
+    <br/>
+    <p class="u_cmd">
+     entity sorter_sys is
+     <br/>
+     generic (
+     <br/>
+     NLEVELS : integer := SYS_NLEVELS     -- number of levels in the sorter heap
+     <br/>
+     );
+     <br/>
+     port (
+     <br/>
+     din   : in  T_DATA_REC;
+     <br/>
+     we    : in  std_logic;
+     <br/>
+     dout  : out T_DATA_REC;
+     <br/>
+     dav   : out std_logic;
+     <br/>
+     clk   : in  std_logic;
+     <br/>
+     rst_n : in  std_logic;
+     <br/>
+     ready : out std_logic);
+     <br/>
+     end sorter_sys;
+     <br/>
+    </p>
+    To customize it to your needs, you should adjust definition of the
+    type in the
+    file.
+Additionally you may also need to modify functions for converting data records into the std_logic_vector and from the std_logic_vector (
+    and
+    ).
+    <br/>
+    You may also change definition of the
+    , but then probably you should also change the function
+    used to compare sort keys in two data records.
+    <br/>
+    The sources provide also complete testbench for my sorter. To check it, you should simply adjust parameters given in the "sort_test_gen.py" file and run "make".
+    <br/>
+    The Python script will generate the sorter configuration and input records. Then the makefile will compile the testbench and run the simulation.
+    <br/>
+    Finally the records on the output will be analysed. If everything works fine, the "Test passed!" message will be displayed.
+    <br/>
+    The simulation is prepared for the Linux system, and uses the
+    
+     ghdl
+    
+    simulator.
+    <br/>
+    If you want to synthesize the sorter for use in real FPGA, you should replace the implementation found in
+    with implementation based on:
+    
+     http://danstrother.com/2010/09/11/inferring-rams-in-fpgas/
+    
+    The source is available in
+    <br/>
+    All my sources in this archive are published under the BSD license. You can use them and modify them, however you should keep the information about the original author.
+    <br/>
+    First implementation of the sorter has been described in my paper:
+    <br/>
+    Wojciech M. Zabo&#322;otny, "Dual port memory based Heapsort implementation for FPGA", Proc. SPIE 8008, 80080E (2011);
+    
+     doi:10.1117/12.905281
+    
+    .
+I'll be glad if you cite my paper, when you publish something based on my sources.
+    <br/>
+    The archive contains also some sources (dpram4.vhd, dpram_inf.vhd) which were obtained from sources with unclear licensing conditions - so I simply provide them for completeness, but I'm not able to set any specific licensing for them.
+    <br/>
+    I don't know whether my sorter infringes any patents. If you want to use it for commercial purposes, you should check it yourself. I also don't know if my sorter works correctly in all possible conditions. I provide it "AS IS" without any warranty. You use it on your own risk!
+    First version of the sorter is available on my own website:
+    
+     http://www.ise.pw.edu.pl/~wzab/fpga_heapsort/
+    
+    
+     .
+    
+   </div>
+  </div>
+  <div style="clear:both;margin-left:200px;">
+  </div>
+ </div>
+</div>
+</body>
+<p id='foot'>Database updated on 12 June 2015</p>
