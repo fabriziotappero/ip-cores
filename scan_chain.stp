@@ -1,0 +1,132 @@
+NOTE "CREATOR" "&RA version 1.0";
+NOTE "DATE" "2014/05/07";
+'NOTE "STAPL_VERSION" "JESD00-C";
+'NOTE "ALG_VERSION" "4";
+'NOTE "STACK_DEPTH" "3";
+'NOTE "MAX_FREQ" "10000000"; '10MHz
+'NOTE "TARGET" "1";
+
+'*********************************************************
+ACTION READ_IDCODES = DO_READ_IDCODES;
+ACTION READ_IDCODE = DO_READ_IDCODE;
+ACTION READ_IDCODE1 = DO_READ_IDCODE1;
+ACTION READ_IDCODE2 = DO_READ_IDCODE2;
+ACTION BYPASS = DO_BYPASS;
+'*********************************************************
+
+DATA data_id;
+BOOLEAN idcode_data[32*10]; '[idcode_length * max_num_devices]
+BOOLEAN i_idcode[10] = #1001101000; 'assumed IDCODE instruction
+BOOLEAN ones_data[10*32] =
+    $FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+     FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
+BOOLEAN tmp_ir[10*10]; '[ir_length * max_num_devices]
+BOOLEAN read_data[10+1]; 'max_num_devices + 1
+INTEGER max_num_devices =10;
+INTEGER ir_length=10;
+INTEGER total_irlength=0;
+INTEGER idcode_length =32;
+BOOLEAN irdata[10*32];
+INTEGER i;
+INTEGER j;
+INTEGER number_of_chips;
+ENDDATA;
+
+
+PROCEDURE SELECT1;
+	PREIR 0;
+    PREDR 0;
+	POSTIR 8;
+	POSTDR 1;
+ENDPROC;
+
+PROCEDURE SELECT2;
+    PREIR 8;
+    PREDR 1;
+    POSTIR 0;
+    POSTDR 0;
+ENDPROC;
+
+PROCEDURE DO_READ_IDCODE USES data_id;
+    IRSTOP IRPAUSE;
+    DRSTOP DRPAUSE;
+	PRINT ">IRSCAN";
+    IRSCAN 8, $0f, CAPTURE irdata[7..0];
+    WAIT IDLE, 1 CYCLES;
+    DRSCAN 32, $00000000, CAPTURE idcode_data[31..0];
+    EXPORT "IDCODE", idcode_data[31..0];
+ENDPROC;
+
+PROCEDURE DO_READ_IDCODE1 USES SELECT1, DO_READ_IDCODE, data_id;
+	CALL SELECT1;
+	CALL DO_READ_IDCODE;
+ENDPROC;
+
+PROCEDURE DO_READ_IDCODE2 USES SELECT2, DO_READ_IDCODE, data_id;
+    CALL SELECT2;
+    CALL DO_READ_IDCODE;
+ENDPROC;
+
+PROCEDURE DO_BYPASS USES data_id;
+    IRSTOP IRPAUSE;
+    DRSTOP DRPAUSE;
+    IRSCAN 8, $ff, CAPTURE irdata[7..0];
+    EXPORT "Prev IR", irdata[7..0];
+    WAIT IDLE, 1 CYCLES;
+    DRSCAN 32, $00000000, CAPTURE idcode_data[31..0];
+    EXPORT "DRSCAN", idcode_data[31..0];
+ENDPROC;
+
+'*****************************************************
+PROCEDURE DO_READ_IDCODES USES compute_number_of_chips, data_id;
+	'Initialize devices
+	IRSTOP IRPAUSE;
+	DRSTOP DRPAUSE;
+	STATE RESET;
+	CALL compute_number_of_chips;
+
+	'Read id codes of all devices in the chain
+	'Method - after reset the DR should contain the 32-bit ID number
+	STATE RESET;
+	DRSCAN (number_of_chips*idcode_length),
+		ones_data[((number_of_chips* idcode_length)-1)..0], 
+		CAPTURE idcode_data[((number_of_chips* idcode_length)-1)..0];
+	FOR i=0 TO (number_of_chips-1);
+		' that does not work;EXPORT "IDCODE", idcode_data[((i*32)+31)..(i*32)];
+		FOR j=0 TO 31;
+			irdata[j] = idcode_data[(i*32)+j];
+		NEXT j;
+		EXPORT "IDCODE",irdata[31..0];
+	NEXT i;	
+ENDPROC;
+
+'*********************************************************
+PROCEDURE compute_number_of_chips USES data_id;
+
+	'Compute the total length of the IR
+	FOR i=0 to (ir_length * max_num_devices);
+		irdata[i] = 0;
+	NEXT i;
+	IRSCAN (ir_length * max_num_devices), irdata[((ir_length * max_num_devices)-1)..0];
+    IRSCAN (ir_length * max_num_devices), ones_data[((ir_length * max_num_devices)-1)..0],
+		CAPTURE irdata[((ir_length * max_num_devices)-1)..0];
+	FOR i=0 TO (ir_length * max_num_devices)-1;
+    	IF(irdata[i] ==0) THEN
+      	total_irlength = total_irlength+1;
+	NEXT i;
+
+	'Compute number of chips in the chain by sending BYPASS codes into the chain
+	IRSCAN (ir_length * max_num_devices), 
+		ones_data[((ir_length * max_num_devices)-1)..0];
+	DRSCAN (max_num_devices +1), 
+		ones_data[max_num_devices..0], 
+		CAPTURE read_data[max_num_devices..0];
+	FOR i=0 TO max_num_devices-1;
+		IF(read_data[i] ==0) THEN
+		number_of_chips=number_of_chips+1;
+	NEXT i;
+	EXPORT "Number of chips",number_of_chips;
+ENDPROC;
+'********************************************************
+
+CRC 2001;

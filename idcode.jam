@@ -1,0 +1,505 @@
+NOTE "CREATOR" "Altera Chain Interrogation Version 5.0";
+'               Copyright (c) 1999-2007 Altera Corporation.  All Rights Reserved.
+'               File name:  IDCODE.JAM
+
+NOTE "DATE" "2007/12/24";
+NOTE "ALG_VERSION" "1";
+NOTE "STAPL_VERSION" "JESD71";
+NOTE "MAX_FREQ" "10000000";
+
+ACTION read_idcode = header                    RECOMMENDED,
+                     check_chain               RECOMMENDED,
+                     compute_number_of_devices RECOMMENDED,
+                     compute_ir_length         RECOMMENDED,
+                     read_the_idcode           RECOMMENDED,
+                     device_identifier         RECOMMENDED,
+                     exiting;
+
+DATA data_chain;
+  ' Global Constants
+  INTEGER max_num_devices = 100;
+  INTEGER max_ir_length = 1020; 'Suggested value (max_devices)*10 + ~20 extra
+  INTEGER max_idlength = max_num_devices * 32;
+  BOOLEAN all_zeros[3200];
+  BOOLEAN all_ones[3200] =   $FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+                              FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+                              FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+                              FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+                              FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+                              FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+                              FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+                              FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
+  BOOLEAN zeros_ones[max_ir_length*2] 
+                           = $FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+                              FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+                              FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+                              0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+                              0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+                              0000000000000000000000000000000000000000000000000000000;
+  BOOLEAN patterns[3200] =   $FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+                              FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+                              FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+                              FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+                              FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+                              FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+                              FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+                              FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF4321;
+  BOOLEAN id_capture[3200] = $FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+                              FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+                              FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+                              FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+                              FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+                              FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+                              FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+                              FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
+  ' Global Variables
+  INTEGER num_devices = max_num_devices; 'Initialize to max_num_devices in case compute_number_of_devices is skipped.
+  BOOLEAN read_instruction[1600];
+  INTEGER ir_length;
+  BOOLEAN ir_capture[max_ir_length];
+  INTEGER device_list[max_num_devices]; 'Stores a list of integers representing the device names
+  BOOLEAN read_data[2*max_ir_length];
+  BOOLEAN stuck_tdo_flag; 'temporary flag
+  INTEGER i_device;
+  INTEGER offset;
+  BOOLEAN idval[32];
+  BOOLEAN id_match;
+  BOOLEAN id_match_cum;
+ENDDATA;
+
+PROCEDURE header;
+  PRINT "******************************************************************************";
+  PRINT "* Altera Chain Interrogation Version 5.0                                     *";
+  PRINT "*   Copyright (c) 1999-2007 Altera Corporation.  All Rights Reserved.        *";
+ENDPROC;
+
+PROCEDURE check_chain USES data_chain;
+  PRINT "******************************************************************************";
+  PRINT "Chain Continuity Checker";
+  STATE RESET;
+  IRSCAN max_ir_length, all_ones[(max_ir_length-1)..0], COMPARE all_ones[(max_ir_length-1)..0], all_ones[(max_ir_length-1)..0], stuck_tdo_flag;
+  IF (stuck_tdo_flag == 1) THEN PRINT "  ****************************************************************************";
+  IF (stuck_tdo_flag == 1) THEN PRINT "  *** Chain Continuity Failure (1) -- IR is returning TDO with all ones    ***";
+  IF (stuck_tdo_flag == 1) THEN PRINT "  *** Check Cable Connection; Check Cable Power; Check Signal Integrity    ***";
+  IF (stuck_tdo_flag == 1) THEN PRINT "  *** Check TDO connection; Check TDO polarity of Player                   ***";
+  IF (stuck_tdo_flag == 1) THEN PRINT "  ****************************************************************************";
+  IF (stuck_tdo_flag == 1) THEN EXIT (1);
+  STATE RESET;
+  IRSCAN max_ir_length, all_ones[(max_ir_length-1)..0], COMPARE all_zeros[(max_ir_length-1)..0], all_ones[(max_ir_length-1)..0], stuck_tdo_flag;
+  IF (stuck_tdo_flag == 1) THEN PRINT "  ****************************************************************************";
+  IF (stuck_tdo_flag == 1) THEN PRINT "  *** Chain Continuity Failure (2) -- IR is returning with TDO all zeros   ***";
+  IF (stuck_tdo_flag == 1) THEN PRINT "  *** Check Board Power; Check Cable Power; Check Signal Integrity         ***";
+  IF (stuck_tdo_flag == 1) THEN PRINT "  ****************************************************************************";
+  IF (stuck_tdo_flag == 1) THEN EXIT (1);
+  'XXXXXXXXX Should add test for leading 10 for IR capture of first device
+  PRINT "  Chain Continuity during IR is not stuck at zero or one";
+  'XXXXXXXXX Should add test for known pattern coming out of TDO
+ENDPROC;
+
+PROCEDURE compute_number_of_devices USES data_chain;
+  PRINT "******************************************************************************";
+  PRINT "Chain Length -- Load IR of all ones then count DR length";
+  INTEGER device_count;
+  num_devices = 0;
+  STATE RESET;
+  IRSCAN max_ir_length, all_ones[max_ir_length-1..0], CAPTURE ir_capture[max_ir_length-1..0];
+  DRSCAN (max_num_devices+1+16), patterns[max_num_devices+16..0], CAPTURE read_data[max_num_devices+16..0];
+  FOR device_count=0 TO max_num_devices - 1;
+    IF (read_data[device_count] == 0) THEN num_devices = num_devices + 1;
+    IF (read_data[device_count] != 0) THEN device_count = max_num_devices - 1; 'terminating condition
+  NEXT device_count;
+  BOOLEAN pattern_det;
+  pattern_det =   (read_data[num_devices     ] == 1)  'Array compare to value $4321
+               && (read_data[num_devices +  1] == 0)
+               && (read_data[num_devices +  2] == 0)
+               && (read_data[num_devices +  3] == 0)
+               && (read_data[num_devices +  4] == 0)
+               && (read_data[num_devices +  5] == 1)
+               && (read_data[num_devices +  6] == 0)
+               && (read_data[num_devices +  7] == 0)
+               && (read_data[num_devices +  8] == 1)
+               && (read_data[num_devices +  9] == 1)
+               && (read_data[num_devices + 10] == 0)
+               && (read_data[num_devices + 11] == 0)
+               && (read_data[num_devices + 12] == 0)
+               && (read_data[num_devices + 13] == 0)
+               && (read_data[num_devices + 14] == 1)
+               && (read_data[num_devices + 15] == 0);
+
+  IF (pattern_det == 0) THEN PRINT "  ****************************************************************************";
+  IF (pattern_det == 0) THEN PRINT "  *** Chain Continuity Failure (3) -- DR of Bypass detects an unexpected   ***";
+  IF (pattern_det == 0) THEN PRINT "  *** non-zero pattern                                                     ***";
+  IF (pattern_det == 0) THEN PRINT "  *** Check JTAG Chain -- Probably a break in TDI to TDO chain between     ***";
+  IF (pattern_det == 0) THEN PRINT "  *** devices #",num_devices," and #", num_devices+1, " (counting from TDO) because ", num_devices, " zeros were shifted   ***";
+  IF (pattern_det == 0) THEN PRINT "  *** out successfully before encountering the unexpected values.          ***";
+  IF (pattern_det == 0) THEN PRINT "  *** Check Signal Integrity                                               ***";
+  IF (pattern_det == 0) THEN PRINT "  ****************************************************************************";
+  IF (pattern_det == 0) THEN EXIT(2);
+  PRINT "  Number of Devices is ", num_devices;
+  IF (num_devices == 0) THEN PRINT "  ****************************************************************************";
+  IF (num_devices == 0) THEN PRINT "  *** Chain Continuity Failure (4) -- DR of Bypass shows Chain length of   ***";
+  IF (num_devices == 0) THEN PRINT "  *** zero devices                                                         ***";
+  IF (num_devices == 0) THEN PRINT "  *** Check JTAG Chain; Check Signal Integrity                             ***";
+  IF (num_devices == 0) THEN PRINT "  ****************************************************************************";
+  IF (num_devices == 0) THEN EXIT(2);
+  IF (num_devices > 100) THEN PRINT "  ****************************************************************************";
+  IF (num_devices > 100) THEN PRINT "  *** Error: Number devices in chain exceeds maximum number of devices     ***";
+  IF (num_devices > 100) THEN PRINT "  *** that this file can support.                                          ***";
+  IF (num_devices > 100) THEN PRINT "  ****************************************************************************";
+  IF (num_devices > 100) THEN EXIT(2);
+ENDPROC;
+
+PROCEDURE compute_ir_length USES data_chain;
+  PRINT "******************************************************************************";
+  PRINT "IR Length Calculator";
+  IRSCAN max_ir_length*2, zeros_ones[(max_ir_length*2-1)..0], CAPTURE read_data[(max_ir_length*2-1)..0];
+  ir_length = 0;
+  INTEGER i_irlen;
+  FOR i_irlen = (max_ir_length) TO (max_ir_length*2-1);
+    IF (read_data[i_irlen] == 0) THEN ir_length = ir_length + 1;
+  NEXT i_irlen;
+  PRINT "  Instruction Register Length is ", ir_length;
+ENDPROC;
+
+PROCEDURE read_the_idcode USES data_chain;
+  PRINT "******************************************************************************";
+  PRINT "IDCODE Reader";
+  STATE RESET;
+  DRSCAN max_idlength, all_ones[max_idlength-1..0], CAPTURE id_capture[max_idlength-1..0];
+  PRINT "  ---------- | ---- ------------------- ------------- - |"; 
+  PRINT "  TDO -> TDI | Rev  Device              Mfgr          1 |"; 
+  PRINT "  ---------- | ---- ------------------- ------------- - |";
+  offset = 0;
+  FOR i_device = 1 to num_devices;
+    IF (id_capture[offset] == 0) THEN GOTO no_optional_idcode_read;
+      'IDCODE supported
+      PRINT "  Device #", i_device, "  | " , 
+        'revision
+        id_capture[offset + 31], id_capture[offset + 30], id_capture[offset + 29], id_capture[offset + 28], " ",
+        'device
+        id_capture[offset + 27], id_capture[offset + 26], id_capture[offset + 25], id_capture[offset + 24], " ",
+        id_capture[offset + 23], id_capture[offset + 22], id_capture[offset + 21], id_capture[offset + 20], " ",
+        id_capture[offset + 19], id_capture[offset + 18], id_capture[offset + 17], id_capture[offset + 16], " ",  
+        id_capture[offset + 15], id_capture[offset + 14], id_capture[offset + 13], id_capture[offset + 12], " ",
+        'vendor
+        id_capture[offset + 11], id_capture[offset + 10], id_capture[offset +  9], id_capture[offset +  8], " ",
+        id_capture[offset +  7], id_capture[offset +  6], id_capture[offset +  5], id_capture[offset +  4], " ",
+        id_capture[offset +  3], id_capture[offset +  2], id_capture[offset +  1], " ",  
+        'mandatory 1
+        id_capture[offset], " | ";
+       offset = offset + 32;
+        GOTO end_device_idcode_read;
+      'IDCODE not supported
+      no_optional_idcode_read:
+        PRINT "  Device #", i_device, "  | .... .... .... .... .... .... .... ... 0 | No IDCODE support";
+        offset = offset+1;
+    end_device_idcode_read:  
+  NEXT i_device;
+  PRINT "  ---------- | ---- ------------------- ------------- - |"; 
+  ' Should add test for remaining bits being 1
+ENDPROC;
+
+PROCEDURE device_identifier USES data_chain, compare_one_idval, compare_known_idvals;
+  PRINT "******************************************************************************";
+  PRINT "Device Identifier -- Search for device name from list of device IDCODE values";
+  PRINT "  ---------- |      ------------------- -------------   |"; 
+  PRINT "  TDO -> TDI |      Device              Mfgr            |"; 
+  PRINT "  ---------- |      ------------------- -------------   |";
+  offset = 0;
+  FOR i_device = 1 to num_devices;
+    IF (id_capture[offset] == 0) THEN GOTO no_optional_idcode_ident;
+    'IDCODE supported
+      CALL compare_known_idvals;
+      offset = offset + 32;
+      GOTO end_device_idcode_ident;
+    'IDCODE not supported
+    no_optional_idcode_ident:
+      PRINT "  Device #", i_device, "  |      No IDCODE support                   |";
+      offset = offset+1;
+    end_device_idcode_ident:  
+  NEXT i_device;
+  PRINT "  ---------- |      ------------------- ------------- - |";
+  ' Should add test for remaining bits being 1
+ENDPROC;
+
+PROCEDURE compare_known_idvals USES data_chain, compare_one_idval;
+  id_match_cum = 0;
+  '***** Altera MAX 7000 *****
+  idval[31..0] = $070320DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPM7032S            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 1;
+  idval[31..0] = $070640DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPM7064S            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 2;
+  idval[31..0] = $070960DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPM7096S            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 3;
+  idval[31..0] = $071280DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPM7128S/A          Altera          |"; IF id_match == 1 THEN device_list[i_device] = 4;
+  idval[31..0] = $071600DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPM7160S            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 5;
+  idval[31..0] = $071920DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPM7192S            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 6;
+  idval[31..0] = $072560DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPM7256S/A          Altera          |"; IF id_match == 1 THEN device_list[i_device] = 7;
+  idval[31..0] = $170320DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPM7032AE/EPM3032A  Altera          |"; IF id_match == 1 THEN device_list[i_device] = 8;
+  idval[31..0] = $170640DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPM7064AE/EPM3064A  Altera          |"; IF id_match == 1 THEN device_list[i_device] = 9;
+  idval[31..0] = $171280DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPM7128AE/EPM3128A  Altera          |"; IF id_match == 1 THEN device_list[i_device] = 10;
+  idval[31..0] = $172560DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPM7256AE/EPM3256A  Altera          |"; IF id_match == 1 THEN device_list[i_device] = 11;
+  idval[31..0] = $175120DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPM7512AE/EPM3512A  Altera          |"; IF id_match == 1 THEN device_list[i_device] = 12;
+  idval[31..0] = $270320DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPM7032B            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 13;
+  idval[31..0] = $270640DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPM7064B            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 14;
+  idval[31..0] = $271280DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPM7128B            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 15;
+  idval[31..0] = $272560DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPM7256B            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 16;
+  idval[31..0] = $275120DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPM7512B            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 17;
+
+  '***** Altera MAX 9000 *****
+  idval[31..0] = $093200DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPM9320/A           Altera          |"; IF id_match == 1 THEN device_list[i_device] = 18;
+  idval[31..0] = $094000DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPM9400             Altera          |"; IF id_match == 1 THEN device_list[i_device] = 19;
+  idval[31..0] = $094800DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPM9480             Altera          |"; IF id_match == 1 THEN device_list[i_device] = 20;
+  idval[31..0] = $095600DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPM9560/A           Altera          |"; IF id_match == 1 THEN device_list[i_device] = 21;
+
+  '***** Altera MAX II *****
+  idval[31..0] = $020A10DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPM240              Altera          |"; IF id_match == 1 THEN device_list[i_device] = 22;
+  idval[31..0] = $020A20DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPM570              Altera          |"; IF id_match == 1 THEN device_list[i_device] = 23;
+  idval[31..0] = $020A30DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPM1270             Altera          |"; IF id_match == 1 THEN device_list[i_device] = 24;
+  idval[31..0] = $020A40DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPM2210             Altera          |"; IF id_match == 1 THEN device_list[i_device] = 25;
+  idval[31..0] = $020A50DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPM240Z             Altera          |"; IF id_match == 1 THEN device_list[i_device] = 26;
+  idval[31..0] = $020A60DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPM570Z             Altera          |"; IF id_match == 1 THEN device_list[i_device] = 27;
+
+  '***** Altera EPC *****
+  idval[31..0] = $010020DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPC2                Altera          |"; IF id_match == 1 THEN device_list[i_device] = 28;
+  idval[31..0] = $0100A0DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPC4/EPC8/EPC16     Altera          |"; IF id_match == 1 THEN device_list[i_device] = 29;
+
+  '***** Altera APEX 20K/E/C *****
+  idval[31..0] = $004160DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP20K100            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 30;
+  idval[31..0] = $008320DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP20K200            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 31;
+  idval[31..0] = $016640DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP20K400            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 32;
+  idval[31..0] = $080300DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP20K30E            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 33;
+  idval[31..0] = $080600DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP20K60E            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 34;
+  idval[31..0] = $081000DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP20K100E           Altera          |"; IF id_match == 1 THEN device_list[i_device] = 35;
+  idval[31..0] = $081600DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP20K160E           Altera          |"; IF id_match == 1 THEN device_list[i_device] = 36;
+  idval[31..0] = $082000DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP20K200E/C         Altera          |"; IF id_match == 1 THEN device_list[i_device] = 37;
+  idval[31..0] = $083000DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP20K300E           Altera          |"; IF id_match == 1 THEN device_list[i_device] = 38;
+  idval[31..0] = $084000DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP20K400E/C         Altera          |"; IF id_match == 1 THEN device_list[i_device] = 39;
+  idval[31..0] = $086000DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP20K600E/C         Altera          |"; IF id_match == 1 THEN device_list[i_device] = 40;
+  idval[31..0] = $090000DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP20K1000E/C        Altera          |"; IF id_match == 1 THEN device_list[i_device] = 41;
+  idval[31..0] = $095000DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP20K1500E          Altera          |"; IF id_match == 1 THEN device_list[i_device] = 42;
+
+  '***** Altera APEX II *****
+  idval[31..0] = $0C4000DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP2A15	       Altera          |"; IF id_match == 1 THEN device_list[i_device] = 43;
+  idval[31..0] = $0C6000DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP2A25              Altera          |"; IF id_match == 1 THEN device_list[i_device] = 44;
+  idval[31..0] = $0D0000DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP2A40              Altera          |"; IF id_match == 1 THEN device_list[i_device] = 45;
+  idval[31..0] = $0E0000DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP2A70              Altera          |"; IF id_match == 1 THEN device_list[i_device] = 46;
+
+  '***** Altera FLEX10K/E and ACEX 1K *****
+  idval[31..0] = $010100DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPF10K10/A          Altera          |"; IF id_match == 1 THEN device_list[i_device] = 47;
+  idval[31..0] = $010200DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPF10K20            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 48;
+  idval[31..0] = $010300DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPF10K30/A          Altera          |"; IF id_match == 1 THEN device_list[i_device] = 49;
+  idval[31..0] = $010400DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPF10K40            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 50;
+  idval[31..0] = $010500DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPF10K50/V          Altera          |"; IF id_match == 1 THEN device_list[i_device] = 51;
+  idval[31..0] = $010700DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPF10K70            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 52;
+  idval[31..0] = $001000DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPF10K100/A         Altera          |"; IF id_match == 1 THEN device_list[i_device] = 53;
+  idval[31..0] = $001300DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPF10K130V          Altera          |"; IF id_match == 1 THEN device_list[i_device] = 54;
+  idval[31..0] = $002500DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPF10K250A          Altera          |"; IF id_match == 1 THEN device_list[i_device] = 55;
+  idval[31..0] = $101000DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPF10K100B          Altera          |"; IF id_match == 1 THEN device_list[i_device] = 56;
+  idval[31..0] = $110100DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP1K10              Altera          |"; IF id_match == 1 THEN device_list[i_device] = 57;
+  idval[31..0] = $110300DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP1K30/EPF10K30E    Altera          |"; IF id_match == 1 THEN device_list[i_device] = 58;
+  idval[31..0] = $110500DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP1K50/EPF10K50E/S  Altera          |"; IF id_match == 1 THEN device_list[i_device] = 59;
+  idval[31..0] = $201000DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP1K100/EPF10K100E  Altera          |"; IF id_match == 1 THEN device_list[i_device] = 60;
+  idval[31..0] = $101300DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPF10K130E          Altera          |"; IF id_match == 1 THEN device_list[i_device] = 61;
+  idval[31..0] = $102000DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EPF10K200E/S        Altera          |"; IF id_match == 1 THEN device_list[i_device] = 62;
+
+  '***** Altera Stratix *****
+  idval[31..0] = $020010DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP1S10              Altera          |"; IF id_match == 1 THEN device_list[i_device] = 63;
+  idval[31..0] = $020020DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP1S20              Altera          |"; IF id_match == 1 THEN device_list[i_device] = 64;
+  idval[31..0] = $020030DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP1S25              Altera          |"; IF id_match == 1 THEN device_list[i_device] = 65;
+  idval[31..0] = $020040DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP1S30              Altera          |"; IF id_match == 1 THEN device_list[i_device] = 66;
+  idval[31..0] = $020050DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP1S40              Altera          |"; IF id_match == 1 THEN device_list[i_device] = 67;
+  idval[31..0] = $020060DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP1S60              Altera          |"; IF id_match == 1 THEN device_list[i_device] = 68;
+  idval[31..0] = $020070DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP1S80              Altera          |"; IF id_match == 1 THEN device_list[i_device] = 69; 
+
+  '***** Altera Stratix II*****
+  idval[31..0] = $020910DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP2S15              Altera          |"; IF id_match == 1 THEN device_list[i_device] = 70;
+  idval[31..0] = $020920DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP2S30              Altera          |"; IF id_match == 1 THEN device_list[i_device] = 71;
+  idval[31..0] = $120930DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP2S60              Altera          |"; IF id_match == 1 THEN device_list[i_device] = 72;
+  idval[31..0] = $020940DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP2S90              Altera          |"; IF id_match == 1 THEN device_list[i_device] = 73;
+  idval[31..0] = $020950DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP2S130             Altera          |"; IF id_match == 1 THEN device_list[i_device] = 74;
+  idval[31..0] = $020960DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP2S180             Altera          |"; IF id_match == 1 THEN device_list[i_device] = 75;
+
+'***** Altera Stratix III *****
+  idval[31..0] = $021080DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP3SL50             Altera          |"; IF id_match == 1 THEN device_list[i_device] = 76;
+  idval[31..0] = $021010DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP3SL70             Altera          |"; IF id_match == 1 THEN device_list[i_device] = 77;
+  idval[31..0] = $021090DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP3SL110            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 78;
+  idval[31..0] = $021020DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP3SL150            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 79;
+  idval[31..0] = $021030DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP3SL200            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 80;
+  idval[31..0] = $021050DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP3SL340            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 81;
+  idval[31..0] = $021060DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP3SE50             Altera          |"; IF id_match == 1 THEN device_list[i_device] = 82;
+  idval[31..0] = $0210A0DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP3SE80             Altera          |"; IF id_match == 1 THEN device_list[i_device] = 83;
+  idval[31..0] = $021070DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP3SE110            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 84;
+  idval[31..0] = $021040DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP3SE260            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 85;
+
+  '***** Altera Stratix GX *****
+  idval[31..0] = $020410DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP1SGX10            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 86;
+  idval[31..0] = $020430DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP1SGX25            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 87;
+  idval[31..0] = $020450DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP1SGX40            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 88;
+
+'***** Altera Stratix II GX *****
+  idval[31..0] = $020E10DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP2SGX30            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 89;
+  idval[31..0] = $020E20DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP2SGX60            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 90;
+  idval[31..0] = $020E30DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP2SGX90            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 91;
+  idval[31..0] = $020E40DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP2SGX130           Altera          |"; IF id_match == 1 THEN device_list[i_device] = 92;
+
+'***** Altera Arria GX *****
+  idval[31..0] = $021210DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP1AGX20            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 93;
+  idval[31..0] = $021210DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP1AGX35            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 94;
+  idval[31..0] = $021220DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP1AGX50            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 95;
+  idval[31..0] = $021220DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP1AGX60            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 96;
+  idval[31..0] = $021230DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP1AGX90            Altera          |"; IF id_match == 1 THEN device_list[i_device] = 97;
+
+  '***** Altera Cyclone *****
+  idval[31..0] = $020810DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP1C3               Altera          |"; IF id_match == 1 THEN device_list[i_device] = 98;
+  idval[31..0] = $020850DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP1C4               Altera          |"; IF id_match == 1 THEN device_list[i_device] = 99;
+  idval[31..0] = $020820DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP1C6               Altera          |"; IF id_match == 1 THEN device_list[i_device] = 100;
+  idval[31..0] = $020830DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP1C12              Altera          |"; IF id_match == 1 THEN device_list[i_device] = 101;
+  idval[31..0] = $020840DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP1C20              Altera          |"; IF id_match == 1 THEN device_list[i_device] = 102;
+
+  '***** Altera Cyclone II*****
+  idval[31..0] = $020B10DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP2C5               Altera          |"; IF id_match == 1 THEN device_list[i_device] = 103;
+  idval[31..0] = $020B20DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP2C8               Altera          |"; IF id_match == 1 THEN device_list[i_device] = 104;
+  idval[31..0] = $020B30DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP2C20              Altera          |"; IF id_match == 1 THEN device_list[i_device] = 105;
+  idval[31..0] = $020B40DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP2C35              Altera          |"; IF id_match == 1 THEN device_list[i_device] = 106;
+  idval[31..0] = $020B50DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP2C50              Altera          |"; IF id_match == 1 THEN device_list[i_device] = 107;
+  idval[31..0] = $020B60DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP2C70              Altera          |"; IF id_match == 1 THEN device_list[i_device] = 108;
+
+  '***** Altera Cyclone III*****
+  idval[31..0] = $020F10DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP3C5               Altera          |"; IF id_match == 1 THEN device_list[i_device] = 109;
+  idval[31..0] = $020F10DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP3C10              Altera          |"; IF id_match == 1 THEN device_list[i_device] = 110;
+  idval[31..0] = $020F20DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP3C16              Altera          |"; IF id_match == 1 THEN device_list[i_device] = 111;
+  idval[31..0] = $020F30DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP3C25              Altera          |"; IF id_match == 1 THEN device_list[i_device] = 112;
+  idval[31..0] = $020F40DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP3C40              Altera          |"; IF id_match == 1 THEN device_list[i_device] = 113;
+  idval[31..0] = $020F50DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP3C55              Altera          |"; IF id_match == 1 THEN device_list[i_device] = 114;
+  idval[31..0] = $020F60DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP3C80              Altera          |"; IF id_match == 1 THEN device_list[i_device] = 115;
+  idval[31..0] = $020F70DD;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      EP3C120             Altera          |"; IF id_match == 1 THEN device_list[i_device] = 116;
+  
+  '***** Xilinx XC9500 (Xilinx does weird stuff with their version number) *****
+  idval[31..0] = $09502093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XC9536              Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 117;
+  idval[31..0] = $29502093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XC9536(rev2)        Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 118;
+  idval[31..0] = $09504093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XC9572              Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 119;
+  idval[31..0] = $19504093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XC9572(rev1)        Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 120;
+  idval[31..0] = $29504093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XC9572(rev2)        Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 121;
+  idval[31..0] = $09506093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XC95108             Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 122;
+  idval[31..0] = $19506093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XC95108(rev1)       Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 123;
+  idval[31..0] = $29506093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XC95108(rev2)       Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 124;
+  idval[31..0] = $09508093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XC95144             Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 125;
+  idval[31..0] = $09512093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XC95216             Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 126;
+  idval[31..0] = $19512093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XC95216(rev1)       Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 127;
+  idval[31..0] = $29512093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XC95216(rev2)       Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 128;
+  idval[31..0] = $09516093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XC95288             Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 129;
+  idval[31..0] = $29516093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XC95288(rev2)       Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 130;
+
+  '***** Xilinx XC9500XL (Xilinx does weird stuff with their version number) *****
+  idval[31..0] = $09602093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XC9536XL            Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 131;
+  idval[31..0] = $19602093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XC9536XL(rev1)      Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 132;
+  idval[31..0] = $29602093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XC9536XL(rev2)      Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 133;
+  idval[31..0] = $09604093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XC9572XL            Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 134;
+  idval[31..0] = $29504093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XC9572(rev2)        Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 135;
+  idval[31..0] = $09616093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XC95288XL           Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 136;
+  idval[31..0] = $29616093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XC95288XL(rev2)     Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 137;
+
+  '***** Xilinx Virtex (Xilinx does weird stuff with their version number) *****
+  idval[31..0] = $20610093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XCV50               Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 138;
+  idval[31..0] = $20614093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XCV100              Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 139;
+  idval[31..0] = $20618093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XCV150              Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 140;
+  idval[31..0] = $2061C093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XCV200              Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 141;
+  idval[31..0] = $20620093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XCV300              Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 142;
+  idval[31..0] = $20628093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XCV400              Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 143;
+  idval[31..0] = $20630093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XCV600              Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 144;
+  idval[31..0] = $20638093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XCV800              Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 145;
+  idval[31..0] = $20640093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XCV1000             Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 146;
+
+  '***** Xilinx Virtex-E (Xilinx does weird stuff with their version number) *****
+  idval[31..0] = $20A10093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XCV50E              Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 147;
+  idval[31..0] = $20A14093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XCV100E             Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 148;
+  idval[31..0] = $20A1C093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XCV200E             Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 149;
+  idval[31..0] = $20A20093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XCV300E             Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 150;
+  idval[31..0] = $20A28093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XCV400E             Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 151;
+  idval[31..0] = $20A30093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XCV600E             Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 152;
+  idval[31..0] = $20A40093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XCV1000E            Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 153;
+  idval[31..0] = $20A48093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XCV1600E            Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 154;
+  idval[31..0] = $20A50093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XCV2000E            Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 155;
+  idval[31..0] = $20A5C093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XCV2600E            Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 156;
+  idval[31..0] = $20A68093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XCV3200E            Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 157;
+
+  '***** Xilinx Config Device (Xilinx does weird stuff with their version number) *****
+  idval[31..0] = $05024093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XC18V01             Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 158;
+  idval[31..0] = $05025093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XC18V02             Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 159;
+  idval[31..0] = $05026093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XC18V04             Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 160;
+  idval[31..0] = $05022093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XC18V256            Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 161;
+  idval[31..0] = $05023093;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      XC18V512            Xilinx          |"; IF id_match == 1 THEN device_list[i_device] = 162;
+
+  '***** Lattice Mach-5 *****
+  idval[31..0] = $07815003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5-128/68-T100      Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 163;
+  idval[31..0] = $07817003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5-128/68-P100      Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 164;
+  idval[31..0] = $07819003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5-128/104-P144     Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 165;
+  idval[31..0] = $0781B003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5-128/120-P160     Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 166;
+  idval[31..0] = $07825003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5-192/68-T100      Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 167;
+  idval[31..0] = $07827003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5-192/68-P100      Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 168;
+  idval[31..0] = $07829003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5-192/104-P144     Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 169;
+  idval[31..0] = $0782B003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5-192/120-P160     Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 170;
+  idval[31..0] = $0782F003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5-192/160-P208     Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 171;
+  idval[31..0] = $07845003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5-256/68-T100      Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 172;
+  idval[31..0] = $07847003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5-256/68-P100      Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 173;
+  idval[31..0] = $07849003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5-256/104-P144     Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 174;
+  idval[31..0] = $0784B003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5-256/120-P160     Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 175;
+  idval[31..0] = $0784F003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5-256/160-P208     Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 176;
+  idval[31..0] = $07851003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5-320/120-P160     Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 177;
+  idval[31..0] = $07853003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5-320/160-P208     Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 178;
+  idval[31..0] = $07857003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5-320/192-B256     Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 179;
+  idval[31..0] = $07863003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5-384/160-P208     Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 180;
+  idval[31..0] = $07873003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5-512/160-P208     Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 181;
+  idval[31..0] = $07879003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5-512/256-B352     Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 182;
+
+  '***** Lattice Mach-5LV *****
+  idval[31..0] = $07814003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5LV-128/68-T100    Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 183;
+  idval[31..0] = $07816003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5LV-128/68-P100    Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 184;
+  idval[31..0] = $07810003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5LV-128/74-T100    Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 185;
+  idval[31..0] = $07812003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5LV-128/104-T144   Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 186;
+  idval[31..0] = $07818003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5LV-128/104-P144   Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 187;
+  idval[31..0] = $0781A003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5LV-128/120-P160   Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 188;
+  idval[31..0] = $07846003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5LV-256/68-P100    Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 189;
+  idval[31..0] = $07840003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5LV-256/74-T100    Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 190;
+  idval[31..0] = $07848003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5LV-256/104-P144   Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 191;
+  idval[31..0] = $07842003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5LV-256/104-T144   Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 192;
+  idval[31..0] = $0784B003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5LV-256/120-P160   Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 193;
+  idval[31..0] = $0784E003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5LV-256/160-P208   Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 194;
+  idval[31..0] = $07850003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5LV-320/120-P160   Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 195;
+  idval[31..0] = $07852003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5LV-320/160-P208   Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 196;
+  idval[31..0] = $07856003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5LV-320/192-B256   Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 197;
+  idval[31..0] = $07860003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5LV-384/120-P160   Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 198;
+  idval[31..0] = $07862003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5LV-384/160-P208   Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 199;
+  idval[31..0] = $07870003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5LV-512/120-P160   Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 200;
+  idval[31..0] = $07872003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5LV-512/160-P208   Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 201;
+  idval[31..0] = $07878003;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      M5LV-512/256-B352   Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 202;
+
+  '***** Lattice ispLSI5000VE *****
+  idval[31..0] = $0036A043;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      ISPLSI5512VE        Lattice         |"; IF id_match == 1 THEN device_list[i_device] = 203;
+  
+'***** Cypress Delta 39K *****
+  idval[31..0] = $00031069;  CALL compare_one_idval; IF id_match == 1 THEN PRINT "  Device #", i_device, "  |      CY39100             Cypress         |"; IF id_match == 1 THEN device_list[i_device] = 204;
+
+  '***** ADDING ADDITIONAL DEVICES                                                       *****
+  '***** Users of this file are welcome to add as many other devices as they wish here.  *****
+  '***** Each additional entry must be for a particular unique 32-bit value for IDCODE.  *****
+  '***** Suggest copying one of the above lines and edit the idval, string and device    *****
+  '***** list index.
+
+  IF id_match_cum == 0 THEN                                                PRINT "  Device #", i_device, "  |      Unknown IDCODE                      |"; IF id_match == 1 THEN device_list[i_device] = 0;
+ENDPROC;
+
+PROCEDURE compare_one_idval USES data_chain;
+' This entire function exists because boolean array comparisons are not supported.
+  id_match = 1;
+  INTEGER i_32;
+  FOR i_32 = 0 to 31;
+    id_match = id_match && (idval[i_32] == id_capture[offset + i_32]);
+  NEXT i_32;
+  id_match_cum = id_match || id_match_cum;
+ENDPROC;
+
+PROCEDURE exiting;
+  PRINT "******************************************************************************";
+  EXIT (0);
+ENDPROC;
+
+CRC F760;
