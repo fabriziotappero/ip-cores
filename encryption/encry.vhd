@@ -1,0 +1,459 @@
+   ----------------------------------------------------------------------------------
+-- Description:Implements the RC6 encryption algorithm.
+--					Everything based on a positive edge of clock and
+--					an asynchronous reset.
+--					
+--					Module contains two finite state machines. 
+--					
+--					One fsm controls the calculation of the various
+--					rounds. Another fsm is responsible for outputting
+--					the ciphertext so the encryptor can accept plain
+--					text while cipher text is still in the process of
+--					going out.
+--					
+--					We assume the number of rounds to be 20.
+----------------------------------------------------------------------------------
+library IEEE;     
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.STD_LOGIC_ARITH.ALL;
+use IEEE.STD_LOGIC_UNSIGNED.ALL;
+
+-- encryptor module declaration				  
+				        
+entity encryptor  is
+
+port  (
+	    plaintext_e :in std_logic_vector(15 downto 0);-- 16 bit Plaintext output of decryptor
+     	 round_keyse :in std_logic_vector(15 downto 0);--  16 bit roundkeys given to decryptor
+              start_e:in std_logic;  --1 bit ready signal for encryptor
+               reset :in std_logic;  --reset
+               clock :in std_logic ; --clock   
+     	     ready_e :out std_logic; -- 1 bit ready output of decryptor
+	   ciphertext: out std_logic_vector(15 downto 0)-- 16 bit ciphertext input to decrytpor which is output of encryptor
+         
+       );
+
+end  encryptor;
+
+
+Architecture arch_encryptor of encryptor is
+
+-------wallace tree
+
+component multiplier 
+port( B  :in std_logic_vector(15 downto 0);
+    Product :out std_logic_vector(15 downto 0)
+    );
+end component;
+
+--------  constant for key generation.
+
+constant p:std_logic_vector(15 downto 0):= "1011011111100001";------constant value p
+constant q:std_logic_vector(15 downto 0):= "1001111000110111";------constant value q
+	
+type s_tp is array(43 downto 0) of std_logic_vector(15 downto 0);--array of 44 * 16
+signal s :s_tp;
+
+type l_tp is array(42 downto 0) of std_logic_vector(15 downto 0);--array of 43 *16 
+signal l :l_tp;	
+
+--constant  round_keyse : std_logic_vector(15 downto 0):= "0000000000000000";
+ 
+
+--------- constants for the plain text fsm
+
+constant out_idle:std_logic_vector(3 downto 0):= "0000";
+constant   out_A :std_logic_vector(3 downto 0):= "0001";
+constant   out_B :std_logic_vector(3 downto 0):= "0010";
+constant   out_C :std_logic_vector(3 downto 0):= "0011";
+constant   out_D :std_logic_vector(3 downto 0):= "0100";
+
+
+   
+--------- signals needed for internal connections 
+
+signal cleanup_A,cleanup_C ,start_d1,last_round: std_logic;
+signal next_state_out: std_logic_vector( 3 downto 0);
+signal state:std_logic_vector(5 downto 0); --state of primary fsm 
+signal state_out:std_logic_vector(3 downto 0); -- state of plaintext fsm
+signal utemp1,ttemp1:std_logic_vector(15 downto 0);
+
+signal sig3,sig4:INTEGER RANGE 0 TO 15;
+
+signal A_final,B_final,C_final,D_final:std_logic_vector(15 downto 0); 
+signal A,B,C,D : std_logic_vector(15 downto 0);
+signal product1,product2  : std_logic_vector(15 downto 0);
+   
+begin
+		
+		--------fsm for input --------
+
+a1: multiplier port map (B,product1);
+b1: multiplier port map (D,product2);
+			 
+ sig3<=conv_integer(unsigned(utemp1(3 downto 0)));
+ sig4<=conv_integer(unsigned(ttemp1(3 downto 0))); 
+                                --------key generation operation------
+		   
+					s(0) <= P ; -- initialize constant array 
+					l(0)<=(round_keyse +s(0)); 
+					s(1)<=(l(0)+ s(0)+ q);
+					l(1)<=( l(0)+s(1));
+					s(2)<=(l(1)+ s(1)+ q);					
+					l(2)<=( l(1)+s(2));
+					s(3)<=(l(2)+ s(2)+ q);					
+					l(3)<=( l(2)+s(3));
+					s(4)<=(l(3)+ s(3)+ q);					
+					l(4)<=( l(3)+s(4));					
+					s(5)<=(l(4)+ s(4)+ q);					
+					l(5)<=( l(4)+s(5));
+					s(6)<=(l(5)+ s(5)+ q);					
+					l(6)<=( l(5)+s(6));					
+					s(7)<=(l(6)+ s(6)+ q);					
+					l(7)<=( l(6)+s(7));
+					s(8)<=(l(7)+ s(7)+ q);					
+					l(8)<=( l(7)+s(8));					
+					s(9)<=(l(8)+s(8)+ q);					
+					l(9)<=( l(8)+s(9));
+					s(10)<=(l(9)+s(9)+ q);					
+					l(10)<=( l(9)+s(10 ));
+					s(11)<=(l(10)+s(10)+ q);					
+					l(11)<=( l(10)+s(11));				
+					s(12)<=(l(11)+ s(11)+ q);					
+					l(12)<=( l(11)+s(12));					
+					s(13)<=(l(12)+s(12)+ q);					
+					l(13)<=( l(12)+s(13));
+					s(14)<=(l(13)+ s(13)+ q);					
+					l(14)<=( l(13)+s(14));
+					s(15)<=(l(14)+ s(14)+ q);					
+					l(15)<=( l(14)+s(15));
+					s(16)<=(l(15)+ s(15)+ q);					
+					l(16)<=( l(15)+s(16));								
+					s(17)<=(l(16)+ s(16)+ q);					
+					l(17)<=( l(16)+s(17));
+					s(18)<=(l(17)+ s(17)+ q);					
+					l(18)<=( l(17)+s(18));
+					s(19)<=(l(18)+ s(18)+ q);					
+					l(19)<=( l(18)+s(19));
+					s(20)<=(l(19)+ s(19)+ q);					
+					l(20)<=( l(19)+s(20));					
+					s(21)<=(l(20)+ s(20)+ q);					
+					l(21)<=( l(20)+s(21));
+					s(22)<=(l(21)+ s(21)+ q);					
+					l(22)<=( l(21)+s(22));
+					s(23)<=(l(22)+ s(22)+ q);
+					l(23)<=( l(22)+s(23));
+					s(24)<=(l(23)+ s(23)+ q);					
+					l(24)<=( l(23)+s(24));					
+					s(25)<=(l(24)+ s(24)+ q);					
+					l(25)<=( l(24)+s(25));
+					s(26)<=(l(25)+ s(25)+ q);					
+					l(26)<=( l(25)+s(26));
+					s(27)<=(l(26)+ s(26)+ q);					
+					l(27)<=( l(26)+s(27));
+					s(28)<=(l(27)+ s(27)+ q);					
+					l(28)<=( l(27)+s(28));
+					s(29)<=(l(28)+ s(28)+ q);					
+					l(29)<=( l(23)+s(24));					
+					s(30)<=(l(29)+ s(29)+ q);					
+					l(30)<=( l(29)+s(30));
+					s(31)<=(l(30)+ s(30)+ q);					
+					l(31)<=( l(30)+s(31));
+					s(32)<=(l(31)+ s(31)+ q);					
+					l(32)<=( l(31)+s(32));
+					s(33)<=(l(32)+ s(32)+ q);					
+					l(33)<=( l(32)+s(33));
+					s(34)<=(l(33)+ s(33)+ q);					
+					l(34)<=( l(33)+s(34));					
+					s(35)<=(l(34)+ s(34)+ q);					
+					l(35)<=( l(34)+s(35));
+					s(36)<=(l(35)+ s(35)+ q);					
+					l(36)<=( l(35)+s(36));
+					s(37)<=(l(36)+ s(36)+ q);					
+					l(37)<=( l(36)+s(37));
+					s(38)<=(l(37)+ s(37)+ q);					
+					l(38)<=( l(37)+s(38));
+					s(39)<=(l(38)+ s(38)+ q);					
+					l(39)<=( l(33)+s(34));					
+					s(40)<=(l(39)+ s(39)+ q);					
+					l(40)<=( l(39)+s(40));
+					s(40)<=(l(39)+ s(39)+ q);					
+					l(41)<=( l(40)+s(40));
+					s(41)<=(l(40)+ s(40)+ q);					
+					l(42)<=( l(41)+s(41));
+					s(42)<=(l(41)+ s(41)+ q);					
+					s(43)<=(l(42)+ s(42)+ q);
+
+
+process(clock,reset,plaintext_e,sig3,sig4)
+
+-----internal variable declaration
+
+variable t_pre,u_pre:std_logic_vector(15 downto 0);      
+--variable p1,p2 : std_logic_vector(47 downto 0);
+VARIABLE  t,u,A_temp2,C_temp2,A_temp1,C_temp1:std_logic_vector( 15 downto 0);
+variable tempA,tempB,tempC,tempD :std_logic_vector(15 downto 0);
+variable temp_AB,temp_BC,temp_CD,temp_DA :std_logic_vector(15 downto 0);
+variable cnt: std_logic_vector(6 downto 0):="0000000";		
+
+begin
+
+
+
+
+
+        if (reset='1') then 
+        
+                state <= "000001"; -- reset state
+                ready_e <= '0';
+                cnt:=(others=>'0'); 
+                A <= (others=>'0');
+                B <= (others=>'0');
+                C <= (others=>'0');
+                D <= (others=>'0');
+                ready_e <= '0';
+        
+        elsif(clock'event and clock='1') then
+       
+          case state is  --synopsys parallel_case
+                when"000001"=>
+                
+                        if (start_e = '0') then
+                                state <= "000001"; 
+                        else 
+                                state <= "000010";
+                        ready_e <= '1';                      
+                        end if;
+                
+ 
+                when "000010"=>
+               
+                        state <= "000011";
+                        A <= plaintext_e;--read ciphertext into A
+                        ready_e <= '0';
+                     
+                when "000011"=>
+                
+                        state <= "000100";
+                        B <= plaintext_e; -- read ciphertext into B
+                        ready_e <= '0';
+                       
+                
+                when "000100"=>
+               
+                        state <= "000101";
+                        C <= plaintext_e ; -- read ciphertext - into C
+                        B <= B+ s(0) ;-- Use round keys to calculate new value of B
+                        ready_e<= '0';
+                     	
+                
+                when "000101"=>
+                
+                        state <= "000110";
+                        D <=  plaintext_e;--assign ciphertext to D
+                        ready_e <= '0';
+									 
+                       
+                when "000110"=>  -- begin calculation of plaintext loop from r downto 1
+                			  
+			state<= "000111" ;
+								  
+                       D <= D + s(1); -- Use round keys to calculate new value of D
+			
+
+			ready_e <='0';
+
+		when "000111" => 
+		
+			STATE <="001000"; 
+			
+			--t= (B * (2B+1)) 
+
+			t_pre := product1;
+			
+			
+			--t= (D * (2D+1)) 
+			
+			u_pre := product2;
+                      				
+               t:= t_pre(11 downto 0)& t_pre(15 downto 12); 
+				
+		     ttemp1<=t;	
+		    --t= (B * (2B+1)) <<<4
+				
+		     
+			u:= u_pre(11 downto 0)& u_pre(15 downto 12);		 
+				
+		     utemp1<=u;	
+		    --u= (D * (2D+1)) <<<4
+	   		
+	   		A_temp1 := (A xor t);
+	   		C_temp1 := (C xor u); 
+	   
+	   
+	   
+	         when "001000" => 
+		  
+		  state <="001001" ; 
+		
+				
+			 
+	 			
+	 			
+ 			A_temp2:=A_temp1(15-sig3 downto 0)& A_temp1(15 downto 15-sig3+1);
+				---rotate (A xor t) << u
+
+			C_temp2:=C_temp1(15-sig4 downto 0)& C_temp1(15 downto 15-sig4+1);
+				---rotate (c xor u) << t
+				
+ 			
+ 			for  i  in 1 to 20 loop	
+				A <= (A_temp2 + s(2*i));
+				C <= (C_temp2 + s(2*i+1));
+			end loop; 
+			
+                      
+                 when "001001"=>
+			state <="001010";
+                      				-------swap operation---------	
+                      					TEMPA:=A;
+					TEMPB:=B;
+					TEMPC:=C;
+					TEMPD:=D;
+					
+					temp_AB:= tempA xor tempB;
+					A<= temp_AB xor tempA;
+					
+					temp_BC:= tempB xor tempC;
+					B<= temp_BC xor tempB;
+					
+					temp_CD:= tempC xor tempD;
+					C<= temp_CD xor tempC;
+					
+					temp_DA:= tempD xor tempA;
+					D<= temp_DA xor tempD;
+
+                       				  	ready_e <= '0';
+	 	
+		WHEN "001010" =>
+		                  ------start counter------
+					if(cnt<19)then 
+				 	        cnt:=cnt+1	; 
+						state <="000111";							
+					else
+						state<="001011"; 
+						cnt:="0000000" ;
+						last_round <='1';		
+					end if;
+						      
+		
+		 
+		when "001011" =>
+	
+			state <= "001100";
+		  if (last_round ='1') then
+			-- calculate last A value
+			cleanup_A <= '1';
+			-- calculate last C value
+			cleanup_C <= '1';     
+		 else
+			cleanup_A <= '0';
+			cleanup_C <= '0';
+		end if;
+	        
+	        when "001100" =>
+	
+		state <= "000001";
+
+		
+		--rounds are over 
+		--now do the cleanup 
+		if (cleanup_A='1') then 
+			A_final <= A + s(42); --A_temp2 + round_keys_e_saved;
+			B_final <= B;--B_temp2;
+			D_final <= D;--D_temp2;
+		else
+			A_final <= A_final;
+			B_final <= B_final;
+			D_final <= D_final;
+		end if;
+		
+		if (cleanup_C='1') then 
+			C_final <= C + s(43);
+			start_d1 <= '1';
+		else
+			C_final <= C_final;
+			start_d1 <= '0';
+		end if;
+				 		       
+		when others =>
+						state <="000001"	;		          
+
+   end case;
+end if;
+end process;
+
+
+
+-- current state logic for output FSM
+process(clock,reset )
+begin
+	-- if reset stay idle
+	-- else output based on 
+	--state
+	if (reset='1') then
+		state_out <= out_idle;
+	elsif(clock'event and clock='1') then
+		state_out <= next_state_out;
+	end if;
+end process; 
+
+
+-- next state, output logic for output FSM
+process(state_out,start_d1,A_final,B_final,C_final,D_final)
+begin
+		case state_out is --synopsys parallel_case
+		when out_idle=>
+		
+			-- wait for start_d
+			if (start_d1='1') then
+				next_state_out <= out_A;
+			else
+				next_state_out <= out_idle;
+				ciphertext <= (others=>'0');
+			end if;
+		when out_A=>
+		
+			next_state_out <= out_B;
+			-- output A
+			ciphertext <= A_final;----------ouput cipher text 1
+		
+		when out_B=>
+		
+			next_state_out <= out_C;
+			-- output B
+			ciphertext <= B_final;----------ouput cipher text 2  
+		
+		when out_C=> 
+		
+			next_state_out <= out_D;
+			-- output C
+			ciphertext <= C_final;----------ouput cipher text 3
+		
+		when out_D=> 
+		
+			next_state_out <= out_idle;
+			-- output D
+			ciphertext <= D_final;----------ouput cipher text 4
+		
+		when others=>
+		
+			next_state_out <= out_idle; 
+			ciphertext <= (others=>'0');
+		
+		end case;
+		
+-----------------------complete output come after 93 clock--------------------- 
+		
+end process;
+end arch_encryptor ;
