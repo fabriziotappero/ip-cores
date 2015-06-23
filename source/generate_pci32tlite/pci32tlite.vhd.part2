@@ -1,0 +1,142 @@
+
+);
+port (
+
+    -- General 
+    clk33       : in std_logic;
+    nrst	    : in std_logic;
+    
+    -- PCI target 32bits
+    ad          : inout std_logic_vector(31 downto 0);
+    cbe         : in std_logic_vector(3 downto 0);
+    par         : out std_logic;  
+    frame       : in std_logic;
+    irdy        : in std_logic;
+    trdy        : out std_logic;
+    devsel      : out std_logic;
+    stop        : out std_logic;
+    idsel       : in std_logic;
+    perr        : out std_logic;
+    serr        : out std_logic;
+    intb        : out std_logic;
+      
+	-- Master whisbone
+    wb_adr_o     : out std_logic_vector(24 downto 1);     
+	wb_dat_i     : in std_logic_vector(15 downto 0);
+    wb_dat_o     : out std_logic_vector(15 downto 0);
+	wb_sel_o     : out std_logic_vector(1 downto 0);
+    wb_we_o      : out std_logic;
+	wb_stb_o     : inout std_logic;
+	wb_cyc_o     : out std_logic;
+	wb_ack_i     : in std_logic;
+	wb_err_i     : in std_logic;
+	wb_int_i     : in std_logic;
+
+	-- debug signals
+	debug_init	 : out std_logic;
+	debug_access : out std_logic 
+
+);
+end pci32tlite;
+
+
+--+-----------------------------------------------------------------------------+
+--|									ARCHITECTURE								|
+--+-----------------------------------------------------------------------------+
+
+architecture rtl of pci32tlite is
+
+
+--+-----------------------------------------------------------------------------+
+--|									COMPONENTS									|
+--+-----------------------------------------------------------------------------+
+
+
+	component pcidec_new
+	port (
+	
+	    clk_i       	: in std_logic;
+   		nrst_i       	: in std_logic;
+		--
+		ad_i			: in std_logic_vector(31 downto 0);
+		cbe_i			: in std_logic_vector(3 downto 0);
+		idsel_i    	 	: in std_logic;
+		bar0_i        	: in std_logic_vector(31 downto 25);
+		memEN_i			: in std_logic;
+		pciadrLD_i	   	: in std_logic;
+		adrcfg_o		: out std_logic;
+		adrmem_o		: out std_logic;
+		adr_o			: out std_logic_vector(24 downto 1);
+		cmd_o			: out std_logic_vector(3 downto 0)
+		
+	);
+	end component;
+
+	
+	component pciwbsequ
+	port (
+	
+   		-- General 
+	    clk_i       	: in std_logic;
+   		nrst_i       	: in std_logic;
+		-- pci 
+		cmd_i			: in std_logic_vector(3 downto 0);
+		cbe_i			: in std_logic_vector(3 downto 0);
+		frame_i    	 	: in std_logic;
+		irdy_i        	: in std_logic;
+		devsel_o		: out std_logic;
+		trdy_o        	: out std_logic;
+		-- control
+		adrcfg_i		: in std_logic;
+		adrmem_i 		: in std_logic;
+		pciadrLD_o	   	: out std_logic;
+		pcidOE_o		: out std_logic;
+		parOE_o			: out std_logic;		
+		wbdatLD_o   	: out std_logic;
+		wbrgdMX_o		: out std_logic;
+		wbd16MX_o		: out std_logic;
+		wrcfg_o 		: out std_logic;
+		rdcfg_o 		: out std_logic;
+		-- whisbone
+		wb_sel_o		: out std_logic_vector(1 downto 0);
+		wb_we_o			: out std_logic;
+		wb_stb_o		: inout std_logic;	
+		wb_cyc_o		: out std_logic;
+		wb_ack_i		: in std_logic;
+		wb_err_i		: in std_logic;	
+		-- debug signals
+		debug_init	 	: out std_logic;
+		debug_access 	: out std_logic
+	);
+	end component;
+
+
+	component pcidmux
+	port (
+	
+	    clk_i       	: in std_logic;
+   		nrst_i       	: in std_logic;
+		--
+		d_io			: inout std_logic_vector(31 downto 0);
+		pcidatout_o		: out std_logic_vector(31 downto 0);
+		pcidOE_i		: in std_logic;
+		wbdatLD_i		: in std_logic;
+		wbrgdMX_i		: in std_logic;
+		wbd16MX_i		: in std_logic;
+		wb_dat_i		: in std_logic_vector(15 downto 0);
+		wb_dat_o		: out std_logic_vector(15 downto 0);
+		rg_dat_i		: in std_logic_vector(31 downto 0);
+		rg_dat_o		: out std_logic_vector(31 downto 0)
+				
+	);
+	end component;
+
+
+	component pciregs
+	generic (
+
+		vendorID : std_logic_vector(15 downto 0);
+		deviceID : std_logic_vector(15 downto 0);
+		revisionID : std_logic_vector(7 downto 0);
+		subsystemID : std_logic_vector(15 downto 0);
+    	subsystemvID : std_logic_vector(15 downto 0);

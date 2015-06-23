@@ -1,0 +1,245 @@
+	constant INTPINr		: std_logic_vector(7 downto 0)	:= X"01";		-- INTA#
+
+
+--+-----------------------------------------------------------------------------+
+--|									SIGNALS   									|
+--+-----------------------------------------------------------------------------+
+
+	signal dataout		: std_logic_vector(31 downto 0);
+	signal tabortPFS	: std_logic;
+	signal serrPFS		: std_logic;
+	signal perrPFS		: std_logic;
+	signal adrSTCMD		: std_logic;
+	signal adrBAR0		: std_logic;
+	signal adrINT		: std_logic;
+	signal we0CMD		: std_logic;
+	signal we1CMD		: std_logic;
+	signal we3ST		: std_logic;
+	signal we3BAR0		: std_logic;
+	signal we0INT		: std_logic;
+	signal we1INT		: std_logic;
+	signal st11SEN		: std_logic;
+	signal st11REN		: std_logic;
+	signal st14SEN		: std_logic;
+	signal st14REN		: std_logic;
+	signal st15SEN		: std_logic;
+	signal st15REN		: std_logic;
+
+
+	--+---------------------------------------------------------+
+	--|  CONFIGURATION SPACE REGISTERS							|
+	--+---------------------------------------------------------+
+
+	-- INTERRUPT LINE register 
+  	signal INTLINEr		: std_logic_vector(7 downto 0);
+	-- COMMAND register bits
+	signal MEMSPACEENb	: std_logic;						-- Memory SPACE ENable (bit)
+	signal PERRENb		: std_logic;						-- Parity ERRor ENable (bit)
+	signal SERRENb		: std_logic;						-- SERR ENable (bit)
+	-- STATUS register bits
+	--signal DEVSELTIMb	: std_logic_vector(1 downto 0);		-- DEVSEL TIMing (bits)
+	signal TABORTSIb	: std_logic;						-- TarGet ABORT SIgnaling (bit)
+	signal SERRSIb		: std_logic;						-- System ERRor SIgnaling (bit)
+	signal PERRDTb		: std_logic;						-- Parity ERRor DeTected (bit)
+	-- BAR0 register bits
+	signal BAR032MBb	: std_logic_vector(6 downto 0);		-- BAR0 32MBytes Space (bits)
+		
+
+component pfs
+port (
+   clk          : in std_logic;
+   a            : in std_logic;
+   y            : out std_logic
+);   
+
+end component;
+
+begin
+
+    --+-------------------------------------------------------------------------+
+    --|  Component instances													|
+    --+-------------------------------------------------------------------------+
+
+	u1:  pfs port map ( clk => clk_i, a => tabort_i, y => tabortPFS );
+	u2:  pfs port map ( clk => clk_i, a => serr_i, y => serrPFS );
+	u3:  pfs port map ( clk => clk_i, a => perr_i, y => perrPFS );
+	 
+
+	--+-------------------------------------------------------------------------+
+	--|  Registers Address Decoder												|
+    --+-------------------------------------------------------------------------+
+
+    adrSTCMD <= '1' when ( adr_i(5 downto 0) = b"000001" ) else '0';
+    adrBAR0  <= '1' when ( adr_i(5 downto 0) = b"000100" ) else '0';
+    adrINT   <= '1' when ( adr_i(5 downto 0) = b"001111" ) else '0';
+
+
+	--+-------------------------------------------------------------------------+
+	--|                       WRITE ENABLE REGISTERS							|
+    --+-------------------------------------------------------------------------+
+
+	--+-----------------------------------------+
+	--|  Write Enable Registers					|
+	--+-----------------------------------------+
+		
+    we0CMD  <= adrSTCMD and wrcfg_i and (not cbe_i(0));
+    we1CMD  <= adrSTCMD and wrcfg_i and (not cbe_i(1));
+    --we2ST    <= adrSTCMD and wrcfg_i and (not cbe_i(2));
+    we3ST   <= adrSTCMD and wrcfg_i and (not cbe_i(3));
+    --we2BAR0 <= adrBAR0  and wrcfg_i and (not cbe_i(2));
+    we3BAR0 <= adrBAR0  and wrcfg_i and (not cbe_i(3));
+	we0INT  <= adrINT   and wrcfg_i and (not cbe_i(0));
+    --we1INT	<= adrINT   and wrcfg_i and (not cbe_i(1));
+
+	--+-----------------------------------------+
+	--|  Set Enable & Reset Enable bits			|
+	--+-----------------------------------------+
+	st11SEN	<= tabortPFS; 
+	st11REN	<= we3ST and dat_i(27);
+	st14SEN	<= serrPFS; 
+	st14REN	<= we3ST and dat_i(30);
+	st15SEN	<= perrPFS; 
+	st15REN	<= we3ST and dat_i(31);
+
+
+	--+-------------------------------------------------------------------------+
+	--|  							WRITE REGISTERS								|
+    --+-------------------------------------------------------------------------+
+
+	--+---------------------------------------------------------+
+	--|  COMMAND REGISTER Write									|
+	--+---------------------------------------------------------+
+
+    REGCMDWR: process( clk_i, nrst_i, we0CMD, we1CMD, dat_i )
+    begin
+
+        if( nrst_i = '0' ) then
+			MEMSPACEENb <= '0';
+			PERRENb 	<= '0';
+			SERRENb 	<= '0';			
+        elsif( rising_edge( clk_i ) ) then
+
+			-- Byte 0
+            if( we0CMD = '1' ) then
+				MEMSPACEENb <= dat_i(1);
+				PERRENb 	<= dat_i(6);                
+            end if;
+			
+			-- Byte 1
+            if( we1CMD = '1' ) then
+				SERRENb 	<= dat_i(8);                
+            end if;
+
+        end if;
+
+    end process REGCMDWR;
+
+
+	--+---------------------------------------------------------+
+	--|  STATUS REGISTER WRITE (Reset only)						|
+	--+---------------------------------------------------------+
+
+    REGSTWR: process( clk_i, nrst_i, st11SEN, st11REN, st14SEN, st14REN, st15SEN, st15REN )
+    begin
+
+        if( nrst_i = '0' ) then
+			TABORTSIb	<= '0';
+			SERRSIb		<= '0';
+			PERRDTb		<= '0';
+        elsif( rising_edge( clk_i ) ) then
+
+			-- TarGet ABORT SIgnaling bit
+            if( st11SEN = '1' ) then
+				TABORTSIb	<= '1';
+			elsif ( st11REN = '1' ) then
+				TABORTSIb	<= '0';			
+            end if;
+
+			-- System ERRor SIgnaling bit
+            if( st14SEN = '1' ) then
+				SERRSIb	<= '1';
+			elsif ( st14REN = '1' ) then
+				SERRSIb	<= '0';			
+            end if;
+
+			-- Parity ERRor DEtected bit
+            if( st15SEN = '1' ) then
+				PERRDTb	<= '1';
+			elsif ( st15REN = '1' ) then
+				PERRDTb	<= '0';			
+            end if;
+			
+        end if;
+
+    end process REGSTWR;
+
+
+	--+---------------------------------------------------------+
+	--|  INTERRUPT REGISTER Write								|
+	--+---------------------------------------------------------+
+
+    REGINTWR: process( clk_i, nrst_i, we0INT, dat_i )
+    begin
+
+        if( nrst_i = '0' ) then
+			INTLINEr <= ( others => '0' );
+        elsif( rising_edge( clk_i ) ) then
+
+			-- Byte 0
+            if( we0INT = '1' ) then
+				INTLINEr <= dat_i(7 downto 0);
+            end if;
+			
+
+        end if;
+
+    end process REGINTWR;
+
+
+	--+---------------------------------------------------------+
+	--|  BAR0 32MBytes address space (bits 31-25)				|
+	--+---------------------------------------------------------+
+
+    REGBAR0WR: process( clk_i, nrst_i, we3BAR0, dat_i )
+    begin
+
+        if( nrst_i = '0' ) then
+			BAR032MBb <= ( others => '1' );
+        elsif( rising_edge( clk_i ) ) then
+
+			-- Byte 3
+            if( we3BAR0 = '1' ) then
+				BAR032MBb <= dat_i(31 downto 25);
+            end if;
+			
+        end if;
+
+    end process REGBAR0WR;
+
+
+	--+-------------------------------------------------------------------------+
+	--|  Registers MUX	(READ)													|
+    --+-------------------------------------------------------------------------+
+--+-------------------------------------------------------------------------------------------------+
+
+    RRMUX: process( adr_i, PERRDTb, SERRSIb, TABORTSIb, SERRENb, PERRENb, MEMSPACEENb, BAR032MBb, 
+					INTLINEr, rdcfg_i )
+    begin
+
+		if ( rdcfg_i = '1' ) then
+		
+	        case adr_i is
+
+    	        when b"000000" => 
+					dataout <= DEVICEIDr & VENDORIDr;
+            	when b"000001" => 
+					dataout <= PERRDTb & SERRSIb & b"00" & TABORTSIb & DEVSELTIMb & b"000000000" &
+							   b"0000000" & SERRENb & b"0" & PERRENb & b"0000" & MEMSPACEENb & b"0";
+	            when b"000010" => 
+					dataout <= CLASSCODEr & REVISIONIDr;
+        	    when b"000100" => 
+					dataout <= BAR032MBb & b"0" & b"00000000" & b"00000000" & b"00000000";
+    	        when b"001011" => 
+					dataout <= SUBSYSTEMIDr & SUBSYSTEMVIDr;
+	            when b"001111" => 
+					dataout <= b"0000000000000000" & INTPINr & INTLINEr;
