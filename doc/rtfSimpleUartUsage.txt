@@ -1,0 +1,224 @@
+
+  	To use:
+ 
+  	Set the pClkFreq parameter to the frequency of the system
+  	clock (clk_i). This can be done when the core is instanced.
+ 
+    1) set the baud rate value in the clock multiplier
+    registers (CM1,2,3). A default multiplier value may
+    be specified using the pClkMul parameter, so it
+    doesn't have to be programmed at run time. (Note the
+    pBaud parameter may also be set, but it doesn't work
+    in all cases due to arithmetic limitations).
+    2) enable communication by activating the rts, and
+    dtr signals in the modem control register. These
+    signals are defaulted to be active on reset, so they
+    may not need to be set. The pRts and pDtr parameters
+    may be used to change the default setting.
+    3) use interrupts or poll the status register to
+    determine when to transmit or receive a byte of data
+    4) read / write the transmit / recieve data buffer
+    for communication.
+
+    Notes:
+    	This core only supports a single transmission /
+    reception format: 1 start, 8 data, and 1 stop bit (no
+    parity).	
+    	The baud rate generator uses a 24 bit harmonic
+    frequency synthesizer. Compute the multiplier value
+    as if a 32 bit value was needed, then take the upper
+    24 bits of the value. (The number of significant bits
+    in the value determine the minimum frequency
+    resolution or the precision of the value).
+
+    				baud rate * 16
+    	value = -----------------------
+    			(clock frequency / 2^32)
+  
+  		eg			38400 * 16
+  		value = -----------------------
+				(28.63636MHz / 2^32)
+				
+				= 92149557.65
+				= 057E1736 (hex)
+				
+				
+		taking the upper 24 bits
+				top 24 = 057E17
+						= 359959
+				
+		so the value needed to be programmed into the register
+	for 38.4k baud is 57E17 (hex)
+		eg 	CM0 = 0 (not used)
+			CM1 = 17 hex
+			CM2 = 7E hex
+			CM3 = 05 hex
+
+
+	Register Description
+
+	reg
+	0	read / write (RW)
+		TRB - transmit / receive buffer
+		transmit / receive buffer
+		write 	- write to transmit buffer
+		read	- read from receive buffer
+
+	1	read only (RO)
+		LS	- line status register
+		bit 0 = receiver not empty, this bit is set if there is
+				any data available in the receiver fifo
+		bit 1 = overrun, this bit is set if receiver overrun occurs
+		bit 3 = framing error, this bit is set if there was a
+				framing error with the current byte in the receiver
+				buffer.
+		bit 5 = transmitter not full, this bit is set if the transmitter
+				can accept more data
+		bit 6 = transmitter empty, this bit is set if the transmitter is
+				completely empty
+
+	2	MS	- modem status register (RO)
+		writing to the modem status register clears the change
+		indicators, which should clear a modem status interrupt
+		bit 3 = change on dcd signal
+		bit 4 = cts signal level
+		bit 5 = dsr signal level
+		bit 6 = ri signal level
+		bit 7 = dcd signal level
+
+	3	IS	- interrupt status register (RO)
+		bit 0-4 = mailbox number
+		bit 0,1	= 00
+		bit 2-4	= encoded interrupt value
+		bit 5-6 = not used, reserved
+		bit 7 = 1 = interrupt pending, 0 = no interrupt
+
+	4	IE	- interrupt enable register (RW)
+		bit 0 = receive interrupt (data present)
+		bit 1 = transmit interrupt (data empty)
+		bit 3 = modem status (dcd) register change
+		bit 5-7 = unused, reserved
+
+	5	FF	- frame format register		(RW)
+		this register doesn't do anything in the simpleUart
+		but is reserved for compatiblity with the more
+		advanced uart
+
+	6	MC	- modem control register (RW)
+		bit 0 = dtr signal level output
+		bit 1 = rts signal level output
+
+	7	- control register
+		bit 0 = hardware flow control,
+			when this bit is set, the transmitter output is
+			controlled by the cts signal line automatically
+
+
+		* Clock multiplier steps the 16xbaud clock frequency
+		in increments of 1/2^32 of the clk_i input using a
+		harmonic frequency synthesizer
+		eg. to get a 9600 baud 16x clock (153.6 kHz) with a
+		27.175 MHz clock input,
+		value  = upper24(9600 * 16  / (27.175MHz / 2^32))
+		Higher frequency baud rates will exhibit more jitter
+		on the 16x clock, but this will mostly be masked by the 
+		16x clock factor.
+
+	8	CM0	- Clock Multiplier byte 0 (RW)
+		this is the least significant byte
+		of the clock multiplier value
+		this register is not used unless the clock
+		multiplier is set to contain 32 bit values
+
+	9	CM1 - Clock Multiplier byte 1	(RW)
+		this is the third most significant byte
+		of the clock multiplier value
+		this register is not used unless the clock
+		multiplier is set to contain 24 or 32 bit values
+
+	10	CM2 - Clock Multiplier byte 2	(RW)
+		this is the second most significant byte of the clock
+		multiplier value
+
+	11	CM3	- Clock Multiplier byte 3 	(RW)
+		this is the most significant byte of the multiplier value
+
+	12	FC	- Fifo control register		(RW)
+		this register doesnt' do anything in the simpleUart
+		but is reserved for compatibility with the more
+		advanced uart
+		
+	13-14	reserved registers
+
+	15	SPR	- scratch pad register (RW)
+
+
+
+SAMPLE SOFTWARE USAGE:
+	This is an extract of code from Tiny Basic 68000. The UART is in use as the auxilliary
+port for tiny basic. The sample is in 68000 assembly language. The sample uses default
+settings of the UART, which is 19.2k baud, so there is no initialization required.
+
+;==============================================================================
+;==============================================================================
+UART		EQU		0xFFDC0A00
+UART_LS		EQU		UART+1
+UART_CTRL	EQU		UART+7
+
+
+;*
+;* ===== Output character to the host (Port 2) from register D0
+;*	(Preserves all registers.)
+;*
+AUXOUT:
+	BTST	#5,UART_LS	;is port ready for a character?
+	BEQ		AUXOUT		;if not, wait for it
+	MOVE.B	D0,UART		;out it goes.
+	RTS
+
+;*
+;* ===== Input a character from the host into register D0 (or
+;*	return Zero status if there's no character available).
+;*
+AUXIN:
+	BTST	#0,UART_LS	;is character ready?
+	BEQ		AXIRET		;if not, return Zero status
+	MOVE.B	UART,D0		;else get the character
+	AND.B	#0x7F,D0 	;zero out the high bit
+AXIRET:
+	RTS
+
+
+;==============================================================================
+;==============================================================================
+EXAMPLE OF CORE INSTANCING:
+The core needs to know the clock rate.
+
+
+rtfSimpleUart #(16666667) uuart
+(
+	// WISHBONE Slave interface
+	.rst_i(rst),			// reset
+	.clk_i(clk25),			// eg 100.7MHz
+	.cyc_i(sys_cyc),		// cycle valid
+	.stb_i(sys_stb),		// strobe
+	.we_i(sys_we),			// 1 = write
+	.adr_i(cpu_adr),	// register address
+	.dat_i(dbo[7:0]),		// data input bus
+	.dat_o(uart_dbo),		// data output bus
+	.ack_o(uart_ack),		// transfer acknowledge
+	.vol_o(),				// volatile register selected
+	.irq_o(),				// interrupt request
+	//----------------
+	.cts_ni(1'b0),		// clear to send - active low - (flow control)
+	.rts_no(),			// request to send - active low - (flow control)
+	.dsr_ni(1'b0),		// data set ready - active low
+	.dcd_ni(1'b0),		// data carrier detect - active low
+	.dtr_no(),			// data terminal ready - active low
+	.rxd_i(rxd),			// serial data in
+	.txd_o(txd),			// serial data out
+	.data_present_o()
+);
+
+
+
