@@ -1,0 +1,251 @@
+#!/usr/bin/perl
+################################################################
+#Theia, Ray Cast Programable graphic Processing Unit.
+#Copyright (C) 2010  Diego Valverde (diego.valverde.g@gmail.com)
+#
+#This program is free software; you can redistribute it and/or
+#modify it under the terms of the GNU General Public License
+#as published by the Free Software Foundation; either version 2
+#of the License, or (at your option) any later version.
+#
+#This program is distributed in the hope that it will be useful,
+#but WITHOUT ANY WARRANTY; without even the implied warranty of
+#MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#GNU General Public License for more details.
+#
+#You should have received a copy of the GNU General Public #License
+#along with this program; if not, write to the Free Software
+#Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  #02110-1301, USA.
+################################################################
+$CodePath = $ARGV[0];
+$DefsPath = "aDefinitions.v";
+
+
+print
+"
+---------------------------------------------------------------
+  
+ _/_/_/_/_/  _/                  _/            
+   _/      _/_/_/      _/_/          _/_/_/   
+  _/      _/    _/  _/_/_/_/  _/  _/    _/    
+ _/      _/    _/  _/        _/  _/    _/     
+_/      _/    _/    _/_/_/  _/    _/_/_/      
+
+ 
+---------------------------------------------------------------
+Compiling file '$CodePath'
+
+
+";
+
+$Line = 0;
+%Registers;
+%Instructions;
+%Labels;
+%EntryPoints;
+@EntryKeys;
+$OutputFile = "Instructions.mem";
+open OUT, ">$OutputFile" or die "Can't open output file for R/W\n";
+PopulateRegistersAndInstructionSet();
+GenerateLabels();
+ParseCode();
+print 
+"
+
+Output file: '$OutputFile'
+
+** Compilation successful! **
+---------------------------------------------------------------
+";
+close OUT;
+exit(0);
+
+
+#-------------------------------------------------------------------
+sub PopulateRegistersAndInstructionSet()
+{
+   open DEFINITIONS, $DefsPath or die "'$DefsPath' : $!\n";
+   while (<DEFINITIONS>)
+   {
+      #skip comments and empty lines
+      next if (m/^([\s|\t]*\/\/)|^(\s*\n).*/);
+
+       if (m/`define\s*(ENTRYPOINT_ADRR_\S*)[\s|\t]+.*\'d(\d+)/)
+       {
+         push @EntryKeys, $1; 
+         $EntryPoints{$1}= sprintf('%08X',$2);
+
+         next;
+       }
+
+       if (m/\`define\s*([C|O]REG\_\S*)[\s|\t]+.*\'d(\d+)/ || 
+          m/\`define\s*([R|C]\d+)[\s|\t]+.*\'d(\d+)/) 
+       { 
+          $Registers{$1} = sprintf('%X', $2);
+          next;  
+       }
+
+       if (m/\`define\s*(\S*)[\s|\t]+\`INSTRUCTION_OP_LENGTH\'b([0|1|\_]+)/)
+       {
+       $Instructions{$1} = $2;
+       $key = $1;
+       #get rid of the '_' characters
+       $Instructions{$key} =~ s/\_//g;
+       #convert to hexadecimal  
+       $Instructions{$key}= sprintf('%X', oct("0b$Instructions{$key}"));
+       next;
+      }
+      if (m/\`define\s*(\S*)[\s|\t]+32\'d(\d+)/)
+      {
+          $Registers{$1} = $2;
+      }
+
+
+   }
+
+   $InstructionCount = 0;
+   close DEFINITIONS;
+   #Ok, add some extra stuff
+   $Registers{'VOID'} = 0;
+   $Registers{'RT_TRUE'} = 1;
+   $Registers{'RT_FALSE'} = 0;
+}
+#-------------------------------------------------------------------
+sub GenerateLabels()
+{
+
+   my $IP = 0;
+   open CODE, $CodePath or die "'$CodePath': $!\n";
+   while (<CODE>)
+   {
+      #skip comments and empty lines
+      next if (m/^([\s|\t]*\/\/)|^(\s*\n).*/);
+      $Line++;
+      #print "$_ &&&& $IP\n";
+
+      if (m/^(ENTRYPOINT_ADRR_\S+)\:.*\n/)
+      
+      {
+         #print "$1\n";
+         die "Error line $Line: Entry point not defined $1\n" if  (not defined $EntryPoints{$1});
+          $EntryPoints{$1} = sprintf("%06X",$IP | 0x8000);#sprintf("%08X",$Line-1 | 0x8000);
+          print "Implemented @ 0x$EntryPoints{$1} --> $1\n";
+         next;
+      }
+
+       if (m/[\s|\t]*(\S+)\:.*\n/)
+       {
+          # print "$1 " . sprintf("%08X",$InstructionCount | 0x8000) . "\n"; 
+           $Labels{$1} = ($IP | 0x8000);#(($Line-1) | 0x8000); #sprintf("%08X",$Line-1 | 0x8000)
+         #  print "$1 =  $Labels{$1}\n";
+           next;
+       }
+
+      $IP++;
+      $InstructionCount++;
+   }
+   close CODE;
+   $Line = 0;
+}
+#-------------------------------------------------------------------
+sub DecodeInstruction
+{
+   my ($Line,$EntryAddrCount,$OP,@Tokens) = @_;
+   my @D_Tokens;
+    if ( defined $Instructions{$OP}) {  $D_OP = hex $Instructions{$OP}; 
+    } else {
+       die "Error Line $Line: undefined instruction '$OP'\n";
+    }
+
+   foreach $Token (@Tokens)
+   {
+      next if ($Token eq '');
+      if ($Token =~ m/(RT_TRUE|RT_FALSE)/) 
+      {
+         push @D_Tokens,0;
+         push @D_Tokens,0;
+         push @D_Tokens,$Registers{$Token};
+      } elsif ($Token =~ m/SWIZZLE.*/){
+          push @D_Tokens,0;
+          push @D_Tokens,$Registers{$Token};
+      } elsif (defined  $Registers{$Token} ){
+          
+         push @D_Tokens,  hex $Registers{$Token}; 
+          
+      } elsif (defined  $Labels{$Token})
+      {
+        # print "$Labels{$Token}\n";
+         push @D_Tokens, ($Labels{$Token}+$EntryAddrCount); 
+	  }elsif (defined  $EntryPoints{$Token}){
+	     
+	     push @D_Tokens,hex $EntryPoints{$Token};
+      } elsif ($Token =~ m/32\'h(.*)/) {   
+         #if this is inmmediate value of 32 bits, then insert 0 and then the value
+         push  @D_Tokens,0; 
+         push  @D_Tokens, hex $1; 
+      } else {
+         die "Error Line $Line: undefined token '$Token'\n" 
+      }
+   }
+
+   return ($D_OP,@D_Tokens);
+}
+#-------------------------------------------------------------------
+sub ParseCode()
+{
+
+my $ByteCount = ($InstructionCount+$#EntryKeys+1)*2;   
+print OUT "$ByteCount //Number of ioctects in file\n";
+print OUT "//--------------------------------------\n";
+print OUT "//Subroutine Entry Point Table\n";
+
+my $IP = 0;
+for my $k ( @EntryKeys ) 
+{
+   my $foo =  (oct("0x$EntryPoints{$k}") & 0x8000) ? 
+   sprintf("%08X", oct("0x$EntryPoints{$k}")+$#EntryKeys+1) : 
+   sprintf("%08X", oct("0x$EntryPoints{$k}")) ;
+    print OUT "00000000 $foo\t//$k\n";
+
+   $IP++;       
+}
+
+print OUT "//--------------------------------------\n";
+
+open CODE, $CodePath or die "$CodePath: $!\n";
+while (<CODE>)
+{
+      $Line++;
+       #skip comments and empty lines
+       next if (m/^([\s|\t]*\/\/)|^(\s*\n).*/);
+       #skip labels
+       next if (m/(\S+\:).*\n/);
+       #get rid of comments in the same line
+       s/\/\/.*\n/\n/g;
+
+       my $OpcodeH,$OpcodeL; 
+       ($OP,$DST,$R1,$R2) = ("","","","");
+      #Handle OP DST R1 R2
+      if (m/^[\s|\t]*(\S+)\s+(\S+)\s*(\S*)\s*(\S*).*\n/)
+      {
+         ($OP,$DST,$R1,$R2) = ($1,$2,$3,$4);
+         my @D = DecodeInstruction($Line,$#EntryKeys+1,$OP,($DST,$R1,$R2) );
+
+
+         $OpcodeH = ($D[0] << 16) + $D[1];
+         $OpcodeL = ($D[2] << 16) + $D[3];
+      } else {
+          die "Error: line $Line: incorrect statement '$_'\n";
+      }
+
+       printf OUT "%08X",$OpcodeH;
+       printf OUT " %08X",$OpcodeL;
+      print OUT "\t\t//  ".sprintf("IP %06X",$IP | 0x8000) . " ($IP): $OP $DST $R1 $R2\n"; $IP++;
+      
+      
+}
+
+close CLOSE;
+}
+#-------------------------------------------------------------------
+
