@@ -1,0 +1,84 @@
+OpenCores tiny SPI
+
+Author(s):
+  - Thomas Chou <thomas@wytron.com.tw>
+
+
+This is an 8 bits SPI master controller. It features optional 
+programmable baud rate and SPI mode selection. Altera SPI doesn't
+support programmable rate which is needed for MMC SPI, nor does
+Xilinx SPI.
+
+It is small. It combines transmit and receive buffer and remove unused 
+functions. It takes only 36 LEs for SPI flash controller, or 53 LEs for 
+MMC SPI controller in an Altera CycoloneIII SOPC project. While Altera 
+SPI takes around 143 LEs. OpenCores SPI takes 857 LEs and simple SPI 
+takes 171 LEs.
+
+It doesn't generate SS_n signal. Please use gpio core for SS_n, which
+costs 3- LEs per pin. The gpio number is used for the cs number in
+u-boot and linux drivers.
+
+
+Parameters:
+
+BAUD_WIDTH: bits width of programmable divider
+  sclk = clk / ((baud_reg + 1) * 2)
+  if BAUD_DIV is not zero, BAUD_WIDTH is ignored.
+
+BAUD_DIV: fixed divider, must be even
+  sclk = clk / BAUD_DIV
+
+SPI_MODE: value 0-3 fixed mode CPOL,CPHA
+          otherwise (eg, 4) programmable mode in control reg[1:0]
+
+Registers map:
+
+base+0  R shift register
+base+4  R buffer register
+        W buffer register
+base+8  R status
+	  [1] TXR transfer ready
+          [0] TXE transter end
+        W irq enable
+          [1] TXR_EN transfer ready irq enable
+       	  [0] TXE_EN transter end irq enable
+base+12 W control (optional)
+          [1:0] spi mode
+base+16 W baud divider (optional)
+
+Program flow:
+
+There is an 8-bits shift register and buffer register.
+
+1. after reset or idle, TXR=1, TXE=1
+2. first byte written to buffer register, TXR=0, TXE=1
+3. buffer register swabbed with shift register, TXR=1, TXE=0   
+   shift register has the first byte and starts shifting
+   buffer register has (useless) old byte of shift register
+4. second byte written to buffer register, TXR=0, TXE=0
+5. first byte shifted,
+   buffer register swabbed with shift register, TXR=1, TXE=0
+   shift register has the second byte and starts shifting
+   buffer register has the first received byte from shift register
+6. third byte written to buffer register, TXR=0, TXE=0
+7. repeat like 5.
+
+9. last byte written to buffer register, TXR=0, TXE=0
+10. last-1 byte shifted,
+   buffer register swabbed with shift register, TXR=1, TXE=0
+   shift register has the last byte and starts shifting
+   buffer register has the last-1 received byte from shift register
+11. last byte shifted, no more to write, TXR=1, TXE=1
+   shift register has the last received byte
+   
+Interrupt usage:
+Interrupt is controlled with irq enable reg.
+
+For performace issue, at sclk > 200KHz, interrupt should not be used and 
+polling will get better result. In this case, interrupt can be 
+disconnected in SOPC builder to save 2 LEs. A 100MHz Nios2 is able to
+serve 25 MHz sclk using polling.
+
+This core uses zero-wait bus access. Clock crossing bridges between
+CPU and this core might reduce performance.
