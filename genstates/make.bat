@@ -1,0 +1,1 @@
+cl -D_CRT_SECURE_NO_DEPRECATE genstates.c
