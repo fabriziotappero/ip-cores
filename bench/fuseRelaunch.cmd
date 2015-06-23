@@ -1,0 +1,1 @@
+-intstyle "ise" -incremental -lib "secureip" -o "D:/Dropbox/VHDL_training/OpenCores/debouncer_vhdl/debouncer_vhdl/trunk/bench/testbench_isim_beh.exe" -prj "D:/Dropbox/VHDL_training/OpenCores/debouncer_vhdl/debouncer_vhdl/trunk/bench/testbench_beh.prj" "work.testbench" 
