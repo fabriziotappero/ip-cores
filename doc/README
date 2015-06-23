@@ -1,0 +1,85 @@
+--
+-- * pipelined synchronous pulse counter *
+--
+-- fast counter for slow-carry architectures
+-- non-monotonic counting, value calculable by HDL/CPU
+--
+-- idea&code by Marek Peca <mp@duch.cz> 08/2012
+-- Vyzkumny a zkusebni letecky ustav, a.s. http://vzlu.cz/
+-- thanks to Michael Vacek <michael.vacek@vzlu.cz> for testing
+--
+
+Pipelined Synchronous Pulse Counter
+===================================
+
+is a proposal of binary counter, designed to minimize logic path
+length in between flip-flops to one gate (MUX/AND) only, at the
+expense of not so straightforward binary counting. The reason for this
+design has emerged while using Actel (MicroSemi) ProASIC/IGLOO
+architecture, lacking any hardwired support for fast carry.
+
+During our work on Actel FPGAs (basically, 3-LUT & DFF only), we were
+aware of following types of faster counters:
+- LFSR counter
+- Johnson counter
+- "RLA counter" (as tailored using Actel's SmartGen core generator)
+
+Johnson due to its O(2^n) (n as number of bits) can not be used for
+longer counts; LFSR's are hard to invert (table lookup seems to be
+only known method), therefore also impractical for wider counters. RLA
+counter is still too slow and complex for wider counters and moderate
+speeds (e.g.  > 24bits @ >100MHz).
+
+As a consequence, the proposed counter uses synchronous divide-by-two
+blocks, each using 1-bit pipeline and carry by single-clock
+pulse. Design is simple and fast, preliminary results from Synplify
+and Actel Designer shows 32bits @200MHz feasible.
+
+However, output bit lines are non-proportionaly delayed by discrete
+number of clock periods. Therefore, to obtain linear bit word, an
+inversion formula needs to be applied. Fortunately, the inversion is
+simple (unlike LFSR's), in C (pcount.c):
+
+  for (k = 1; k < n; k++)
+    if ((y & ((1<<k)-1)) < k)
+      y = y ^ (1<<k);
+
+-- it may be implemented in VHDL core, or within CPU as shown, depending on
+application requirements.
+
+Files
+=====
+
+pdivtwo.vhdl			basic building block -- 1-stage pipelined
+				flip-flop
+pdchain.vhdl			counter top-level entity
+pcount_tb.vhdl			GHDL testbench
+pcount.c			C language encoder/decoder of counter bitword
+doc/pcounter_4bit_trace.pdf	simulated signals of 4-bit counter
+doc/pcounter_sch.pdf		schematic diagram of the counter
+
+Results
+=======
+
+Synthesized within larger circuit for Actel ProASIC3E A3PE1500-Std
+as 32bit wide counter, typical frequency: 234MHz
+
+Comments?
+=========
+
+***
+* First, if you find this pretty simple idea to be non-original work
+* *please* send me an e-mail with respective pointers; I will then freeze
+* the repository, including link to the reference.
+***
+
+If you find this idea useful, apply it whenever you want, however,
+share your improvements. E.g.:
+- (fast) HDL implementation of bitword encode/decode
+- preset/reset/match/enable logic
+
+Testimonials (usage/frequency/bits/architecture) are indeed welcome.
+
+
+--
+Greetings by Marek <mp@duch.cz>
