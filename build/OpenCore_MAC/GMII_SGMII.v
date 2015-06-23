@@ -1,0 +1,45 @@
+
+
+/*
+* This core is to adapt from GMII to SGMII interface. 
+* This core requires hardIP to perform serdes  
+*/
+
+
+
+
+module GMII_SGMII (
+//GMII interface
+input [7:0] TxD,
+input TxDV,
+input TxER,
+input TxClk,
+
+output [7:0] RxD,
+output RxDV,
+output RxER,
+output RxClk,
+
+//SGMII Interface
+
+output SGMII_Tx,
+input  SGMII_Rx,
+
+//Supplementary
+
+input clk_125M,
+input [2:0] Speed,
+input rstn,
+output core_clk, 	//This clock will change according to speed, will be either 125,25,2.5
+output core_clkh	//This clock will change according to speed, will be either 125,12.5,1.25
+);
+
+
+
+
+
+
+
+
+
+endmodule
