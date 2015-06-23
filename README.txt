@@ -1,0 +1,16 @@
+--ECE395 GPU:
+--Top Level HDL
+--=====================================================
+--Designed by:
+--Zuofu Cheng
+--James Cavanaugh
+--Eric Sands
+--
+--of the University of Illinois at Urbana Champaign
+--under the direction of Dr. Lippold Haken
+--====================================================
+--Based in part on Doug Hodson's work which in turn
+--was based off of the XSOC from Gray Research LLC.
+--										
+--release under the GNU General Public License
+--and kindly hosted by www.opencores.org
