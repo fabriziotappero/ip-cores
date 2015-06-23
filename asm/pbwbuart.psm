@@ -1,0 +1,430 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; This sourcecode is released under BSD license.
+;; Please see http://www.opensource.org/licenses/bsd-license.php for details!
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; Copyright (c) 2010, Stefan Fischer <Ste.Fis@OpenCores.org>
+;; All rights reserved.
+;;
+;; Redistribution and use in source and binary forms, with or without 
+;; modification, are permitted provided that the following conditions are met:
+;;
+;;  * Redistributions of source code must retain the above copyright notice, 
+;;    this list of conditions and the following disclaimer.
+;;  * Redistributions in binary form must reproduce the above copyright notice,
+;;    this list of conditions and the following disclaimer in the documentation
+;;    and/or other materials provided with the distribution.
+;;
+;; THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
+;; AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE 
+;; IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE 
+;; ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE 
+;; LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR 
+;; CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF 
+;; SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS 
+;; INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN 
+;; CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) 
+;; ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE 
+;; POSSIBILITY OF SUCH DAMAGE.
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; filename: pbwbuart.psm
+;; description: uart example, demonstrating access to wishbone peripherals
+;; todo4user: modify main program and uart code as needed, i. e. non-blocking
+;;            read and write transactions or data burst transfers
+;; version: 0.0.0
+;; changelog: - 0.0.0, initial release
+;;            - ...
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+; wishbone variables
+NAMEREG sF , wb_addr
+NAMEREG sE , wb_data ; also used as tmp-reg for status polling
+
+; uart variables
+NAMEREG sD , uart_data
+
+
+ADDRESS 000
+
+; main entry point
+;;;;;;;;;;;;;;;;;;
+
+DISABLE INTERRUPT
+
+CALL uart_init
+
+; obligatory "Hello World!" message
+
+; new line
+LOAD uart_data , ASCII_CR_CHAR
+CALL uart_wr_byte
+LOAD uart_data , ASCII_LF_CHAR
+CALL uart_wr_byte
+; H
+LOAD uart_data , ASCII_H_UC
+CALL uart_wr_byte
+; e
+LOAD uart_data , ASCII_E_LC
+CALL uart_wr_byte
+; l
+LOAD uart_data , ASCII_L_LC
+CALL uart_wr_byte
+; l
+LOAD uart_data , ASCII_L_LC
+CALL uart_wr_byte
+; o
+LOAD uart_data , ASCII_O_LC
+CALL uart_wr_byte
+; space
+LOAD uart_data , ASCII_SP_CHAR
+CALL uart_wr_byte
+; W
+LOAD uart_data , ASCII_W_UC
+CALL uart_wr_byte
+; o
+LOAD uart_data , ASCII_O_LC
+CALL uart_wr_byte
+; r
+LOAD uart_data , ASCII_R_LC
+CALL uart_wr_byte
+; l
+LOAD uart_data , ASCII_L_LC
+CALL uart_wr_byte
+; d
+LOAD uart_data , ASCII_D_LC
+CALL uart_wr_byte
+; !
+LOAD uart_data , ASCII_EXCLAMATION_MARK_SIGN
+CALL uart_wr_byte
+; new line
+LOAD uart_data , ASCII_CR_CHAR
+CALL uart_wr_byte
+LOAD uart_data , ASCII_LF_CHAR
+CALL uart_wr_byte
+
+; simple loopback of uart data
+mainloop:
+  CALL uart_rd_byte
+  CALL uart_wr_byte
+  JUMP mainloop
+  
+  
+; wbs_uart module subroutines and settings
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; usage:
+; 1. set baud rate in uart_init subroutine 
+; 2. call uart_init subroutine to configure wbs_uart module for operation
+; 3. use uart_wr_byte and uart_rd_byte subroutines to access uart transceiver,
+;    all accesses are blocking, subroutines do not return, if wbs_uart tx buffer
+;    is full or rx buffer is empty
+;    uart write code =>
+;    LOAD uart_data , <user data> ; setting up data
+;    CALL uart_wr_byte ; writing data to uart module
+;    <next user instruction>
+;    uart read code =>
+;    CALL uart_rd_byte ; reading data from uart module
+;    LOAD <user data> , uart_data ; uart_data is updated now
+;    <next user instruction>
+; 4. uart_clr_buff subroutine can be used to discard wbs_uart rx buffer contents
+;    during software runtime
+
+; uart start-up configuration, i. e. baudrate
+uart_init:
+  ; setting baud rate
+  LOAD wb_addr , UART_BAUD_LO_ADDR
+  LOAD wb_data , UART_BAUD_LO_115200_VALUE
+  CALL wb_wr
+  LOAD wb_addr , UART_BAUD_HI_ADDR
+  LOAD wb_data , UART_BAUD_HI_115200_VALUE
+  CALL wb_wr
+  ; clear uart receive buffer, after power up and change of baud rate, there is
+  ; maybe invalid data in it
+  CALL uart_clr_buff
+RETURN  
+
+; blocking write byte to uart    
+uart_wr_byte:
+  LOAD wb_addr , UART_RXTX_ADDR
+  LOAD wb_data , uart_data
+  CALL wb_wr
+RETURN
+
+; blocking read byte from uart    
+uart_rd_byte:
+  LOAD wb_addr , UART_RXTX_ADDR
+  CALL wb_rd
+  LOAD uart_data , wb_data
+RETURN
+
+; uart rx buffer clear
+uart_clr_buff:
+  ; uart receive buffer software reset, checking status register for level and
+  ; reading out all available data
+  LOAD wb_addr , UART_SR_ADDR ; setting status register address
+  CALL wb_rd
+  ; checking data present flag
+  TEST wb_data , UART_SR_RX_DP_FLAG
+  ; if flag is not set, returning immediately
+  RETURN Z
+  ; else reading out next byte and checking flag again
+  CALL uart_rd_byte
+  JUMP uart_clr_buff
+
+; register and flag addressing
+CONSTANT UART_RXTX_ADDR , 00 ; receive/transmit data pipe
+CONSTANT UART_SR_ADDR , 01 ; status register
+CONSTANT UART_SR_RX_F_FLAG , 01 ; status rx full
+CONSTANT UART_SR_RX_HF_FLAG , 02 ; status rx half full
+CONSTANT UART_SR_RX_DP_FLAG , 04 ; status rx data present
+CONSTANT UART_SR_TX_F_FLAG , 10 ; status tx full
+CONSTANT UART_SR_TX_HF_FLAG , 20 ; status tx half full
+CONSTANT UART_BAUD_LO_ADDR , 02 ; baud rate cfg. register / low byte
+CONSTANT UART_BAUD_HI_ADDR , 03 ; baud rate cfg. register / high byte
+
+; baud rate configuration:
+; baud_limit = round( system clock frequency / (16 * baud rate) ) - 1
+; i. e. 9600 baud at 50 MHz system clock =>
+; baud_limit = round( 50.0E6 / (16 * 9600) ) - 1 = 325 = 0x0145
+
+; WARNING, baud rate error should not exceed 1.0 % for reliable operation!
+
+; baud rate settings for 50.0E6 Hz system reference clock
+; max. 3125000.0 baud
+; min. 48.0 baud (16 bit baud timer)
+CONSTANT UART_BAUD_LO_300_VALUE , B0 ; actual baud rate 299.99
+CONSTANT UART_BAUD_HI_300_VALUE , 28 ; => baud rate error 0.003 %
+CONSTANT UART_BAUD_LO_600_VALUE , 57 ; actual baud rate 600.04
+CONSTANT UART_BAUD_HI_600_VALUE , 14 ; => baud rate error 0.006 %
+CONSTANT UART_BAUD_LO_1200_VALUE , 2B ; actual baud rate 1200.08
+CONSTANT UART_BAUD_HI_1200_VALUE , 0A ; => baud rate error 0.006 %
+CONSTANT UART_BAUD_LO_2400_VALUE , 15 ; actual baud rate 2400.15
+CONSTANT UART_BAUD_HI_2400_VALUE , 05 ; => baud rate error 0.006 %
+CONSTANT UART_BAUD_LO_4800_VALUE , 8A ; actual baud rate 4800.31
+CONSTANT UART_BAUD_HI_4800_VALUE , 02 ; => baud rate error 0.006 %
+CONSTANT UART_BAUD_LO_9600_VALUE , 45 ; actual baud rate 9585.89
+CONSTANT UART_BAUD_HI_9600_VALUE , 01 ; => baud rate error 0.147 %
+CONSTANT UART_BAUD_LO_19200_VALUE , A2 ; actual baud rate 19171.78
+CONSTANT UART_BAUD_HI_19200_VALUE , 00 ; => baud rate error 0.147 %
+CONSTANT UART_BAUD_LO_38400_VALUE , 50 ; actual baud rate 38580.25
+CONSTANT UART_BAUD_HI_38400_VALUE , 00 ; => baud rate error 0.467 %
+CONSTANT UART_BAUD_LO_57600_VALUE , 35 ; actual baud rate 57870.37
+CONSTANT UART_BAUD_HI_57600_VALUE , 00 ; => baud rate error 0.467 %
+CONSTANT UART_BAUD_LO_115200_VALUE , 1A ; actual baud rate 115740.74
+CONSTANT UART_BAUD_HI_115200_VALUE , 00 ; => baud rate error 0.467 %
+;CONSTANT UART_BAUD_LO_230400_VALUE , 0D ; actual baud rate 223214.29
+;CONSTANT UART_BAUD_HI_230400_VALUE , 00 ; => baud rate error 3.219 %
+;CONSTANT UART_BAUD_LO_460800_VALUE , 06 ; actual baud rate 446428.57
+;CONSTANT UART_BAUD_HI_460800_VALUE , 00 ; => baud rate error 3.219 %
+;CONSTANT UART_BAUD_LO_921600_VALUE , 02 ; actual baud rate 1041666.67
+;CONSTANT UART_BAUD_HI_921600_VALUE , 00 ; => baud rate error 11.526 %
+
+
+; wbm_picoblaze module subroutines and settings
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; subroutines wb_wr and wb_rd are working together with external wbm_picoblaze
+; wishbone adapter module and therefore should not be modified. wb_wait_on_ack 
+; is a supporting subroutine, which should not be called directly
+; 
+; transfer principle wishbone write:
+; 1. OUTPUT cycle to set up wishbone address, data and control signals from 
+;    PORT_ID, OUT_PORT and WRITE_STROBE
+; 2. INPUT cycle(s) to poll wishbone peripheral acknowledgement using IN_PORT
+; => at least one OUTPUT and one INPUT cycle for a write
+;
+; transfer principle wishbone read:
+; 1. INPUT cycle to set up wishbone address and control signals from PORT_ID
+;    and READ_STROBE
+; 2. INPUT cycle(s) to poll wishbone peripheral acknowledgement using IN_PORT
+; 3. the very next INPUT cycle after acknowledgement contains valid wishbone 
+;    data from IN_PORT
+; => at least three INPUT cycles for a read
+;
+; calling examples:
+;
+; wishbone write code =>
+;
+; LOAD wb_addr , <user address> ; setting up address
+; LOAD wb_data , <user data> ; setting up data
+; CALL wb_wr ; starting wishbone write cycle
+; <next user instruction> ; wishbone cycle finished
+;
+; wishbone read code =>
+;
+; LOAD wb_addr , <user address> ; setting up address
+; CALL wb_rd ; starting wishbone read cycle
+; LOAD <user data> , wb_data ; wb_data is updated now
+; <next user instruction> ; wishbone cycle finished
+
+; wishbone write access
+wb_wr:
+  OUTPUT wb_data , (wb_addr)
+  CALL wb_wait_on_ack
+RETURN
+
+; wishbone read access
+wb_rd:
+  CALL wb_wait_on_ack
+  INPUT wb_data , (wb_addr)
+RETURN 
+
+; waiting on wishbone cycle to complete
+wb_wait_on_ack:
+  INPUT wb_data , (wb_addr)
+  TEST wb_data , WB_ACK_FLAG
+  JUMP Z , wb_wait_on_ack
+RETURN
+
+CONSTANT WB_ACK_FLAG , 01
+
+
+; interrupt subroutines and settings
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; IMPORTANT NOTICE!
+; be carefull, if using interrupts. wishbone cycles must be atomar, as any 
+; other processor local bus cycles are normally be. interrupting wishbone 
+; access may cause a crash of external wishbone master fsm, especially, if 
+; program flow through isr leads to another wishbone cycle!
+
+; interrupt handling template, if needed
+isr:
+RETURNI DISABLE
+ADDRESS 3FF
+JUMP isr
+
+
+; ascii table
+;;;;;;;;;;;;;
+
+CONSTANT ASCII_NUL_CHAR , 00 ; NUL
+CONSTANT ASCII_SOH_CHAR , 01 ; SOH
+CONSTANT ASCII_STX_CHAR , 02 ; STX
+CONSTANT ASCII_ETX_CHAR , 03 ; ETX
+CONSTANT ASCII_EOT_CHAR , 04 ; EOT
+CONSTANT ASCII_ENQ_CHAR , 05 ; ENQ
+CONSTANT ASCII_ACK_CHAR , 06 ; ACK
+CONSTANT ASCII_BEL_CHAR , 07 ; BEL
+CONSTANT ASCII_BS_CHAR , 08 ; BS
+CONSTANT ASCII_TAB_CHAR , 09 ; TAB
+CONSTANT ASCII_LF_CHAR , 0A ; LF
+CONSTANT ASCII_VT_CHAR , 0B ; VT
+CONSTANT ASCII_FF_CHAR , 0C ; FF
+CONSTANT ASCII_CR_CHAR , 0D ; CR
+CONSTANT ASCII_SO_CHAR , 0E ; SO
+CONSTANT ASCII_SI_CHAR , 0F ; SI
+CONSTANT ASCII_DLE_CHAR , 10 ; DLE
+CONSTANT ASCII_DC1_CHAR , 11 ; DC1
+CONSTANT ASCII_DC2_CHAR , 12 ; DC2
+CONSTANT ASCII_DC3_CHAR , 13 ; DC3
+CONSTANT ASCII_DC4_CHAR , 14 ; DC4
+CONSTANT ASCII_NAK_CHAR , 15 ; NAK
+CONSTANT ASCII_SYN_CHAR , 16 ; SYN
+CONSTANT ASCII_ETB_CHAR , 17 ; ETB
+CONSTANT ASCII_CAN_CHAR , 18 ; CAN
+CONSTANT ASCII_EM_CHAR , 19 ; EM
+CONSTANT ASCII_SUB_CHAR , 1A ; SUB
+CONSTANT ASCII_ESC_CHAR , 1B ; ESC
+CONSTANT ASCII_FS_CHAR , 1C ; FS
+CONSTANT ASCII_GS_CHAR , 1D ; GS
+CONSTANT ASCII_RS_CHAR , 1E ; RS
+CONSTANT ASCII_US_CHAR , 1F ; US
+CONSTANT ASCII_SP_CHAR , 20 ; SP
+CONSTANT ASCII_EXCLAMATION_MARK_SIGN , 21 ; !
+CONSTANT ASCII_DOUBLE_QUOTE_SIGN , 22 ; "
+CONSTANT ASCII_NUMBER_SIGN , 23 ; #
+CONSTANT ASCII_DOLLAR_SIGN , 24 ; $
+CONSTANT ASCII_PERCENT_SIGN , 25 ; %
+CONSTANT ASCII_AMPERSAND_SIGN , 26 ; &
+CONSTANT ASCII_SINGLE_QUOTE_SIGN , 27 ; '
+CONSTANT ASCII_OPN_PARENTHESIS_SIGN , 28 ; (
+CONSTANT ASCII_CLS_PARENTHESIS_SIGN , 29 ; )
+CONSTANT ASCII_ASTERISK_SIGN , 2A ; *
+CONSTANT ASCII_PLUS_SIGN , 2B ; +
+CONSTANT ASCII_COMMA_SIGN , 2C ; ,
+CONSTANT ASCII_MINUS_SIGN , 2D ; -
+CONSTANT ASCII_DOT_SIGN , 2E ; .
+CONSTANT ASCII_SLASH_SIGN , 2F ; /
+CONSTANT ASCII_0_DIGIT , 30 ; 0
+CONSTANT ASCII_1_DIGIT , 31 ; 1
+CONSTANT ASCII_2_DIGIT , 32 ; 2
+CONSTANT ASCII_3_DIGIT , 33 ; 3
+CONSTANT ASCII_4_DIGIT , 34 ; 4
+CONSTANT ASCII_5_DIGIT , 35 ; 5
+CONSTANT ASCII_6_DIGIT , 36 ; 6
+CONSTANT ASCII_7_DIGIT , 37 ; 7
+CONSTANT ASCII_8_DIGIT , 38 ; 8
+CONSTANT ASCII_9_DIGIT , 39 ; 9
+CONSTANT ASCII_COLON_SIGN , 3A ; :
+CONSTANT ASCII_SEMICOLON_SIGN , 3B ; ;
+CONSTANT ASCII_LESS_THAN_SIGN , 3C ; <
+CONSTANT ASCII_EQUAL_SIGN , 3D ; =
+CONSTANT ASCII_GREATER_THAN_SIGN , 3E ; >
+CONSTANT ASCII_QUESTION_MARK_SIGN , 3F ; ?
+CONSTANT ASCII_AT_SIGN , 40 ; @
+CONSTANT ASCII_A_UC , 41 ; A
+CONSTANT ASCII_B_UC , 42 ; B
+CONSTANT ASCII_C_UC , 43 ; C
+CONSTANT ASCII_D_UC , 44 ; D
+CONSTANT ASCII_E_UC , 45 ; E
+CONSTANT ASCII_F_UC , 46 ; F
+CONSTANT ASCII_G_UC , 47 ; G
+CONSTANT ASCII_H_UC , 48 ; H
+CONSTANT ASCII_I_UC , 49 ; I
+CONSTANT ASCII_J_UC , 4A ; J
+CONSTANT ASCII_K_UC , 4B ; K
+CONSTANT ASCII_L_UC , 4C ; L
+CONSTANT ASCII_M_UC , 4D ; M
+CONSTANT ASCII_N_UC , 4E ; N
+CONSTANT ASCII_O_UC , 4F ; O
+CONSTANT ASCII_P_UC , 50 ; P
+CONSTANT ASCII_Q_UC , 51 ; Q
+CONSTANT ASCII_R_UC , 52 ; R
+CONSTANT ASCII_S_UC , 53 ; S
+CONSTANT ASCII_T_UC , 54 ; T
+CONSTANT ASCII_U_UC , 55 ; U
+CONSTANT ASCII_V_UC , 56 ; V
+CONSTANT ASCII_W_UC , 57 ; W
+CONSTANT ASCII_X_UC , 58 ; X
+CONSTANT ASCII_Y_UC , 59 ; Y
+CONSTANT ASCII_Z_UC , 5A ; Z
+CONSTANT ASCII_OPN_BRACKET_SIGN , 5B ; [
+CONSTANT ASCII_BACKSLASH_SIGN , 5C ; \
+CONSTANT ASCII_CLS_BRACKET_SIGN , 5D ; ]
+CONSTANT ASCII_CARET_SIGN , 5E ; ^
+CONSTANT ASCII_UNDERSCORE_SIGN , 5F ; _
+CONSTANT ASCII_ACCENT_SIGN , 60 ; `
+CONSTANT ASCII_A_LC , 61 ; a
+CONSTANT ASCII_B_LC , 62 ; b
+CONSTANT ASCII_C_LC , 63 ; c
+CONSTANT ASCII_D_LC , 64 ; d
+CONSTANT ASCII_E_LC , 65 ; e
+CONSTANT ASCII_F_LC , 66 ; f
+CONSTANT ASCII_G_LC , 67 ; g
+CONSTANT ASCII_H_LC , 68 ; h
+CONSTANT ASCII_I_LC , 69 ; i
+CONSTANT ASCII_J_LC , 6A ; j
+CONSTANT ASCII_K_LC , 6B ; k
+CONSTANT ASCII_L_LC , 6C ; l
+CONSTANT ASCII_M_LC , 6D ; m
+CONSTANT ASCII_N_LC , 6E ; n
+CONSTANT ASCII_O_LC , 6F ; o
+CONSTANT ASCII_P_LC , 70 ; p
+CONSTANT ASCII_Q_LC , 71 ; q
+CONSTANT ASCII_R_LC , 72 ; r
+CONSTANT ASCII_S_LC , 73 ; s
+CONSTANT ASCII_T_LC , 74 ; t
+CONSTANT ASCII_U_LC , 75 ; u
+CONSTANT ASCII_V_LC , 76 ; v
+CONSTANT ASCII_W_LC , 77 ; w
+CONSTANT ASCII_X_LC , 78 ; x
+CONSTANT ASCII_Y_LC , 79 ; y
+CONSTANT ASCII_Z_LC , 7A ; z
+CONSTANT ASCII_OPN_BRACE_SIGN , 7B ; {
+CONSTANT ASCII_VERTICAL_BAR_SIGN , 7C ; |
+CONSTANT ASCII_CLS_BRACE_SIGN , 7D ; }
+CONSTANT ASCII_TILDE_SIGN , 7E ; ~
+CONSTANT ASCII_DEL_CHAR , 7F ; DEL

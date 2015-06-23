@@ -1,0 +1,166 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; This sourcecode is released under BSD license.
+;; Please see http://www.opensource.org/licenses/bsd-license.php for details!
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; Copyright (c) 2010, Stefan Fischer <Ste.Fis@OpenCores.org>
+;; All rights reserved.
+;;
+;; Redistribution and use in source and binary forms, with or without 
+;; modification, are permitted provided that the following conditions are met:
+;;
+;;  * Redistributions of source code must retain the above copyright notice, 
+;;    this list of conditions and the following disclaimer.
+;;  * Redistributions in binary form must reproduce the above copyright notice,
+;;    this list of conditions and the following disclaimer in the documentation
+;;    and/or other materials provided with the distribution.
+;;
+;; THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" 
+;; AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE 
+;; IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE 
+;; ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE 
+;; LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR 
+;; CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF 
+;; SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS 
+;; INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN 
+;; CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) 
+;; ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE 
+;; POSSIBILITY OF SUCH DAMAGE.
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; filename: pbwbgpio.psm
+;; description: gpio example, demonstrating access to wishbone peripherals
+;; todo4user: modify main program and gpio_init code as needed
+;; version: 0.0.0
+;; changelog: - 0.0.0, initial release
+;;            - ...
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+; wishbone variables
+NAMEREG sF , wb_addr
+NAMEREG sE , wb_data ; also used as tmp-reg for status polling
+
+
+ADDRESS 000
+
+; main entry point
+;;;;;;;;;;;;;;;;;;
+
+DISABLE INTERRUPT
+
+CALL gpio_init
+
+; mirroring upper nibble gpio inputs 
+; to lower nibble gpio outputs
+LOAD wb_addr , GPIO_IO_ADDR
+mainloop:
+  CALL wb_rd
+  NAMEREG s0 , i
+  LOAD i , 04
+  for_i_in_4_downto_1_loop: ; bitshifting (wb_data>>4)
+    SR0 wb_data
+    SUB i , 01
+    JUMP NZ , for_i_in_4_downto_1_loop
+  CALL wb_wr
+  JUMP mainloop
+
+  
+; wbs_gpio module subroutines and settings
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; usage:
+; 1. set bitmasks for output enable and output level in gpio_init subroutine
+; 2. call gpio_init subroutine to configure wbs_gpio module for operation
+; 3. use wb_wr and wb_rd subroutines to access i/o register
+
+; gpio start-up configuration, i. e. i/o direction and default output value 
+gpio_init:
+  ; setting all outputs low
+  LOAD wb_addr , GPIO_IO_ADDR
+  LOAD wb_data , 00
+  CALL wb_wr
+  ; configuring lower gpio nibble as output
+  LOAD wb_addr , GPIO_OE_ADDR
+  LOAD wb_data , 0F
+  CALL wb_wr
+RETURN  
+
+; register addressing
+CONSTANT GPIO_IO_ADDR , 00 ; input/output register
+CONSTANT GPIO_OE_ADDR , 01 ; output-enable register
+
+
+; wbm_picoblaze module subroutines and settings
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; subroutines wb_wr and wb_rd are working together with external wbm_picoblaze
+; wishbone adapter module and therefore should not be modified. wb_wait_on_ack 
+; is a supporting subroutine, which should not be called directly
+; 
+; transfer principle wishbone write:
+; 1. OUTPUT cycle to set up wishbone address, data and control signals from 
+;    PORT_ID, OUT_PORT and WRITE_STROBE
+; 2. INPUT cycle(s) to poll wishbone peripheral acknowledgement using IN_PORT
+; => at least one OUTPUT and one INPUT cycle for a write
+;
+; transfer principle wishbone read:
+; 1. INPUT cycle to set up wishbone address and control signals from PORT_ID
+;    and READ_STROBE
+; 2. INPUT cycle(s) to poll wishbone peripheral acknowledgement using IN_PORT
+; 3. the very next INPUT cycle after acknowledgement contains valid wishbone 
+;    data from IN_PORT
+; => at least three INPUT cycles for a read
+;
+; calling examples:
+;
+; wishbone write code =>
+;
+; LOAD wb_addr , <user address> ; setting up address
+; LOAD wb_data , <user data> ; setting up data
+; CALL wb_wr ; starting wishbone write cycle
+; <next user instruction> ; wishbone cycle finished
+;
+; wishbone read code =>
+;
+; LOAD wb_addr , <user address> ; setting up address
+; CALL wb_rd ; starting wishbone read cycle
+; LOAD <user data> , wb_data ; wb_data is updated now
+; <next user instruction> ; wishbone cycle finished
+
+; wishbone write access
+wb_wr:
+  OUTPUT wb_data , (wb_addr)
+  CALL wb_wait_on_ack
+RETURN
+
+; wishbone read access
+wb_rd:
+  CALL wb_wait_on_ack
+  INPUT wb_data , (wb_addr)
+RETURN 
+
+; waiting on wishbone cycle to complete
+wb_wait_on_ack:
+  INPUT wb_data , (wb_addr)
+  TEST wb_data , WB_ACK_FLAG
+  JUMP Z , wb_wait_on_ack
+RETURN
+
+CONSTANT WB_ACK_FLAG , 01
+
+
+; interrupt subroutines and settings
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; IMPORTANT NOTICE!
+; be carefull, if using interrupts. wishbone cycles must be atomar, as any 
+; other processor local bus cycles are normally be. interrupting wishbone 
+; access may cause a crash of external wishbone master fsm, especially, if 
+; program flow through isr leads to another wishbone cycle!
+
+; interrupt handling template, if needed
+isr:
+RETURNI DISABLE
+ADDRESS 3FF
+JUMP isr

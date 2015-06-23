@@ -1,0 +1,1 @@
+vsim -do picoblaze_wb_uart_tb.do

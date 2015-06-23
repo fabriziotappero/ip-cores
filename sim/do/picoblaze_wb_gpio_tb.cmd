@@ -1,0 +1,1 @@
+vsim -do picoblaze_wb_gpio_tb.do
