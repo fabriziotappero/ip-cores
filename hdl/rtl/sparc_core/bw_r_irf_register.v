@@ -1,0 +1,278 @@
+// ========== Copyright Header Begin ==========================================
+// 
+// OpenSPARC T1 Processor File: bw_r_irf_register.v
+// Copyright (c) 2006 Sun Microsystems, Inc.  All Rights Reserved.
+// DO NOT ALTER OR REMOVE COPYRIGHT NOTICES.
+// 
+// The above named program is free software; you can redistribute it and/or
+// modify it under the terms of the GNU General Public
+// License version 2 as published by the Free Software Foundation.
+// 
+// The above named program is distributed in the hope that it will be 
+// useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+// General Public License for more details.
+// 
+// You should have received a copy of the GNU General Public
+// License along with this work; if not, write to the Free Software
+// Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA.
+// 
+// ========== Copyright Header End ============================================
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+module bw_r_irf_register(clk, wrens, save, save_addr, restore, restore_addr, wr_data0, wr_data1, wr_data2, wr_data3, rd_thread, rd_data);
+	input		clk;
+	input	[3:0]	wrens;
+	input		save;
+	input	[4:0]	save_addr;
+	input		restore;
+	input	[4:0]	restore_addr;
+	input	[71:0]	wr_data0;
+	input	[71:0]	wr_data1;
+	input	[71:0]	wr_data2;
+	input	[71:0]	wr_data3;
+	input	[1:0]	rd_thread;
+	output	[71:0]	rd_data;
+
+reg	[71:0]	window[31:0]/* synthesis syn_ramstyle = block_ram  syn_ramstyle = no_rw_check */;
+reg	[71:0]	reg_th0, reg_th1, reg_th2, reg_th3;
+
+reg	[4:0]	rd_addr;
+reg	[4:0]	wr_addr;
+reg		save_d;
+
+initial begin
+  reg_th0 = 72'b0;
+  reg_th1 = 72'b0;
+  reg_th2 = 72'b0;
+  reg_th3 = 72'b0;
+end
+
+bw_r_irf_72_4x1_mux mux4_1(
+	.sel(rd_thread),
+	.x0(reg_th0),
+	.x1(reg_th1),
+	.x2(reg_th2),
+	.x3(reg_th3),
+	.y(rd_data)
+	);
+
+  always @(negedge clk) begin
+    rd_addr = restore_addr;
+  end
+
+  wire [71:0] restore_data = window[rd_addr];
+
+  always @(posedge clk) begin
+    wr_addr <= save_addr;
+  end
+  always @(posedge clk) begin
+    save_d <= save;
+  end
+
+  wire [71:0] save_data;
+
+  bw_r_irf_72_4x1_mux mux4_2(
+        .sel(wr_addr[4:3]),
+        .x0(reg_th0),
+        .x1(reg_th1),
+        .x2(reg_th2),
+        .x3(reg_th3),
+        .y(save_data)
+        );
+
+  always @(negedge clk) begin
+    if(save_d) window[wr_addr] <= save_data;
+  end
+
+//Register implementation for 4 threads / 2 write & 1 restore port
+
+  wire [3:0] restores = (1'b1 << rd_addr[4:3]) & {4{restore}};
+  //wire [3:0] wren1s = (1'b1 << wr1_th) & {4{wren1}};
+  //wire [3:0] wren2s = (1'b1 << wr2_th) & {4{wren2}};
+
+  wire [71:0] wrdata0, wrdata1, wrdata2, wrdata3;
+
+  bw_r_irf_72_2x1_mux mux2_5(
+        .sel(restores[0]),
+        .x0(wr_data0),
+        .x1(restore_data),
+        .y(wrdata0)
+        );
+
+  bw_r_irf_72_2x1_mux mux2_6(
+        .sel(restores[1]),
+        .x0(wr_data1),
+        .x1(restore_data),
+        .y(wrdata1)
+        );
+
+  bw_r_irf_72_2x1_mux mux2_7(
+        .sel(restores[2]),
+        .x0(wr_data2),
+        .x1(restore_data),
+        .y(wrdata2)
+        );
+
+  bw_r_irf_72_2x1_mux mux2_8(
+        .sel(restores[3]),
+        .x0(wr_data3),
+        .x1(restore_data),
+        .y(wrdata3)
+        );
+
+  //wire [3:0] wr_en = wren1s | wren2s | (restores & {4{(wr_addr[4:0] != rd_addr[4:0])}});
+  wire [3:0] wr_en = wrens | (restores & {4{(wr_addr[4:0] != rd_addr[4:0])}});
+
+  //288 Flops
+  always @(posedge clk) begin
+    if(wr_en[0]) reg_th0 <= wrdata0;
+    if(wr_en[1]) reg_th1 <= wrdata1;
+    if(wr_en[2]) reg_th2 <= wrdata2;
+    if(wr_en[3]) reg_th3 <= wrdata3;
+  end
+    
+endmodule
+
+
+module bw_r_irf_72_4x1_mux(sel, y, x0, x1, x2, x3);
+	input	[1:0]	sel;
+	input	[71:0]	x0;
+	input	[71:0]	x1;
+	input	[71:0]	x2;
+	input	[71:0]	x3;
+	output	[71:0] y;
+	reg	[71:0] y;
+
+	always @(sel or x0 or x1 or x2 or x3)
+		case(sel)
+		  2'b00: y = x0;
+		  2'b01: y = x1;
+		  2'b10: y = x2;
+		  2'b11: y = x3;
+		endcase
+
+endmodule
+	
+
+module bw_r_irf_72_2x1_mux(sel, y, x0, x1);
+	input		sel;
+	input	[71:0]	x0;
+	input	[71:0]	x1;
+	output	[71:0] y;
+	reg	[71:0] y;
+
+	always @(sel or x0 or x1)
+		case(sel)
+		  1'b0: y = x0;
+		  1'b1: y = x1;
+		endcase
+
+endmodule
+	
+
+
+

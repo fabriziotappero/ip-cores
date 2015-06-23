@@ -1,0 +1,347 @@
+// ========== Copyright Header Begin ==========================================
+// 
+// OpenSPARC T1 Processor File: tlu_prencoder16.v
+// Copyright (c) 2006 Sun Microsystems, Inc.  All Rights Reserved.
+// DO NOT ALTER OR REMOVE COPYRIGHT NOTICES.
+// 
+// The above named program is free software; you can redistribute it and/or
+// modify it under the terms of the GNU General Public
+// License version 2 as published by the Free Software Foundation.
+// 
+// The above named program is distributed in the hope that it will be 
+// useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+// General Public License for more details.
+// 
+// You should have received a copy of the GNU General Public
+// License along with this work; if not, write to the Free Software
+// Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA.
+// 
+// ========== Copyright Header End ============================================
+////////////////////////////////////////////////////////////////////////
+/*
+//      Description:    Datapath Priority Encoder 16b
+//				- 15b multihot vector as input
+//				- 15b 1-hit vector as output
+//				- Can use some std length such as 16b
+//				- msb is given highest priority
+*/
+////////////////////////////////////////////////////////////////////////
+// Global header file includes
+////////////////////////////////////////////////////////////////////////
+// system level definition file which contains the/*
+/* ========== Copyright Header Begin ==========================================
+* 
+* OpenSPARC T1 Processor File: sys.h
+* Copyright (c) 2006 Sun Microsystems, Inc.  All Rights Reserved.
+* DO NOT ALTER OR REMOVE COPYRIGHT NOTICES.
+* 
+* The above named program is free software; you can redistribute it and/or
+* modify it under the terms of the GNU General Public
+* License version 2 as published by the Free Software Foundation.
+* 
+* The above named program is distributed in the hope that it will be 
+* useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+* General Public License for more details.
+* 
+* You should have received a copy of the GNU General Public
+* License along with this work; if not, write to the Free Software
+* Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301, USA.
+* 
+* ========== Copyright Header End ============================================
+*/
+// -*- verilog -*-
+////////////////////////////////////////////////////////////////////////
+/*
+//
+// Description:		Global header file that contain definitions that 
+//                      are common/shared at the systme level
+*/
+////////////////////////////////////////////////////////////////////////
+//
+// Setting the time scale
+// If the timescale changes, JP_TIMESCALE may also have to change.
+`timescale	1ps/1ps
+
+//
+// JBUS clock
+// =========
+//
+
+
+
+// Afara Link Defines
+// ==================
+
+// Reliable Link
+
+
+
+
+// Afara Link Objects
+
+
+// Afara Link Object Format - Reliable Link
+
+
+
+
+
+
+
+
+
+
+// Afara Link Object Format - Congestion
+
+
+
+  
+
+
+
+
+
+
+
+// Afara Link Object Format - Acknowledge
+
+
+
+
+
+
+
+
+
+
+
+// Afara Link Object Format - Request
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// Afara Link Object Format - Message
+
+
+
+// Acknowledge Types
+
+
+
+
+// Request Types
+
+
+
+
+
+// Afara Link Frame
+
+
+
+//
+// UCB Packet Type
+// ===============
+//
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+//
+// UCB Data Packet Format
+// ======================
+//
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// Size encoding for the UCB_SIZE_HI/LO field
+// 000 - byte
+// 001 - half-word
+// 010 - word
+// 011 - double-word
+// 111 - quad-word
+
+
+
+
+
+
+
+//
+// UCB Interrupt Packet Format
+// ===========================
+//
+
+
+
+
+
+
+
+
+
+
+//`define UCB_THR_HI             9      // (6) cpu/thread ID shared with
+//`define UCB_THR_LO             4             data packet format
+//`define UCB_PKT_HI             3      // (4) packet type shared with
+//`define UCB_PKT_LO             0      //     data packet format
+
+
+
+
+
+
+
+//
+// FCRAM Bus Widths
+// ================
+//
+
+
+
+
+
+
+//
+// ENET clock periods
+// ==================
+//
+
+
+
+
+//
+// JBus Bridge defines
+// =================
+//
+
+
+
+
+
+
+
+
+
+
+
+//
+// PCI Device Address Configuration
+// ================================
+//
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                        // time scale definition
+
+////////////////////////////////////////////////////////////////////////
+// Local header file includes / local defines
+////////////////////////////////////////////////////////////////////////
+
+module	tlu_prencoder16 (din, dout);
+
+input	[14:0]	din  ;
+output	[3:0]	dout ;
+
+wire	[14:0]	onehot ;
+
+assign	onehot[14] = din[14] ;
+assign	onehot[13] = din[13] & ~din[14] ;
+assign	onehot[12] = din[12] & ~(|din[14:13]) ;
+assign	onehot[11] = din[11] & ~(|din[14:12]) ;
+assign	onehot[10] = din[10] & ~(|din[14:11]) ;
+assign	onehot[9]  = din[9]  & ~(|din[14:10]) ;
+assign	onehot[8]  = din[8]  & ~(|din[14:9]) ;
+assign	onehot[7]  = din[7]  & ~(|din[14:8]) ;
+assign	onehot[6]  = din[6]  & ~(|din[14:7]) ;
+assign	onehot[5]  = din[5]  & ~(|din[14:6]) ;
+assign	onehot[4]  = din[4]  & ~(|din[14:5]) ;
+assign	onehot[3]  = din[3]  & ~(|din[14:4]) ;
+assign	onehot[2]  = din[2]  & ~(|din[14:3]) ;
+assign	onehot[1]  = din[1]  & ~(|din[14:2]) ;
+assign	onehot[0]  = din[0]  & ~(|din[14:1]) ;
+//assign	onehot[0]  = din[0]  & ~(|din[15:1]) ;
+
+assign	dout[3]  =  |onehot[14:7] ;
+assign	dout[2]  = (|onehot[6:3]) | (|onehot[14:11]) ;
+assign	dout[1]  = (|onehot[2:1]) | (|onehot[6:5]) |
+		   (|onehot[10:9]) | (|onehot[14:13]) ;
+assign	dout[0]  =  onehot[0] | onehot[2] | onehot[4] | onehot[6] |
+		    onehot[8] | onehot[10] | onehot[12] | onehot[14] ;
+
+endmodule

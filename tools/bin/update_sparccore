@@ -1,0 +1,141 @@
+#!/bin/bash
+
+# Check command line parameter
+if ( (test $# != 1) || ((test $1 != "-me") && (test $1 != "-se") && (test $1 != "-ee")) ) then
+  echo "update_sparccore - Script to update SPARC Core sources from a fresh OpenSPARC installation";
+  echo "(C) 2007 by Simply RISC";
+  echo "Usage:";
+  echo "      update_sparccore {-me|-se|-ee}";
+  echo "where parameter refers to the S1 Core version you want to obtain in your environment:";
+  echo "      -me : S1 Core Memory-less Edition (single-thread, no L1 caches)";
+  echo "      -se : S1 Core Single-thread Edition (single-thread, normal 16K+8K caches)";
+  echo "      -ee : S1 Core Elite Edition (four threads support, normal 16K+8K caches)";
+  echo "NOTE: To run this script you MUST have the OpenSPARC T1 environment unpacked";
+  echo "      and the T1_ROOT variable properly set in your S1_ROOT/sourceme file.";
+  exit 1;
+fi
+
+# Set source and destination directories
+test_var S1_ROOT
+test_var T1_ROOT
+SRC_DIR=$T1_ROOT/design/sys/iop
+DST_DIR=$S1_ROOT/hdl/rtl/sparc_core
+
+# Clean destination directory
+rm -f $DST_DIR/*.*
+rm -f $DST_DIR/include/*.*
+
+# Copy all the Verilog files of the SPARC Core into destination directory
+cp $SRC_DIR/include/*.h $DST_DIR/include
+cp $SRC_DIR/srams/rtl/*.v $DST_DIR
+cp $SRC_DIR/analog/bw_clk/rtl/*.v $DST_DIR
+cp $SRC_DIR/analog/bw_rng/rtl/*.v $DST_DIR
+find $SRC_DIR/common -name "*.v" -exec cp {} $DST_DIR \;
+find $SRC_DIR/pr_macro -name "*.v" -exec cp {} $DST_DIR \;
+find $SRC_DIR/sparc -name "*.v" -exec cp {} $DST_DIR \;
+
+# Remove synthetized files -- if any
+find $DST_DIR -name "*_flat.v" -exec rm -f {} \;
+find $DST_DIR -name "*_flat_nc.v" -exec rm -f {} \;
+find $DST_DIR -name "*_hier.v" -exec rm -f {} \;
+
+# Also remove SPU files
+rm -f $DST_DIR/*spu*.v
+
+# Remove other unused files (according to liuyadong)
+cd $DST_DIR
+rm bw_r_l2t.v bw_r_cm16x40.v bw_r_cm16x40b.v bw_r_dcm.v bw_r_efa.v bw_r_l2d.v bw_r_l2d_32k.v \
+    bw_r_l2d_rep_bot.v bw_r_l2d_rep_top.v bw_r_rf16x128d.v bw_r_rf32x108.v bw_rf_16x65.v bw_rf_16x81.v \
+    bw_clk_cclk_hdr_48x.v bw_clk_cclk_hdr_64x.v bw_clk_cclk_inv_128x.v bw_clk_cclk_inv_48x.v \
+    bw_clk_cclk_inv_64x.v bw_clk_cclk_inv_96x.v bw_clk_cclk_scanlasr_2x.v bw_clk_cclk_sync.v \
+    bw_clk_gclk_center_3inv.v bw_clk_gclk_inv_192x.v bw_clk_gclk_inv_224x.v bw_clk_gclk_inv_288x.v \
+    bw_clk_gclk_inv_r90_192x.v bw_clk_gclk_inv_r90_224x.v bw_clk_gclk_inv_r90_256x.v bw_clk_gclk_sctag_3inv.v \
+    bw_clk_gl.v bw_clk_gl_fdbk.v bw_clk_gl_hz.v bw_clk_gl_rstce_rtl.v bw_clk_gl_vrt_all.v flop_rptrs_xa0.v \
+    flop_rptrs_xa1.v flop_rptrs_xb0.v flop_rptrs_xb1.v flop_rptrs_xb2.v flop_rptrs_xb3.v flop_rptrs_xc0.v \
+    flop_rptrs_xc1.v flop_rptrs_xc2.v flop_rptrs_xc3.v flop_rptrs_xc4.v flop_rptrs_xc5.v flop_rptrs_xc6.v \
+    flop_rptrs_xc7.v bw_rng.v cluster_header_ctu.v cluster_header_dup.v cluster_header_sync.v dbl_buf.v \
+    sync_pulse_synchronizer.v synchronizer_asr_dup.v ucb_bus_in.v ucb_bus_out.v ucb_flow_2buf.v \
+    ucb_flow_jbi.v ucb_flow_spi.v ucb_noflow.v spc_pcx_buf.v
+
+# Clean the files by substituting the $error System Task and applying defines with Icarus preprocessor
+for file in $DST_DIR/*.v ; do
+  sed -e 's/\$error/\$display/g' $file | sed -e 's/negedge rclk or rst_l/negedge rclk/g' > $DST_DIR/temp.v
+  if(test $1 == "-me" || test $1 == "-se") then
+    iverilog -E -D CMP_CLK_PERIOD=1 -D FPGA_SYN -D FPGA_SYN_1THREAD -D FPGA_SYN_NO_SPU -I $DST_DIR/include -o$file $DST_DIR/temp.v
+  else
+    iverilog -E -D CMP_CLK_PERIOD=1 -D FPGA_SYN -D FPGA_SYN_NO_SPU -I $DST_DIR/include -o$file $DST_DIR/temp.v
+  fi
+  # These steps are required because Icarus does not allow this kind of comments
+  sed -e 's/\* ========== Copyright Header Begin/\/\* ========== Copyright Header Begin/g' $file > $DST_DIR/temp.v
+  mv -f $DST_DIR/temp.v $file
+done
+
+# Correct some strange strings
+sed -e 's/sparc_exu_alulogic logic/sparc_exu_alulogic logic_MAYBEARESERVEDWORD/g' $DST_DIR/sparc_exu_alu.v > $DST_DIR/temp.v
+mv $DST_DIR/temp.v $DST_DIR/sparc_exu_alu.v
+sed -e 's/logic/logic_MAYBEARESERVEDWORD/g' $DST_DIR/sparc_ffu_ctl_visctl.v > $DST_DIR/temp.v
+mv $DST_DIR/temp.v $DST_DIR/sparc_ffu_ctl_visctl.v
+sed -e 's/$display(\"ILLEGAL_THR_STATE\"/\/\/$display(\"ILLEGAL_THR_STATE\"/g' sparc_ifu_thrfsm.v > $DST_DIR/temp.v
+mv $DST_DIR/temp.v $DST_DIR/sparc_ifu_thrfsm.v
+sed -e 's/(\* keep = "yes" \*)//g' $DST_DIR/bw_r_frf.v > $DST_DIR/temp.v
+mv $DST_DIR/temp.v $DST_DIR/bw_r_frf.v
+sed -e 's/synthesis translate_/synopsys translate_/g' $DST_DIR/bw_r_irf.v > $DST_DIR/temp.v
+mv $DST_DIR/temp.v $DST_DIR/bw_r_irf.v
+sed -e 's/initial onereg/\/\/initial onereg/g' $DST_DIR/bw_r_irf_register.v > $DST_DIR/temp.v
+mv $DST_DIR/temp.v $DST_DIR/bw_r_irf_register.v
+
+# After preprocessing we can safely delete the include directory
+rm -f $DST_DIR/include/*.*
+
+# Disable L1 Instruction and Data Caches if required
+if(test $1 == "-me") then
+  cp -f $S1_ROOT/tools/src/bw_r_dcd.v $DST_DIR
+  cp -f $S1_ROOT/tools/src/bw_r_icd.v $DST_DIR
+  cp -f $S1_ROOT/tools/src/bw_r_idct.v $DST_DIR
+fi
+
+# Hack the SPARC Core to add the external stall input from the bridge
+# Cookbook from book "OpenSPARC Internals", paragraph 6.8
+
+# Top-level of SPARC Core (s1_top.sparc)
+sed -e 's/pcx_spc_grant_px,/pcx_spc_grant_px,wbm_spc_stall,wbm_spc_resume,/g' $DST_DIR/sparc.v |
+  sed -e 's/pcx_spc_grant_px;/pcx_spc_grant_px;input wbm_spc_stall;input wbm_spc_resume;/g' |
+  sed -e 's/sparc_ifu ifu(/sparc_ifu ifu(.wbm_spc_stall(wbm_spc_stall),.wbm_spc_resume(wbm_spc_resume),/g' > $DST_DIR/sparc_TMP.v
+mv -f $DST_DIR/sparc_TMP.v $DST_DIR/sparc.v
+
+# Fetch unit (s1_top.sparc.ifu)
+sed -e 's/ffu_ifu_stallreq,/ffu_ifu_stallreq,wbm_spc_stall,wbm_spc_resume,/g' $DST_DIR/sparc_ifu.v |
+  sed -e 's/ffu_ifu_stallreq;/ffu_ifu_stallreq;input wbm_spc_stall;input wbm_spc_resume;/g' |
+  sed -e 's/sparc_ifu_swl swl(/sparc_ifu_swl swl(.wbm_spc_stall(wbm_spc_stall),.wbm_spc_resume(wbm_spc_resume),/g' > $DST_DIR/sparc_ifu_TMP.v
+mv -f $DST_DIR/sparc_ifu_TMP.v $DST_DIR/sparc_ifu.v
+
+# Switch logic unit (s1_top.sparc.ifu.swl)
+sed -e 's/thr_config_in_m,/thr_config_in_m,wbm_spc_stall,wbm_spc_resume,/g' $DST_DIR/sparc_ifu_swl.v |
+  sed -e 's/thr_config_in_m;/thr_config_in_m;input wbm_spc_stall;input wbm_spc_resume;wire wait_state;/g' |
+  sed -e 's/sparc_ifu_thrcmpl compl(/sparc_ifu_thrcmpl compl(.wbm_spc_stall(wbm_spc_stall),.wbm_spc_resume(wbm_spc_resume),.wait_state(wait_state),/g' |
+  sed -e 's/(~wm_stbwait | stb_retry);/(~wm_stbwait|stb_retry)\&(~wait_state|wbm_spc_resume);/g' |
+  sed -e 's/wm_stbwait & ~stb_retry);/wm_stbwait \& ~stb_retry|wait_state \& ~wbm_spc_resume);/g' > $DST_DIR/sparc_ifu_swl_TMP.v
+mv -f $DST_DIR/sparc_ifu_swl_TMP.v $DST_DIR/sparc_ifu_swl.v
+
+# Stall completion logic (s1_top.sparc.ifu.swl.compl)
+sed -e 's/clear_wmo_e,/clear_wmo_e,wbm_spc_stall,wbm_spc_resume,wait_state,/g' $DST_DIR/sparc_ifu_thrcmpl.v |
+  sed -e 's/clear_wmo_e;/clear_wmo_e;input wbm_spc_stall;input wbm_spc_resume;output wait_state;wire wait_next;/g' |
+  sed -e 's/endmodule/assign wait_next=wbm_spc_stall|(wait_state \& ~wbm_spc_resume);\nendmodule/g' |
+  sed -e 's/endmodule/dffr wait_ff(.din(wait_next),.q(wait_state),.clk(clk),.rst(reset),.se(se),.si(),.so());\nendmodule/g' |
+  sed -e 's/assign completion/assign completion[0]/g' |
+  sed -e 's/endmodule/assign completion[1]=completion[0];\nendmodule/g' |
+  sed -e 's/endmodule/assign completion[2]=completion[0];\nendmodule/g' |
+  sed -e 's/endmodule/assign completion[3]=completion[0];\nendmodule/g' |
+  sed -e 's/wm_stbwait));/wm_stbwait|wait_state));/g' > $DST_DIR/sparc_ifu_thrcmpl_TMP.v
+mv -f $DST_DIR/sparc_ifu_thrcmpl_TMP.v $DST_DIR/sparc_ifu_thrcmpl.v
+
+# This is a temporary hack to take a top-level SPARC Core with the SPU instance removed by-hand (ifdef is wrong)
+cp -f $S1_ROOT/tools/src/sparc.v $DST_DIR
+
+# Copy also behavioral libraries used for RTL simulations
+DST_DIR=$S1_ROOT/hdl/behav/sparc_libs
+rm -f $DST_DIR/*.*
+cp $SRC_DIR/../../../lib/m1/m1.behV $DST_DIR/m1_lib.v
+cp $SRC_DIR/../../../lib/u1/u1.behV $DST_DIR/u1_lib.v
+
+
