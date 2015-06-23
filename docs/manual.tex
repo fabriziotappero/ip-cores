@@ -1,0 +1,309 @@
+% The Potato Processor - User's Manual
+% (c) Kristian Klomsten Skordal 2015 <skordal@opencores.org>
+% Report bugs and issues on <http://opencores.org/project,potato,bugtracker>
+
+\documentclass[12pt,a4paper]{report}
+
+\usepackage[utf8]{inputenc}
+\usepackage[pdftitle={The Potato Processor: Technical Reference Manual},
+	pdfauthor={Kristian Klomsten Skordal}]{hyperref}
+\usepackage{placeins}
+\usepackage{titlesec}
+\usepackage[english]{babel}
+
+\newcommand{\register}[1]{\textsc{#1}}
+
+\titleformat{\chapter}[block]{\normalfont\huge\bfseries}{\thechapter}{20pt}{\Huge}\titlespacing*{\chapter}{0pt}{50pt}{40pt}
+
+\begin{document}
+
+\begin{titlepage}
+	\begin{center}
+		\vspace*{3cm}
+		{\large The Potato Processor}\\[0.5cm]
+		{\Huge\bf Technical Reference Manual}\\[6cm]
+
+		\textsc{Kristian Klomsten Skordal}\\\href{mailto:skordal@opencores.org}{skordal@opencores.org}\\[3em]
+
+		\vfill
+		{Project page:\\\url{http://opencores.org/project,potato}}\\[0.2em]
+		{Report bugs and issues on\\\url{http://opencores.org/project,potato,bugtracker}}\\[1.2em]
+		{\small Updated \today}
+	\end{center}
+\end{titlepage}
+
+\tableofcontents
+
+\chapter{Introduction}
+
+The Potato processor is an implementation of the 32-bit integer subset of the RISC-V
+instruction set v2.0. It is designed around a standard 5-stage pipeline. All instructions
+execute in 1 cycle, with the exception of load and store instructions when the processor
+has to wait for external memory.
+
+The processor has been tested on an Artix~7 (xc7a100tcsg324-1) FPGA from Xilinx, on the
+Nexys 4 board from Digilent. More details about the test design can be found in chapter
+\ref{cha:quickstart}.
+
+\section{Features}
+Here is a highlight of the current features of the Potato processor:
+
+\begin{itemize}
+\item Implements the complete 32-bit integer subset of the RISC-V ISA v2.0.
+\item Implements the \textsc{csr*} instructions from the RISC-V supervisor extensions v1.0.
+\item Supports using the \register{fromhost}/\register{tohost} registers for communicating
+	with a host environment, such as a simulator, or peripherals.
+\item Supports exception handling, with support for 8 individually maskable IRQ inputs.
+\item Includes a wishbone B4 compatible interface.
+\end{itemize}
+
+\section{Planned features}
+Here is a highlight of the future planned features of the Potato processor:
+
+\begin{itemize}
+\item Caches.
+\item Branch prediction.
+\item Hardware multiplication and division support (the RISC-V M extension).
+\item Compressed instruction support (the RISC-V C extension).
+\item Supervisor mode support
+\end{itemize}
+
+\chapter{Quick Start Guide}
+\label{cha:quickstart}
+
+This chapter contains instructions on getting started with the demo/example design that is
+included in the Potato source distribution. The example design targets the Nexys 4 board
+available from Digilent\footnote{See \url{http://www.digilentinc.com/Products/Detail.cfm?Prod=NEXYS4}}.
+
+\section{Setting up the Vivado Project}
+
+Start by creating a new project in Vivado. Import all source files from the \texttt{src/} directory,
+which contains all source files required for using the processor. Then import all source files from
+the \texttt{example/} directory, which contains the toplevel setup for the example SoC design,
+and from the \texttt{soc/} directory, which contains various peripherals for the processor.
+
+\section{Adding IP Modules}
+
+The example design requires two additional IP modules. These are not included in the source
+distribution and must be added separately.
+
+\subsection{Clock Generator}
+
+Add a clock generator using the Clocking Wizard. Name the component ``\texttt{clock\_generator}''
+and make sure that the checkboxes for ``frequency synthesis'' and ``safe clock startup'' are
+selected.
+
+Add two output clocks with frequencies of 50~MHz and 10~MHz. Rename the corresponding ports
+to ``\texttt{system\_clk}'' and ``\texttt{timer\_clk}''. Rename the input clock signal to
+``\texttt{clk}''.
+
+The added module should appear in the hierarchy under the toplevel module as ``\texttt{clkgen}''.
+
+\subsection{Instruction memory}
+
+Add a block RAM to use for storing the test application using the Block Memory Generator.
+Choose ``Single-port ROM'' as memory type and name the module ``\texttt{instruction\_rom}''.
+Set port A width to 32 bits and the depth to 2048 words. Initialize the block RAM with
+your application or use one of the provided benchmarks, such as the SHA256 benchmark,
+which, when built, produces a \texttt{.coe} file that can be used for this purpose.
+
+Note that in order to build a benchmark application, you have to install a RISC-V toolchain.
+See section \ref{sec:toolchain} for instructions on how to accomplish this.
+
+\section{Running an Example Application}
+
+Assuming you initialized the instruction memory with the SHA256 benchmark, synthesize and
+implement the design, generate a bitfile and load it into the FPGA. Using a serial port
+application, such as \texttt{minicom}, watch as the number of hashes per second are
+printed to the screen and rejoice because it works!
+
+\chapter{Instantiating}
+
+The Potato processor can be used either with or without a wishbone interface. Using the wishbone
+interface allows the processor to communicate with other wishbone-compatible peripherals. However,
+if no such peripherals are to be used, the processor can, for instance, be connected directly to
+block RAM memories for full performance without needing to use caches.
+
+\section{Customizing the Processor Core}
+The processor can be customized using generics. The following list details the parameters
+that can be changed:
+
+\begin{description}
+	\item[\texttt{PROCESSOR\_ID}:] Any 32-bit value used as the processor ID. This value can
+	be read back from the hardware thread ID register, \register{hartid}.
+	\item[\texttt{RESET\_ADDRESS}:] Any 32-bit value used as the address of the first instruction
+	fetched by the processor after it has been reset.
+\end{description}
+
+\section{Instantiating in a Wishbone System}
+\label{sec:instantiating-wishbone}
+
+In order to integrate the Potato processor into a wishbone-based system, the module \texttt{pp\_potato}
+is used. It provides signals for the wishbone master interface, prefixed with \texttt{wb\_}, and
+inputs for interrupts and the HTIF interface.
+
+The specifics of the wishbone interface is listed in table \ref{tab:wishbone}. To see an example
+of the processor used in a Wishbone system, see the example design under the \texttt{example/}
+directory.
+
+\begin{table}
+	\centering
+	\begin{tabular}{|l|l|}
+		\hline
+		Wishbone revision		& B4 \\
+		Interface type			& Master \\
+		Address port width		& 32 bits \\
+		Data port width			& 32 bits \\
+		Data port granularity		& 8 bits \\
+		Maximum operand size		& 32 bits \\
+		Endianess			& Little endian \\
+		Sequence of data transfer	& Not specified \\
+		\hline
+	\end{tabular}
+	\caption{Wishbone Interface Specifics}
+	\label{tab:wishbone}
+\end{table}
+
+\FloatBarrier
+
+\section{Instantiating in a Standalone System}
+\label{sec:instantiating-standalone}
+
+The processor can also be used without connecting it to the Wishbone bus. An example
+of this can be seen in the processor testbench, \texttt{tb\_processor.vhd}.
+
+\section{Verifying}
+
+The processor provides an automatic testing environment for verifying that the processor
+correctly executes the instructions of the ISA. The tests have been extracted from the
+official test suite available at \url{https://github.com/riscv/riscv-tests} and covers
+most of the available instructions.
+
+Two testbenches are used to execute the test programmes: \texttt{tb\_processor.vhd}, in
+which the processor is directly connected to block-RAM-like memories so the processor
+never stalls to wait for memory operations to finish (see section \ref{sec:instantiating-standalone}
+for more details about this kind of setup), and \texttt{tb\_soc.vhd}, which models a
+simple system-on-chip with the processor connected to memories through the
+wishbone interface (see section \ref{sec:instantiating-wishbone} for more information
+about this kind of setup).
+
+To run the test suites, run \texttt{make run-tests} or \texttt{make run-soc-tests}.
+
+Make sure that \texttt{xelab} and \texttt{xsim} is in your \texttt{PATH} or the
+tests will fail.
+
+\chapter{Programming}
+
+The processor implements the RISC-V instruction set, and can be programmed with tools
+such as GCC.
+
+\section{Building a RISC-V Toolchain}
+\label{sec:toolchain}
+
+An ``official'' toolchain is provided by the RISC-V project. In order to install it, clone
+the ``riscv-tools'' Git repository from \url{https://github.com/riscv/riscv-tools} and follow
+the instructions provided by the README file.
+
+\section{Control and Status Registers}
+
+The supported control and status registers are shown in table \ref{tab:csr_list}. The registers
+can be manipulated using the \textsc{csr*} family of instructions, listed in \ref{sec:csr_instrs}.
+
+\begin{table}
+	\centering
+	\begin{tabular}{|l|l|l|}
+		\hline
+		\textbf{Name}		& \textbf{ID}	& \textbf{Description} \\
+		\hline
+		\register{hartid}	& 0x50b		& Hardware thread ID \\
+		\register{evec}		& 0x508		& Exception vector address \\
+		\register{epc}		& 0x502		& Return address for exceptions \\
+		\register{cause}	& 0x509		& Exception cause \\
+		\register{sup0}		& 0x500		& Support register 0, for operating system use \\
+		\register{sup1}		& 0x501		& Support register 1, for operating system use \\
+		\register{badvaddr}	& 0x503		& Bad address, used for invalid address exceptions \\
+		\register{status}	& 0x50a		& Processor status and control register \\
+		\register{tohost}	& 0x51e		& Register for sending data to a host system \\
+		\register{fromhost}	& 0x51f		& Register where data received from a host system is stored \\
+		\register{cycle}	& 0xc00		& Cycle counter, low 32 bits \\
+		\register{cycleh}	& 0xc80		& Cycle counter, high 32 bits \\
+		\register{time}		& 0xc01		& Timer tick counter, low 32 bits \\
+		\register{timeh}	& 0xc81		& Timer tick counter, high 32 bits \\
+		\register{instret}	& 0xc02		& Retired instruction counter, low 32 bits \\
+		\register{instreth}	& 0xc82		& Retired instruction counter, high 32 bits \\
+		\hline
+	\end{tabular}
+	\caption{List of Control and Status Registers}
+	\label{tab:csr_list}
+\end{table}
+\FloatBarrier
+
+\chapter{Instruction Set}
+
+The Potato processor is designed to support the full 32-bit integer subset of
+the RISC-V instruction set, version 2.0. The ISA documentation is available
+from \url{http://riscv.org}.
+
+\section{Status and Control Register Instructions}
+\label{sec:csr_instrs}
+
+In addition to the base ISA, some additional instructions have been imported
+from the RISC-V supervisor specification\footnote{The processor is in
+the process of being upgraded to the new specification.} version 1.0.
+
+\begin{table}[htb]
+	\centering
+	\begin{tabular}{|l|l|}
+		\hline
+		\textbf{Mnemonic}		& \textbf{Description} \\
+		\hline
+		\texttt{scall}			& System call \\
+		\texttt{sbreak}			& Breakpoint instruction \\
+		\texttt{sret}			& Exception return \\
+		\hline
+		\texttt{csrrw rd, rs1, CSR}	& Writes rs1 into CSR, place sold value in rd \\
+		\texttt{csrrs rd, rs1, CSR}	& Ors rs1 with CSR, places old value in rd \\
+		\texttt{csrrc rd, rs1, CSR}	& Ands the inverse of rs1 with CSR, places old value in rd \\
+		\texttt{csrrwi rd, imm, CSR}	& Writes imm into CSR, places old value in rd \\
+		\texttt{csrrsi rd, imm, CSR}	& Ors CSR with imm, places old value in rd \\
+		\texttt{csrrci rd, imm, CSR}	& Ands the inverse of imm with CSR, places old value in rd \\
+		\hline
+	\end{tabular}
+	\caption{List of CSR Instructions}
+\end{table}
+
+\appendix
+
+\chapter{Peripherals}
+
+The source distribution of the processor contains several peripheral modules that can be
+used in system-on-chip designs using the Potato processor (or other processors).
+
+This chapter briefly describes each of the modules.
+
+\section{GPIO}
+
+The GPIO module provides a simple GPIO interface for up to 32 general purpose pins.
+Each pin can be separately configured to work as either an input or an output pin.
+
+Registers are provided to set the direction of each pin. Additional registers
+provide the ability to read or write the values of the pins.
+
+\section{Timer}
+
+The timer module provides a timer that fires off an interrupt at a specified
+interval.
+
+\section{UART}
+
+The UART module provies a fixed-baudrate serial port interface. It features
+separate FIFOs for buffering input and output data, and interrupts for when
+the module is ready to send or has received data.
+
+\section{Memory}
+
+The memory module is basically a simple block RAM wrapper with support for
+byte-writes.
+
+\end{document}
+
