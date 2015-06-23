@@ -1,0 +1,138 @@
+%option noyywrap
+
+%{
+
+#include <stdio.h>
+#include <math.h>
+#include "tools.h"
+
+#include "y.tab.h"
+
+%}
+
+
+W		[ \t\r\n]+
+NL		[\n]+
+COMMENT		"@"[^\n]*"\n"
+IMM		("0x"([0-9a-fA-F]+))|([-]?[0-9]+)				
+REG		"l"[0-7]|"h"[0-7]
+OBRA	\[
+CBRA	\]
+OSBRA	\<
+CSBRA	\>
+C		\,
+
+LABEL	([_0-9a-zA-Z]+)":"
+USELAB	":"([_0-9a-zA-Z]+)
+
+NOP		"nop"|"stop"
+LDL		"LDL"
+ARI		"add"|"sub"|"or"|"and"|"xor"|"sh"
+LDI		"ldi"
+LSI		"lsi"
+SHA		"shi"|"shit"|"adi"|"adit"
+CMP		"cmpl"|"cmpls"
+BR		"brz"|"brnz"
+JUMP	"jump"
+CALL	"call"
+MOV		"mov"
+MEM		"ld"|"st"|"ldio"|"stio"
+SEL		"seh"|"seb"
+SELI	"seib"|"seih"|"seibs"|"seihs" 
+
+%%
+{C}		{return C;}
+{OBRA}	{return OBRA;}
+{CBRA}	{return CBRA;}
+{OSBRA}	{return OSBRA;}
+{CSBRA}	{return CSBRA;}
+{LDL}	{return LDL;}
+{NOP}   { if (!strcmp(yytext, "stop")) yylval.num=0xffff;
+	  else yylval.num = 0xe000;
+	  return NOP;
+	}
+{USELAB} {yylval.str=strdup(yytext+1); return USELAB;}
+{LABEL} {yylval.str=strdup(yytext); yylval.str[strlen(yytext)-1] = 0; return LABEL;}
+{IMM}	{
+		//if(yytext[0]=='\'') {
+		//	yytext[strlen(yytext)-1]=' ';
+		//}
+		//yytext[0] = ' ';
+		yylval.str = (char *) strdup(yytext);
+		return IMM;}
+{REG}	{
+		//yylval.str=strdup(yytext); 
+		yylval.num=atoi(yytext+1);
+		if(yytext[0]=='h') yylval.num+=8;
+		return REG;}
+
+{ARI}	{	
+			if(!strcmp(str_toupper(yytext),"ADD")) yylval.num=0x00; 
+			else if(!strcmp(str_toupper(yytext),"SUB")) yylval.num=0x01; 
+			else if(!strcmp(str_toupper(yytext),"AND")) yylval.num=0x02; 
+			else if(!strcmp(str_toupper(yytext),"OR")) yylval.num=0x03; 
+			else if(!strcmp(str_toupper(yytext),"XOR")) yylval.num=0x04; 
+			else if(!strcmp(str_toupper(yytext),"SH")) yylval.num=0x05; 
+			
+			return ARI;
+		}
+{CMP}	{
+		  if(!strcmp(str_toupper(yytext),"CMPL")) yylval.num=0x00; 
+		  else if(!strcmp(str_toupper(yytext),"CMPLS")) yylval.num=0x01; 
+		  //else if(!strcmp(str_toupper(yytext),"CMPG")) yylval.num=0x02; 
+		  //else if(!strcmp(str_toupper(yytext),"CMPGS")) yylval.num=0x03; 
+		  return CMP;
+		}
+{JUMP}	{ yylval.num=0; return JUMP; }
+{CALL}	{ yylval.num=8; return CALL; }
+{MOV}	{ yylval.num=1; return MOV; }
+{MEM}	{ 
+			if(!strcmp(yytext,"ld")) yylval.num=2;
+			else if(!strcmp(yytext,"st")) yylval.num=3;
+			else if(!strcmp(yytext,"ldio")) yylval.num=10;
+			else if(!strcmp(yytext,"stio")) yylval.num=11;
+			return MEM;
+		}
+{SEL}	{ 
+			if(!strcmp(yytext,"seh")) yylval.num=4;
+			else if(!strcmp(yytext,"seb")) yylval.num=5;
+			return SEL;
+		}
+{SELI}	{ 
+			if(!strcmp(yytext,"seib")) yylval.num=0x06;
+			else if(!strcmp(yytext,"seih")) yylval.num=0x16;
+			else if(!strcmp(yytext,"seibs")) yylval.num=0x26;
+			else if(!strcmp(yytext,"seihs")) yylval.num=0x36;
+			return SELI;
+		}
+{LDI}	{ 
+			return LDI;
+		}
+{LSI}	{ 
+			return LSI;
+		}
+{BR}	{ 
+			if(toupper(yytext[2])=='N') yylval.num = 1;
+			else if(toupper(yytext[2])=='Z') yylval.num = 0;
+			return BR;
+		}
+{SHA}	{ 
+			if(toupper(yytext[0])=='A') yylval.num = 0;
+			else yylval.num = 1;
+			return SHA;
+		}
+{COMMENT}	/* remove comment */
+{W}		/* remove ws */
+
+%%
+
+void PROC_FLUSH_BUF ( FILE * xFile )
+{
+        yy_delete_buffer ( YY_CURRENT_BUFFER );
+		yy_init_globals();
+        yy_switch_to_buffer ( yy_create_buffer ( xFile, YY_BUF_SIZE ) ); 
+}
+
+
+//void main() { while(yylex()); }
+

@@ -1,0 +1,167 @@
+
+
+%{
+
+
+#include <stdio.h>
+#include <string.h>
+#include "tools.h"
+
+#define YYERROR_VERBOSE
+
+int temp;
+int firstpass=1;
+ 
+void yyerror(const char *str)
+{
+        fprintf(stderr,"error: %s\n",str);
+}
+ 
+int yywrap()
+{
+        return 1;
+} 
+  
+int main(int argc, char **argv)
+{
+	if(argc>=2) {
+		if(!strcmp(argv[1], "-h")) hex = 1;
+		if(!strcmp(argv[1], "-b")) hex = 2;
+	}
+	if(!hash_init()) {
+		exit(1);
+		printf("could not create hash table\n");
+	}
+
+	if(hex && argc==3) stdin = fopen(argv[2], "r");	
+	if(!hex && argc==2) stdin = fopen(argv[1], "r");	
+	 
+	firstpass = 1;
+	address = 0;
+    if(yyparse()) exit(1);
+	firstpass = 0;
+	address = 0;
+	rewind(stdin);
+	(void) PROC_FLUSH_BUF (stdin );
+    yyparse();
+    return 0;
+} 
+
+%}
+
+%token C OBRA CBRA OSBRA CSBRA NUM 
+
+%union 
+{
+        int num;
+        char *str;
+}
+
+%token <str> IMM LABEL USELAB
+%token <num> REG 
+%token <num> ARI LDI LSI CMP BR SHA JUMP CALL MOV MEM SEL SELI LDL NOP
+ 
+%type  <num> asms asm nop ari ldsi cmp br sha jmpcall mov mem sel seli ldl
+%type  <num> imm6b imm8b imm8bs imm2b imm32
+
+
+
+%%
+asms: asm | asms asm  
+
+asm:	LABEL			{if(firstpass)add_label($1, address);}
+	|	nop				{if(!firstpass)xprintf($1);address++;}
+	|	ari				{if(!firstpass)xprintf($1);address++;}
+	|	ldsi 			{if(!firstpass)xprintf($1);address++;}
+	|	cmp 			{if(!firstpass)xprintf($1);address++;}
+	|	br	 			{if(!firstpass)xprintf($1);address++;}
+	|	sha 			{if(!firstpass)xprintf($1);address++;}
+	|	jmpcall			{if(!firstpass)xprintf($1);address++;}
+	|	mov 			{if(!firstpass)xprintf($1);address++;}
+	|	mem 			{if(!firstpass)xprintf($1);address++;}
+	|	sel 			{if(!firstpass)xprintf($1);address++;}
+	|	seli 			{if(!firstpass)xprintf($1);address++;}
+	|	ldl				{;}
+
+//	| 					{ yyerror("unknown instruction"); YYERROR; }
+
+
+nop:	NOP								{ $$ = $1; }
+
+ari:	ARI REG C REG C REG				{ $$ = ($1<<12) | ($2<<8) | ($4<<4) | $6; }
+
+ldsi:	LDI REG C imm8b					{ $$ = (0x6000) | ($2<<8) | ($4&0xff); }
+	|	LSI	REG C imm8b					{ $$ = (0x7000) | ($2<<8) | ($4&0xff); }
+
+cmp:	CMP REG C REG C REG				{ $$ = (0x8000) | ($1<<12) | ($2<<8) | ($4<<4) | $6;}
+
+br:		BR	REG C USELAB				{ $$ = (0xc000) | ($1<<12) | (((get_label($4)-address)&0xff) << 4) | $2; 
+										//	if(!firstpass) printf(" @%d - %d: %d",  address, $4, get_label($4)); 
+										}  
+	|	BR	REG C imm8bs				{ $$ = (0xc000) | ($1<<12) | (($4&0xff) << 4) | $2; }  
+
+sha:	SHA	REG C imm6b					{ $$ = (0xe000) | ($2<<8) | ($1<<6) | ($4&0x3f); }
+	|	SHA REG C REG C imm6b			{ if(($2^0x8) != $4) { yyerror("wrong sister register"); YYERROR; }
+								 	 	  $$ = (0xe000) | ($2<<8) | (1<<7) | ($1<<6) | ($6&0x3f); }
+
+jmpcall:JUMP OSBRA REG CSBRA 			{ $$ = (0xf000) | ($3<<4) | $1; }
+	|	CALL REG C OSBRA REG CSBRA  	{ $$ = (0xf000) | ($2<<8) | ($5<<4) | $1; }
+
+mov:	MOV REG C REG 					{ $$ = (0xf000) | ($2<<8) | ($4<<4) | 1; }
+
+mem:	MEM REG C OBRA REG CBRA			{ $$ = (0xf000) | ($2<<8) | ($5<<4) | $1; }
+
+sel:	SEL REG C OBRA REG CBRA			{ $$ = (0xf000) | ($2<<8) | ($5<<4) | $1; }
+	|	SEL REG C REG C OBRA REG CBRA 	{ if(($2^0x8) != $4) { yyerror("wrong sister register"); YYERROR; }
+									  	  $$ = (0xf000) | ($2<<8) | ($7<<4) | (1<<3) | $1; }
+
+seli:	SELI REG C imm2b				{ $$ = (0xf000) | ($2<<8) | ($4<<6) | $1; }
+	|	SELI REG C REG C imm2b		 	{ if(($2^0x8) != $4) { yyerror("wrong sister register"); YYERROR; }
+									  	  $$ = (0xf000) | ($2<<8) | ($6<<4) | (1<<3) | $1; }
+
+ldl:	LDL	REG C imm32
+				{ if(!firstpass)xprintf(0x6000|($2<<8)|(($4>>24)&0xff));address++;
+				  if(!firstpass)xprintf(0x7000|($2<<8)|(($4>>18)&0xff));address++;
+				  if(!firstpass)xprintf(0x7000|($2<<8)|(($4>>8)&0xff));address++;
+				  if(!firstpass)xprintf(0x7000|($2<<8)|(($4>>0)&0xff));address++;
+				}
+	|	LDL REG C USELAB
+				{ temp = get_abs_label($4);
+   				  if(!firstpass)xprintf(0x6000|($2<<8)|((temp>>24)&0xff));address++;
+				  if(!firstpass)xprintf(0x7000|($2<<8)|((temp>>18)&0xff));address++;
+				  if(!firstpass)xprintf(0x7000|($2<<8)|((temp>>8)&0xff));address++;
+				  if(!firstpass)xprintf(0x7000|($2<<8)|((temp>>0)&0xff));address++;
+				}
+
+
+imm2b: 	IMM		{	
+					temp = check_imm($1, &$$, 0, 3);
+					if(temp==1) { yyerror("2 Bit immediate expected"); YYERROR; }
+					if(temp==2) { yyerror("Immediate syntax"); YYERROR; }	
+				}
+
+imm8b: 	IMM		{
+					temp = check_imm($1, &$$, 0, 255);
+					if(temp==1) { yyerror("8 Bit unsigned immediate expected"); YYERROR; }
+					if(temp==2) { yyerror("Immediate syntax"); YYERROR; }	
+				}
+imm8bs:	IMM		{
+					temp = check_imm($1, &$$, -128, 127);
+					if(temp==1) { yyerror("8 bit signed immediate expected"); YYERROR; }
+					if(temp==2) { yyerror("Immediate syntax"); YYERROR; }	
+				}
+//	|	LABEL	{	$$ = get_label($1) - address - 1; }
+
+imm6b:	IMM		{
+					temp = check_imm($1, &$$, -32, 31);
+					if(temp==1) { printf("Immediate Value %d out of range: -32..31 allowed\n", $$); YYERROR; }
+					if(temp==2) { yyerror("Immediate syntax"); YYERROR; }	
+				}
+
+imm32:	IMM		{
+					temp = check_imm($1, &$$, 0x1000000, 0x7fffffff);
+					if(temp==1) { printf("Immediate Value %d out of range: -32b..31b allowed\n", $$); YYERROR; }
+					if(temp==2) { yyerror("Immediate syntax"); YYERROR; }	
+				}
+
+%%
