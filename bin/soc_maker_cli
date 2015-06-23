@@ -1,0 +1,72 @@
+#!/usr/bin/env ruby
+
+root = File.expand_path('../..', __FILE__)
+require File.join(root, %w[lib soc_maker])
+require 'ostruct'
+
+
+cmd_options = OpenStruct.new
+cmd_options.lib_inc = []
+cmd_options.log_out = "socmaker_log.txt"
+
+##
+# create option-parser and manage
+# options
+#
+OptionParser.new do |opts|
+
+  opts.banner = "Usage: soc_maker_cli [ options ]"
+
+  opts.on("-h", "--help", "Show this message") do
+    puts opts
+    exit
+  end
+
+  opts.on("-l", "--library <p1,p2,p3...>", Array, 
+        "Sets library include paths (overrides config value)" ) do |path|
+    cmd_options.lib_inc << path
+  end
+
+  opts.on("-o", "--log-out <file>", String, "Sets the log output file" ) do |file|
+    cmd_options.log_out = file 
+  end
+
+  begin
+    opts.parse!( ARGV )
+  rescue OptionParser::ParseError => e
+    STDERR.puts e.message, "\n", opts
+    exit(-1)
+  end
+end
+
+
+# manage stdout value
+cmd_options.log_out = STDOUT if cmd_options.log_out.upcase == "STDOUT"
+
+
+# setup options for loading the SOCMaker core
+options = {}
+options[ :libpath     ] = cmd_options.lib_inc.flatten if cmd_options.lib_inc.size > 0
+options[ :logger_out  ] = cmd_options.log_out
+
+##
+# initialize SOCMaker core
+#   this sets up logging and parses all yaml files
+#   found in the configure path (see also soc_maker_conf.rb)
+SOCMaker::load( options )
+
+# Print license info
+puts SOCMaker::conf[ :LIC ] + "\n\n"
+
+
+
+cli = SOCMaker::Cli::instance
+if ARGF.filename != '-'
+  ARGF.each do |line|
+    cli.process_cmd line 
+  end
+end
+cli.run
+
+# vim: noai:ts=2:sw=2
+
