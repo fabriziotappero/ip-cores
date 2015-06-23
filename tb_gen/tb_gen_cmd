@@ -1,0 +1,545 @@
+#! /usr/bin/env wish
+##-------------------------------------------------------------------------------
+##                     Copyright 2014 Ken Campbell
+##
+##   Licensed under the Apache License, Version 2.0 (the "License");
+##   you may not use this file except in compliance with the License.
+##   You may obtain a copy of the License at
+##
+##     http://www.apache.org/licenses/LICENSE-2.0
+##
+##   Unless required by applicable law or agreed to in writing, software
+##   distributed under the License is distributed on an "AS IS" BASIS,
+##   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+##   See the License for the specific language governing permissions and
+##   limitations under the License.
+##-------------------------------------------------------------------------------
+##-- $Author:  $ Ken Campbell
+##--
+##-- $Date:  $ June 26 2014
+##--
+##-- $Id:  $
+##--
+##-- $Source:  $
+##--
+##-- Description :
+##--      This application takes a text file containing the definition of a Verilog
+##           module, produces a file set for the SV Directed Test Bench.
+##--
+##------------------------------------------------------------------------------
+
+## set the current version info
+set version "Beta 1.0"
+
+
+set gen_mod 0
+set des_dir "./"
+
+
+proc print_help {} {
+    puts ""
+    puts "tb_gen_cmd  Help"
+		puts "------------------------------"
+		puts "general use:   tb_gen_cmd <path_to/module_file_name> <options>"
+    puts ""
+    puts "The non optional input parameter is the path to and name of the"
+		puts "source file containing the Module."
+    puts ""
+    puts "   Options:"
+    puts "        -des : Destination directory, default is the current directory"
+    puts "        -mod : Enable the output of the tb_mod.sv file"
+    puts "            NOTE: will over write existing file."
+    puts ""
+    puts "        help :  print this help message"
+    puts ""
+    puts "An environment variable needs to be set up.  TBGEN  must point to the"
+    puts "location of tb_gen directory.  The source of the template."
+    puts ""
+}
+
+if {$::argc <= 0} {
+    puts "No Arguments passed to tb_gen_cmd!!"
+		print_help
+		exit
+}
+##  get the value of the environment variable.
+set tbgen $::env(TBGEN)
+if {$tbgen == ""} {
+    puts "ERROR:  Environment variable  TBGEN  is not set to a valid value."
+		exit
+}
+## get the first parameter, check for help
+set mod_fn [lindex $::argv 0]
+if {$mod_fn == "help"} {
+    print_help
+		exit
+}
+
+set idx 0
+set des 0
+foreach arg $::argv {
+		##  if des has been found, set destination dir variable.
+		if {$des == 1} {
+		    set des_dir $arg
+				set des 0
+		}
+	  ## checking that the first param is the source module
+    if {"$arg" == "$mod_fn" && $idx == 0} {
+		    incr idx
+		    continue
+		} elseif {$idx == 0} {
+		    puts "The first parameter must be the path and file name of the module file."
+				exit
+		}
+		##  flag to turn on prg.sv file gen
+		if {$arg == "-mod"} {
+		    set gen_mod 1
+		}
+		##  flag for the destination dir
+		if {$arg == "-des"} {
+		    set des 1
+		}
+		
+		incr idx
+}
+
+puts "********************************************************************"
+puts "**     tb_gen_cmd  Script Directed TB   version:  $version"
+puts "**  Source file for module definition:  $mod_fn"
+puts "**  Destination output directory is:    $des_dir"
+
+
+##########################################################################
+##  proc pars_pindef
+proc pars_pindef { pins } {
+    set pdef  {}
+    set def_lst  {}
+    set lc 0
+
+    set logic_lst {}
+    set dut_modport {}
+    set names_lst {}
+
+    foreach l $pins {
+        set is_mult [string first "," $l]
+        set is_bv   [string first "\[" $l]
+        set l [string trim $l "\;"]
+        ##  if is a vector def
+        if {$is_bv > 0} {
+            set is_cbv [string first "\]" $l]
+            set bv_spec [string range $l $is_bv $is_cbv]
+            set type [string range $l 0 $is_bv-1]
+            set names [string range $l $is_cbv+1 end]
+            set snames [split $names ","]
+            foreach n $snames {
+                lappend names_lst [string trim $n]
+                if {$type != "inout"} {
+                    set tmp "logic "
+                } else {
+                    set tmp "wire "
+                }
+                append tmp $bv_spec " [string trim $n]\;"
+                lappend logic_lst $tmp
+                set tmp [string trim $type]
+                append tmp " [string trim $n],"
+                lappend dut_modport $tmp
+            }
+        } else {
+            set sl [split $l ","]
+            set frst [split [lindex $sl 0]]
+            set type [string trim [lindex $frst 0]]
+            set fname [string trim [lindex $frst end]]
+            set sl [lrange $sl 1 end]
+            lappend names_lst [string trim $fname]
+            if {$type != "inout"} {
+                set tmp "logic "
+            } else {
+                set tmp "wire "
+            }
+            append tmp "$fname\;"
+            lappend logic_lst $tmp
+            set tmp $type
+            append tmp " $fname,"
+            lappend dut_modport $tmp
+            foreach n $sl {
+                lappend names_lst [string trim $n]
+                if {$type != "inout"} {
+                    set tmp "logic "
+                } else {
+                    set tmp "wire "
+                }
+                append tmp "[string trim $n]\;"
+                lappend logic_lst $tmp
+                set tmp $type
+                append tmp " [string trim $n],"
+                lappend dut_modport $tmp
+            }
+        }
+    }
+
+    lappend def_lst $logic_lst
+    lappend def_lst $dut_modport
+    lappend def_lst $names_lst
+
+    return $def_lst
+}
+##  end pars_pindef
+
+##--------------------------------------------------------------------------------
+##  Write header to file passed
+proc write_header { handle } {
+    global version
+    ##global scan_date
+    set raw_date [clock scan now]
+    set scan_date [clock format $raw_date -format "%d %b %Y %T"]
+
+    ## so CVS will not modify selections, they have to be chopped up
+    set auth "// \$Auth"
+    append auth "or:  \$"
+
+    puts $handle "///////////////////////////////////////////////////////////////////////////////"
+    puts $handle "//             Copyright ///////////////////////////////////"
+    puts $handle "//                        All Rights Reserved"
+    puts $handle "///////////////////////////////////////////////////////////////////////////////"
+    puts $handle "$auth"
+    puts $handle "//"
+    puts $handle "//"
+    puts $handle "// Description :"
+    puts $handle "//          This file was generated by tb_gen_cmd $version"
+    puts $handle "//            on $scan_date"
+    puts $handle "//////////////////////////////////////////////////////////////////////////////"
+    puts $handle "// This software contains concepts confidential to ////////////////"
+    puts $handle "// /////////. and is only made available within the terms of a written"
+    puts $handle "// agreement."
+    puts $handle "///////////////////////////////////////////////////////////////////////////////"
+    puts $handle ""
+}
+
+#########################################################################
+#  Generate  files
+set template $tbgen
+append template "/tb_prg_template.sv"
+
+## the source module file
+set ln $mod_fn
+##  Get the working directory
+set lp $des_dir
+
+set path_text $lp
+set destin_text $des_dir
+set infile [open $ln r]
+set file_list {}
+
+
+##################################################################
+##  Read in the file and strip comments as we do
+while {![eof $infile]} {
+    ##  Get a line
+    set rline [gets $infile]
+    ## get rid of white space
+    set rline [string trim $rline]
+    ##  Find comment if there
+    set cindex [string first "//" $rline]
+    ## if a comment was found at the start of the line
+    if {$cindex == 0 || $rline == ""} {
+        continue
+    ## else was not found so put line in list
+    } elseif {$cindex > 0} {
+        #  get rid of trailing comments and trim off spaces
+        set rline [string trim [string range $rline 0 $cindex-1]]
+        lappend file_list $rline
+    } else {
+        lappend file_list $rline
+    }
+}
+close $infile
+
+## check for the module def
+set mod_name ""
+foreach l $file_list {
+    set mod_def [string first module $l]
+    if {$mod_def >= 0} {
+        set ml [split $l]
+        set mod_name [lindex $l 1]
+        break
+    }
+}
+
+## if no module  die
+if {$mod_def < 0} {
+    puts "A module definition was not found in the file provided."
+    exit
+}
+set mod_list {}
+## check for end module
+foreach l $file_list {
+    lappend mod_list $l
+    set end_def [string first endmodule $l]
+    if {$end_def >= 0} {
+        break
+    }
+}
+## if no end die
+if {$end_def < 0} {
+    puts "no endmodule statement found for this module"
+    exit
+}
+
+####
+## collect the parameters if there are.
+set parameter_list {}
+set p_found 0
+foreach l $mod_list {
+    set p_found [string first "parameter" $l]
+    if {$p_found >= 0} {
+        lappend $parameter_list $l
+    }
+}
+
+####################################################################
+##  a few checks have been done, and non-relevant stuff stripped off.
+##  now create an arrry of just the pin names and related info
+set port_lst {}
+set lc 0
+foreach l $mod_list {
+    ## make lines that are continued, one line.
+    set cont [string first "\;" $l]
+    if {$cont < 0 && $lc == 0} {
+        set tmp $l
+        set lc 1
+        continue
+    } elseif {$cont < 0 && $lc == 1} {
+        append tmp $l
+        continue
+    } elseif {$lc == 1} {
+        append tmp $l
+        set lc 0
+        set l $tmp
+    }
+
+    ## look for the port statements
+    set inp [string first "input" $l]
+    if {$inp >= 0} {
+        lappend port_lst $l
+    }
+    set onp [string first "output" $l]
+    if {$onp >= 0} {
+        lappend port_lst $l
+    }
+    set ionp [string first "inout" $l]
+    if {$ionp >= 0} {
+        lappend port_lst $l
+    }
+}
+
+##  Change the port list into a pin info list
+set io_pins [pars_pindef $port_lst]
+
+set log_lst [lindex $io_pins 0]
+set mod_lst [lindex $io_pins 1]
+set name_lst [lindex $io_pins 2]
+
+#foreach r $log_lst {
+#    puts $r
+#}
+#foreach r $mod_lst {
+#    puts $r
+#}
+#foreach r $name_lst {
+#    puts $r
+#}
+
+## calculate the longest pin name in characters
+set name_length 0
+foreach l $name_lst {
+    set temp_length [string length $l]
+    if {$temp_length > $name_length} {
+        set name_length $temp_length
+    }
+}
+##  Make the name length one bigger
+incr name_length
+
+#########################################################################
+## Generate the tb top.
+set tfn $destin_text
+append tfn "/tb_top.sv"
+set tfh [open $tfn w]
+
+write_header $tfh
+puts $tfh "`include \"../sv/tb_prg.sv\""
+puts $tfh ""
+puts $tfh "module tb_top \(\)\;"
+puts $tfh ""
+puts $tfh "  string STM_FILE = \"../stm/stimulus_file.stm\"\;"
+puts $tfh "  string tmp_fn"
+puts $tfh ""
+puts $tfh "  //  Handle plus args"
+puts $tfh "  initial begin : file_select"
+puts $tfh "    if\(\$value\$plusargs\(\"STM_FILE=%s\", tmp_fn\)\) begin"
+puts $tfh "      stm_file = tmp_fn\;"
+puts $tfh "    end"
+puts $tfh "  end"
+puts $tfh ""
+puts $tfh "  dut_if theif\(\)\;"
+puts $tfh ""
+puts $tfh "  $mod_name u1 \("
+
+set llen [llength $name_lst]
+set idx 1
+foreach n $name_lst {
+    set ln $n
+    set len [string length $ln]
+    while {$len < $name_length} {
+        append ln " "
+        set len [string length $ln]
+    }
+    if {$idx < $llen} {
+        puts $tfh "    .$ln \(theif.$n\),"
+    } else {
+        puts $tfh "    .$ln \(theif.$n\)"
+    }
+    incr idx
+}
+
+puts $tfh "  \)\;"
+puts $tfh ""
+puts $tfh "  tb_mod prg_inst\(theif\)\;"
+puts $tfh ""
+puts $tfh "endmodule"
+
+close $tfh
+############################################################################
+##  generate the interface file.
+set ifn $destin_text
+append ifn "/dut_if.sv"
+set ifh [open $ifn w]
+
+write_header $ifh
+puts $ifh "interface dut_if\(\)\;"
+puts $ifh ""
+foreach l $log_lst {
+    puts $ifh "  $l"
+}
+
+puts $ifh ""
+puts $ifh "  modport dut_conn\("
+set llen [llength $mod_lst]
+set idx 1
+foreach p $mod_lst {
+    if {$idx < $llen} {
+        puts $ifh "    $p"
+    } else {
+        puts $ifh "    [string trim $p ","]"
+    }
+    incr idx
+}
+puts $ifh "  \)\;"
+puts $ifh ""
+puts $ifh "  modport tb_conn\("
+set idx 1
+foreach p $mod_lst {
+    set in [string first "input" $p]
+    set out [string first "output" $p]
+    if {$in >= 0} {
+        set type "output  "
+    } elseif {$out >= 0} {
+        set type "input   "
+    } else {
+        set type "inout   "
+    }
+
+    set sp [split $p]
+    if {$idx < $llen} {
+        puts $ifh "    $type [lindex $sp end]"
+    } else {
+        puts $ifh "    $type [string trim [lindex $sp end] ","]"
+    }
+    incr idx
+}
+puts $ifh "  \)\;"
+puts $ifh ""
+puts $ifh "endinterface"
+close $ifh
+
+##########################################################################
+##   generate the tb_prg  file from template.
+if {gen_mod == 0} {
+    exit
+}
+
+set tpl_fh [open $template r]
+set tpl_lst {}
+set hfound 0
+while {![eof $tpl_fh]} {
+    set rline [gets $tpl_fh]
+    if {$hfound == 0} {
+        set head [string first ">>header" $rline]
+        if {$head == 0} {
+            set hfound 1
+        }
+    } else {
+        lappend tpl_lst $rline
+    }
+}
+
+#foreach l $tpl_lst {
+#    puts  $l
+#}
+
+set pfn $destin_text
+append pfn "/tb_mod.sv"
+set pfh [open $pfn w]
+
+set idx 0
+foreach l $tpl_lst {
+    set ent_pt [string first ">>insert sigs" $l]
+    if {$ent_pt == 0} {
+        set tpl_lst [lreplace $tpl_lst $idx $idx]
+        foreach l $log_lst {
+            set tpl_lst [linsert $tpl_lst $idx "  $l"]
+            incr $idx
+        }
+        break
+    }
+    incr idx
+}
+
+set idx 0
+foreach l $tpl_lst {
+    set ent_pt [string first ">>drive sigs" $l]
+    if {$ent_pt == 0} {
+        set tpl_lst [lreplace $tpl_lst $idx $idx]
+        set midx 0
+        foreach l $name_lst {
+            set dir [lindex $mod_lst $midx]
+            #puts $dir
+            set idir [string first "input" $dir]
+            if {$idir >= 0} {
+                set tmp "  assign tif."
+                append tmp "$l = $l\;"
+                set tpl_lst [linsert $tpl_lst $idx $tmp]
+            } else {
+                set tmp "  assign $l"
+                append tmp " = tif.$l\;"
+                set tpl_lst [linsert $tpl_lst $idx $tmp]
+            }
+            incr idx
+            incr midx
+        }
+        break
+    }
+    incr idx
+}
+
+write_header $pfh
+foreach l $tpl_lst {
+    puts $pfh $l
+}
+
+close $pfh
+
+puts "********************************************************************"
+puts "**     tb_gen_cmd  Generation  Done."
+
+exit
