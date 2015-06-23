@@ -1,0 +1,1120 @@
+Registers:
+D0,D1,D2,D3,D4,D5,D6,D7                     32-bit
+A0,A1,A2,A3,A4,A5,A6                        32-bit
+A7                               USP        32-bit
+A7'                              SSP        32-bit
+PC                                          32-bit
+CCR condition code reg, SR status register  8-bit User, 16-bit Supervisor
+
+Address registers:
+base address registers, word and long-word operations,
+operations always affect 32-bits, word operations sign-extended
+All 16: index registers
+
+SR
+Condition Code Register:
+0:      C Carry
+1:      V Overflow
+2:      Z Zero
+3:      N Negative
+4:      X Extend
+Status register:
+8-10:   I Interrupt mask
+13:     S Supervisor
+15:     T Trace mode
+
+MC68000 Addressing modes
+                                                                                        Number of extension words
+Register Direct Addressing
+     Data Register Direct                  <ea> = Dn                                    0
+     Address Register Direct               <ea> = An                                    0
+Absolute Data Addressing
+     Absolute Short                        <ea> = (Next Word)                           1
+     Absolute Long                         <ea> = (Next Two Words)                      2
+Program Counter Relative Addressing
+     Relative with Offset                  <ea> = (PC + d16)                            1
+     Relative with Index and Offset        <ea> = (PC + Rn + d8)                        1*
+Register Indirect Addressing
+     Register Indirect                     <ea> = (An)                                  0
+     Postincrement Register Indirect       <ea> = (An), An <- An + N                    0
+     Predecrement Register Indirect        An <- An–N, <ea> = (An)                      0
+     Register Indirect with Offset         <ea> = (An + d16)                            1
+     Indexed Register Indirect with Offset <ea> = (An + Rn + d8)                        1*
+Immediate Data Addressing
+     Immediate                             DATA = Next Word(s)                          1 or 2
+     Quick Immediate                       Inherent Data                                0
+Implied Addressing                         
+     Implied Register                      <ea> = SR, USP, SSP, PC                      0
+
+N = 1 for byte, 2 for word, and 4 for long word. If An is the stack pointer and
+   the operand size is byte, N = 2 to keep the stack pointer on a word
+   boundary.
+
+1*: format of brief extension word
+Data/Address(1 bit) Rn(3 bits) word/long(1 bit) 000 d8(8 bits)
+word/long: size of sign-extended index register
+
+Exceptions
+0       Reset: Initial SSP              (Supervisor Program Space)
+1       Reset: Initial PC               (Supervisor Program Space)
+
+2       Bus Error                       From external logic
+3       Address Error                   Odd address fetch
+4       Illegal Instruction             $4AFA, $4AFB, $4AFC
+5       Zero Divide
+6       CHK Instruction                 Trap check bounds
+7       TRAPV Instruction               Trap overflow
+8       Privilege Violation
+9       Trace
+10      Line 1010 Emulator              Illegal instruction
+11      Line 1111 Emulator              Illegal instruction
+12-14   RESERVED
+15      Uninitialized Interrupt Vector  Default for uninitialized ext hw
+16-23   RESERVED
+24      Spurious Interrupt              Bus error while int ack cycle
+25      Level 1 Interrupt Autovector
+26      Level 2 Interrupt Autovector
+27      Level 3 Interrupt Autovector
+28      Level 4 Interrupt Autovector
+29      Level 5 Interrupt Autovector
+30      Level 6 Interrupt Autovector
+31      Level 7 Interrupt Autovector
+32-47   Trap Instruction Vectors        Trap instruction
+48-63   RESERVED
+64-255  User Interrupt Vectors
+
+Ack cycle: DACK + vector number, VPA, AVEC, BERR
+
+Privilege violations:                   PC address current
+AND Immediate to SR
+EOR Immediate to SR
+OR Immediate to SR
+MOVE to SR?
+MOVE USP
+RESET
+RTE
+STOP
+
+Tracing
+Not: when interrupt, illegal, privileged, reset, bus error, address error
+Before: pending interrupt
+After: instruction generated exception
+
+Stack Frame
+Reset:
+None
+
+Bus/Address error:
+00. reset, 01. address error, 02. bus error: immediate reaction: abort current bus cycle, abort instruction or exception processing
+if bus error/address error while address error,bus error or reset: block processor
+address error: access word or long operand or instruction from odd address
+bus error: BERR
+processing an instruction: normal state or in group 2 exception
+not processing an instruction: group 0 or 1 exception
+Stack frame:
+Undefined 11 bits, Read/Write bit 4, Instruction/Not bit 3, Function code bits 2-0,
+Access address 32 bits,
+Instruction register 16 bits,
+Status register 16 bits, 
+Program counter 32 bits
+
+Rest:
+Status register, Program counter
+
+Processing sequence
+From TRAP: 1 -> S-bit of SR; SSP -= 4; PC -> (SSP); SSP -= 2; SR -> (SSP)
+From ILLEGAL: SSP -= 4; PC -> (SSP); SSP -= 2; SR -> (SSP)
+Copy status register
+Enter Supervisor mode
+Turn off tracing
+Reset, interrupt exceptions: update interrupt priority mask
+Determine vector number
+Save on stack using SSP
+
+PC value in exceptions:
+    usualy: trap: trace: interrupt: with address of next instruction,
+    address and bus errors: advanced 2-10 bytes after first word of current instruction
+    privilege violation: illegal: address of first word of current instruction
+
+
+Without:
+- Function Codes
+- Bus arbitration
+- Synchronous 6800 bus cycles
+
+
+Operation code map:
+0000 Bit Manipulation/MOVEP/Immediate
+0001 Move Byte
+0010 Move Long
+0011 Move Word
+0100 Miscellaneous
+0101 ADDQ/SUBQ/Scc/DBcc/TRAPc
+0110 Bcc/BSR/BRA
+0111 MOVEQ
+1000 OR/DIV/SBCD
+1001 SUB/SUBX
+1010 (Unassigned, Reserved)
+1011 CMP/EOR
+1100 AND/MUL/ABCD/EXG
+1101 ADD/ADDX
+1110 Shift/Rotate/Bit Field
+1111 Coprocessor Interface/MC68040 and CPU32 Extensions
+
+
+*******************************************************************************************************************************************
+*******************************************************************************************************************************************
+*******************************************************************************************************************************************
+
+
+*******************************************************************************************************************************************
+* add, sub
+*******************************************************************************************************************************************
+*
+ABCD        Add Decimal with Extend
+[SBCD        Subtract Decimal with Extend]
+    Destination10 +[-] Source10 +[-] X -> Destination
+    Byte operation, packed BCD
+    CC: X=C set if decimal carry [borrow] else cleared; Z cleared if result nonzero else unchanged; N,V undefined
+    1100[1000] Ry dest(3 bits) 1 0000 R/M Rx source(3 bits)
+        R/M = 0 data registers, 1 = address registers predecrement: -(An)
+*
+ADD         Add
+[SUB          Subtract]
+    Destination +[-] Source -> Destination
+    Byte, Word, Long
+    CC: X=C set if carry[borrow] generated else cleared; V set if overflow else cleared; Z set if result zero else cleared;
+        N set if result negative else cleared
+    1101[1001] register(3 bits) opmode(3 bits) ea mode register (3,3 bits)
+        register: data reg
+        opmode: 000,001,010 byte,word,long: ea +[-] Dn -> Dn; 100, 101, 110 byte,word,long: Dn +[-] ea -> ea
+        ea source, all modes:     Dn 000,    An (word, long) 001, (An) 010, (An)+ 011, -(An) 100, (d16, An) 101, (d8, An, Xn) 110,
+                                  (xxx).W 111 000, (xxx).L 111 001, #data 111 100, (d16, PC) 111 010, (d8, PC, Xn) 111 011
+        ea dest, memory alter:                                    (An) 010, (An)+ 011, -(An) 100, (d16, An) 101, (d8, An, Xn) 110,
+                                  (xxx).W 111 000, (xxx).L 111 001
+*    
+ADDA        Add Address
+[SUBA         Subtract Address]
+    Destination +[-] Source -> Destination
+    Word, Long
+    CC: not affected
+    1101[1001] register(3 bits) opmode(3 bits) ea mode register(3,3 bits)
+        register: destination An
+        opmode: 011 word operation sign extended to 32 bits; 111 long operation
+        ea source, all modes.
+*
+ADDI        Add Immediate
+[SUBI         Subtract Immediate]
+    Destination +[-] Immediate data -> Destination
+    Byte, Word, Long
+    CC: same as ADD
+    0000 0110[0100] size(2 bits) ea mode register(3,3 bits); imm16 next word, imm8 lower order byte of next word, imm32 two next words
+        size: 00,01,10 byte,word,long
+        ea dest, data alter:    Dn 000,                 (An) 010, (An)+ 011, -(An) 100, (d16, An) 101, (d8, An, Xn) 110,
+                                (xxx).W 111 000, (xxx).L 111 001,
+*
+ADDQ        Add Quick
+[SUBQ         Subtract Quick]
+    Destination +[-] Immediate data -> Destination
+    Byte, Word, Long
+    CC: same as ADD,ADDA; not affected when destiantion is An
+    0101 data(3 bits) 0[1] size(2 bits) ea mode register (3,3 bits)
+        data: immediate data: 0=8, 1=1, ..., 7=7
+        size: 00,01,10 byte,word,long
+        ea dest, alter:            Dn 000, An (word, long) 001, (An) 010, (An)+ 011, -(An) 100, (d16, An) 101, (d8, An, Xn) 110,
+                                (xxx).W 111 000, (xxx).L 111 001,
+*                            
+ADDX        Add with Extend
+[SUBX         Subtract with Extend]
+    Destination +[-] Source +[-] X -> Destination
+    Byte, Word, Long
+    CC: X=C set if carry[borrow] else cleared; V set if overflow else cleared; Z cleared if nonzero else unchanged; N set if negative else cleared
+    1101[1001] Ry dest(3 bits) 1 size(2 bits) 00 R/M Rx source(3 bits)
+        R/M = 0 data registers, 1 = address registers predecrement: -(An)
+        size: 00,01,10 byte,word,long
+
+*******************************************************************************************************************************************
+* cmp
+*******************************************************************************************************************************************
+*
+CMP         Compare
+    Destination - Source -> CC
+    Byte, Word, Long
+    CC: X not affected; C set if borrow else cleared; V set if overflow else cleared; Z set if zero else cleared; N set if negative else cleared
+    1011 register(3 bits) opmode(3 bits) ea mode register(3,3 bits)
+        register: destination Dn
+        opmode: 000,001,010 byte,word,long: Dn - ea
+        ea source, all modes.
+*
+CMPA        Compare Address
+    Destination - Source -> CC
+    CC: same as CMP
+    1011 register(3 bits) opmode(3 bits) ea mode register(3,3 bits)
+        register: destination An
+        opmode: 011 word operation sign extended to 32 bits; 111 long operation
+        ea source, all modes.
+*
+CMPI        Compare Immediate
+    Destination - Immediate Data -> CC
+    Byte, Word, Long
+    CC: same as CMP
+    0000 1100 size(2 bits) ea mode register(3,3 bits); imm16 next word, imm8 lower order byte of next word, imm32 two next words
+        size: 00,01,10 byte,word,long
+        ea dest, data alter.
+*
+CMPM        Compare Memory to Memory
+    Destination - Source -> CC
+    Byte, Word, Long
+    CC: same as CMP
+    1011 Ax dest(3 bits) 1 size(2 bits) 00 1 Ay source(3 bits)
+        Ax dest, Ay source: postincrement: +(An)
+        size: 00,01,10 byte,word,long
+
+*******************************************************************************************************************************************
+* mul, div
+*******************************************************************************************************************************************
+*
+MULS         Signed Multiply
+[MULU         Unsigned Multiply]
+    Source x Destination -> Destination
+    Word operation: source and dest 16 bit lower order -> destination 32 bit
+    CC: X not affected; C cleared; V cleared; Z set if zero else cleared; N set if negative else cleared
+    1100 Dn dest(3 bits) 1[0] 11 ea mode register(3,3 bits)
+        ea source, data:        Dn 000,                         (An) 010, (An)+ 011, -(An) 100, (d16, An) 101, (d8, An, Xn) 110,
+                                (xxx).W 111 000, (xxx).L 111 001, #data 111 100, (d16, PC) 111 010, (d8, PC, Xn) 111 011
+         
+*
+DIVS        Signed Divide
+[DIVU        Unsigned Divide]
+    Destination / Source -> Destination
+    Word operation: dest 32 bits, source 16 bits -> 16 bit MSB remainder, 16 bit LSB quotient, sign of remainder = sign of dividend
+    CC: X not affected; C cleared; V set if overflow else if trap undefined else cleared;
+        Z set if quotient zero else if trap or overflow undefined else cleared;
+        Z set if quotient negative else if trap or overflow undefined else cleared; 
+    1000 Dn dest(3 bits) 1[0] 11 ea mode register(3,3 bits)
+        ea source, data.
+    
+    Overflow: if quotient larger than a 16-bit signed integer.
+    Division by 0: trap.
+    If overflow detected: operands unaffected.
+
+*******************************************************************************************************************************************
+* ext, neg
+*******************************************************************************************************************************************
+*
+EXT         Sign Extend
+    Destination sign-extended -> Destination
+    Word, Long
+    CC: X not affected; C cleared; V cleared; Z set if zero else cleared; N set if negative else cleared
+    0100 100 opmode(3 bits) 00 0 Dn dest(3 bits)
+        opmode: 010,011 byte to word, word to long
+*
+NEGX        Negate with Extend
+    0 - Destination - X -> Destination
+    Byte, Word, Long
+    CC: X=C set if borrow else clear; V set if overflow else clear; Z set if nonzero else unchanged; N set if negative else clear
+    0100 0000 size(2 bits) ea mode register(3,3 bits)
+        size: 00,01,10 byte,word,long
+        ea dest, data alter.
+*
+NBCD        Negate Decimal with Extend
+    0 - Destination10 - X -> Destination
+    Byte operation
+    CC: X=C set if decimal borrow else cleared; Z cleared if nonzero else unchanged; N,V undefined
+    0100 1000 00 ea mode register(3,3 bits)
+        ea dest, data alter.
+*
+NEG         Negate
+    0 - Destination -> Destination
+    Byte, Word, Long
+    CC: X=C clear if zero else set; V set if overflow else clear; Z set if zero else clear; N set if negative else clear
+    0100 0100 size(2 bits) ea mode register(3,3 bits)
+        size: 00,01,10 byte,word,long
+        ea dest, data alter.
+        
+*******************************************************************************************************************************************
+* and,eor,or,not
+*******************************************************************************************************************************************
+*
+AND         Logical AND
+[OR           Logical Inclusive-OR]
+    Source &[|] Destination -> Destination
+    Byte, Word, Long: not on An
+    CC: X not affected; C cleared; V cleared; Z set if zero else clear; N set if MSB set else cleared
+    1100[1000] Dn register(3 bits) opmode(3 bits) ea mode register(3,3 bits)
+        opmode: 000,001,010 byte,word,long: ea & Dn -> Dn; 100,101,110 byte,word,long: Dn & ea -> ea
+        ea source, data.
+        ea dest, memory alter.
+*    
+ANDI        Logical AND Immediate
+[EORI        Logical Exclusive-OR Immediate]
+[ORI          Logical Inclusive-OR Immediate]
+    Immediate data &[^][|] Destination -> Destination
+    Byte, Word, Long
+    CC: X not affected; C cleared; V cleared; Z set if zero else clear; N set if MSB set else cleared
+    0000 0010[1010][0000] size(2 bits) ea mode register(3,3 bits); imm16 next word, imm8 lower order byte of next word, imm32 two next words
+        size: 00,01,10 byte,word,long
+        ea dest, data alter.
+*    
+ANDI to CCR AND Immediate to Condition Code Register
+[EORI to CCR Exclusive-OR Immediate to Condition Code Register]
+[ORI to CCR   Inclusive-OR Immediate to Condition Code Register]
+    Source &[^][|] CCR -> CCR
+    Byte operation
+    CC: result
+    0000 0010[1010][0000] 00 111 100; 0000 0000 data(8 bit)
+*
+ANDI to SR  AND Immediate to Status Register/Privilege/
+[EORI to SR  Exclusive-OR Immediate to Status Register/Privilege/]
+[ORI to SR   Inclusive-OR Immediate to Status Register/Privilege/]
+    Source &[^][|] SR -> SR
+    Word operation
+    CC: result
+    0000 0010[1010][0000] 01 111 100; data(16 bit)
+*
+EOR         Logical Exclusive-OR
+    Source ^ Destination -> Destination
+    Byte, Word, Long
+    CC: X not affected; C cleared; V cleared; Z set if zero else clear; N set if MSB set else cleared
+    1011 Dn source(3 bits) opmode(3 bits) ea mode register(3,3 bits)
+        opmode: 100,101,110 byte,word,long: ea ^ Dn -> ea
+        ea dest, data alter.
+*
+NOT          Logical Complement
+    ~ Destination -> Destination
+    Byte, Word, Long
+    CC: X not affected; C cleared; V cleared; Z set if zero else cleared; N set if negative else cleared
+    0100 0110 size(2 bits) ea mode register(3,3 bits)
+        size: 00,01,10 byte,word,long
+        ea dest, data alter.
+
+*******************************************************************************************************************************************
+* shift,rotate
+*******************************************************************************************************************************************
+*
+ASL, ASR    Arithmetic Shift Left and Right
+[LSL, LSR     Logical Shift Left and Right]
+[ROL, ROR     Rotate Left and Right]
+[ROXL, ROXR   Rotate with Extend Left and Right]
+    Destination shifted[shifted][rotated][rotated with X] by count -> Destination
+    Byte, Word, Long, in memory: 1 bit shift[shift][rotate][rotate] and word
+    CC: X set to last bit, unchanged if zero shift[same][not affected][same set]; N set if MSB bit is set else cleared;
+        Z set if zero else cleared; V set if MSB bit changed during shift else cleared[cleared][cleared][cleared];
+        C set to last bit, cleared if zero shift[same][same][set to X]
+    1110 count/register(3 bits) dr(1 bit) size(2 bits) i/r(1 bit) 00[01][11][10] Dn dest(3 bit)
+        i/r = 0 count/register=count: 0=8, 1=1, ..., 7=7; i/r = 0 count/register=register: modulo 64
+        dr = 0 right shift; dr = 1 left shift
+        size: 00,01,10 byte,word,long
+    1110 000[001][011][010] dr(1 bit) 11 ea mode register(3,3 bits)
+        dr = 0 right shift; dr = 1 left shift
+        ea dest: memory alter.
+
+*******************************************************************************************************************************************
+* move,clr,exg,swap
+*******************************************************************************************************************************************
+*
+MOVE         Move
+    Source -> Destination
+    Byte, Word, Long
+    CC: X not affected; C cleared; V cleared; Z set if zero else cleared; N set if negative else cleared
+    00 size(2 bits) ea dest register mode(3,3 bits) ea source mode register(3,3 bits)
+        size: 01,11,10 byte,word,long
+         ea dest, data alter.
+         ea source, all modes.
+*     
+MOVEA        Move Address
+    Source -> Destination
+    Word, Long
+    CC: not affected
+    00 size(2 bits) An dest(3 bits) 0 01 ea source mode register(3,3 bits)
+        size: 11,10 word,long: word operands are sign extended
+        ea source, all modes.
+*
+MOVE to CCR  Move to Condition Code Register
+    Source -> CC
+    Word operation: upper byte ignored
+    0100 0100 11 ea source mode register(3,3 bits)
+    ea source, data.
+*
+MOVE from SR Move from Status Register
+    SR -> Destination
+    Word operation
+    CC: not affected
+    0100 0000 11 ea dest mode register(3,3 bits)
+        ea dest, data alter.
+*
+MOVE to SR   Move to Status Register/Privileged/
+    Source -> SR
+    Word operation
+    CC: result
+    0100 0110 11 ea source mode register(3,3 bits)
+        ea source, data.
+*    
+MOVE USP     Move User Stack Pointer/Privileged/
+    USP -> An; An -> USP
+    Long operation
+    CC: not affected
+    0100 1110 0110 dr(1 bit) An reg(3 bits)
+        dr: 0 An -> USP; 1 USP -> An
+*    
+MOVEM        Move Multiple Registers
+    Registers -> Destination; Source -> Registers
+    Word, Long: word operations to An or Dn are sign extended
+    CC: not affected
+    0100 1 dr(1 bit) 00 1 size(1 bit) ea mode register(3,3 bits); register list mask
+        dr: 0 register to memory; 1 memory to register
+        size: 0,1 word,long operation
+        ea dest: register to memory, control alter or predecrement available:
+                                                    (An) 010,            -(An) 100, (d16, An) 101, (d8, An, Xn) 110,
+                                (xxx).W 111 000, (xxx).L 111 001,
+        ea source: memory to register, control or postincrement available:
+                                                            (An) 010, (An)+ 011,            (d16, An) 101, (d8, An, Xn) 110,
+                                (xxx).W 111 000, (xxx).L 111 001,                (d16, PC) 111 010, (d8, PC, Xn) 111 011
+        list mask: control or postincrement: A7-A0, D7-D0; predecrement: D0-D7; A0-A7
+*        
+MOVEP        Move Peripheral
+    Source -> Destination
+    Word, Long
+    CC: not affected
+    0000 data reg(3 bits) opmode(3 bits) 00 1 address reg(3 bits); 16 bit displacement
+        opmode: 100,101 word,long: memory -> register; 110,111 word,long: register -> memory
+        address reg: (An, d16)
+*    
+MOVEQ        Move Quick
+    Immediate data -> Destination
+    Long operation; 8 bit data is sign extended to 32 bits
+    CC: X not affected; C cleared; V cleared; Z set if zero else cleared; N set if negative else cleared
+    0111 Dn dest(3 bits) 0 data(8 bits)
+*
+CLR         Clear
+    0 -> Destination
+    Byte, Word, Long
+    CC: X not affected; C cleared; V cleared; Z set; N cleared
+    0100 0010 size(2 bits) ea dest mode register(3,3 bits)
+        size: 00,01,10 byte,word,long
+        ea dest, data alter.
+*    
+EXG         Exchange Registers
+    Rx <-> Ry
+    Long operation
+    CC: not affected
+    1100 Rx reg(3 bits) 1 opmode(5 bits) Ry reg(3 bits)
+        Rx reg: if Dn <-> An always Dn
+        Ry reg: if Dn <-> An always An
+        opmode: 01000 data regs; 01001 address regs; 10001 mix regs
+*
+SWAP        Swap Register Words
+    Reg 31-16 <-> Reg 15-0
+    Word operation
+    CC: X not affected; C cleared; V cleared; Z set if 32 bits are zero else cleared; N set if result MSB set else cleared
+    0100 1000 0100 0 reg(3 bits)
+
+*******************************************************************************************************************************************
+* branch,jump
+*******************************************************************************************************************************************
+*
+Bcc         Branch Conditionally
+    if condition PC + d8/d16 -> PC
+    Byte, Word
+    CC: not affected
+    0110 condition(4 bits) disp8(8 bit); 16 bit displacement if disp8 == 0
+        condition:                               high(!C & !Z) 0010, low or same(C | V) 0011,
+                    carry clear(!C) 0100, carry set(C) 0101, not equal(Z) 0110, equal(!Z) 0111,
+                    overflow clear(!V) 1000, overflow set(V) 1001, plus(!N) 1010, minus(N) 1011,
+                    greater or equal(N & V | !N & !V) 1100, less than(N & !V | !N & V) 1101,
+                    greater than(N & V & !Z | !N & !V & !Z) 1110, less or equal(Z | N & !V | !N & V) 1111
+*
+BRA         Branch
+    if condition PC + d8/d16 -> PC
+    Byte, Word
+    CC: not affected
+    0110 0000 disp8(8 bit); 16 bit displacement if disp8 == 0
+*    
+BSR         Branch to Subroutine
+    SP -= 4; PC -> (SP); PC + d8/d16 -> PC
+    Byte, Word
+    CC: not affected
+    0110 0001 disp8(8 bit); 16 bit displacement if disp8 == 0
+*
+DBcc        Test Condition, Decrement, and Branch
+    if !condition { Dn(lower order 16 bits) -= 1; if Dn != -1 then PC + d16 -> PC }
+    Word operation
+    CC: not affected
+    0101 condition(4 bits) 1100 1 Dn register(3 bits); 16 bit displacement
+        condition:    true(1) 0000, false(0) 0001, high(!C & !Z) 0010, low or same(C | V) 0011,
+                    carry clear(!C) 0100, carry set(C) 0101, not equal(Z) 0110, equal(!Z) 0111,
+                    overflow clear(!V) 1000, overflow set(V) 1001, plus(!N) 1010, minus(N) 1011,
+                    greater or equal(N & V | !N & !V) 1100, less than(N & !V | !N & V),
+                    greater than(N & V & !Z | !N & !V & !Z), less or equal(Z | N & !V | !N & V) 1111
+*        
+JMP         Jump
+    Destination address -> PC
+    Unsized
+    CC: not affected
+    0100 1110 11 ea mode register(3,3 bits)
+        ea, control:                                          (An) 010,                       (d16, An) 101, (d8, An, Xn) 110,
+                                (xxx).W 111 000, (xxx).L 111 001,         (d16, PC) 111 010, (d8, PC, Xn) 111 011
+*            
+JSR         Jump to Subroutine
+    SP -= 4; PC -> (SP); Destination address -> PC
+    Unsized
+    CC: not affected
+    0100 1110 10 ea mode register(3,3 bits)
+        ea, control.
+*
+RTR          Return and Restore
+    (SP) -> CC; SP += 2; (SP) -> PC; SP += 4
+    Unsized
+    CC: set from stack; supervisor bits unaffected
+    0100 1110 0111 0111
+*
+RTS          Return from Subroutine
+    (SP) -> PC; SP += 4
+    Unsized
+    CC: not affected
+    0100 1110 0111 0101
+
+*******************************************************************************************************************************************
+* test bit,test,check
+*******************************************************************************************************************************************
+*
+BCHG        Test Bit and Change
+[BCLR        Test Bit and Clear]
+[BSET        Test Bit and Set]
+[BTST        Test Bit]
+    test( <number> of Destination ) -> Z; test( <number> of Destination )[0][1][nothing] -> <bit number> of Destination
+    Byte, Long
+    CC: X,N,V,C not affected; Z set if bit tested is zero else cleared
+    0000 Dn reg(3 bits) 101[110][111][100] ea mode register(3,3 bits)
+        Dn reg: bit number 
+        ea dest, data alter.[same][same][data address]; Dn is long operation else byte operation
+    0000 1000 01[10][11][00] ea mode register(3,3 bits); 0000 0000 bit number(8 bits)
+        ea dest, data alter[same][same][data address]; Dn is long operation else byte operation
+        
+        ea data address            Dn 000,                         (An) 010, (An)+ 011, -(An) 100, (d16, An) 101, (d8, An, Xn) 110,
+                                (xxx).W 111 000, (xxx).L 111 001,                (d16, PC) 111 010, (d8, PC, Xn) 111 011
+*
+Scc         Set Conditionally
+    if condition 1s -> Destination else 0s -> Destination
+    Byte operation
+    CC: not affected
+    0101 condition(4 bits) 11 ea mode register(3,3 bits)
+        condition: same as in DBcc
+        ea dest, data alter.
+*
+TAS         Test Operand and Set/Read-modify-write bus operation/
+    Destination tested -> CC; 1 -> bit 7 of destination
+    Byte operation
+    CC: X not affected; C cleared; V cleared; Z set if zero else cleared; N set if MSB bit set else cleared
+    0100 1010 11 ea mode register(3,3 bits)
+        ea operand, data alter.
+*
+TST         Test Operand
+    Destination tested -> CC
+    Byte, Word, Long
+    CC: X not affected; C cleared; V cleared; Z set if zero else cleared; N set if MSB bit set else cleared
+    0100 1010 size(2 bits) ea mode register(3,3 bits)
+        size: 00,01,10 byte,word,long
+        ea operand, data alter.
+*
+CHK         Check Register Against Bound
+    if Dn < 0 or Dn > Source then TRAP
+    Word operation
+    CC: X not affected; N set if Dn < 0; cleared if Dn > Source else undefined; C,V,Z udefined
+    0100 Dn reg(3 bits) size(2 bits) 0 ea mode register(3,3 bits)
+        size: 11 word
+        ea source, data.
+        
+*******************************************************************************************************************************************
+* address,stack
+*******************************************************************************************************************************************
+*
+LEA          Load Effective Address
+    ea -> An
+    Long operation
+    CC: not affected
+    0100 An reg(3 bits) 1 11 ea mode register(3,3 bits)
+        ea, control.
+*
+PEA          Push Effective Address
+    SP -= 4; ea -> (SP)
+    Long operation
+    CC: not affected
+    0100 1000 01 ea mode register(3,3 bits)
+        ea, control.
+*
+LINK         Link and Allocate
+    SP -= 4; An -> (SP); SP -> An; SP + d16 -> SP
+    Word operation
+    CC: not affected
+    0100 1110 0101 0 An reg(3 bits); 16 bit displacement
+*
+UNLK         Unlink
+    An -> SP; (SP) -> An; Sp += 4
+    Unsized
+    CC: not affected
+    0100 1110 0101 1 An reg(3 bits)
+    
+*******************************************************************************************************************************************
+* exceptions
+*******************************************************************************************************************************************
+*
+ILLEGAL     Take Illegal Instruction Trap
+    SSP -= 4; PC -> (SSP); SSP -= 2; SR -> (SSP)
+    Unsized
+    CC: not affected
+    0100 1010 1111 1100
+*
+TRAP        Trap
+    1 -> S-bit of SR; SSP -= 4; PC -> (SSP); SSP -= 2; SR -> (SSP)
+    Unsized
+    CC: not affected
+    0100 1110 0100 vector(4 bits)
+*
+TRAPV       Trap on Overflow
+    if V then TRAP
+    Unsized
+    CC: not affected
+    0100 1110 0111 0110
+*
+RTE         Return from Exception/Privileged/
+    if S-bit set in SR then { (SP) -> SR; SP += 2; (SP) -> PC; SP += 4; restore state and dealocate rest of stack according to (SP) } else TRAP
+    Unsized
+    CC: set from stack
+    0100 1110 0111 0011
+
+*******************************************************************************************************************************************
+* control
+*******************************************************************************************************************************************
+*
+NOP          No Operation
+    None
+    Unsized
+    CC: not affected
+    0100 1110 0111 0001
+*    
+RESET        Reset External Devices/Privileged/
+    if S-bit set in SR then { assert !RESET line for 124 clock cycles } else TRAP
+    Unsized
+    CC: not affected
+    0100 1110 0111 0000
+*
+STOP         Stop/Privileged/
+    if S-bit set in SR then { immediate data -> SR; STOP } else TRAP
+    Unsized
+    CC: set according to immediate data
+    0100 1110 0111 0010; 16 bit immediate data
+    
+    Resume when trace, interrupt or rest.
+
+*******************************************************************************************************************************************
+*******************************************************************************************************************************************
+*******************************************************************************************************************************************
+
+0000 0010[1010][0000] size(2 bits) ea mode register(3,3 bits); imm16 next word, imm8 lower order byte of next word, imm32 two next words
+                                                                                                    ANDI,EORI,ORI
+
+0000 0010[1010][0000] 00 111 100; 0000 0000 data(8 bit)                                             ANDI to CCR,EORI to CCR,ORI to CCR
+0000 0010[1010][0000] 01 111 100; data(16 bit)                                                      ANDI to SR,EORI to SR,ORI to SR
+
+0000 0110[0100] size(2 bits) ea mode register(3,3 bits); imm16 next word, imm8 lower order byte of next word, imm32 two next words
+                                                                                                    ADDI,SUBI
+                                                                                    
+0000 1000 01[10][11][00] ea mode register(3,3 bits); 0000 0000 bit number(8 bits)                   BCHG,BCLR,BSET,BTST
+
+0000 1100 size(2 bits) ea mode register(3,3 bits); imm16 next word, imm8 lower order byte of next word, imm32 two next words
+                                                                                                    CMPI
+
+0000 Dn reg(3 bits) 101[110][111][100] ea mode register(3,3 bits)                                   BCHG,BCLR,BSET,BTST
+
+0000 Dn reg(3 bits) opmode(3 bits) 001 address reg(3 bits); 16 bit displacement                     MOVEP
+
+00 size(2 bits) ea dest register mode(3,3 bits) ea source mode register(3,3 bits)                   MOVE
+00 size(2 bits) An dest(3 bits) 001 ea source mode register(3,3 bits)                               MOVEA
+
+if( 0000 000 0 ** !111100 )        ORI
+if( 0000 000 0 00 111100 )        ORI to CCR
+if( 0000 000 0 01 111100 )         ORI to SR
+if( 0000 001 0 ** !111100 )        ANDI
+if( 0000 001 0 00 111100 )        ANDI to CCR
+if( 0000 001 0 01 111100 )         ANDI to SR
+if( 0000 010 0 )                SUBI
+if( 0000 011 0 )                ADDI
+if( 0000 100 0 )                BCHG,BCLR,BSET,BTST
+if( 0000 101 0 ** !111100 )        EORI
+if( 0000 101 0 00 111100 )        EORI to CCR
+if( 0000 101 0 01 111100 )         EORI to SR
+if( 0000 110 0 )                CMPI
+if( 0000 *** 1** !001 )            BCHG,BCLR,BSET,BTST
+if( 0000 *** 1** 001 )            MOVEP
+if( 00 !00 *** !001 )            MOVE
+if( 00 !00 *** 001 )            MOVEA
+
+*******************************************************************************************************************************************
+
+0100     0000                 size(2 bits)     ea mode register(3,3 bits)                           NEGX
+0100     0000                 11                 ea dest mode register(3,3 bits)                    MOVE FROM SR
+
+0100     Dn reg(3 bits) 1     10                 ea mode register(3,3 bits)                         CHK
+0100     An reg(3 bits) 1     11                 ea mode register(3,3 bits)                         LEA
+
+0100 0010 size(2 bits) ea dest mode register(3,3 bits)                                              CLR
+
+0100 0100 size(2 bits) ea mode register(3,3 bits)                                                   NEG
+0100 0100 11 ea source mode register(3,3 bits)                                                      MOVE TO CCR
+
+0100 0110 size(2 bits) ea mode register(3,3 bits)                                                   NOT
+0100 0110 11 ea source mode register(3,3 bits)                                                      MOVE TO SR
+
+0100     1000     00     ea mode register(3,3 bits)                                                 NBCD
+0100     1000     01    000 reg(3 bits)                                                             SWAP
+0100     1000     01     ea mode register(3,3 bits)                                                 PEA
+0100     100     opmode(3 bits) 000 Dn dest(3 bits)                                                 EXT
+
+0100     1 dr(1 bit) 00 1 size(1 bit) ea mode register(3,3 bits); register list mask                MOVEM
+
+0100     1010     size(2 bits) ea mode register(3,3 bits)                                           TST
+0100     1010     11 ea mode register(3,3 bits)                                                     TAS
+0100     1010     1111     1100                                                                     ILLEGAL
+
+0100     1110    0100    vector(4 bits)                                                             TRAP
+
+0100     1110     0101      0 An reg(3 bits); 16 bit displacement                                   LNK
+0100     1110     0101    1 An reg(3 bits)                                                          UNLK
+
+0100     1110    0110     dr(1 bit) An reg(3 bits)                                                  MOVE USP
+
+0100     1110     0111     0000                                                                     RESET
+0100     1110     0111      0001                                                                    NOP
+0100     1110     0111    0010                                                                      STOP
+0100     1110     0111     0011                                                                     RTE
+0100     1110     0111     0101                                                                     RTS
+0100     1110     0111    0110                                                                      TRAPV
+0100     1110     0111     0111                                                                     RTR
+
+0100     1110     10     ea mode register(3,3 bits)                                                 JSR
+0100     1110     11     ea mode register(3,3 bits)                                                 JMP
+
+if( 0100 0000 00|01|10 )         NEGX
+if( 0100 0000 11 )                 MOVE FROM SR
+if( 0100 ***1 10 )                 CHK
+if( 0100 ***1 11 )                LEA
+if( 0100 0010 )                    CLR
+if( 0100 0100 00|01|10 )         NEG
+if( 0100 0100 11 )                MOVE TO CCR
+if( 0100 0110 00|01|10 )         NOT
+if( 0100 0110 11 )                MOVE TO SR
+if( 0100 1000 00 )                NBCD
+if( 0100 1000 01 000 )            SWAP
+if( 0100 1000 01 !000 )            PEA
+if( 0100 1000 1* 000 )             EXT
+if( 0100 1*00 1* !000 )            MOVEM
+if( 0100 1010 00|01|10 )         TST
+if( 0100 1010 11 !111100 )        TAS
+if( 0100 1010 11 111100 )        ILLEGAL
+if( 0100 1110 0100 )            TRAP
+if( 0100 1110 0101 0 )            LNK
+if( 0100 1110 0101 1 )             ULNK
+if( 0100 1110 0110 )            MOVE USP
+if( 0100 1110 0111 0000 )         RESET
+if( 0100 1110 0111 0001 )         NOP
+if( 0100 1110 0111 0010 )         STOP
+if( 0100 1110 0111 0011 )         RTE
+if( 0100 1110 0111 0101 )         RTS
+if( 0100 1110 0111 0110 )         TRAPV
+if( 0100 1110 0111 0111 )         RTR
+if( 0100 1110 10 )                 JSR
+if( 0100 1110 11 )                 JMP 
+
+*******************************************************************************************************************************************
+
+0101 data(3 bits) 0[1] size(2 bits) ea mode register (3,3 bits)                                     ADDQ,SUBQ
+0101 condition(4 bits) 11 ea mode register(3,3 bits)                                                Scc
+0101 condition(4 bits) 11 001 Dn register(3 bits); 16 bit displacement                              DBcc
+
+if( 0101 *** 0 !11 )            ADDQ
+if( 0101 *** 1 !11 )            SUBQ
+if( 0101 *** * 11 !001 )        Scc
+if( 0101 *** * 11 001 )            DBcc
+
+*******************************************************************************************************************************************
+
+0110 0000 disp8(8 bit); 16 bit displacement if disp8 == 0                                           BRA
+0110 0001 disp8(8 bit); 16 bit displacement if disp8 == 0                                           BSR
+0110 condition(4 bits) disp8(8 bit); 16 bit displacement if disp8 == 0                              Bcc
+
+if( 0110 0000 )                 BRA
+if( 0110 0001 )                    BSR
+if( 0110 !000 )                    Bcc
+
+*******************************************************************************************************************************************
+
+0111 Dn dest(3 bits) 0 data(8 bits)                                                                 MOVEQ
+
+*******************************************************************************************************************************************
+
+1011 register(3 bits) opmode(3 bits) ea mode register(3,3 bits)                                     CMP
+
+1011 Dn source(3 bits) opmode(3 bits) ea mode register(3,3 bits)                                    EOR
+1011 Ax dest(3 bits) 1 size(2 bits) 001 Ay source(3 bits)                                           CMPM
+
+1011 register(3 bits) opmode(3 bits) ea mode register(3,3 bits)                                     CMPA
+
+if( 1011 *** 000|001|010 )        CMP
+if( 1011 *** 100|101|110 001 )    CMPM
+if( 1011 *** 100|101|110 !001 )    EOR
+if( 1011 *** 011|111 )            CMPA
+
+*******************************************************************************************************************************************
+
+1000 Dn dest(3 bits) 1[0] 11 ea mode register(3,3 bits)                                             DIVS,DIVU
+
+1100[1000] Ry dest(3 bits) 1 0000 R/M Rx source(3 bits)                                             ABCD,SBCD
+1100[1000] Dn register(3 bits) opmode(3 bits) ea mode register(3,3 bits)                            AND,OR
+
+1100 Rx reg(3 bits) 1 opmode(5 bits) Ry reg(3 bits)                                                 EXG
+1100 Dn dest(3 bits) 1[0] 11 ea mode register(3,3 bits)                                             MULS,MULU
+
+if( 1000 *** 011 )                DIVU
+if( 1000 *** 111 )                DIVS
+if( 1000 *** 10000 )            SBCD
+if( 1000 *** 000**|001**|010**|10001|10010|10011|101**|110** )                                      OR
+
+if( 1100 *** 011 )                MULU
+if( 1100 *** 111 )                MULS
+if( 1100 *** 10000 )            ABCD
+if( 1100 *** 000**|001**|010**|10001|10010|10011|10101|10110|10111|11001|11010|11011 )              AND
+if( 1100 *** 10100|11000 )         EXG
+
+*******************************************************************************************************************************************
+
+1101[1001] register(3 bits) opmode(3 bits) ea mode register (3,3 bits)                              ADD,SUB
+1101[1001] register(3 bits) opmode(3 bits) ea mode register(3,3 bits)                               ADDA,SUBA
+1101[1001] Ry dest(3 bits) 1 size(2 bits) 00 R/M Rx source(3 bits)                                  ADDX,SUBX
+
+if( 1001 *** 000|001|010|10001|10010|10011|10101|10110|10111|11001|11010|11011 )    SUB
+if( 1001 *** 011|111 )                    SUBA
+if( 1001 *** 10000|10100|11000 )        SUBX
+if( 1101 *** 000|001|010|10001|10010|10011|10101|10110|10111|11001|11010|11011 )    ADD
+if( 1101 *** 011|111 )                    ADDA
+if( 1101 *** 10000|10100|11000)            ADDX
+
+*******************************************************************************************************************************************
+
+1110 count/register(3 bits) dr(1 bit) size(2 bits) i/r(1 bit) 00[01][11][10] Dn dest(3 bit)         ASL,LSL,ROL,ROXL,ASR,LSR,ROR,ROXR
+1110 000[001][011][010] dr(1 bit) 11 ea mode register(3,3 bits)                                     ASL,LSL,ROL,ROXL,ASR,LSR,ROR,ROXR
+
+if( 1110 *** * !11 )             ASL,LSL,ROL,ROXL,ASR,LSR,ROR,ROXR
+if( 1110 *** * 11 )             ASL,LSL,ROL,ROXL,ASR,LSR,ROR,ROXR
+
+*******************************************************************************************************************************************
+
+microcode
+instruction: XXXX *** XXX
+
+0000 *** 000                ORI,ORI to CCR,ANDI,ANDI to CCR,SUBI,ADDI,BCHG,BCLR,BSET,BTST,EORI,EORI to CCR,CMPI
+0000 *** 001                ORI,ORI to SR,ANDI,ANDI to SR,SUBI,ADDI,BCHG,BCLR,BSET,BTST,EORI,EORI to SR,CMPI
+0000 *** 010                ORI,ANDI,SUBI,ADDI,BCHG,BCLR,BSET,BTST,EORI,CMPI
+0000 *** 011                ORI,ANDI,SUBI,ADDI,BCHG,BCLR,BSET,BTST,EORI,CMPI
+0000 *** 100                BCHG,BCLR,BSET,BTST,MOVEP
+0000 *** 101                BCHG,BCLR,BSET,BTST,MOVEP
+0000 *** 110                BCHG,BCLR,BSET,BTST,MOVEP
+0000 *** 111                BCHG,BCLR,BSET,BTST,MOVEP
+
+0001 *** 000                MOVE
+0001 *** 001                MOVEA
+0001 *** 010                MOVE
+0001 *** 011                MOVE
+0001 *** 100                MOVE
+0001 *** 101                MOVE
+0001 *** 110                MOVE
+0001 *** 111                MOVE
+
+0010 *** 000                MOVE
+0010 *** 001                MOVEA
+0010 *** 010                MOVE
+0010 *** 011                MOVE
+0010 *** 100                MOVE
+0010 *** 101                MOVE
+0010 *** 110                MOVE
+0010 *** 111                MOVE
+
+0011 *** 000                MOVE
+0011 *** 001                MOVEA
+0011 *** 010                MOVE
+0011 *** 011                MOVE
+0011 *** 100                MOVE
+0011 *** 101                MOVE
+0011 *** 110                MOVE
+0011 *** 111                MOVE
+
+0100 *** 000                NEGX,CLR,NEG,NOT,NBCD,TST
+0100 *** 001                NEGX,CLR,NEG,NOT,SWAP,PEA,TST,TRAP,LNK,ULNK,MOVE USP,RESET,NOP,STOP,RTE,RTS,TRAPV,RTR
+0100 *** 010                NEGX,CLR,NEG,NOT,EXT,MOVEM,TST,JSR
+0100 *** 011                MOVE FROM SR,CLR,MOVE TO CCR,MOVE TO SR,EXT,MOVEM,TAS,ILLEGAL,JMP
+0100 *** 100                invalid
+0100 *** 101                invalid
+0100 *** 110                CHK
+0100 *** 111                LEA
+
+0101 *** 000                ADDQ
+0101 *** 001                ADDQ
+0101 *** 010                ADDQ
+0101 *** 011                Scc,DBcc
+0101 *** 100                SUBQ
+0101 *** 101                SUBQ
+0101 *** 110                SUBQ
+0101 *** 111                Scc,DBcc
+
+0110 *** 000                BRA,Bcc
+0110 *** 001                BRA,Bcc
+0110 *** 010                BRA,Bcc
+0110 *** 011                BRA,Bcc
+0110 *** 100                BSR,Bcc
+0110 *** 101                BSR,Bcc
+0110 *** 110                BSR,Bcc
+0110 *** 111                BSR,Bcc
+
+0111 *** 000                MOVEQ
+0111 *** 001                MOVEQ
+0111 *** 010                MOVEQ
+0111 *** 011                MOVEQ
+0111 *** 100                invalid
+0111 *** 101                invalid
+0111 *** 110                invalid
+0111 *** 111                invalid
+
+1000 *** 000                OR
+1000 *** 001                OR
+1000 *** 010                OR
+1000 *** 011                DIVU
+1000 *** 100                SBCD,OR
+1000 *** 101                OR
+1000 *** 110                OR
+1000 *** 111                DIVS
+
+1001 *** 000                SUB
+1001 *** 001                SUB
+1001 *** 010                SUB
+1001 *** 011                SUBA
+1001 *** 100                SUB,SUBX
+1001 *** 101                SUB,SUBX
+1001 *** 110                SUB,SUBX
+1001 *** 111                SUBA
+
+1010 *** 000                invalid
+1010 *** 001                invalid
+1010 *** 010                invalid
+1010 *** 011                invalid
+1010 *** 100                invalid
+1010 *** 101                invalid
+1010 *** 110                invalid
+1010 *** 111                invalid
+
+1011 *** 000                CMP
+1011 *** 001                CMP
+1011 *** 010                CMP
+1011 *** 011                CMPA
+1011 *** 100                CMPM,EOR
+1011 *** 101                CMPM,EOR
+1011 *** 110                CMPM,EOR
+1011 *** 111                CMPA
+
+1100 *** 000                AND
+1100 *** 001                AND
+1100 *** 010                AND
+1100 *** 011                MULU
+1100 *** 100                ABCD,AND
+1100 *** 101                EXG,AND
+1100 *** 110                EXG,AND
+1100 *** 111                MULS
+
+1101 *** 000                ADD
+1101 *** 001                ADD
+1101 *** 010                ADD
+1101 *** 011                ADDA
+1101 *** 100                ADD,ADDX
+1101 *** 101                ADD,ADDX
+1101 *** 110                ADD,ADDX
+1101 *** 111                ADDA
+
+1110 *** 000                ASL,LSL,ROL,ROXL,ASR,LSR,ROR,ROXR reg
+1110 *** 001                ASL,LSL,ROL,ROXL,ASR,LSR,ROR,ROXR reg
+1110 *** 010                ASL,LSL,ROL,ROXL,ASR,LSR,ROR,ROXR reg
+1110 *** 011                ASL,LSL,ROL,ROXL,ASR,LSR,ROR,ROXR ea
+1110 *** 100                ASL,LSL,ROL,ROXL,ASR,LSR,ROR,ROXR reg
+1110 *** 101                ASL,LSL,ROL,ROXL,ASR,LSR,ROR,ROXR reg
+1110 *** 110                ASL,LSL,ROL,ROXL,ASR,LSR,ROR,ROXR reg
+1110 *** 111                ASL,LSL,ROL,ROXL,ASR,LSR,ROR,ROXR ea
+
+1111 *** 000                invalid
+1111 *** 001                invalid
+1111 *** 010                invalid
+1111 *** 011                invalid
+1111 *** 100                invalid
+1111 *** 101                invalid
+1111 *** 110                invalid
+1111 *** 111                invalid
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+Original MC68000 Ports:
+
+Address bus: A23-A1, output
+Data bus: D15-D0, bidirectional
+
+Address Strobe: output
+Read/Write: 0 - write, 1 - read
+Upper and Lower data strobes: output
+
+Data transfer acknowlege: input
+
+A,D,AS,R/W,UDS,LDS: all tri-state
+
+BERR: input
+BERR: perform exception handling, while BERR asserted wait in Hi-Z
+BERR + HALT: retry bus cycle, HALT longer than BERR for at least 1 clock cycle, while HALT asserted wait in Hi-Z,
+    not for read-modify-write, retry count not limited
+
+
+FC[2:0]: valid with Address Strobe
+    0 - undefined
+    1 - user data
+    2 - user program
+    3 - undefined
+    4 - undefined
+    5 - supervisor data             : all exception vector entries except reset
+    6 - supervisor program          : exception vector for reset
+    7 - cpu space                   : interrupt acknowlege bus cycle
+
+interrupt IPL[2:0]:
+    assert IPL until processor signals interrupt acknowlege
+interrupt acknowlege bus cycle:
+    FC: 7
+    A23-A4: high, A3-A1: interrupt number output
+        D15-D8 ignored, D7-D0 + DACK: vector number
+        input VPA: autovector, complete 6800 read cycle: assert VMA
+        input BERR: spurious interrupt
+
+HALT, RESET: inout
+input HALT + RESET: processor reset
+output RESET: RESET opcode: reset external devices
+output HALT: processor blocked
+input HALT: stop bus activity after current bus cycle, Hi-Z all three-state lines, bus arbitration as usual
+
+
+bus request: input, at any time
+bus grant: output, bus is to be released after current cycle
+bus grant acknowlege: input, bus in use by external device
+
+E: clock: output, 6 clocks low, 4 clocks high
+Valid Peripheral Address: input, use autovector in interrupt acknowlege cycle, device is 6800 type: synchronize data on E
+Valid Memory Address: output, memory address valid and processor synchronized on E
+
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+Backup
+>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+//----- flip_flop_registers
+//ir1,ir2:
+//    required by: ANDI,EORI,ORI,ANDI to CCR,EORI to CCR,ORI to CCR,ANDI to SR,EORI to SR,ORI to SR,ADDI,SUBI
+
