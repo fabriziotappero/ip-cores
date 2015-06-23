@@ -1,0 +1,9 @@
+L1:	ADDI		R1,R0,8
+	ADDI		R2,R1,8
+	ADDI		R3,R2,8
+	ADD			R4,R2,R3
+	ST			R4,R1,2
+	LD			R5,R1,2
+	SUB			R6,R4,R5
+	BZ			R6,L1
+	ADDI		R7,R7,1
