@@ -1,0 +1,1 @@
+../workspace/lcd_display/src/wb_lcd.v

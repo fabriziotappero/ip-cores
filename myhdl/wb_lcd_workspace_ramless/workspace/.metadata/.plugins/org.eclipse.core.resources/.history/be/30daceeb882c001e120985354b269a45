@@ -1,0 +1,360 @@
+from myhdl import *
+
+t_TxState = enum('tx_high_setup', 'tx_high_hold', 'tx_oneus', 'tx_low_setup', 'tx_low_hold', 'tx_fortyus', 'tx_done');
+t_State = enum('display_init', 'init_fifteenms', 'init_one', 'init_two', 'init_three', 'init_four', 'init_five', 'init_six', 'init_seven', 'init_eight', 'display_function_set', 'display_entry_set', 'display_set_display', 'display_clr_display', 'display_pause_setup', 'display_pause', 'display_done', 'display_set_addr', 'display_char_write')
+
+def delayCounter(clk, reset, count, load, done, width = 13):
+    
+    counter = Signal(intbv(0)[width:0])
+    
+    @always_comb
+    def done_logic():
+        done.next = (counter == 0)
+    
+    @always(clk.posedge)
+    def countdown_logic():
+        if load:
+            counter.next = count
+        else: #elif not done:
+            counter.next = counter - 1
+    
+    return instances()
+    
+    
+
+def lcd(clk, reset, dat, addr, we, busy, SF_D, LCD_E, LCD_RS, LCD_RW):
+    
+    
+    state = Signal(t_State.display_init)
+    tx_state = Signal(t_TxState.tx_done)
+    tx_byte = Signal(intbv(0)[8:0])
+    tx_init = Signal(bool())
+    tx_done = Signal(bool())
+    LCD_E0 = Signal(bool())
+    SF_D0 = Signal(intbv(0)[4:0])
+    LCD_E1 = Signal(bool())
+    SF_D1 = Signal(intbv(0)[4:0])
+    wr_dat = Signal(intbv(0)[7:0])
+    wr_addr = Signal(intbv(0)[7:0])
+    
+    @always_comb
+    def busy_and_rw_handlers():
+        busy.next = (state != t_State.display_done)
+        LCD_RW.next = 0
+                      
+    #Delay counter
+    main_delay_load = Signal(bool())
+    main_delay_value = Signal(intbv(0)[20:0])
+    
+    tx_delay_load = Signal(bool())
+    main_delay_load = Signal(bool())
+    delay_load = Signal(bool())
+    
+    tx_delay_value = Signal(intbv(0)[20:0])
+    main_delay_value = Signal(intbv(0)[20:0])
+    delay_value = Signal(intbv(0)[20:0])
+    
+    delay_done = Signal(bool())
+    output_selector  = Signal(bool())    
+    counter = delayCounter(clk, reset, delay_value, delay_load, delay_done, width = 21)
+
+    @always_comb
+    def conunter_sharing_load():
+        delay_load.next = tx_delay_load or main_delay_load
+            
+    @always_comb
+    def conunter_sharing_value():
+        if tx_delay_load:
+            delay_value.next = tx_delay_value 
+        else:
+            delay_value.next = main_delay_value
+
+
+    # SF_D and LCD_E management for sharing between Init and TX phases.
+    @always_comb
+    def output_tx_or_init_select(): # 0 tx; 1 init
+        output_selector.next = (state == t_State.display_init) | (state == t_State.init_fifteenms) | (state == t_State.init_one) | (state == t_State.init_two) | (state == t_State.init_three) | (state == t_State.init_four) | (state == t_State.init_five) | (state == t_State.init_six) | (state == t_State.init_seven) | (state == t_State.init_eight) 
+        
+    @always_comb
+    def output_tx_or_init_mux():
+        if output_selector: # Init
+            SF_D.next = SF_D1
+            LCD_E.next = LCD_E1
+        else: # TX
+            SF_D.next = SF_D0 
+            LCD_E.next = LCD_E0 
+
+
+    @always_comb
+    def init_transmissions():
+        tx_init.next = (~tx_done) & ((state == t_State.display_function_set) | (state == t_State.display_entry_set) | (state == t_State.display_set_display) | (state == t_State.display_clr_display) | (state == t_State.display_set_addr) | (state == t_State.display_char_write))
+        LCD_RS.next = ~(bool(state == t_State.display_function_set) | (state == t_State.display_entry_set) | (state == t_State.display_set_display) | (state == t_State.display_clr_display) | (state == t_State.display_set_addr))
+        
+    @always(clk.posedge, reset.posedge)
+    def DisplayFSM():
+        if reset == 1:
+            state.next = t_State.display_init
+            main_delay_load.next = 0
+            main_delay_value.next = 0
+            SF_D1.next = 0
+            LCD_E1.next = 0
+            tx_byte.next = 0
+        else:
+            main_delay_load.next = 0;
+            main_delay_value.next = 0;
+            if state == t_State.display_init:
+                tx_byte.next = 0 #00000000
+                
+                state.next = t_State.init_fifteenms
+                main_delay_load.next = 1
+                main_delay_value.next = 750000            
+                                                
+            elif state == t_State.init_fifteenms:
+                main_delay_load.next = 0
+                
+                if delay_done:
+                    state.next = t_State.init_one;
+                    main_delay_load.next = 1
+                    main_delay_value.next = 11
+                    
+            elif state == t_State.init_one:
+                main_delay_load.next = 0
+                SF_D1.next = 3
+                LCD_E1.next = 1    
+                
+                if delay_done:
+                    state.next = t_State.init_two;
+                    main_delay_load.next = 1
+                    main_delay_value.next = 205000
+
+            elif state == t_State.init_two:
+                main_delay_load.next = 0
+                LCD_E1.next = 0    
+                
+                if delay_done:
+                    state.next = t_State.init_three;
+                    main_delay_load.next = 1
+                    main_delay_value.next = 11
+                
+            elif state == t_State.init_three:
+                main_delay_load.next = 0
+                SF_D1.next = 3
+                LCD_E1.next = 1    
+                
+                if delay_done:
+                    state.next = t_State.init_four;
+                    main_delay_load.next = 1
+                    main_delay_value.next = 5000
+
+            elif state == t_State.init_four:
+                main_delay_load.next = 0
+                LCD_E1.next = 0    
+                
+                if delay_done:
+                    state.next = t_State.init_five;
+                    main_delay_load.next = 1
+                    main_delay_value.next = 11
+                    
+
+            elif state == t_State.init_five:
+                main_delay_load.next = 0
+                SF_D1.next = 3
+                LCD_E1.next = 1    
+                
+                if delay_done:
+                    state.next = t_State.init_six;
+                    main_delay_load.next = 1
+                    main_delay_value.next = 2000
+
+            elif state == t_State.init_six:
+                main_delay_load.next = 0
+                LCD_E1.next = 0   
+                
+                if delay_done:
+                    state.next = t_State.init_seven;
+                    main_delay_load.next = 1
+                    main_delay_value.next = 11
+
+            elif state == t_State.init_seven:
+                main_delay_load.next = 0
+                SF_D1.next = 2
+                LCD_E1.next = 1    
+                
+                if delay_done:
+                    state.next = t_State.init_eight;
+                    main_delay_load.next = 1
+                    main_delay_value.next = 2000
+
+            elif state == t_State.init_eight:
+                main_delay_load.next = 0
+                LCD_E1.next = 0
+                
+                if delay_done:
+                    state.next = t_State.display_function_set;
+                    
+            elif state == t_State.display_function_set:
+                tx_byte.next = 40 #00101000
+                if tx_done:
+                    state.next = t_State.display_entry_set
+
+            elif state == t_State.display_entry_set:
+                tx_byte.next = 6 #00000110
+                if tx_done:
+                    state.next = t_State.display_set_display
+                    
+            elif state == t_State.display_set_display:
+                tx_byte.next = 12 #00001100
+                if tx_done:
+                    state.next = t_State.display_clr_display
+
+            elif state == t_State.display_clr_display:
+                tx_byte.next = 1 #00000001
+                if tx_done:
+                    state.next = t_State.display_pause #_setup
+                    main_delay_load.next = 1
+                    main_delay_value.next = 82000
+
+            elif state == t_State.display_pause_setup:
+                state.next = t_State.display_pause
+                
+            elif state == t_State.display_pause:
+                tx_byte.next = 0 #00000000
+                
+                if delay_done:
+                    state.next = t_State.display_done;
+                    
+            elif state == t_State.display_done:
+                tx_byte.next = 0 #00000000
+                
+                if we:
+                    state.next = t_State.display_set_addr
+                    wr_addr.next = addr
+                    wr_dat.next = dat
+                else:
+                    state.next = t_State.display_done
+                    
+            elif state == t_State.display_set_addr:
+                tx_byte.next = 128 | wr_addr #10000000 + addr[6:0]
+                if tx_done:
+                    state.next = t_State.display_char_write
+                
+            elif state == t_State.display_char_write:
+                tx_byte.next = wr_dat
+                if tx_done:                
+                    state.next = t_State.display_done;    
+           # else:
+               # raise ValueError("Undefined Display state")
+            
+  
+
+    @always(clk.posedge, reset.posedge)
+    def TxFSM():
+        if reset == 1:
+            tx_state.next = t_TxState.tx_done
+            SF_D0.next = 0
+            LCD_E0.next = 0
+        else:
+            tx_delay_load.next = 0;
+            tx_delay_value.next = 0;
+            if tx_state == t_TxState.tx_high_setup:
+                LCD_E0.next = 0
+                SF_D0.next = tx_byte[8 : 4]
+                tx_delay_load.next = 0
+                if delay_done:
+                    tx_state.next = t_TxState.tx_high_hold
+                    tx_delay_load.next = 1
+                    tx_delay_value.next = 12
+                    
+            elif tx_state == t_TxState.tx_high_hold:
+                LCD_E0.next = 1
+                SF_D0.next = tx_byte[8 : 4]
+                tx_delay_load.next = 0
+                if delay_done:
+                    tx_state.next = t_TxState.tx_oneus
+                    tx_delay_load.next = 1
+                    tx_delay_value.next = 50
+                    
+            elif tx_state == t_TxState.tx_oneus:
+                LCD_E0.next = 0
+                tx_delay_load.next = 0
+                if delay_done:
+                    tx_state.next = t_TxState.tx_low_setup
+                    tx_delay_load.next = 1
+                    tx_delay_value.next = 2
+                    
+            elif tx_state == t_TxState.tx_low_setup:
+                LCD_E0.next = 0
+                SF_D0.next = tx_byte[4 : 0]
+                tx_delay_load.next = 0
+                if delay_done:
+                    tx_state.next = t_TxState.tx_low_hold
+                    tx_delay_load.next = 1
+                    tx_delay_value.next = 12
+                    
+            elif tx_state == t_TxState.tx_low_hold:
+                LCD_E0.next = 1
+                SF_D0.next = tx_byte[4 : 0]
+                tx_delay_load.next = 0
+                if delay_done:
+                    tx_state.next = t_TxState.tx_fortyus
+                    tx_delay_load.next = 1
+                    tx_delay_value.next = 2000
+                    
+            elif tx_state == t_TxState.tx_fortyus:
+                LCD_E0.next = 0
+                tx_delay_load.next = 0
+                if delay_done:
+                    tx_state.next = t_TxState.tx_done
+                    tx_done.next = 1
+                    
+            elif tx_state == t_TxState.tx_done:
+                LCD_E0.next = 0
+                tx_done.next = 0
+                tx_delay_load.next = 0
+                if tx_init:                
+                    tx_state.next = t_TxState.tx_high_setup
+                    tx_delay_load.next = 1
+                    tx_delay_value.next = 2
+           # else:
+           #     raise ValueError("Undefined TX state")
+            
+    return instances()
+
+
+def wb_lcd(wb_clk_i, wb_rst_i, wb_dat_i, wb_dat_o, wb_adr_i, wb_sel_i, wb_we_i, wb_cyc_i, wb_stb_i, wb_ack_o, SF_D, LCD_E, LCD_RS, LCD_RW):
+
+    busy = Signal(bool(0))
+    wb_dat_o = Signal(intbv(0)[32:0])
+    wb_ack_o = Signal(bool(0))
+    
+    status_register_address = 128
+    status_register_busy = 1
+    status_register_iddle = 0
+    
+    @always_comb()
+    def wishbone_logic():
+        wb_ack_o.next = wb_cyc_i & wb_stb_i;
+        lcd_we.next =   wb_cyc_i & wb_stb_i & wb_we_i & wb_adr != status_register_address
+        if busy:
+            wb_dat_o.next = status_register_busy
+        else:
+            wb_dat_o.next = status_register_iddle
+
+    lcd (wb_clk_i, wb_rst_i, wb_dat_i, wb_adr_i, lcd_we, busy, SF_D, LCD_E, LCD_RS, LCD_RW)
+    
+    
+def main():
+    width = 20
+
+    count = Signal(intbv(0)[width:0])
+    clk, reset, we, busy, LCD_E, LCD_RS, LCD_RW = [Signal(bool(0)) for i in range(7)]
+    dat = Signal(intbv(0)[32:0])
+    addr = Signal(intbv(0)[7:0])
+    SF_D = Signal(intbv(0)[4:0])
+    
+    toVerilog(lcd, clk, reset, dat, addr, we, busy, SF_D, LCD_E, LCD_RS, LCD_RW)
+    toVHDL(lcd, clk, reset, dat, addr, we, busy, SF_D, LCD_E, LCD_RS, LCD_RW)
+
+if __name__ == '__main__':
+    main()
+    
