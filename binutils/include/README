@@ -1,0 +1,162 @@
+
+Format of Object and Executable Files
+-------------------------------------
+
+0) General
+
+The "a.out" file format is used as format for assembler output
+("object files") as well as for linker output ("executable files").
+The difference of these two is the size of certain sections of
+the file being zero in case of executable files.
+
+The file consists of a header and up to 6 sections:
+  - code
+  - initialized data
+  - code relocation records
+  - data relocation records
+  - symbol table records
+  - symbol string storage
+
+
+1) Header
+
+The header specifies the sizes of all following sections,
+but has itself a fixed length (and is always present):
+
+typedef struct {
+  unsigned int magic;		/* must be EXEC_MAGIC */
+  unsigned int csize;		/* size of code in bytes */
+  unsigned int dsize;		/* size of initialized data in bytes */
+  unsigned int bsize;		/* size of uninitialized data in bytes */
+  unsigned int crsize;		/* size of code relocation info in bytes */
+  unsigned int drsize;		/* size of data relocation info in bytes */
+  unsigned int symsize;		/* size of symbol table in bytes */
+  unsigned int strsize;		/* size of string space in bytes */
+} ExecHeader;
+
+The magic number is used to distinguish executable files from
+other file types. This field must have the value EXEC_MAGIC.
+
+The code size is given in bytes, but is always a multiple of 4.
+This is the exact size of the code section in the executable file.
+For the code size in memory see "executing an executable" below.
+
+The initialized data size is given in bytes, but is always a
+multiple of 4. This is the exact size of the initialized data
+section in the executable file. For the data size in memory see
+"executing an executable" below.
+
+The uninitialized data size is given in bytes, but is always a
+multiple of 4. There is no corresponding section to this value
+contained within the executable. See "executing an executable"
+below for the semantics of this value.
+
+The code relocation info size is given in bytes, but is always
+a multiple of sizeof(RelocRecord). These records describe the
+changes to be applied to the code section during the link step.
+This size is zero if the file is an executable.
+
+The data relocation info size is given in bytes, but is always
+a multiple of sizeof(RelocRecord). These records describe the
+changes to be applied to the data section during the link step.
+This size is zero if the file is an executable.
+
+The size of the symbol table is given in bytes, but is always
+a multiple of sizeof(SymbolRecord). The symbol table contains
+information about symbols which are exported from or imported
+into this object file. It is mainly used during the link step
+and may not be present (size = 0) if the file is an executable.
+
+The string space is used to store the names of the symbols in
+the symbol table.
+
+
+2) Code/Initialized Data
+
+These sections contain the instructions and the initialized data
+of the program, respectively.
+
+
+3) Code/Data Relocation Records
+
+The relocation records have the following structure:
+
+typedef struct {
+  unsigned int offset;		/* where to relocate */
+  int method;			/* how to relocate */
+  int value;			/* additive part of value */
+  int base;			/* if MSB = 0: segment number */
+				/* if MSB = 1: symbol table index */
+} RelocRecord;
+
+The offset gives the position where the relocation has to be done,
+in the form of a byte offset from the beginning of the section.
+
+The method determines how the relocation is performed, and must
+be one of the following constants:
+METHOD_H16	/* write 16 bits with high part of value */
+METHOD_L16	/* write 16 bits with low part of value */
+METHOD_R16	/* write 16 bits with value relative to PC */
+METHOD_R26	/* write 26 bits with value relative to PC */
+METHOD_W32	/* write full 32 bit word with value */
+
+"Value" and "base" together are used to compute the final value of
+the relocated code or data item. The value is added to the value of
+the base. The base is either the start address of a segment in memory,
+or the value of an imported symbol. In the former case, which is marked
+by an MSB of 0, the base is specified as one of the following constants:
+SEGMENT_ABS	/* absolute values */
+SEGMENT_CODE	/* code segment */
+SEGMENT_DATA	/* initialized data segment */
+SEGMENT_BSS	/* uninitialized data segment */
+In the latter case, which is marked by an MSB of 1, the remaining bits
+specify the index of the symbol in the symbol table.
+
+
+4) Symbol Table Records
+
+For every symbol which is imported into or exported from the current
+object file, there is a corresponding symbol table record:
+
+typedef struct {
+  unsigned int name;		/* offset in string space */
+  int type;			/* if MSB = 0: the symbol's segment */
+				/* if MSB = 1: the symbol is undefined */
+  int value;			/* if symbol defined: the symbol's value */
+				/* if symbol not defined: meaningless */
+} SymbolRecord;
+
+The name of the symbol is given as an offset into the string space.
+
+If the "type" has an MSB of 0, the symbol is defined here (i.e.,
+it is exported), and the "type" specifies the segment (for the
+segment constants see above) in which the symbol is defined, while
+the "value" holds its value. Otherwise, the symbol is not defined
+here (i.e., it is imported), and the "value" has no meaning.
+
+
+5) Symbol String Storage
+
+The strings are null-terminated and stored without any padding.
+
+
+6) Executing an Executable
+
+When an executable file is loaded into memory for execution, three
+logical segments are set up: the code segment, the data segment (with
+initialized data, followed by uninitialized data, which starts off
+as all 0), and a stack.
+
+The code segment begins at address 0 in virtual memory and is loaded
+with the contents of the code section from the executable file.
+
+The data segment begins at the next page boundary (multiple of 4 KB)
+after the code segment. It is loaded with the contents of the data
+section from the executable file and is followed immediately by the
+"uninitialized data", which must be zeroed by the loader. The data
+area is expanded upwards as requested by explicit "brk" system calls.
+
+The stack is located in the highest possible locations in the virtual
+address space, which are accessible in user mode, and thus expanding
+downwards from (but excluding) the address 0x80000000. It is extended
+automatically by the operating system.

@@ -1,0 +1,271 @@
+\chapter{Demonstration SoC Project}
+
+This chapter describes a demonstration project that uses the \eco in a SoC design. The project is implemented on an XSA-3S1000 prototyping board form XESS Corp. More information about the prototyping board itself can be found on the XESS homepage, \href{http://www.xess.com}{http://www.xess.com}.
+
+The demonstration project instantiates the \eco inside the Spartan-3 FPGA on the prototyping board and augments it with on-chip controllers for the external hardware on the prototyping board. These controllers are connected to the \eco through the SoC bus. They allow to access the on-board 32 MB SDRAM as the program and data RAM of the \ecox. The flash ROM is connected to the beginning of the peripheral device address space, such that the V bit of the psw selects a base address either in RAM or ROM (see \myref{2}{psw}). Further controllers connected to the SoC bus allow access to a character-based VGA display, PS/2 keyboard, RS232 serial port, and IDE hard disk.
+
+\section{Address Map}
+
+This section describes the mapping of physical addresses to devices in the demonstration project. To access a device directly from a program, direct-mapped virtual addresses can be used that are obtained by adding 0xC0000000 to the physical addresses listed here.
+
+\begin{tabular}{|c|c|c|}
+\hline
+Physical Address & Virtual Address & Device\\
+\hline
+00000000$_h$ - 01FFFFFF$_h$ & C0000000$_h$ - C1FFFFFF$_h$ & RAM\\
+02000000$_h$ - 1FFFFFFF$_h$ & C2000000$_h$ - DFFFFFFF$_h$ & (unused)\\
+20000000$_h$ - 2003FFFF$_h$ & E0000000$_h$ - E003FFFF$_h$ & ROM\\
+20040000$_h$ - 2FFFFFFF$_h$ & E0040000$_h$ - EFFFFFFF$_h$ & (unused)\\
+30000000$_h$ - 300FFFFF$_h$ & F0000000$_h$ - F00FFFFF$_h$ & Timer\\
+30100000$_h$ - 301FFFFF$_h$ & F0100000$_h$ - F01FFFFF$_h$ & Display\\
+30200000$_h$ - 302FFFFF$_h$ & F0200000$_h$ - F02FFFFF$_h$ & Keyboard\\
+30300000$_h$ - 303FFFFF$_h$ & F0300000$_h$ - F03FFFFF$_h$ & Terminal\\
+30400000$_h$ - 304FFFFF$_h$ & F0400000$_h$ - F04FFFFF$_h$ & Disk\\
+30500000$_h$ - 3FFFFFFF$_h$ & F0500000$_h$ - FFFFFFFF$_h$ & (unused)\\
+40000000$_h$ - FFFFFFFF$_h$ & (not direct-mapped) & (unused)$^*$\\
+\hline
+\end{tabular}
+
+$^*$these addresses are defined to be permanently unused by the SoC bus architecture.
+
+\section{Interrupt Map}
+
+This section describes the mapping of interrupt numbers (0..15) to devices in the demonstration project. The interupt number specifies both the index of the interrupt signal in the interrupt signal group when connecting the soft-core to other devices, and the number that is placed in the $IEN$ field of the \psw when accepting an interrupt.
+
+\begin{tabular}{|c|c|}
+\hline
+Interrupt Number & Device\\
+\hline
+0 & Terminal Sender \#1\\
+1 & Terminal Receiver \#1\\
+2 & Terminal Sender \#2\\
+3 & Terminal Receiver \#2\\
+4 & Keyboard\\
+5 & (unused)\\
+6 & (unused)\\
+7 & (unused)\\
+8 & Disk\\
+9 & (unused)\\
+10 & (unused)\\
+11 & (unused)\\
+12 & (unused)\\
+13 & (unused)\\
+14 & Timer\\
+15 & (unused)\\
+\hline
+\end{tabular}
+
+\section{RAM and ROM}
+
+The RAM controller connects the \eco to the 32 MB SDRAM chip on the development board. Above 32 MB, the memory map has a hole to allow similar designs with a larger RAM use a compatible memory map. Next comes the ROM controller which connects the \eco to the on-board flash ROM. Only 256 kB of that ROM can be accessed. Note that the ROM also contains the configuration bitstream for the FPGA. The ROM locations for the bit stream are not accessible by the \ecox.
+
+The RAM and ROM are the only devices in the physical address space that may be accessed by half-word and byte transfers. They may contain both program and data. Obviously, the ROM can only contain constant data.
+
+\section{Timer}
+
+The timer is a simple binary counter inside the FPGA that counts clock cycles backwards. Whenever it reaches zero, it is reset to a value specified by a \definition{divisor register} and sets a wrap-around flag. Optionally, this flag generates an interrupt when set. The divisor register thus controls how often the flag is set. 
+
+The \definition{control register} of the timer is used to read or write the wrap-around flag as well as an interrupt enable flag. An interrupt is generated when both the wrap-around flag and the interrupt enable flag are set. The interrupt service routine typically resets the wrap-around flag to de-assert the interrupt signal. Note that the interrupt enable flag is distinct from both the global and the channel-specific interrupt enable flags in the \pswx. 
+
+\begin{tabular}{|c|c|c|c|}
+\hline
+Bits & 31..2 & 1 & 0\\
+\hline
+Meaning & (ignored) & Interrupt Enable & Wrap-Around\\
+\hline
+\end{tabular}
+
+The control register can be accessed at physical address 30000000$_h$ (virtual address F0000000$_h$). The divisor register can be accessed at physical address 30000004$_h$ (virtual address F0000004$_h$).
+
+\section{Display}
+
+The display controller generates a 640x480x60 VGA signal from a 80x30 character matrix, with 8x16 pixels per character. The signal is sent to the VGA port of the prototyping board and can be viewed on a VGA monitor connected to that port. Characters are generated by taking ASCII-encoded characters from the character matrix, converting them to pixels through a character ROM, and applying attributes stored together with the character matrix.
+
+Although the visible character matrix has a size of 80x30, it uses a 128x32 memory internally. These memory locations can be accessed by 128x32 consecutive word locations, stored line by line, at physical addresses 30100000$_h$ through 30100FFC$_h$ (virtual addresses F0100000$_h$ through F0100FFC$_h$). Each word location contains a character code and attributes:
+
+\begin{tabular}{|c|c|c|c|}
+\hline
+Bits & 31..16 & 15..8 & 7..0\\
+\hline
+Meaning & (ignored) & Attributes & Character Code\\
+\hline
+\end{tabular}
+
+The attributes can be subdivided again:
+
+\begin{tabular}{|c|c|c|c|c|c|c|c|c|c|c|}
+\hline
+Bits & ... & 15 & 14 & 13 & 12 & 11 & 10 & 9 & 8 & ...\\
+\hline
+Meaning & ... & $BL$ & $R_B$ & $G_B$ & $B_B$ & $I$ & $R_F$ & $G_F$ & $B_F$ & ...\\
+\hline
+\end{tabular}
+
+The $R_F$, $G_F$, and $B_F$ bits control the base foreground color of the character by enabling the red, green, and blue channels, respectively. If the $I$ bit is set, then all enabled channels are intensified to make the foreground color brighter. The $R_B$, $G_B$, and $B_B$ bits control the color of the background by enabling the red, green, and blue channels, respectively. The $BL$ bit causes the character to \definition{blink}, that is, to become visible and invisible in regular intervals.
+
+The character ROM which contains the pixel patterns for the individual characters cannot be accessed directly.
+
+\section{Keyboard}
+
+The keyboard controller connects the \eco with a keyboard attached to the PS/2 port of the prototyping board. It delivers a stream of \definition{scan codes} from the keyboard which correspond to {\it key press} and {\it key release} events. The decoding of these scan codes is not done by the keyboard controller, but must be done in software instead.
+
+The keyboard controller is accessed by two device registers called the \definition{control register} and the \definition{data register}. When the keyboard controller receives a scancode byte from the keyboard, it stores that byte internally and sets a \definition{ready} flag in the control register. Optionally, the ready flag generates an interrupt: The interrupt signal is asserted if both the ready flag and the interrupt enable flag are set. The corresponding interrupt service routine typically resets the ready flag to de-assert the interrupt signal. The received scancode byte can be read from the data register. Reading from the data register has the side-effect of resetting the ready flag, so the interrupt service routine need not do this manually if it reads from the data register.
+
+The control register can be accessed at physical address 30200000$_h$ (virtual address F0200000$_h$) and has the following layout:
+
+\begin{tabular}{|c|c|c|c|}
+\hline
+Bits & 31..2 & 1 & 0\\
+\hline
+Meaning & (ignored) & Interrupt Enable & Ready\\
+\hline
+\end{tabular}
+
+The data register can be accessed at physical address 30200004$_h$ (virtual address F0200004$_h$) and has the following layout:
+
+\begin{tabular}{|c|c|c|}
+\hline
+Bits & 31..8 & 7..0\\
+\hline
+Meaning & (ignored) & Scancode Byte\\
+\hline
+\end{tabular}
+
+\section{Terminal}
+
+The demonstration project supports a serial terminal connected to the RS232 port of the prototyping board. It also supports a second serial terminal if a modified cable is used: The data transfer lines of the second terminal use the flow control lines of the RS232 port. Using a single terminal with hardware flow control instead of a second terminal is not supported. Also, terminals must currently use a transfer speed of 38400 bauds, a transfer size of 8 bits, 1 start bit, 1 stop bit, and no parity bit.
+
+Each terminal is accessed by four registers: The \definition{receiver control register}, the \definition{receiver data register}, the \definition{sender control register}, and the \definition{sender data register}. These registers can be accessed at the following addresses: 
+
+\begin{tabular}{|c|c|c|}
+\hline
+Register & Physical Address & Virtual Address\\
+\hline
+Receiver Control 1 & 30300000$_h$ & F0300000$_h$\\
+\hline
+Receiver Data 1 & 30300004$_h$ & F0300004$_h$\\
+\hline
+Sender Control 1 & 30300008$_h$ & F0300008$_h$\\
+\hline
+Sender Data 1 & 3030000C$_h$ & F030000C$_h$\\
+\hline
+Receiver Control 2 & 30300010$_h$ & F0300010$_h$\\
+\hline
+Receiver Data 2 & 30300014$_h$ & F0300014$_h$\\
+\hline
+Sender Control 2 & 30300018$_h$ & F0300018$_h$\\
+\hline
+Sender Data 2 & 3030001C$_h$ & F030001C$_h$\\
+\hline
+\end{tabular}
+
+\subsection{Receiver}
+
+The control register of each receiver contains a \definition{ready flag} that indicates whether a character has been received, and an \definition{interrupt enable flag} to indicate whether the ready flag shall cause an interrupt. The interrupt signal is asserted if both flags are set. Typically, the corresponding interrupt service routine resets the ready flag to de-assert the interrupt signal. The receiver control register has the following layout:
+
+\begin{tabular}{|c|c|c|c|}
+\hline
+Bits & 31..2 & 1 & 0\\
+\hline
+Meaning & (ignored) & Interrupt Enable & Ready\\
+\hline
+\end{tabular}
+
+When a character has been received, it can be read from the receiver data register. Reading a character from the receiver data register has the side-effect of resetting the ready flag. The receiver data register has the following layout:
+
+\begin{tabular}{|c|c|c|}
+\hline
+Bits & 31..8 & 7..0\\
+\hline
+Meaning & (ignored) & Received Character\\
+\hline
+\end{tabular}
+
+\subsection{Sender}
+
+The control register of each sender contains a \definition{ready flag} that indicates whether the sender can accept a character to send, and an \definition{interrupt enable flag} to indicate whether the ready flag shall cause an interrupt. The interrupt signal is asserted if both flags are set. Typically, the corresponding interrupt service routine resets the ready flag to de-assert the interrupt signal. The sender control register has the following layout:
+
+\begin{tabular}{|c|c|c|c|}
+\hline
+Bits & 31..2 & 1 & 0\\
+\hline
+Meaning & (ignored) & Interrupt Enable & Ready\\
+\hline
+\end{tabular}
+
+To send a character, the corresponding data byte must be written to the sender data register. Writing to this register has the side-effect of resetting the ready flag. The sender data register has the following layout:
+
+\begin{tabular}{|c|c|c|}
+\hline
+Bits & 31..8 & 7..0\\
+\hline
+Meaning & (ignored) & Character to Send\\
+\hline
+\end{tabular}
+
+\section{Disk}
+
+The disk controller connects the \eco to an IDE hard disk through the IDE port of the prototyping board. The disk controller simplifies the communication with the disk by hiding the details of the IDE protocol, but in turn allows only simple commands and low transfer speeds.
+
+The disk controller is accessed through the following addresses:
+
+\begin{tabular}{|c|c|c|}
+\hline
+Location & Physical Address & Virtual Address\\
+\hline
+Control Register & 30400000$_h$ & F0400000$_h$\\
+\hline
+Sector Count Register & 30400004$_h$ & F0400004$_h$\\
+\hline
+Sector Address Register & 30400008$_h$ & F0400008$_h$\\
+\hline
+Capacity Register & 3040000C$_h$ & F040000C$_h$\\
+\hline
+(unused) & 30400010$_h$ & F0400010$_h$\\
+& ..3047FFFC$_h$ & ..F047FFFC$_h$\\
+\hline
+Data Buffer & 30480000$_h$ & F0480000$_h$\\
+& ..30480FFF$_h$ & ..F0480FFF$_h$\\
+\hline
+(mirrored data buffer) & 30481000$_h$ & F0481000$_h$\\
+& ..304FFFFC$_h$ & ..F04FFFFC$_h$\\
+\hline
+\end{tabular}
+
+\subsection{Control Register}
+
+The control register is used to read the status of the disk controller, change general control parameters, and initiate actions. It has the following layout:
+
+\begin{tabular}{|c|c|c|c|c|c|c|c|c|}
+\hline
+Bits & 31 & 30..6 & 5 & 4 & 3 & 2 & 1 & 0\\
+\hline
+Meaning & DMARQ & (ignored) & INIT & FIN & ERR & WR & IEN & START\\
+\hline
+\end{tabular}
+
+The DMARQ is a read-only bit that indicates whether the attached disk currently sends a DMA request. This flag can be safely ignored. The INIT flag is a read-only bit that is set to 0 after reset, but turns to 1 as soon as the disk controller has finished initialization. Until the disk is initialized, only the control register should be accessed, and it should only be read to check the status of the INIT flag.
+
+The FIN flag is set to 1 each time the disk controller finishes an operation. The IEN flag can be used to specify whether the FIN flag shall cause an interrupt. The interrupt signal is asserted if both flags are set. Both flags can be changed by writing to the control register. Typically, the corresponding interrupt service routine resets FIN to de-assert the interrupt signal.
+
+The ERR flag is a read-only bit that is either set or reset whenever the disk controller has finished an operation. If set, it indicates an error during the operation.
+
+The WR flag can only be changed while no operation is in progress. It is used to specify whether the disk controller shall perform a read or write operation on the disk.
+
+The START bit is not actually a register. When reading from the control register, it always contains the value 0. Writing a value of 0 to this bit has no effect. Writing a value of 1 initiates the action selected by the WR bit, using the arguments from the sector address and sector count registers.
+
+\subsection{Disk Controller Operations}
+
+An action is initiated by writing a value of 1 to the START bit of the control register. While an action is in progress, the WR bit of the control register, as well as the sector address register and the sector count register cannot be modified. An action transfers sectors from the data buffer to the disk (if WR is set), or from the disk to the data buffer (if WR is reset). The number of transferred sectors is specified by the sector count register. The range of transferred sectors starts at the beginning of the data buffer, and on disk at the sector indicated by the sector address register.
+
+When the transfer is complete, the disk controller resets or sets the ERR flag in the control register, depending on whether the transfer was successful or an error occurred. The disk controller also sets the FIN flag of the control register to indicate completion of the transfer, which causes the interrupt signal to be asserted if the IEN flag is also set.
+
+\subsection{Sector Address, Sector Count, and Capacity}
+
+The sector address register must be set to the number of the first sector on disk to take part in a transfer prior to starting the transfer. Likewise, the sector count register must be set to the number of sectors to transfer prior to starting the transfer. The capacity register is a read-only register that contains the total number of sectors on disk.
+
+\subsection{Data Buffer}
+
+The data buffer has a size of 4096 bytes and thus contains up to 8 sectors. Being located in the device address space, it may only be accessed by word-sized transfers. Since the disk buffer conceptually contains bytes, not words, the word units transferred through the SoC bus comprise the corresponding bytes in a big-endian fashion.
+
+The data buffer should not be accessed while a transfer is in progress.

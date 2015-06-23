@@ -1,0 +1,464 @@
+
+FPGA Implementations of ECO32
+=============================
+
+eco32-00
+--------
+
+This is essentially the same as the solution of assigment 9 of the
+course "Hardware for Embedded Systems", i.e., an implementation of
+ECO32e. The differences are:
+a) The reset circuit is moved to a subdirectory of its own. The
+   duration of the reset pulse is reduced to 2^24/50MHz = 0.3 sec,
+   a quarter of the original duration.
+b) The reset circuit is connected to the pushbutton on the carrier
+   board, which has been designated for reset by the manufacturer.
+c) The bus controller is moved to a subdirectory of its own.
+d) The top-level description is transformed from a schematic into
+   plain text. This in turn eliminates the need for top-level
+   symbols of the Reset/ROM/RAM/Busctrl/CPU/DSP/KBD circuits.
+
+
+eco32-01
+--------
+
+We have a new module, "ser", which represents the circuit for a
+serial interface (8 bit data, no parity, 1 stop bit, 38400 baud).
+The data is buffered twice in both directions. The module is
+instanciated once; the data in/out lines are connected to the
+RS232 interface on the carrier board. The bus controller got
+the necessary additional connections to drive the module.
+
+
+eco32-02
+--------
+
+The fake RAM module is replaced by a preliminary implementation of
+real RAM. It uses the block RAM of the FPGA (instead of the SDRAM
+mounted as an extra chip on the board that the final implementation
+will use). It is therefore very small in size: 4 blocks of 16K bits
+each yield a total size of 2 KWords (8K bytes).
+
+
+eco32-03
+--------
+
+This revision corrects an error which should have been corrected
+a long time ago: the instructions ldb and ldh never sign-extended
+their loaded data. On top of that, the instructions ldbu and ldhu
+never placed zeroes into the bit positions 31 to 8 and 31 to 16,
+respectively. This went undetected so far, because the implementation
+of the bus did this already, although it is not explicitly requested.
+
+
+eco32-04
+--------
+
+This version got a shift unit. It is connected in parallel to the
+ALU, feeding its output into an expanded multiplexer. Because
+arithmetic right shifts are slow, shifting needs an extra cycle
+to complete. Even then it was necessary to request the place and
+route effort level "high" to get by with a clock period of 20 nsec.
+
+
+eco32-05
+--------
+
+Again there was an error to correct: I tried to scroll the display
+by copying the display memory contents and discovered that reading
+the memory needs an additional bus cycle (because the memory is
+clocked). A simple state machine had to be written, which in turn
+needed the reset signal. I changed the top-level description of
+the display from a schematic to plain text.
+
+
+eco32-06
+--------
+
+An easy job: I implemented the "jalr" instruction.
+
+
+eco32-07
+--------
+
+This is the first step in getting the real memory to work:
+I integrated the clock/reset module from my SDRAM controller
+experiments. I also corrected the naming of the flash ROM
+signals; all active-low signals are now consistently named
+with a trailing "_n".
+
+
+eco32-08
+--------
+
+We now have a working SDRAM controller!
+
+
+eco32-09
+--------
+
+Second serial interface added.
+
+
+eco32-10
+--------
+
+Branches based on signed comparisons added.
+
+
+eco32-11
+--------
+
+Timer added.
+
+
+eco32-12
+--------
+
+Multiply, divide, and remainder instructions done.
+
+
+eco32-13
+--------
+
+A first attempt to introduce virtual addressing: a totally
+minimalistic MMU consisting of two AND gates which suppress
+the two MSBs of the virtual address if they are set. If
+they are not, too bad - the virtual address is then mapped
+to physical address 0.
+
+
+eco32-14
+--------
+
+A couple of steps to make interrupts available:
+
+a) The CPU gets an input vector of 16 interrupt request lines which
+   are all tied to 0 in the top-level design external to the CPU.
+
+b) The timer circuit's control register gets an interrupt enable bit,
+   which gates the 'timer expired' status bit onto an additional
+   output line, the timer's interrupt request line. This line is
+   connected to the CPU's irq line 14.
+
+c) Inside the CPU there must be a set of 4 special registers. They
+   are implemented in a separate module. Two instructions (mvfs and
+   mvts) transfer data between the standard and the special register
+   sets. The data input of the special register set is connected to
+   the standard register data output 2; the write enable signal for
+   the special register set is controlled by the CPU's state machine.
+   The data output of the special register set is connected to the
+   data input 2 multiplexer of the standard register set, which has
+   to be widened by one input (and by one control line also). The
+   register number which selects the special register from/to which
+   reading/writing should take place comes from the instruction
+   register's immediate constant. The two new instructions get one
+   extra state each in the CPU's state machine.
+
+d) For interrupts and exceptions to take place there must be four
+   additional values available which can be loaded into the PC:
+   0xE0000004   general interrupts (V-bit of the PSW off)
+   0xC0000004   general interrupts (V-bit of the PSW on)
+   0xE0000008   user TLB miss (V-bit of the PSW off)
+   0xC0000008   user TLB miss (V-bit of the PSW on)
+   The contents of the special register 0 (the PSW) are needed at
+   several places in the description of the CPU's state machine.
+   They have to be set also, independently of the mvts instruction.
+   Therefore an extra data path from/to the special register set
+   is established, together with a separate write signal for the
+   PSW. The state machine gets two new states, one to acknowledge
+   interrupts and another one to implement the rfx instruction.
+   Each instruction tests a specific 'interrupt trigger line'
+   before returning to state 1 (instruction fetch). If it is set,
+   the state machine branches to the 'interrupt' state. In this
+   way we don't need a separate state before the 'instruction
+   fetch' state to check for interrupts (and also avoid the
+   unpleasant alternative: to merge interrupt detection into
+   the fetch state - think of the already-incremented pc, for
+   example). The trigger signal is set if there is any interrupt
+   request present, its mask is open, and the global interrupt
+   enable (in the PSW) is set. The ECO32 architecture defines
+   5 bits in the PSW to be the priority of the last acknowledged
+   interrupt. Therefore a priority encoder takes the vector of
+   interrupt requests (possibly modified by closed mask bits)
+   and determines the highest unmasked interrupt from that. The
+   two additional states in the state machine also handle the
+   two stacks (each three positions deep) for the 'interrupt
+   enable' and 'user mode' flags within the PSW.
+
+e) Since its construction, the ALU had two unused function encodings;
+   they had been assigned to add and subtract, but were never used.
+   They now deliver either the first or the second operand of the ALU
+   to the output, unchanged. This simplifies three instructions (ldhi,
+   jr, rfx) as well as the interrupt state in the CPU's state machine.
+
+
+eco32-15
+--------
+
+We now have the 'trap' instruction. This is an important first
+example of an exception.
+
+
+eco32-16
+--------
+
+This version accepts the four TLB instructions as valid instructions
+(but treats them as no-ops).
+
+
+eco32-17
+--------
+
+A couple of steps to make exceptions work:
+
+a) There are only 16 interrupts, so irq_priority is only [3:0] wide.
+   The leading bit of the interrupt/exception priority in the PSW is
+   explicitly set to 0 in state 15 (interrupt).
+
+b) Generally, states returning to state 1 (instruction fetch) check
+   the signal irq_trigger for pending interrupts and branch to state
+   15 (interrupt) if it is set. This should NOT be done if the current
+   state could possibly set the PSW to disable interrupts. So states
+   15 (interrupt), 22 (mvts), 23 (rfx), and 24 (trap) don't do this
+   check any longer. On the other hand, delaying the acceptance of
+   a pending interrupt for a whole instruction would come as a hard
+   surprise for an unsuspecting system programmer. It would in fact
+   be possible to write an instruction sequence which never accepts
+   any interrupts, although interrupts are expected to be enabled for
+   one instruction:
+       mvts $5,PSW    ; disable interrupts
+   label:
+       mvts $4,PSW    ; enable interrupts
+       mvts $5,PSW    ; disable interrupts
+       j label
+   This cannot be tolerated. Therefore an additional state is inserted,
+   just to check irq_trigger, computed from the new value of the PSW.
+   This certainly makes no sense for interrupt and trap, because the new
+   value of the interrupt enable flag in the PSW is known to be 0. So
+   the new state is only reached from states 22 (mvts) and 23 (rfx).
+   First, I did some renumbering of states:
+   Renamed state 25 to 26 (TLB instruction).
+   Renamed state 24 to 25 (trap).
+   Then the additional state is called state 24.
+
+c) Because the trap instruction is merely one of several possible causes
+   for an exception, its execution state (25, see step b) above) can be
+   used to implement exceptions. The exception number must be communicated
+   to this state. We therefore have a 4-bit register named 'exc_priority'
+   which must be set by any state transition to state 25. Its contents
+   are appended to a leading 1 and then represent the exception priority
+   which is found in the PSW.
+
+d) The following exceptions are implemented:
+     trap instruction exception
+     illegal instruction exception
+     divide instruction exception
+
+e) The 'bus timeout exception' is implemented with the help of a counter
+   which is activated if the bus is enabled and its wait line active.
+   When the counter expires, the exception execution state is entered.
+   There is a catch: if the bus timeout occurs during instruction fetch,
+   the PC has yet its old value, i.e., it must not get decremented while
+   handling the exception. This could be handled best by just another
+   state (renaming state 26 to 27, and using the new state 26 for
+   exception handling without decrementing the PC).
+
+f) The 'privileged instruction exception' isn't difficult to implement
+   but can only be tested if a TLB is present (because the test program
+   must enter user mode in order to trigger the exception - and in user
+   mode, instructions cannot be executed at addresses which have their
+   MSB set without triggering a 'privileged address exception').
+
+
+eco32-18
+--------
+
+This intermediate version got a new bus controller which does no longer
+mirror RAM and ROM in their respective upper address spaces but signals
+a bus timeout instead.
+
+
+eco32-19
+--------
+
+This version implements the MMU with a TLB (first of two parts).
+
+a) Add the TLB module. It consists of an "input section" (32 comparators
+   working in parallel, and a priority encoder which computes the binary
+   representation of the number of one of the matching comparators), and
+   an "output section" which merely delivers the previously stored frame
+   number and permission bits of the frame. The output section's memory
+   is addressed by the output of the priority encoder. The two sections
+   together implement a fully associative address translation cache.
+
+b) Change the MMU from a purely combinational circuit to one which needs
+   a single clock cycle to compute its output. This is necessary because
+   the RAM which stores frame numbers in the TLB output section also needs
+   one cycle to read its contents.
+
+c) In the controller of the CPU add one state before each bus cycle state
+   (i.e., three states: fetch, load, and store). These additional states
+   perform the address translation from a virtual to a physical address.
+   I added three new states (28..30) which now implement the bus cycles
+   and reassigned the old state numbers (1, 12, 14) to the states which
+   do address translations.
+
+d) The MMU must implement several functions:
+     no operation, hold output
+     map virtual to physical address
+     execute tbs
+     execute tbwr
+     execute tbri
+     execute tbwi
+   The controller instructs the MMU which function is to be executed.
+
+e) The tbwr instruction needs a "random" index. This can be generated
+   by a counter which counts down at every clock pulse, instruction
+   fetch, or address mapping request. There is a catch: if the counter
+   would count on every clock pulse and each instruction would need a
+   multiple of 2 clock pulses to complete, then only half the entries
+   of the TLB would be used. Thus counting instructions is safer, and
+   furthermore counting address mappings is cheaper than that (because
+   address mapping is already one of the functions of the MMU and
+   therefore easily detectable).
+
+f) The values of the special registers 1 (TLB Index), 2 (TLB EntryHi),
+   and 3 (TLB EntryLo) are needed within the MMU. The MMU also must
+   write new values to these registers under certain circumstances.
+   Three dedicated signals for each of these special registers (old
+   value, write enable, new value) enable the MMU to do so.
+
+g) In principle, the tbri instruction needs two clock cycles to do
+   its work: one cycle to read the TLB and another one to write the
+   data to special register 3. This can be reduced to a single clock
+   cycle (write to special register 3) if the RAM's contents are read
+   out by default within every clock cycle.
+
+
+eco32-20
+--------
+
+This version implements the MMU with a TLB (second of two parts).
+
+a) Detect privileged and illegal address exceptions within the state
+   machine. In order to do so, virtual address bits 31, 1, and 0 must
+   be available there. The exceptions are detected in the address
+   translation states (1, 12, 14). Control is transferred to state
+   25 (or 26 in case of violation during instruction fetch) with
+   exc_priority set accordingly. Although not yet needed for the bus,
+   the bus size lines must be set to the intended transfer width
+   already in the translation states in order to detect illegal
+   addresses there (before the bus is actually accessed). Last but
+   not least the MMU must not try to map an address if that triggered
+   one of the two exceptions.
+
+b) The TLB supplies three control signals (tlb_missed, tlb_invalid,
+   and tlb_wrtprot) which are needed to detect the three exceptions
+   "TLB miss", "TLB entry invalid", and "page frame write protected".
+   The first of these, tlb_missed, is generated in the "input section"
+   of the TLB and has to be delayed for one clock cycle so that it
+   appears at the TLB output at the same time the other two signals do.
+   The three signals are routed to the CPU's state machine. Because
+   they are valid only after the address translation took place (the
+   valid and write bits are stored together with the frame number),
+   the error conditions can only be detected in the bus cycle states.
+   The actual bus cycle however must suppress its bus enable signal,
+   if any exception has been detected.
+   Attention: the three control signals must be de-asserted if the
+   address in question is directly mapped (i.e., has its two MSBs set).
+
+c) The tlb_missed signal has in fact to be splitted into two signals:
+   tlb_kmissed (MSB of address is 1) and tlb_umissed (MSB is 0). This
+   must be done in order to route "user TLB misses" to another start
+   address. Furthermore, the V bit in the PSW has to be considered and
+   the ISR start address modified accordingly.
+
+d) The three write enable signals for the three special TLB registers
+   are best produced within the main CPU state machine, because they
+   are dependent on the opcode if one of the TLB instructions is
+   executed. They must also be asserted according to any exception
+   which das been detected.
+
+
+eco32-21
+--------
+
+I changed the display description from a schematic to plain Verilog.
+
+
+eco32-22
+--------
+
+The display has got character attributes: one attribute byte per
+character stored in the display memory. The bits in the attribute
+byte are loosely imitating those from the good old CGA adapter in
+text mode.
+  Bit 7:  blinking foreground
+  Bit 6:  background red
+  Bit 5:  background green
+  Bit 4:  background blue
+  Bit 3:  intensified foreground
+  Bit 2:  foreground red
+  Bit 1:  foreground green
+  Bit 0:  foreground blue
+
+
+eco32-23
+--------
+
+Now the keyboard can interrupt the CPU.
+
+
+eco32-24
+--------
+
+Project re-organized. All source files are now located under a single
+directory "src". Now it is easier to clean up a project after editing
+or testing: simply remove all files and directories except "src" and
+the project manager's control file "eco32.npl".
+
+
+eco32-25
+--------
+
+The reset circuit had the following problem: although an externally
+applied reset signal (produced by pressing the "reset" pushbutton)
+was internally recognized for initializing the CPU, it did not work
+the other way around, which is important when re-loading the FPGA.
+In this case, the CPU was reset, but the external devices, especially
+the disk drive, did not get a reset signal. So the drive could get
+out of sync with its controller. The reset circuit now actively drives
+the external bidirectional reset line when performing a reset, as well
+as observing this line when not actively driving it.
+
+
+eco32-26
+--------
+
+This is the first version with a real IDE disk attached! Thanks to
+Martin Geisse, who did a very nice job.
+
+
+eco32-27
+--------
+
+The two serial interfaces are now able to generate interrupt requests.
+As far as I can see, the implementation is now functionally complete.
+
+
+eco32-28
+--------
+
+The IDE disk interface had a small problem with reading/writing a block
+of 8 sectors in a single operation. Fixed.
+
+
+eco32-29
+--------
+
+Same as eco32-28, but with an ISE Version 11 project file. Because
+it is now possible to develop exclusively under Linux (including
+download to the FPGA board), all source files were converted to
+newline-only line endings.
+

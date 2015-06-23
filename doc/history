@@ -1,0 +1,1272 @@
+
+Project History
+---------------
+
+14-Nov-2002
+Project launched.
+Main makefile written.
+Directory structure created.
+
+15-Nov-2002
+Kernel of UNIX 7th Edition copied.
+Download and installation of lcc.
+This included the following steps:
+1) In 'src', copy 'mips.md' to 'eco32.md' without changes,
+   except that the interface record is named 'eco32IR'.
+   The code output remains for now as it is in 'mips.md'.
+2) Add instructions to makefile for compiling 'eco32.md'.
+3) In 'src', add the interface record definition 'eco32IR'
+   to the file 'bind.c'.
+4) Add a directory 'include/eco32/linux' and copy all header
+   files from the corresponding directory for the mips processor.
+5) In 'etc', copy 'irix.c' to 'eco32-linux.c' and change the
+   contents of this file to properly call the preprocessor,
+   the compiler, etc.
+6) Add the option -DLCCDIR=\"$(BUILDDIR)/\" to the instruction
+   in the makefile which compiles $(HOSTFILE).
+7) In 'src', substitute 'lex.c' with a newer version, which
+   computes the types of hexadecimal constants correctly.
+Disk creator done.
+Program to write the bootstrap sector done.
+
+16-Nov-2002
+Preliminary instruction formats defined.
+Preliminary instruction set constructed.
+Some ideas for an address translation unit noted.
+
+17-Nov-2002
+Final instruction formats defined.
+Preliminary version of simulator finished.
+
+19-Nov-2002
+Instruction set cleanup done.
+Work on assembler started.
+
+23-Nov-2002
+Four of the five ROMs translated to ECO32.
+
+24-Nov-2002
+Preliminary version of assembler/linker/loader finished.
+
+25-Nov-2002
+Bootstrap monitor ROM translated to ECO32.
+Simulator is running.
+Bootstrap sector on disk created.
+Now it is possible to boot from the disk.
+
+26-Nov-2002
+Work on an ECO32 back-end for the C compiler started.
+
+27-Nov-2002
+Preliminary version of back-end done.
+
+28-Nov-2002
+'Load address' instruction invented as macro for a set
+of short sequences of instructions which are difficult
+to generate by the back-end.
+
+29-Nov-2002
+Startup code (c0.s, c1.s) revised.
+Writing the bootstrap sector revised.
+System ROMs revised.
+Tests revised.
+
+30-Nov-2002
+Started to program the MMU.
+Surprise: we don't need an MMU enable bit! The unit can be
+switched on all the time, but we have to be careful not to
+use the TLB before it is properly initialized.
+
+01-Dec-2002
+Interrupt system re-designed.
+Added the last missing case in the 'lda' implementation.
+Timer interrupt is working properly.
+We now have a new instruction: 'nor'. With this it is easy
+to implement the bitwise complement of an integer. Done.
+The compiler option -Wo-kernel compiles a program so that
+it can be run in kernel mode.
+This is a big step forward: hello.c is running (in kernel
+mode of course).
+
+02-Dec-2002
+The characteristic feature of kernel mode programs as well as
+of the kernel itself is that they want to handle all sorts of
+special conditions for themselves (e.g., interrupts, exceptions,
+startup code). So if the flag -Wo-kernel is given, the startup
+library code (c0.s and c1.s) is no longer linked in automatically.
+
+03-Dec-2002
+The assembler now contains a complete expression parser which can
+handle additive, multiplicative and shift expressions as well as
+unary and parenthesized expressions.
+Error in back-end corrected: mul & div instructions did not
+correctly specify the second source register.
+
+04-Dec-2002
+The low-level code generators in the assembler had completely to
+be redone: they could not handle big constants (immediate values
+and addresses) in instructions that allow only 16 bit constants.
+
+05-Dec-2002
+I now have a pair of functions which allow to get/set an
+interrupt service routine in the interrupt service routine
+table. The low-level register save/restore is handled in
+assembler, but the interrupt service routine itself can be
+written in C. An application of this principle shows how to
+determine the total amount of physical memory by probing
+the memory until a bus timeout exception occurs. This can
+fully be formulated in C.
+The back-end generates a 'jal' instruction even when the
+argument is a register. Although it would perhaps be more
+appropriate to generate a 'jalr' instruction, I changed the
+assembler to accept an address as well as a register with
+this instruction.
+
+06-Dec-2002
+TLB flush is the first instruction dealing with the TLB.
+Implemented.
+
+07-Dec-2002
+Until now we only had one special processor register, the
+processor status word. With the MMU present, this will change.
+Renamed 'gpsw' (get processor status word) to 'mvfs' (move
+from special register). Renamed 'ppsw' (put processor status
+word) to 'mvts' (move to special register). These instructions
+have two arguments: a single register and a number specifying
+the special register.
+It is perhaps better to use an established set of instructions
+dealing with the TLB (i.e., the way MIPS is doing this) instead
+of an even more minimalistic one, which is not guaranteed to
+cover all cases. So I will abandon 'TLB flush' in favor of the
+four instructions found in the MIPS instruction set ('tbs',
+'tbwr', 'tbri', and 'tbwi').
+As is documented in the MIPS reference book, the valid bit V is
+not involved in the TLB matching process. Implementation changed.
+Perhaps we don't need the V bit at all? I'll leave it out for now.
+
+08-Dec-2002
+Today I came up with the idea to test the MMU implementation by
+running a somewhat more realistic test: a task which is compiled
+for virtual address 0 and has a minimal I/O library which traps
+to the kernel to output a character.
+
+09-Dec-2002
+It is not necessary to prepare real page tables for the task, as I
+thought initially. Since we have only one task which uses exactly
+two pages (code and stack), it is possible to preset the TLB with
+two entries for the pages and then leave it alone.
+The test is running.
+
+10-Dec-2002
+Now for the next step: two tasks running concurrently, preempted
+by a timer interrupt. This is really a lot more complicated than
+a single task because now the entries in the TLB must be flushed
+and re-programmed when a task switch occurs.
+Another complication is the need for two kernel-mode stacks, one
+for each task, in addition to the task-specific user-mode stacks.
+This is necessary because of two facts:
+  - the kernel cannot rely on the integrity of the user-mode stacks
+  - the state of the suspended task must be preserved somewhere,
+    even if the other task is running and trapping to the kernel
+    for a system call.
+
+11-Dec-2002
+This was indeed much harder than expected, but now it works.
+
+12-Dec-2002
+It is evident that only a very short sequence of instructions is
+able to handle a TLB miss exception efficiently. MIPS is doing
+this by giving the TLB miss exception a separate interrupt vector.
+We don't want to go so far, but of course we cannot tolerate to
+execute all the lengthy actions at the beginning of the standard
+trap handler. So we will sort out the TLB miss exception at the
+very beginning of the standard exception handling.
+
+13-Dec-2002
+It is easy to catch the TLB miss - but how should it be handled?
+Some sort of page table has to supply the necessary information
+so that a new entry can be filled into the TLB. How should the
+page tables be organized? In the past I saw cascaded page tables
+as the only solution. But it might be better to have a single
+page table which itself is paged and lies in virtual memory.
+The big advantages of this scheme are fast access (no pointers
+to chase) and (almost) no waste of memory because gaps in the
+table do not need any real memory. But then of course we have
+to handle TLB misses while accessing the page table...
+Very confusing!
+
+14-Dec-2002
+What information is needed in which format if a TLB miss (or any
+other TLB exception) occurs? I really have no stringent answer to
+this question, so I will follow again a minimalistic design path:
+Implement a register in the MMU which is set to the offending
+virtual address in case the translation didn't work. Done.
+As I realize now, this hardware equipment can support a variety of
+different organizations of the page tables handled by software.
+Even inverted page tables seem feasible!
+It would be very convenient if the kernel could use another
+register without having to save its contents first. I think
+we could let the kernel have also register 28 at its disposal.
+
+17-Dec-2002
+Yesterday I realized that the 'lda' macro instruction is no longer
+needed because 'add' does the very same job. Deleted.
+
+18-Dec-2002
+It is very desirable to have an interrupt mask in the PSW.
+If, e.g., the timer interrupts and the timer ISR decides to
+disable interrupts from all devices but the timer itself,
+then this is not easily achievable without a central mask.
+
+19-Dec-2002
+One's complement, represented by '~', is another operator
+implemented in the assembler.
+
+20-Dec-2002
+As well as bitwise and, bitwise xor, and bitwise or,
+represented by '&', '^', and '|', respectively. These
+operators are left associative and have the same priority
+as they have in C, i.e., & > ^ > |, in order of decreasing
+priority.
+
+21-Dec-2002
+Because of the new structure of the PSW all tests must be
+updated and carried out once more. A lot of work...
+
+22-Dec-2002
+I spotted a minor bug in the simulator: a breakpoint which
+was set to address C0000004 in order to catch any interrupt
+or exception will not work for exceptions. This is due to
+the handling of exceptions by setjmp/longjmp. Corrected.
+
+23-Dec-2002
+ECO32 Version 0.0 released.
+
+26-Dec-2002
+Today I started to convert the original sources of
+UNIX 7th Edition to ANSI C.
+
+29-Dec-2002
+I found a real programming error in the text.c module:
+  if (ip->i_flag&ITEXT==0) return;
+My compiler warned: 'expression with no effect elided'.
+'==' has higher precedence than '&', but ITEXT does not
+equal zero, so the whole test expression becomes zero
+and the return is never executed. The line should read:
+  if ((ip->i_flag&ITEXT)==0) return;
+
+31-Dec-2002
+The masters made a typoe: in the file kl.c, the function
+named 'ttioccomm' is spelled 'ttioccom'. I think this
+did go undetected because of the very restricted length
+of symbols with external linkage.
+
+01-Jan-2003
+Today I began investigating the startup procedure. I will
+place the per-process kernel stack in the top half of the
+u area, which itself is one page in size and is located
+directly underneath the kernel at 0xC0000000 - 0x1000.
+This part of the virtual address space is mapped and so
+the u area of the running process is always accessible.
+
+02-Jan-2003
+How do we do the memory management? This is THE central
+question of our porting effort. One possibility which
+offers the chance of only minor changes to the existing
+sources would be to keep the management by the coremap
+array, but with the granularity changed to 4 k, the page
+size. This route of course would not barely touch the
+power of demand paging, which is possible by our hardware.
+Nevertheless, I will follow this path for the time being.
+I changed the coremap/swapmap entries into structs of two
+integers instead of two shorts. Otherwise the range of
+addresses might get too small (although this is unlikely:
+64 k pages of 4 k bytes each equals 256 M bytes - quite a
+lot of memory).
+
+04-Jan-2003
+This last change is nonsense - much of the other stored
+information about processes would have to be changed also.
+Reverted.
+Because ECO32 does not have two different stack pointers
+(as the PDP-11 has) we must switch to the kernel stack
+explicitly. But we must not do the switch if the interrupt
+hit while the machine was running in kernel mode already -
+then the sp points deep into a properly setup kernel stack.
+Switching stacks would then destroy the stack completely.
+
+11-Jan-2003
+I discovered a mysterious overwriting of some bytes of
+the loaded UNIX kernel. This took place even before any
+of its code was executed! A little bit of searching, and
+the guilty one was found: the bootmon ROM code and its
+stack. Now there is a problem: where should we put the
+stack of the bootmon ROM?
+We have two ways to get some program into the bare machine:
+a) The 'realistic hardware' scenario: a ROM holds an initial
+program which e.g. may boot the operating system from disk.
+b) The 'convenient debugging scenario': the program, e.g. the
+operating system, is somewhat magically loaded into RAM.
+The error described above is caused by the unwanted interaction
+of a) and b) when used together. So I think that the correct
+solution of the problem is to forbid the specification of both
+simulator options -r and -l at the same time.
+
+13-Jan-2003
+The simulator uses all CPU power which is available, even
+when only waiting for a command line. This can easily be
+changed by inserting a usleep(100) call into the input
+waiting loop of the curses interface. Done.
+Two new pseudo-ops (.syn and .nosyn) added to the assembler.
+They allow or disallow synthesizing instructions with 'big'
+constants, respectively. This can be used e.g. in the TLB miss
+handler, where much finer control over the usage of register
+$1 is needed.
+
+15-Jan-2003
+The constant BSLOP in param.h must be set to 0. Otherwise there
+would exist blocks which don't start at an address which is a
+multiple of 4. This would result in a Bus Address Error if e.g.
+an integer is fetched from the block.
+
+16-Jan-2003
+The type mapping from C to machine types is as follows:
+         PDP-11                   ECO32
+char     byte (1 byte)            byte (1 byte)
+short    word (2 bytes)           half (2 bytes)
+int      word (2 bytes)           word (4 bytes)
+long     double word (4 bytes)    word (4 bytes)
+T *      word (2 bytes)           word (4 bytes)
+As can be seen, only ints and pointers are differently mapped.
+This is of not much concern with in-memory data structures but
+can be desastrous with on-disk data structures (super block,
+inodes). Therefore we have to do the following:
+a) define ino_t as unsigned short
+b) rearrange the components in struct filsys (and in principle in
+struct dinode and struct direct too) so that no padding occurs.
+I thought that I could simply write a disk with the PDP-11 simulator
+and then use it with the ECO32 simulator; this is not possible
+due to different endianness.
+
+17-Jan-2003
+Here are the changes I actually made:
+1) in param.h:
+   a) type 'ino_t' is 'unsigned short' instead of 'unsigned int'
+   b) type 'dev_t' is 'short' instead of 'int'
+2) in filsys.h:
+   a) delete all components of struct filsys below the comment
+      'remainder not maintained by this version of the system'
+   b) 's_isize' is of type 'daddr_t', not of type 'unsigned short'
+   c) 's_nfree' is of type 'int', not of type 'short'
+   d) 's_ninode' is of type 'int', not of type 'short'
+   e) exchange components 's_isize' and 's_fsize'
+3) in inode.h:
+   a) 'i_flag' is of type 'short', not of type 'char'
+   b) 'i_count' is of type 'short', not of type 'char'
+The size of the superblock structure is thus increased by 6 bytes
+to 424 bytes (well below the 512 bytes block boundary), and all
+padding or misalignment is avoided.
+
+18-Jan-2003
+I replaced the "Hello, world!" message in the default master boot
+record by a somewhat more appropriate message.
+
+19-Jan-2003
+In order to simplify things a bit, I removed the '-n' option from
+the assembler. Now assembler output files always do have headers.
+There are of course situations in which the header must be stripped
+off, e.g. with the boot record, or with the ROM in the simulator.
+We have therefore now a 'loader', a little program which converts
+an assembler output file into a memory image without any header.
+This has the additional benefit that the simulator does no longer
+need to know the executable format, which is especially good if we
+change the format or add new formats.
+
+20-Jan-2003
+Started to port the 'mkfs' utility.
+
+21-Jan-2003
+Started to program a 'show file system' utility.
+
+22-Jan-2003
+Today I decided to spare a small number of TLB entries (4) from
+random replacement. This helps to keep such vital information as
+the current kernel stack permanently mapped.
+
+25-Jan-2003
+I changed the disk so that it is now similar to the 'rp' device
+in the PDP-11. This has the advantage that the usr file system
+is located on a different device (specifically: a different minor
+device, i.e., a different partition) so that mounting can be tested.
+The partitions and their intended use is as follows:
+   device      size in blocks     use as
+  -------------------------------------------
+    rp0           14000           whole disk
+    rp1            2000           root
+    rp2            4000           swap
+    rp3            8000           usr
+
+28-Jan-2003
+This was quite a lot of work, but finally 'mkfs' is running.
+The crucial tool to achieve this was 'shfs' - show file system,
+which allows displaying arbitrary blocks of a disk in several
+formats (raw data, super block, inode block, directory block,
+free list block, or indirect block). So everything on the disk
+can be examined in detail.
+By the way, the main hurdles to overcome had been different
+endianness of ECO32 and x86, different padding of structures,
+and alignment restrictions with ECO32, which are not present
+on the x86 architecture.
+
+29-Jan-2003
+Here is a short report on byte-ordering on x86, ECO32, and PDP-11.
+The C data type 'long' is stored in 4 bytes on all thre machines,
+as already stated above (16-Jan-2003). The order of the bytes is
+different on all three machines. We number the bytes from MSB
+(most signigicant byte) to LSB (least significant byte): then
+the number (b1 b2 b3 b4) has the value b1*2^24+b2*2^16+b3*2^8+b4.
+If 'A' is the lowest (byte) address where the number is to be stored,
+then the memory layout of the three architectures look like this:
+x86       A+0:b4  A+1:b3  A+2:b2  A+3:b1    (i.e., little endian)
+ECO32     A+0:b1  A+1:b2  A+2:b3  A+3:b4    (i.e., big endian)
+PDP-11    A+0:b2  A+0:b1  A+0:b4  A+0:b3    (i.e., mixed)
+An additional complication results from the fact that disk addresses
+in inodes on a disk are stored in a three byte format, which is
+different on ECO32 and PDP-11 (there is no such format on the x86,
+because we don't want to run a file system on a bare PC, only within
+the ECO32 simulator). In this format only the three least significant
+bytes (b2 b3 b4) are stored; if b1 were non-zero an error would be
+triggered. So then, here are the layouts of this special format:
+ECO32     A+0:b2  A+1:b3  A+2:b4
+PDP-11    A+0:b2  A+1:b4  A+2:b3
+As can be seen, this format is constructed on both architectures by
+omitting b1 (the MSB) from the four byte format.
+I changed the routines that convert the three byte format from and to
+the four byte format (iexpand() and iupdat(), both in module iget.c)
+in order to cope with the changed byte-ordering.
+Reduced the RAM size to 1M; this fits better to the disk swap size.
+Added a counter to the simulator which counts the total number of
+instructions executed since the last reset. This helps a lot if one
+wants to re-visit a specific location in the program, if a lot of
+single-stepping has been done to find the location for the first time.
+
+31-Jan-2003
+There has been an inconsistency with the object file format since
+its invention: the header data is stored in little endian format,
+which is convenient for the tools working in the cross development
+setup. The tools running on the target architecture require the
+data to be in ECO32 format of course. This is especially true for
+the kernel exec file loader. Changed.
+
+03-Feb-2003
+ECO32 Version 0.1 released.
+
+04-Feb-2003
+Added to 'shfs' a command which translates an inode number into the
+block number in which this inode is located, together with an inode
+number relative to that block.
+The simulator's 't' command now displays also the special registers
+of the MMU (Index, EntryHi, EntryLo, BadAddress).
+Memory commands of the simulator completed.
+
+05-Feb-2003
+ATTENTION: I changed the output of the disassembler to get it more
+consistent with the rest of the simulator, and especially with its
+inline assembler. There are no more '0x' prefixes in front of numbers,
+and we don't have any decimal output. All numbers are given as hex
+numbers without a prefix (the only exception to this rule are the
+numbers of registers proper, of course, which are given in decimal).
+The instructions which do sign extension show their arguments as
+signed hex numbers. Labels are also no longer prefixed.
+Inline assembler completed.
+
+17-Feb-2003
+ECO32 Version 0.2 released.
+
+20-Aug-2003
+ECO32 Version 0.3 released.
+
+21-Aug-2003
+1) I changed the 'ldhi' opcode from 0x1E to 0x1F.
+   Reason: The instruction decoding gets more regular.
+2) The ALU has now an 'xnor' instruction instead of a 'nor':
+   (a xnor b) = ~(a ^ b) = (~a ^ b) = (a ^ ~b) = (a == b),
+   bitwise parallel for all 32 bits.
+   Reason: The ALU is easier to implement, and the instruction
+   set becomes more regular.
+3) The PC relative jumps (j, jal, all conditional branches) now
+   have PC+4 as their reference location (and no longer PC).
+   Reason: PC+4 is computed early in the instruction cycle; all
+   other RISC machines do this alike.
+4) The PC relative jumps (j, jal, all conditional branches) now
+   encode a word offset, and no longer a byte offset.
+   Reason: The target ranges for the jumps are quadrupled without
+   any additional effort.
+
+07-Oct-2003
+Explored the possibilities to implement a graphics controller for
+ECO32. Easy from the simulator's point of view, not quite so easy
+from the implementer's point of view (due to X complications,
+threads needed) but certainly feasible.
+
+13-Oct-2003
+Graphics controller implemented.
+
+20-Oct-2003
+Curses feeds certain keypad codes directly into the simulator's
+terminal, e.g. KEY_BACKSPACE. There the MSBs get stripped off and
+a wrong keycode is supplied to the simulated program. Now these
+special codes are mapped to regular control characters, e.g. BS.
+
+25-Oct-2003
+The assembler now understands the option '-h' which suppresses the
+output of the executable's header and appends the BSS's size bytes
+of zeroes at the end of the executable. This in turn renders the
+'load' tool redundant, which can be deleted. Done.
+
+26-Oct-2003
+A group of students is working on a ROM-based monitor program. They
+need an instruction to implement breakpoints. Because the instruction
+map is already crowded they have to use 'trap'. But they want of
+course a breakpoint trap be easily distinguishable from any other
+kind of trap. So the assembler now allows a constant operand for
+'trap'. This operand is assembled into the otherwise unused bits
+of the instruction. These bits are in turn ignored by the CPU (as
+was the case all the time) but can be inspected by software which
+must read the instruction from memory in order to do this. Now a
+breakpoint trap can get a unique bit pattern distinct from the bit
+patterns of all other traps. Remark: not only the regular assembler
+must understand this but also the simulator's inline assembler as
+well as its disassembler. Done.
+
+09-Nov-2003
+The curses library correctly sets the terminal mode to "raw" so that
+neither SIGINT nor SIGQUIT signals can be generated by the keyboard.
+With a graphics controller attached it is however possible that the
+user selects "kill" from the window menu of the monitor window and
+thus shuts down the connection to the X server. This in turn leads
+to an uncontrolled instant termination of the whole simulator which
+cannot be tolerated (e.g. the terminal would stay in raw mode: very
+annoying for an unsuspecting user). Solution: install an I/O error
+handler which gets called from the X system in case the connection
+to the server is lost. Done.
+
+16-Nov-2003
+I added a check to the initialization of the memory simulation ensuring
+that neither ROM image files nor program files loaded into main memory
+can overflow the available space (and thus crash the simulator).
+
+18-Nov-2003
+The terminal simulation now handles the following control characters:
+(input)    <return>         0x0D
+           <backspace>      0x08
+           <arrow down>     0x0E
+           <arrow up>       0x10
+           <arrow left>     0x02
+           <arrow right>    0x06
+(output)   0x07             beep
+           0x0D             return cursor to begin of current line
+           0x0A             scroll if cursor is in last line,
+                            set cursor to next line in same column
+           0x02             move cursor left (stop at leftmost column)
+           0x06             move cursor right (stop at rightmost column)
+           0x10             move cursor up (stop at topmost line)
+           0x0E             move cursor down (stop at bottom line)
+           0x08             delete character to the left of cursor,
+                            move cursor left
+           0x09             output spaces (minimum is one space),
+                            until column mod 8 = 0
+
+19-Nov-2003
+Today I took the first few steps towards a bootable system disk.
+Changes in bootstrap monitor:
+  - 'g' command deleted
+  - monitor stack sits just below 1M
+  - master boot record loaded at physical address 0x00000000
+  - master boot record started at virtual address 0xC0000000
+Changes in constructing the default master boot record:
+  - relocate code to 0xC0000000
+
+20-Nov-2003
+Now here is the big picture of the boot process:
+a) ROM bootstrap
+   The ROM loads the first sector of the disk and starts whatever it
+   has loaded (provided that the signature is present). Until now this
+   was always the default master boot record. In the future this will
+   be the first stage bootstrap. This part is already finished.
+b) First stage bootstrap
+   The first stage looks for a file named "boot" in the root directory
+   of the file system on the boot disk. This part must fit into a single
+   sector and thus is restricted in its capabilities:
+     - boot must lie in the root directoy
+     - it must be one of the first 320 directory entries in the root
+       directory (only the 10 direct blocks of the directory file are
+       searched for it)
+     - it must not be bigger than 5120 Bytes (only the 10 direct blocks
+       of the executable file are loaded)
+c) Second stage bootstrap
+   This stage loads the kernel, perhaps asking the user for its name.
+
+22-Nov-2003
+First stage bootstrap completed.
+
+27-Nov-2003
+Second stage bootstrap completed.
+It was indeed possible to ask the user for the path to the kernel he
+wants to get started. The only kernel available for now is one of the
+tests from tst/os.
+
+29-Nov-2003
+Makefiles tweaked.
+
+06-Dec-2003
+Today I started to develop the tools shfs and mkfs for file systems
+with 4K blocksize. With this blocksize it should be possible to do
+the bootstrap without a named second stage. Conceptually there are
+again two stages (first load a single sector, then the rest), but
+both stages should fit within the boot block.
+
+20-Dec-2003
+I discovered a small bug (?) in the simulator: if a write to $0 is
+requested by an instruction, not only the write is suppressed (this
+is expected) but also the source operand does not get computed.
+Thus the instruction ldw $0,$0,1 which is incorrect if no TLB entry
+for page 0 exists (and is so even if it exists because of alignment
+violation) does not lead to an exception (which is quite unexpected).
+Solution: Always compute the source operands, even if $0 is the target.
+
+30-Dec-2003
+In order to use swap space on the same disk where the root file system
+is located we need some form of disk partitioning, preferrably NOT
+deeply coded into the disk driver (as the original UNIX has done it).
+In other words, we need a real master boot record, a partition table
+and a tool ("fdisk" or "mkpart") to set up such a table.
+
+01-Jan-2004
+"mkpart" finished. It constructs a partition table from a textual
+configuration file and writes it to sector 1. It also copies an MBR
+(which has not been done yet) to sector 0, and a bootstrap manager
+(which also has yet to be done) to sectors 2-7.
+MBR coded.
+
+02-Jan-2004
+Bootstrap manager done.
+
+03-Jan-2004
+Tool "mkpart" is working.
+New tool "shpart" displays a partition table, read from a disk image.
+
+04-Jan-2004
+I made the file systen viewer aware of partitions.
+
+05-Jan-2004
+Now "mkfs" also knows something about partitions.
+
+08-Jan-2004
+If the operating system is booted from a partition of a disk (in
+contrast to being booted from the start of the whole disk) its disk
+driver must know where logical sector 0 of the partition is located
+on the disk. In other words, the master bootstrap must transfer a
+little bit of information to the boot loader of the OS. This could
+be done as follows: $26 holds the start sector of the partition from
+where the OS is booted and $27 holds its size. In order to use the
+very same bootstrap also in the case that the disk has no partitions
+(and thus the file system occupies the whole disk), this information
+must also be supplied by the ROM bootstrap sequence. Done.
+Surprise: this scheme would allow the sub-partitioning of a partition
+without any modification!
+
+10-Jan-2004
+Now the whole bootstrap chain is working. It goes like this:
+a) The ROM loads the first sector of the disk and starts whatever it
+   has loaded (provided that the 0x55AA signature is present). This
+   may be either the master boot record if the disk is partitioned,
+   or an ordinary boot record if it is not (see remark below).
+b) In case the master boot record is executing, it loads sectors 2..7
+   into memory (sector 1, the second sector of the disk, is skipped
+   because it holds the partition table). These sectors contain a small
+   program, the boot manager, in executable format. The boot manager is
+   started by the master boot record.
+c) The boot manager loads the partition table from sector 1 of the disk,
+   displays the partitions of the disk, and asks the user to enter a
+   partition number to boot. An attempt to boot a partition outside the
+   range 0..15 is rejected, as well as requesting to boot a partition
+   which does not contain a file system of any kind, or does not have
+   the "bootable" flag set. If all is well, the boot record of the
+   selected partition is loaded. If it has a valid 0x55AA signature,
+   it is started.
+   Remark: This is the point in the bootstrap chain which is reached
+   immediately from the ROM code if the disk is not partitioned.
+d) The boot record code loads partition relative sectors 1..7, i.e.
+   the rest of the boot block. These sectors contain a small program,
+   the bootstrap loader, in executable format. The bootstrap loader is
+   started by the boot record code.
+e) The bootstrap loader asks the user for a path to a file which must
+   exist, must be a regular file, and must be executable by its owner.
+   This will of course be normally an operating system kernel. The
+   default value is /boot/unix. The file is loaded and started.
+Throughout the whole process registers $26 and $27 hold the start sector
+and size of the currently selected range of the disk, respectively.
+
+12-Jan-2004
+The register conventions shown above must be changed somewhat because
+with more than one disk present it is also necessary to tell the disk
+driver which disk to use:
+$26 base address of disk controller
+$27 start sector of partition (or disk)
+$28 size of partition (or disk) in sectors
+
+28-Jan-2004
+After rewriting parts of the make file system utility (so that double
+indirect blocks can be used, which is necessary for a file system with
+512 byte blocks to hold files of more than 69K) it is now possible to
+boot our port of UNIX 7th Edition from the disk. Alas, it is not yet
+running very stable.
+
+10-Mar-2004
+Finally I added the generation of copying loops to the compiler's
+back-end. This has long been missing.
+
+17-Apr-2004
+Translating virtual addresses using the TLB costs time because the
+parallel associative hardware must be simulated by serial software.
+This is very noticeable with programs running in user mode; they run
+at roughly one third of the speed kernel mode programs do. In order
+to alleviate this I added a function which acts almost the same as
+the TLB associative lookup does, but without any error checks. Its
+sole pupose is to use up time and it is called whenever an unmapped
+address is detected by the virtual-to-physical address translation.
+
+21-Apr-2004
+Up till now the assembler located the data segment directly above
+the code segment. This is not a viable strategy once paging is in
+effect. Due to code sharing and protection reasons, the data segment
+should start on the next page boundary above the code. The resulting
+gap may also be present in the executable file: there is no need to
+store any bytes for it in the executable (at least as long as it is
+an executable with a header - for headerless executables the gap
+bytes must be stored within the file).
+It would have been possible to define two different executable formats,
+one with the data segment directly following the code segment, and
+another one with the data segment aligned on a page boundary. The
+two formats then would have to be distinguished by different magic
+numbers in the header. I did not do this, however, because I saw
+no reason to keep the "directly following" format. If one wants to
+compress code and data as much as possible, one can in any case put
+both into the code segment.
+
+24-Apr-2004
+The simulated graphics device did not detect memory accesses which
+lie within the device address bounds but outside the screen memory.
+These accesses were propagated to the X Window System and in turn an
+X Window data structure was accessed outside of its allocated memory.
+At least on our Sun computer this translated to an immediate death
+of the simulator process. Now the graphics device detects such an
+attempt to access simulated memory outside the screen, and produces
+a 'bus timeout' exception.
+
+06-May-2004
+ECO32 Version 0.4 released.
+
+08-May-2004
+I intend to give the ECO32 simulator the ability to run with more than
+one simulated terminal. This will work best if there is no difference
+between the first terminal and the other ones, so I will open a separate
+window for each terminal (and use the first window in which the simulator
+was started only for controlling the simulator, and NOT for a simulated
+terminal). Then using curses is no longer necessary and can be removed.
+But I want to retain command line editing, so I will use the 'getline'
+library.
+Curses interface removed.
+Getline library installed.
+Interrupt priorities changed:
+  15    not used
+  14    timer
+  13    not used
+  12    not used
+  11    not used
+  10    not used
+  09    not used
+  08    disk
+  07    terminal 3 receiver
+  06    terminal 3 transmitter
+  05    terminal 2 receiver
+  04    terminal 2 transmitter
+  03    terminal 1 receiver
+  02    terminal 1 transmitter
+  01    terminal 0 receiver
+  00    terminal 0 transmitter
+
+10-May-2004
+SIGINT handler installed (for use within the control window to regain
+control in case of a runaway program).
+In order to use a single timer callback routine for all terminals, the
+callback routine must get an argument, telling which terminal is doing
+the callback. So ALL timer callbacks now have such an argument, which
+can be used arbitrarily by the callback initiator to communicate an
+integer to the callback routine.
+
+17-May-2004
+The new terminal implementation must be tested as well as the changed
+interrupt priority scheme. And even more important: allocation of the
+data segment on a page boundary (see 21-Apr-2004) must be verified!
+Done for the 'tst' directory.
+
+18-May-2004
+Done for the 'eos' directory.
+
+27-Feb-2005
+ECO32 Version 0.5 released.
+
+28-Feb-2005
+Despite the long time since the release of the previous version this
+was very premature: I did not read the comments above and forgot to
+conduct many of the tests. And indeed, the bootstrap does not work
+any longer.
+
+01-Mar-2005
+The bootstrap manager should not be compiled to any standard executable
+format, because this part of the boot process is independent of any
+operating system. It should be compiled to plain binary format, as is
+the master boot record. Now we are facing a dilemma: We want to write
+the boot manager (mostly) in C and therefore will have a separate data
+segment, aligned on a page boundary. But we also want a headerless
+binary output, so there will be no loading information. All gaps in
+the loaded program and data will therefore be filled with zeroes.
+Then either we must define another executable format in which the data
+segment follows directly after the code segment (without padding to the
+next page boundary, see discussion above) or we have to spend somewhat
+more space on disk for the bootstrap managers's program/data image.
+I think I will do the latter.
+
+04-Mar-2005
+The solution above is not very elegant: The same reasoning applies also
+to the bootstrap within a partition. Then we are forced to reserve two
+blocks instead of the traditional single one for the bootstrap. This is
+not totally out of question, but not very appealing either.
+There is another solution, if we accept the boot manager to be compiled
+to standard executable format: write a very compact loader for this format
+and squeeze it into the master boot record. Difficult, but it can be
+done, as I proved today.
+Changes from above reverted.
+Disk partitioning, master boot record, and boot manager done.
+
+05-Mar-2005
+Boot record and bootstrap loader done.
+
+08-Mar-2005
+I think that today I completed the tests and changes which I begun
+on 17-May-2004.
+ECO32 Version 0.6 released.
+
+27-Oct-2005
+ECO32 Version 0.7 released.
+This was done in order to have a stable release on which to build
+a simplified version of the ECO32, which is named ECO32e (the 'e'
+stands for 'embedded'). The ECO32e will get implemented in an FPGA.
+
+26-Jun-2006
+We do have an error in the implementation of the SAR instructions,
+really! The C standard says that the result of shifts with shift
+amounts greater than or equal to (!) the number of bits in the left
+expression's type is undefined. Consequently, in the CPU implementation
+cpu.c we have to replace
+smsk = (MSB ? 0xFFFFFFFF << (32 - scnt) : 0);
+in the SAR and SARI instructions with
+smsk = (MSB ? ~(((Word) 0xFFFFFFFF) >> scnt) : 0);
+because if scnt == 0 then 0xFFFFFFFF << (32 - scnt) is undefined.
+Thanks to Rolf Viehmann for pointing this out.
+
+27-Jun-2006
+The rfx instruction must not be executed in user mode, because it
+writes the previous mode and interrupt enable bits of the PSW over
+the current ones. Therefore rfx becomes a privileged instruction
+which triggers EXC_PRV_INSTRCT if executed in user mode.
+Again thanks to Rolf Viehmann for recognizing the potential danger
+if this instruction is executed in user mode.
+
+09-Jul-2006
+Pending interrupts are now displayed when executing the 'register'
+command. It is not meaningful to display pending exceptions, however,
+because these are immediately handled within the longjump framework
+and thus would never show anything else but 'off'.
+
+10-Jul-2006
+We have a new command to display (and possibly change) the value of
+the PSW. This comes in very handy if debugging in user mode and thus
+not having access to privileged addresses.
+
+12-Jul-2006
+There is a new control bit in the PSW, the 'vector bit' V, which directs
+interrupts to ROM_BASE + 4 if it is off and to RAM_BASE + 4 if it is on.
+This bit is cleared when the CPU is reset. In this way the software can
+decide whether the interrupt service routine is located in ROM or in RAM.
+
+15-Jul-2006
+I decided to give "user TLB misses" an extra interrupt service routine
+entry point. These are TLB misses triggered by an access to a virtual
+address with MSB = 0, regardless of execution mode (user or kernel).
+
+22-Jul-2006
+The physical address space (2^30 bytes) is partitioned as follows
+(in order to be compatible with the ECO32e):
+RAM    virt start 0xC0000000    phys start 0x00000000    size 0x20000000
+ROM    virt start 0xE0000000    phys start 0x20000000    size 0x10000000
+I/O    virt start 0xF0000000    phys start 0x30000000    size 0x10000000
+The I/O address space is evenly divided into 256 devices which may
+occupy up to 1MByte each.
+
+30-Jul-2006
+We now have two control bits in the outgoing part of every entry of
+the TLB: a "valid" bit (which triggers a "TLB invalid exception" if
+this entry is selected by a memory translation and the bit is 0) and
+a "write" bit (which triggers a "TLB write exception" if this entry
+is used to map a write access to a page and the bit is 0). The "TLB
+double hit exception" does not exist any longer.
+The reason for existence of the "write" bit is obvious (possibility
+to protect pages from writing, implement a copy-on-write policy).
+The reason for existence of the "valid" bit is speed: the TLB refill
+routine should run as fast as possible and therefore should avoid
+tests for special cases as much as possible. If some processing must
+be done for a page to be usable, the check for this condition should
+not be done in the TLB miss handler. If the valid bit is cleared in
+the page table, the refill routine will enter the translation that it
+gets from the page table into the TLB without checking, but the next
+use of this entry will lead to another exception, where the processing
+then can be done.
+
+31-Jul-2006
+The implementation of the ECO32e suggested a different coding of the
+single register operand in the jr and jalr instructions. It is now
+coded in the src1 field instead of the dst field of these instructions.
+
+01-Aug-2006
+a) I rearranged the exceptions as follows:
+EXC_BUS_TIMEOUT 16
+EXC_ILL_INSTRCT 17
+EXC_PRV_INSTRCT 18
+EXC_DIVIDE      19
+EXC_TRAP        20
+EXC_TLB_MISS    21
+EXC_TLB_WRITE   22
+EXC_TLB_INVALID 23
+EXC_ILL_ADDRESS 24
+EXC_PRV_ADDRESS 25
+In this way they are grouped together more logically.
+b) The detection of an EXC_ILL_ADDRESS exception (formerly called
+EXC_BUS_ADDRESS) is now done in the MMU and thus operates on logical
+addresses. It is then possible to store the offending address in the
+BadAddr register for further processing by OS software.
+c) The EntryHi register now gets loaded with the page base address
+if one of the three TLB exceptions occurs, so that it need not be
+computed from the contents of the BadAddr register.
+
+02-Aug-2006
+A "context" register, which is preloaded by OS software with the base
+address of memory-resident page tables, and where the page number of
+a page with missing translation is ored-in by hardware would speed up
+the TLB miss handler. On the other hand, it practically mandates the
+use of a certain page table format (or, if the OS designer wants a
+different format, the context register would not be used at all).
+Therefore I will not implement a context register.
+
+03-Oct-2006
+Major instruction format redesign: the decision to put the destination
+register address in a fixed location within the instruction was wrong.
+It implied that the source register addresses were not fixed and thus
+must be multiplexed early in the instruction cycle dependent upon the
+opcode. It should be done the other way around. Completed.
+
+19-Nov-2006
+Today I completed the back-port of the display and keyboard from ECO32e.
+Both are available if the command line switch -c ("console") is given.
+The default number of terminals was in turn reduced to 0.
+
+14-Feb-2007
+Interrupts are now level triggered. If at any time interrupt sharing
+would become necessary (this is in fact quite possible with only 16
+interrupts) it cannot be realized if interrupts were edge triggered.
+
+04-Jun-2008
+Project finally split:
+ECO32 (version 0.17) -- FPGA hardware, simulator, assembler
+EOS32 (version 0.11) -- C compiler, ROM monitor, operating system
+
+20-Feb-2009
+ECO32 now has its own linkable object file format, which is a variant
+of the venerable a.out format. Consequently, 'asld' has been split into
+the assembler 'as' and the linking loader 'ld'. Additionally, there is
+a program 'dof' which dumps the contents of an object file.
+
+22-Feb-2009
+What is the exact meaning of 'jalr $31'? This can of course be defined
+arbitrarily, but the natural semantics would likely be "jump to the
+routine addressed by $31 and remember the return address (in $31)".
+To my surprise, the hardware did exactly that, while the simulator
+interpreted the instruction as "store the return address in $31 and
+then jump to the routine addressed by $31", which resulted in not
+taking the jump at all. Simulator corrected.
+
+14-Feb-2011
+B_PHYS and B_MAP macros eliminated. They both are only used with the
+PDP-11 UNIBUS map functionality.
+
+15-Feb-2011
+In the simulated ECO32, if I try to allocate 60 chunks of memory, each
+of them having 10000 bytes, I get a kernel panic: exception 22 in kernel
+mode. The reason is untested code, executed for the first time ever: the
+kernel is doing an "expansion swap" in order to get enough memory for
+the process.
+
+16-Feb-2011
+Now this is interesting: what is the field "b_bcount" in struct buf
+(include/buf.h) good for? Do any transfers with b_bcount != BSIZE
+exist? The answer is yes, in two places:
+a) swap I/O (src/bio.c)
+b) raw I/O (src/bio.c)
+(There is a third (mis-)usage of the field b_bcount: it is used as
+b_active flag in some block device drivers.)
+Raw I/O has to be overhauled in any case, so we concentrate on swap
+I/O here. Swap I/O transfers possibly many pages at once, starting
+at a given disk block and a given memory address. But this is only
+correct under the current "contiguous physical memory per process"
+allocation policy. It is useless under any policy which allocates
+physical memory for a process non-contiguously - provided that the
+transfer mechanism accesses physical memory and not virtual memory
+(this is typically the case with DMA). So the kernel will no longer
+rely on the disk driver (and possibly the disk hardware) to transfer
+multiple blocks in a single call, but split them up into single block
+transfers. Done - the "expansion swap" is now running.
+
+----------------------------------------------------------------
+
+In the meantime...
+
+  - experiments with porting ECO32 to another FPGA board
+  - splitting the project (separating the OS part)
+  - experiments with a pipelined version of ECO32
+
+----------------------------------------------------------------
+
+03-Feb-2014
+Project "ECO32" created on OpenCores, based on version eco32-0.22:
+http://opencores.org/project,eco32
+
+04-Feb-2014
+Main Makefile, lcc, docs, binutils, sim, and simtest added.
+
+05-Feb-2014
+FPGA implementations, hwtests, monitor, disk and standalone
+programs added.
+
+07-Feb-2014
+Release eco32-0.22 tagged.
+
+08-Feb-2014
+ECO32 manual added. It can now be generated from TeX sources.
+
+18-Feb-2014
+Several changes in the simulator:
+a) There are two independent identical timer/counters
+available, of course with different interrupts and I/O
+addresses (see below).
+b) The timer/counters are readable, so that they can
+be used for short-time measurements. They count clock
+cycles (no pre-scaling any longer). This change will
+affect all programs which use the timer/counters.
+c) The simulation timing model is completely based on
+clock cycles (and does no longer tries to function in
+some sort of "real-time"). As there is no real clock
+within the simulator, but the natural time unit is
+one instruction, the simulation time is incremented
+by the CPI value (clock cycles per instruction) every
+instruction. I measured the CPI value in the real ECO32
+implementation: it's a horrible 18 cycles per instruction,
+yielding an instruction rate of about 2.8 MIPS. There is
+so much room for improvements...
+d) I changed the resolution of the simulation timers to
+microseconds. All timing constants had to be adapted and
+can now be specified more precisely. They are automatically
+scaled to clock cycles (see above).
+e) The addressing scheme for peripherals of the same sort
+has changed slightly. Virtual addresses of I/O devices have
+the form 0xFxxyyrrr, where xx is the device type, yy is the
+device number, and rrr is the register within the device
+(must be a word address). This change could affect existent
+programs which use more than one terminal.
+f) The ECO32 simulation got a new peripheral, called the
+"shutdown device". A write to address 0xFF100000 results
+in terminating the simulation run, with the lower 8 bits
+of the data written supplied as exit status.
+
+19-Feb-2014
+In the hardware section, only the latest FPGA implementation
+was kept.
+
+20-Feb-2014
+New ISE project file created. In the LCC section, lburg/gram.c
+gets re-generated from the grammar file. Two new simulator
+tests written. Standalone programs updated.
+
+22-Feb-2014
+Tools: bin2exo tool updated, bin2mcs tool added. Hardware:
+character generator generator added, display memory generator
+added. Monitor: load server added. Disk: disk server renamed
+and updated.
+
+23-Feb-2014
+Monitor directories re-structured. Monitors extensively updated.
+FPGA implementation updated; timer is now equal to port-15.
+
+24-Feb-2014
+Hardware: timer counts clock cycles, counter is readable, two
+timers are now available.
+
+25-Feb-2014
+Simulator: IRQ 15 explanation added, IRQ 0-3 explanations
+changed.
+
+26-Feb-2014
+Hardware: cpu is now equal to port-15. Constraints file for
+XESS board re-formatted.
+
+27-Feb-2014
+Simulator: tlbBadAddr register is now called mmuBadAddr.
+
+28-Feb-2014
+Hardware tests (kbdtest): second timer added.
+
+01-Mar-2014
+Hardware tests (xcptest): test the bad address register too.
+Hardware: cpu now also has a bad address register.
+*****************************************************************
+Stefan Kristiansson's Linux port to ECO32 is running on the FPGA!
+*****************************************************************
+Simulator: change command @ -> #, better help for commands.
+Simulator: individual help messages corrected.
+
+02-Mar-2014
+Monitor: bad address register added.
+Monitor: bootstrap parameters modified.
+Disk: master boot made compatible with monitor.
+
+03-Mar-2014
+DE0-Nano board arrived. I can download a simple design.
+
+04-Mar-2014
+The Nano board does only have a bit-serial ROM. Besides the
+configuration bitstring for the FPGA there is enough room in
+it to store the machine monitor, but this program cannot
+reasonably be executed from there. So it must be copied to
+RAM before it can be started. This is also the case with the
+S3E starter kit board - this board indeed does have a parallel
+ROM but alas, it must be disabled in order to use the A/D or
+D/A converters. Therefore it is best to run the monitor from
+RAM in any case. Consequences: the boot procedures must again
+be revised.
+Monitor: do not set sp on bootstrap.
+EOS32 bootstrap update.
+
+05-Mar-2014
+Simulator: -a command line option added (which specifies a load
+address where a binary file is loaded when -l <prog> is given).
+Compiler: -Wo-kernel relocates code to 0xC0010000.
+
+06-Mar-2014
+Standalone programs (hello, hello2, memsize, onetask, twotasks-1,
+twotasks-2) executable at 0xC0010000.
+
+07-Mar-2014
+Standalone programs (wrtmbr, dskchk) executable at 0xC0010000.
+
+08-Mar-2014
+Standalone programs (shpart, mkpart) executable at 0xC0010000.
+Verified the four ways that a standalone program can be executed:
+  - simulator and -l/-a command line options
+  - simulator and simulated disk (boot the standalone program)
+  - FPGA and load server (load the standalone program)
+  - FPGA and simulated disk (boot the standalone program)
+
+09-Mar-2014
+NetBSD bootstrap now executing at 0xC0010000.
+
+14-Mar-2014
+Hardware: kbd is now equal to port-15.
+Hardware: ser is now equal to port-15.
+
+15-Mar-2014
+Hardware: rom is now equivalent to port-15.
+Hardware: ram is now equivalent to port-15.
+
+16-Mar-2014
+Hardware: in cpu/sregs change signal names di->din, do->dout
+(simulation tool 'Verilator' doesn't like 'do' as signal name).
+Hardware: dsk source formatted.
+Hardware: in sdramcntl.v signal added to sensitivity list.
+Hardware: dsp is now equivalent to port-15.
+
+17-Mar-2014
+Hardware: busctrl source formatted.
+Hardware: cpu external pin ordering changed.
+Hardware: ram pin ordering changed.
+Hardware: clock/reset source formatted.
+
+18-Mar-2014
+Hardware: clock/reset update.
+
+30-Mar-2014
+Hardware tests: serial/fpga2pc verified, README added.
+Hardware tests: serial/pc2fpga verified, README added.
+
+31-Mar-2014
+Hardware tests: serial/sertest verified, README added.
+Hardware tests: looptest verified, README added.
+Hardware tests: ldtest verified, README added.
+Hardware tests: memtest1 verified, README added.
+Hardware tests: memtest2 verified, README added.
+Hardware tests: shtest verified, README added.
+Hardware tests: serial README added.
+Hardware tests: brtest verified, README added.
+Hardware tests: tmrtest verified, README added.
+Hardware tests: multest verified, README added.
+Hardware tests: divtest verified, README added.
+
+01-Apr-2014
+Hardware tests: remtest verified, README added.
+Hardware tests: sregtest verified, README added.
+Hardware tests: tlbtest verified, README added.
+Hardware tests: irqtest verified, README added.
+Hardware tests: xcptest verified, README added.
+Hardware tests: dsptest verified, README added.
+
+02-Apr-2014
+Hardware tests: kbdtest verified, README added.
+Hardware tests: jalrtest verified, README added.
+Release eco32-0.23 tagged.
+
+27-Aug-2014
+I think I came up with a better solution for the problem of how to
+quickly transfer a disk image to the FPGA board (several hundred
+megabytes): instead of transferring the data over the serial line,
+we write the disk image created on the development system onto
+a hard disk (or SSD), and then swap drives. This can easily be
+done utilizing an USB-to-IDE converter (e.g., from an old external
+hard disk drive enclosure). The disk image is simply written to
+the disk using the "dd" command, with the whole USB mass storage
+device (e.g., /dev/sdb) as the destination.
+
+28-Aug-2014
+Another error in the IDE disk interface showed up yesterday:
+the two bytes of every halfword are byte-swapped on the storage
+medium! This error can only be discovered if the disk is written
+with a non-ECO32 controller and read with the ECO32 controller,
+or vice versa, which is the reason for the error hiding for so
+long.
+
+06-Sep-2014
+If the TLB hardware detects no matching entry on a "tbs" instruction,
+it does an "or" of the MSB into the index register, in contrast to
+the simulator, which sets the bit (and clears the bit if a matching
+entry is found). In this way the MSB was never cleared automatically,
+which led to strange behavior in the NetBSD kernel. Solved in favor
+of the simulator.

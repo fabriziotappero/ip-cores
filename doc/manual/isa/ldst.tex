@@ -1,0 +1,90 @@
+\section{Load and Store Instructions}
+
+Load and store instructions transfer data from and to RAM and peripheral devices. All load/store instructions first compute a virtual address by adding a sign-extended 16-bit immediate value to a register value. That address is then transformed to a physical address by the \mmux. The load/store operation is sent to the SoC bus using the physical address and responded to by a slave device attached to the bus. Both the slave device itself and the target location inside that device are determined from the physical address. A write operation stores a value in a RAM location or device register, but may also trigger side-effects in some devices. Similarly, a read operation reads a value from a RAM location or device register, but may also trigger side-effects in some devices. Write operations take the data to write from a general-purpose register. Read operations store the received data in a general-purpose register.
+
+All load/store operations must be aligned to the transferred data size. If a half-word (word) sized load/store operation is not half-word (word) aligned, it triggers an \name{Illegal Address Fault}.
+
+All virtual addresses in the range 80000000$_h$ through FFFFFFFF$_h$ are privileged addresses and may only be accessed while in Kernel Mode. If such an address is accessed in User Mode, a \name{Privileged Address Fault} occurs.
+
+The transformation of a virtual address to a physical address is done by the \mmu and may trigger a \name{TLB Miss Fault}, \name{TLB Invalid Fault} or \name{TLB Write Fault}. The service routine for these kinds of faults typically restarts the load/store operation after fixing the problem.
+
+Any of these exceptions -- \name{Illegal Address Fault}, \name{Privileged Address Fault}, \name{TLB Miss Fault}, \name{TLB Invalid Fault} and \name{TLB Write Fault} -- causes the faulting address to be loaded into the \name{TLB Bad Address Register} ($S_4$).
+
+Certain physical addresses may not actually correspond to any device attached to the SoC bus. This includes {\it holes} in the physical address map as well as the range of unused physical addresses (40000000$_h$ through FFFFFFFF$_h$). Access to such addresses results in a \name{Bus Timeout Fault}.
+
+Load/store operations come in variants with different transfer size. Only the RAM and ROM support half-word and byte sized operations. Peripheral devices only support word-sized operations. Accessing peripheral devices with half-word or byte sized operations has an undefined effect. Access to RAM or ROM with different transfer sizes provides word-sized, half-word sized, and byte-sized views on the same memory locations. These views are arranged in a big-endian fashion.
+
+When a half-word or byte sized location in RAM or ROM is read, the resulting value is extended to 32 bits to fit into a general-purpose register. Half-word and byte sized load operations come in variants that either sign-extend or zero-extend these values.
+
+\newcommand{\badaddress}[1]{
+	\begin{effectblock}
+		\effect $S_4 \leftarrow A_v$
+		\effect trigger a \name{#1}
+	\end{effectblock}
+	\effect end if
+}
+\newcommand{\signedload}{The result is sign-extended to 32 bits.}
+\newcommand{\unsignedload}{The result is zero-extended to 32 bits.}
+\newcommand{\signedloadeffect}{\effect $R_r \leftarrow signext_{32}($response value$)$}
+\newcommand{\unsignedloadeffect}{\effect $R_r \leftarrow zeroext_{32}($response value$)$}
+\newcommand{\ldstdesc}[6]{
+\pagebreak
+\subsection{#1}
+
+The #1 instruction #3 a #4-sized value #5 RAM, ROM, or a peripheral device. #6
+
+\ldstformat{#2}
+
+}
+
+\newcommand{\xaligned}[1]{
+\effect if $A_v$ is not #1 aligned then \badaddress{Illegal Address Fault}
+}
+\newcommand{\haligned}{\xaligned{half-word}}
+\newcommand{\waligned}{\xaligned{word}}
+\newcommand{\writeprotection}{
+\effect if the TLB entry for $pageNumber$ does not have the {\it write} bit set then \badaddress{TLB Write Fault}
+}
+\newcommand{\sendload}[1]{
+\effect send a load #1 request using the address $A_p$ to the SoC bus
+}
+\newcommand{\sendstore}[2]{
+\effect send a store #1 request using the address $A_p$ and data $#2$ to the SoC bus
+}
+\newcommand{\ldsteffects}[4]{
+\begin{effectize}
+\effect $A_v \leftarrow R_x + signext_{32}(y)$
+#1
+\effect if $A_{v,31} = 1$ and $U_C = 1$ then \badaddress{Privileged Address Fault}
+\effect $pageNumber \leftarrow A_{v,31..12}$
+\effect if no TLB entry exists for $pageNumber$ then \badaddress{TLB Miss Fault}
+\effect if the TLB entry for $pageNumber$ does not have the {\it valid} bit set then \badaddress{TLB Invalid Fault}
+#2
+\effect $A_p \leftarrow $ page frame number in the TLB entry for $pageAddress$
+#3
+\effect if no response is received then trigger a \name{Bus Timeout Fault}
+#4
+\end{effectize}
+\vfill
+
+}
+
+\ldstdesc{LDW}{110000}{reads}{word}{from}{}
+\ldsteffects{\waligned}{}{\sendload{word}}{\effect $R_r \leftarrow$ response value}
+\ldstdesc{LDH}{110001}{reads}{half-word}{from}{\signedload}
+\ldsteffects{\haligned}{}{\sendload{half-word}}{\signedloadeffect}
+\ldstdesc{LDHU}{110010}{reads}{half-word}{from}{\unsignedload}
+\ldsteffects{\haligned}{}{\sendload{half-word}}{\unsignedloadeffect}
+\ldstdesc{LDB}{110011}{reads}{byte}{from}{\signedload}
+\ldsteffects{}{}{\sendload{byte}}{\signedloadeffect}
+\ldstdesc{LDBU}{110100}{reads}{byte}{from}{\unsignedload}
+\ldsteffects{}{}{\sendload{byte}}{\unsignedloadeffect}
+
+\ldstdesc{STW}{110101}{writes}{word}{to}{}
+\ldsteffects{\waligned}{\writeprotection}{\sendstore{word}{R_r}}{}
+\ldstdesc{STH}{110110}{writes}{half-word}{to}{}
+\ldsteffects{\haligned}{\writeprotection}{\sendstore{half-word}{R_{r,15..0}}}{}
+\ldstdesc{STB}{110111}{writes}{byte}{to}{}
+\ldsteffects{}{\writeprotection}{\sendstore{byte}{R_{r,7..0}}}{}
+
+

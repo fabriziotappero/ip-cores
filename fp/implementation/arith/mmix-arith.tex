@@ -1,0 +1,2631 @@
+\input cwebmac
+% This file is part of the MMIXware package (c) Donald E Knuth 1999
+% This material goes at the beginning of all MMIXware CWEB files
+
+\def\topofcontents{
+  \leftline{\sc\today\ at \hours}\bigskip\bigskip
+  \centerline{\titlefont\title}}
+
+\font\ninett=cmtt9
+\def\botofcontents{\vskip 0pt plus 1filll
+    \ninerm\baselineskip10pt
+    \noindent\copyright\ 1999 Donald E. Knuth
+    \bigskip\noindent
+    This file may be freely copied and distributed, provided that
+    no changes whatsoever are made. All users are asked to help keep
+    the {\ninett MMIX}ware files consistent and ``uncorrupted,''
+    identical everywhere in the world. Changes are permissible only
+    if the modified file is given a new name, different from the names of
+    existing files in the {\ninett MMIX}ware package,
+    and only if the modified file is clearly identified
+    as not being part of that package.
+    (The {\ninett CWEB} system has a ``change file'' facility by
+    which users can easily make minor alterations without modifying
+    the master source files in any way. Everybody is supposed to use
+    change files instead of changing the files.)
+    The author has tried his best to produce correct and useful programs,
+    in order to help promote computer science research,
+    but no warranty of any kind should be assumed.}
+
+
+\def\title{MMIX-ARITH}
+
+\def\MMIX{\.{MMIX}}
+\def\MMIXAL{\.{MMIXAL}}
+\def\Hex#1{\hbox{$^{\scriptscriptstyle\#}$\tt#1}} % experimental hex constant
+\def\dts{\mathinner{\ldotp\ldotp}}
+\def\<#1>{\hbox{$\langle\,$#1$\,\rangle$}}\let\is=\longrightarrow
+\def\ff{\\{ff\kern-.05em}}
+
+
+
+
+\N{1}{1}Introduction. The subroutines below are used to simulate 64-bit \MMIX\
+arithmetic on an old-fashioned 32-bit computer---like the one the author
+had when he wrote \MMIXAL\ and the first \MMIX\ simulators in 1998 and 1999.
+All operations are fabricated from 32-bit arithmetic, including
+a full implementation of the IEEE floating point standard,
+assuming only that the \CEE/ compiler has a 32-bit unsigned integer type.
+
+Some day 64-bit machines will be commonplace and the awkward manipulations of
+the present program will look quite archaic. Interested readers who have such
+computers will be able to convert the code to a pure 64-bit form without
+difficulty, thereby obtaining much faster and simpler routines. Meanwhile,
+however, we can simulate the future and hope for continued progress.
+
+This program module has a simple structure, intended to make it
+suitable for loading with \MMIX\ simulators and assemblers.
+
+\Y\B\8\#\&{include} \.{<stdio.h>}\6
+\8\#\&{include} \.{<string.h>}\6
+\8\#\&{include} \.{<ctype.h>}\6
+\X2:Stuff for \CEE/ preprocessor\X\7
+\&{typedef} \&{enum} ${}\{{}$\5
+\1${}\\{false},\39{}$\\{true}\5
+\2${}\}{}$ \&{bool};\7
+\X3:Tetrabyte and octabyte type definitions\X\6
+\X36:Other type definitions\X\6
+\X4:Global variables\X\6
+\X5:Subroutines\X\par
+\fi
+
+\M{2}Subroutines of this program are declared first with a prototype,
+as in {\mc ANSI C}, then with an old-style \CEE/ function definition.
+Here are some preprocessor commands that make this work correctly with both
+new-style and old-style compilers.
+
+\Y\B\4\X2:Stuff for \CEE/ preprocessor\X${}\E{}$\6
+\8\#\&{ifdef} \.{\_\_STDC\_\_}\6
+\8\#\&{define} \.{ARGS}(\\{list}) \5\\{list}\6
+\8\#\&{else}\6
+\8\#\&{define} \.{ARGS}(\\{list}) \5(\,)\6
+\8\#\&{endif}\par
+\U1.\fi
+
+\M{3}The definition of type \&{tetra} should be changed, if necessary, so that
+it represents an unsigned 32-bit integer.
+
+\Y\B\4\X3:Tetrabyte and octabyte type definitions\X${}\E{}$\6
+\&{typedef} \&{unsigned} \&{int} \&{tetra};\C{ for systems conforming to the
+LP-64 data model }\6
+\&{typedef} \&{struct} ${}\{{}$\1\6
+\&{tetra} \|h${},{}$ \|l;\2\6
+${}\}{}$ \&{octa};\C{ two tetrabytes make one octabyte }\par
+\U1.\fi
+
+\M{4}\B\D$\\{sign\_bit}$ \5
+((\&{unsigned}) \T{\^80000000})\par
+\Y\B\4\X4:Global variables\X${}\E{}$\6
+\&{octa} \\{zero\_octa};\C{ \PB{$\\{zero\_octa}.\|h\K\\{zero\_octa}.\|l\K%
+\T{0}$} }\6
+\&{octa} \\{neg\_one}${}\K\{{-}\T{1},\39{-}\T{1}\}{}$;\C{ \PB{$\\{neg\_one}.\|h%
+\K\\{neg\_one}.\|l\K{-}\T{1}$} }\6
+\&{octa} \\{inf\_octa}${}\K\{\T{\^7ff00000},\39\T{0}\}{}$;\C{ floating point $+%
+\infty$ }\6
+\&{octa} \\{standard\_NaN}${}\K\{\T{\^7ff80000},\39\T{0}\}{}$;\C{ floating
+point NaN(.5) }\6
+\&{octa} \\{aux};\C{ auxiliary output of a subroutine }\6
+\&{bool} \\{overflow};\C{ set by certain subroutines for signed arithmetic }\par
+\As9, 30, 32, 69\ETs75.
+\U1.\fi
+
+\M{5}It's easy to add and subtract octabytes, if we aren't terribly
+worried about speed.
+
+\Y\B\4\X5:Subroutines\X${}\E{}$\6
+\&{octa} \\{oplus}\,\,${}\.{ARGS}((\&{octa},\39\&{octa})){}$;\5
+\hbox{}\6{}\&{octa} ${}\\{oplus}(\|y,\39\|z{}$)\C{ compute $y+z$ }\1\1\6
+\&{octa} \|y${},{}$ \|z;\2\2\6
+${}\{{}$\5
+\1\&{octa} \|x;\7
+${}\|x.\|h\K\|y.\|h+\|z.\|h{}$;\5
+${}\|x.\|l\K\|y.\|l+\|z.\|l;{}$\6
+\&{if} ${}(\|x.\|l<\|y.\|l){}$\1\5
+${}\|x.\|h\PP;{}$\2\6
+\&{return} \|x;\6
+\4${}\}{}$\2\7
+\&{octa} \\{ominus}\,\,${}\.{ARGS}((\&{octa},\39\&{octa})){}$;\5
+\hbox{}\6{}\&{octa} ${}\\{ominus}(\|y,\39\|z{}$)\C{ compute $y-z$ }\1\1\6
+\&{octa} \|y${},{}$ \|z;\2\2\6
+${}\{{}$\5
+\1\&{octa} \|x;\7
+${}\|x.\|h\K\|y.\|h-\|z.\|h{}$;\5
+${}\|x.\|l\K\|y.\|l-\|z.\|l;{}$\6
+\&{if} ${}(\|x.\|l>\|y.\|l){}$\1\5
+${}\|x.\|h\MM;{}$\2\6
+\&{return} \|x;\6
+\4${}\}{}$\2\par
+\As6, 7, 8, 12, 13, 24, 25, 26, 27, 28, 29, 31, 34, 37, 38, 39, 40, 41, 44, 46,
+50, 54, 60, 61, 62, 68, 82, 85, 86, 88, 89, 91\ETs93.
+\U1.\fi
+
+\M{6}In the following subroutine, \PB{\\{delta}} is a signed quantity that is
+assumed to fit in a signed tetrabyte.
+
+\Y\B\4\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{octa} \\{incr}\,\,${}\.{ARGS}((\&{octa},\39\&{int})){}$;\5
+\hbox{}\6{}\&{octa} ${}\\{incr}(\|y,\39\\{delta}{}$)\C{ compute $y+\delta$ }\1%
+\1\6
+\&{octa} \|y;\6
+\&{int} \\{delta};\2\2\6
+${}\{{}$\5
+\1\&{octa} \|x;\7
+${}\|x.\|h\K\|y.\|h{}$;\5
+${}\|x.\|l\K\|y.\|l+\\{delta};{}$\6
+\&{if} ${}(\\{delta}\G\T{0}){}$\5
+${}\{{}$\1\6
+\&{if} ${}(\|x.\|l<\|y.\|l){}$\1\5
+${}\|x.\|h\PP;{}$\2\6
+\4${}\}{}$\5
+\2\&{else} \&{if} ${}(\|x.\|l>\|y.\|l){}$\1\5
+${}\|x.\|h\MM;{}$\2\6
+\&{return} \|x;\6
+\4${}\}{}$\2\par
+\fi
+
+\M{7}Left and right shifts are only a bit more difficult.
+
+\Y\B\4\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{octa} \\{shift\_left}\,\,${}\.{ARGS}((\&{octa},\39\&{int})){}$;\5
+\hbox{}\6{}\&{octa} ${}\\{shift\_left}(\|y,\39\|s{}$)\C{ shift left by $s$
+bits, where $0\le s\le64$ }\1\1\6
+\&{octa} \|y;\6
+\&{int} \|s;\2\2\6
+${}\{{}$\1\6
+\&{while} ${}(\|s\G\T{32}){}$\1\5
+${}\|y.\|h\K\|y.\|l,\39\|y.\|l\K\T{0},\39\|s\MRL{-{\K}}\T{32};{}$\2\6
+\&{if} (\|s)\5
+${}\{{}$\5
+\1\&{register} \&{tetra} \\{yhl}${}\K\|y.\|h\LL\|s,{}$ \\{ylh}${}\K\|y.\|l\GG(%
+\T{32}-\|s);{}$\7
+${}\|y.\|h\K\\{yhl}+\\{ylh}{}$;\5
+${}\|y.\|l\MRL{{\LL}{\K}}\|s;{}$\6
+\4${}\}{}$\2\6
+\&{return} \|y;\6
+\4${}\}{}$\2\7
+\&{octa} \\{shift\_right}\,\,${}\.{ARGS}((\&{octa},\39\&{int},\39\&{int})){}$;\5
+\hbox{}\6{}\&{octa} ${}\\{shift\_right}(\|y,\39\|s,\39\|u{}$)\C{ shift right,
+arithmetically if $u=0$ }\1\1\6
+\&{octa} \|y;\6
+\&{int} \|s${},{}$ \|u;\2\2\6
+${}\{{}$\1\6
+\&{while} ${}(\|s\G\T{32}){}$\1\5
+${}\|y.\|l\K\|y.\|h,\39\|y.\|h\K(\|u\?\T{0}:{-}(\|y.\|h\GG\T{31})),\39\|s%
+\MRL{-{\K}}\T{32};{}$\2\6
+\&{if} (\|s)\5
+${}\{{}$\5
+\1\&{register} \&{tetra} \\{yhl}${}\K\|y.\|h\LL(\T{32}-\|s),{}$ \\{ylh}${}\K%
+\|y.\|l\GG\|s;{}$\7
+${}\|y.\|h\K(\|u\?\T{0}:({-}(\|y.\|h\GG\T{31}))\LL(\T{32}-\|s))+(\|y.\|h\GG%
+\|s){}$;\5
+${}\|y.\|l\K\\{yhl}+\\{ylh};{}$\6
+\4${}\}{}$\2\6
+\&{return} \|y;\6
+\4${}\}{}$\2\par
+\fi
+
+\N{1}{8}Multiplication. We need to multiply two unsigned 64-bit integers,
+obtaining
+an unsigned 128-bit product. It is easy to do this on a 32-bit machine
+by using Algorithm 4.3.1M of {\sl Seminumerical Algorithms}, with $b=2^{16}$.
+
+The following subroutine returns the lower half of the product, and
+puts the upper half into a global octabyte called \PB{\\{aux}}.
+
+\Y\B\4\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{octa} \\{omult}\,\,${}\.{ARGS}((\&{octa},\39\&{octa})){}$;\5
+\hbox{}\6{}\&{octa} ${}\\{omult}(\|y,\39\|z){}$\1\1\6
+\&{octa} \|y${},{}$ \|z;\2\2\6
+${}\{{}$\1\6
+\&{register} \&{int} \|i${},{}$ \|j${},{}$ \|k;\6
+\&{tetra} \|u[\T{4}]${},{}$ \|v[\T{4}]${},{}$ \|w[\T{8}];\6
+\&{register} \&{tetra} \|t;\6
+\&{octa} \\{acc};\7
+\X10:Unpack the multiplier and multiplicand to \PB{\|u} and \PB{\|v}\X;\6
+\&{for} ${}(\|j\K\T{0};{}$ ${}\|j<\T{4};{}$ ${}\|j\PP){}$\1\5
+${}\|w[\|j]\K\T{0};{}$\2\6
+\&{for} ${}(\|j\K\T{0};{}$ ${}\|j<\T{4};{}$ ${}\|j\PP){}$\1\6
+\&{if} ${}(\R\|v[\|j]){}$\1\5
+${}\|w[\|j+\T{4}]\K\T{0};{}$\2\6
+\&{else}\5
+${}\{{}$\1\6
+\&{for} ${}(\|i\K\|k\K\T{0};{}$ ${}\|i<\T{4};{}$ ${}\|i\PP){}$\5
+${}\{{}$\1\6
+${}\|t\K\|u[\|i]*\|v[\|j]+\|w[\|i+\|j]+\|k;{}$\6
+${}\|w[\|i+\|j]\K\|t\AND\T{\^ffff},\39\|k\K\|t\GG\T{16};{}$\6
+\4${}\}{}$\2\6
+${}\|w[\|j+\T{4}]\K\|k;{}$\6
+\4${}\}{}$\2\2\6
+\X11:Pack \PB{\|w} into the outputs \PB{\\{aux}} and \PB{\\{acc}}\X;\6
+\&{return} \\{acc};\6
+\4${}\}{}$\2\par
+\fi
+
+\M{9}\B\X4:Global variables\X${}\mathrel+\E{}$\6
+\&{extern} \&{octa} \\{aux};\C{ secondary output of subroutines with multiple
+outputs }\6
+\&{extern} \&{bool} \\{overflow};\par
+\fi
+
+\M{10}\B\X10:Unpack the multiplier and multiplicand to \PB{\|u} and \PB{\|v}%
+\X${}\E{}$\6
+$\|u[\T{3}]\K\|y.\|h\GG\T{16},\39\|u[\T{2}]\K\|y.\|h\AND\T{\^ffff},\39\|u[%
+\T{1}]\K\|y.\|l\GG\T{16},\39\|u[\T{0}]\K\|y.\|l\AND\T{\^ffff};{}$\6
+${}\|v[\T{3}]\K\|z.\|h\GG\T{16},\39\|v[\T{2}]\K\|z.\|h\AND\T{\^ffff},\39\|v[%
+\T{1}]\K\|z.\|l\GG\T{16},\39\|v[\T{0}]\K\|z.\|l\AND\T{\^ffff}{}$;\par
+\U8.\fi
+
+\M{11}\B\X11:Pack \PB{\|w} into the outputs \PB{\\{aux}} and \PB{\\{acc}}\X${}%
+\E{}$\6
+$\\{aux}.\|h\K(\|w[\T{7}]\LL\T{16})+\|w[\T{6}],\39\\{aux}.\|l\K(\|w[\T{5}]\LL%
+\T{16})+\|w[\T{4}];{}$\6
+${}\\{acc}.\|h\K(\|w[\T{3}]\LL\T{16})+\|w[\T{2}],\39\\{acc}.\|l\K(\|w[\T{1}]\LL%
+\T{16})+\|w[\T{0}]{}$;\par
+\U8.\fi
+
+\M{12}Signed multiplication has the same lower half product as unsigned
+multiplication. The signed upper half product is obtained with at most two
+further subtractions, after which the result has overflowed if and only if
+the upper half is unequal to 64 copies of the sign bit in the lower half.
+
+\Y\B\4\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{octa} \\{signed\_omult}\,\,${}\.{ARGS}((\&{octa},\39\&{octa})){}$;\5
+\hbox{}\6{}\&{octa} ${}\\{signed\_omult}(\|y,\39\|z){}$\1\1\6
+\&{octa} \|y${},{}$ \|z;\2\2\6
+${}\{{}$\1\6
+\&{octa} \\{acc};\7
+${}\\{acc}\K\\{omult}(\|y,\39\|z);{}$\6
+\&{if} ${}(\|y.\|h\AND\\{sign\_bit}){}$\1\5
+${}\\{aux}\K\\{ominus}(\\{aux},\39\|z);{}$\2\6
+\&{if} ${}(\|z.\|h\AND\\{sign\_bit}){}$\1\5
+${}\\{aux}\K\\{ominus}(\\{aux},\39\|y);{}$\2\6
+${}\\{overflow}\K(\\{aux}.\|h\I\\{aux}.\|l\V(\\{aux}.\|h\XOR(\\{aux}.\|h\GG%
+\T{1})\XOR(\\{acc}.\|h\AND\\{sign\_bit})));{}$\6
+\&{return} \\{acc};\6
+\4${}\}{}$\2\par
+\fi
+
+\N{1}{13}Division. Long division of an unsigned 128-bit integer by an unsigned
+64-bit integer is, of course, one of the most challenging routines
+needed for \MMIX\ arithmetic. The following program, based on
+Algorithm 4.3.1D of {\sl Seminumerical Algorithms}, computes
+octabytes $q$ and $r$ such that $(2^{64}x+y)=qz+r$ and $0\le r<z$,
+given octabytes $x$, $y$, and~$z$, assuming that $x<z$.
+(If $x\ge z$, it simply sets $q=x$ and $r=y$.)
+The quotient~$q$ is returned by the subroutine;
+the remainder~$r$ is stored in \PB{\\{aux}}.
+
+\Y\B\4\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{octa} \\{odiv}\,\,${}\.{ARGS}((\&{octa},\39\&{octa},\39\&{octa})){}$;\5
+\hbox{}\6{}\&{octa} ${}\\{odiv}(\|x,\39\|y,\39\|z){}$\1\1\6
+\&{octa} \|x${},{}$ \|y${},{}$ \|z;\2\2\6
+${}\{{}$\1\6
+\&{register} \&{int} \|i${},{}$ \|j${},{}$ \|k${},{}$ \|n${},{}$ \|d;\6
+\&{tetra} \|u[\T{8}]${},{}$ \|v[\T{4}]${},{}$ \|q[\T{4}]${},{}$ \\{mask}${},{}$
+\\{qhat}${},{}$ \\{rhat}${},{}$ \\{vh}${},{}$ \\{vmh};\6
+\&{register} \&{tetra} \|t;\6
+\&{octa} \\{acc};\7
+\X14:Check that \PB{$\|x<\|z$}; otherwise give trivial answer\X;\6
+\X15:Unpack the dividend and divisor to \PB{\|u} and \PB{\|v}\X;\6
+\X16:Determine the number of significant places \PB{\|n} in the divisor \PB{%
+\|v}\X;\6
+\X17:Normalize the divisor\X;\6
+\&{for} ${}(\|j\K\T{3};{}$ ${}\|j\G\T{0};{}$ ${}\|j\MM){}$\1\5
+\X20:Determine the quotient digit \PB{\|q[\|j]}\X;\2\6
+\X18:Unnormalize the remainder\X;\6
+\X19:Pack \PB{\|q} and \PB{\|u} to \PB{\\{acc}} and \PB{\\{aux}}\X;\6
+\&{return} \\{acc};\6
+\4${}\}{}$\2\par
+\fi
+
+\M{14}\B\X14:Check that \PB{$\|x<\|z$}; otherwise give trivial answer\X${}\E{}$%
+\6
+\&{if} ${}(\|x.\|h>\|z.\|h\V(\|x.\|h\E\|z.\|h\W\|x.\|l\G\|z.\|l)){}$\5
+${}\{{}$\1\6
+${}\\{aux}\K\|y{}$;\5
+\&{return} \|x;\6
+\4${}\}{}$\2\par
+\U13.\fi
+
+\M{15}\B\X15:Unpack the dividend and divisor to \PB{\|u} and \PB{\|v}\X${}\E{}$%
+\6
+$\|u[\T{7}]\K\|x.\|h\GG\T{16},\39\|u[\T{6}]\K\|x.\|h\AND\T{\^ffff},\39\|u[%
+\T{5}]\K\|x.\|l\GG\T{16},\39\|u[\T{4}]\K\|x.\|l\AND\T{\^ffff};{}$\6
+${}\|u[\T{3}]\K\|y.\|h\GG\T{16},\39\|u[\T{2}]\K\|y.\|h\AND\T{\^ffff},\39\|u[%
+\T{1}]\K\|y.\|l\GG\T{16},\39\|u[\T{0}]\K\|y.\|l\AND\T{\^ffff};{}$\6
+${}\|v[\T{3}]\K\|z.\|h\GG\T{16},\39\|v[\T{2}]\K\|z.\|h\AND\T{\^ffff},\39\|v[%
+\T{1}]\K\|z.\|l\GG\T{16},\39\|v[\T{0}]\K\|z.\|l\AND\T{\^ffff}{}$;\par
+\U13.\fi
+
+\M{16}\B\X16:Determine the number of significant places \PB{\|n} in the divisor
+\PB{\|v}\X${}\E{}$\6
+\&{for} ${}(\|n\K\T{4};{}$ ${}\|v[\|n-\T{1}]\E\T{0};{}$ ${}\|n\MM){}$\1\5
+;\2\par
+\U13.\fi
+
+\M{17}We shift \PB{\|u} and \PB{\|v} left by \PB{\|d} places, where \PB{\|d} is
+chosen to
+make $2^{15}\le v_{n-1}<2^{16}$.
+
+\Y\B\4\X17:Normalize the divisor\X${}\E{}$\6
+$\\{vh}\K\|v[\|n-\T{1}];{}$\6
+\&{for} ${}(\|d\K\T{0};{}$ ${}\\{vh}<\T{\^8000};{}$ ${}\|d\PP,\39\\{vh}\MRL{{%
+\LL}{\K}}\T{1}){}$\1\5
+;\2\6
+\&{for} ${}(\|j\K\|k\K\T{0};{}$ ${}\|j<\|n+\T{4};{}$ ${}\|j\PP){}$\5
+${}\{{}$\1\6
+${}\|t\K(\|u[\|j]\LL\|d)+\|k;{}$\6
+${}\|u[\|j]\K\|t\AND\T{\^ffff},\39\|k\K\|t\GG\T{16};{}$\6
+\4${}\}{}$\2\6
+\&{for} ${}(\|j\K\|k\K\T{0};{}$ ${}\|j<\|n;{}$ ${}\|j\PP){}$\5
+${}\{{}$\1\6
+${}\|t\K(\|v[\|j]\LL\|d)+\|k;{}$\6
+${}\|v[\|j]\K\|t\AND\T{\^ffff},\39\|k\K\|t\GG\T{16};{}$\6
+\4${}\}{}$\2\6
+${}\\{vh}\K\|v[\|n-\T{1}];{}$\6
+${}\\{vmh}\K(\|n>\T{1}\?\|v[\|n-\T{2}]:\T{0}){}$;\par
+\U13.\fi
+
+\M{18}\B\X18:Unnormalize the remainder\X${}\E{}$\6
+$\\{mask}\K(\T{1}\LL\|d)-\T{1};{}$\6
+\&{for} ${}(\|j\K\T{3};{}$ ${}\|j\G\|n;{}$ ${}\|j\MM){}$\1\5
+${}\|u[\|j]\K\T{0};{}$\2\6
+\&{for} ${}(\|k\K\T{0};{}$ ${}\|j\G\T{0};{}$ ${}\|j\MM){}$\5
+${}\{{}$\1\6
+${}\|t\K(\|k\LL\T{16})+\|u[\|j];{}$\6
+${}\|u[\|j]\K\|t\GG\|d,\39\|k\K\|t\AND\\{mask};{}$\6
+\4${}\}{}$\2\par
+\U13.\fi
+
+\M{19}\B\X19:Pack \PB{\|q} and \PB{\|u} to \PB{\\{acc}} and \PB{\\{aux}}\X${}%
+\E{}$\6
+$\\{acc}.\|h\K(\|q[\T{3}]\LL\T{16})+\|q[\T{2}],\39\\{acc}.\|l\K(\|q[\T{1}]\LL%
+\T{16})+\|q[\T{0}];{}$\6
+${}\\{aux}.\|h\K(\|u[\T{3}]\LL\T{16})+\|u[\T{2}],\39\\{aux}.\|l\K(\|u[\T{1}]\LL%
+\T{16})+\|u[\T{0}]{}$;\par
+\U13.\fi
+
+\M{20}\B\X20:Determine the quotient digit \PB{\|q[\|j]}\X${}\E{}$\6
+${}\{{}$\1\6
+\X21:Find the trial quotient, $\hat q$\X;\6
+\X22:Subtract $b^j\hat q v$ from \PB{\|u}\X;\6
+\X23:If the result was negative, decrease $\hat q$ by 1\X;\6
+${}\|q[\|j]\K\\{qhat};{}$\6
+\4${}\}{}$\2\par
+\U13.\fi
+
+\M{21}\B\X21:Find the trial quotient, $\hat q$\X${}\E{}$\6
+$\|t\K(\|u[\|j+\|n]\LL\T{16})+\|u[\|j+\|n-\T{1}];{}$\6
+${}\\{qhat}\K\|t/\\{vh},\39\\{rhat}\K\|t-\\{vh}*\\{qhat};{}$\6
+\&{if} ${}(\|n>\T{1}){}$\1\6
+\&{while} ${}(\\{qhat}\E\T{\^10000}\V\\{qhat}*\\{vmh}>(\\{rhat}\LL\T{16})+\|u[%
+\|j+\|n-\T{2}]){}$\5
+${}\{{}$\1\6
+${}\\{qhat}\MM,\39\\{rhat}\MRL{+{\K}}\\{vh};{}$\6
+\&{if} ${}(\\{rhat}\G\T{\^10000}){}$\1\5
+\&{break};\2\6
+\4${}\}{}$\2\2\par
+\U20.\fi
+
+\M{22}After this step, \PB{$\|u[\|j+\|n]$} will either equal \PB{\|k} or \PB{$%
+\|k-\T{1}$}. The
+true value of~\PB{\|u} would be obtained by subtracting~\PB{\|k} from \PB{$\|u[%
+\|j+\|n]$};
+but we don't have to fuss over \PB{$\|u[\|j+\|n]$}, because it won't be
+examined later.
+
+\Y\B\4\X22:Subtract $b^j\hat q v$ from \PB{\|u}\X${}\E{}$\6
+\&{for} ${}(\|i\K\|k\K\T{0};{}$ ${}\|i<\|n;{}$ ${}\|i\PP){}$\5
+${}\{{}$\1\6
+${}\|t\K\|u[\|i+\|j]+\T{\^ffff0000}-\|k-\\{qhat}*\|v[\|i];{}$\6
+${}\|u[\|i+\|j]\K\|t\AND\T{\^ffff},\39\|k\K\T{\^ffff}-(\|t\GG\T{16});{}$\6
+\4${}\}{}$\2\par
+\U20.\fi
+
+\M{23}The correction here occurs only rarely, but it can be necessary---for
+example, when dividing the number \Hex{7fff800100000000} by \Hex{800080020005}.
+
+\Y\B\4\X23:If the result was negative, decrease $\hat q$ by 1\X${}\E{}$\6
+\&{if} ${}(\|u[\|j+\|n]\I\|k){}$\5
+${}\{{}$\1\6
+${}\\{qhat}\MM;{}$\6
+\&{for} ${}(\|i\K\|k\K\T{0};{}$ ${}\|i<\|n;{}$ ${}\|i\PP){}$\5
+${}\{{}$\1\6
+${}\|t\K\|u[\|i+\|j]+\|v[\|i]+\|k;{}$\6
+${}\|u[\|i+\|j]\K\|t\AND\T{\^ffff},\39\|k\K\|t\GG\T{16};{}$\6
+\4${}\}{}$\2\6
+\4${}\}{}$\2\par
+\U20.\fi
+
+\M{24}Signed division can be reduced to unsigned division in a tedious
+but straightforward manner. We assume that the divisor isn't zero.
+
+\Y\B\4\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{octa} \\{signed\_odiv}\,\,${}\.{ARGS}((\&{octa},\39\&{octa})){}$;\5
+\hbox{}\6{}\&{octa} ${}\\{signed\_odiv}(\|y,\39\|z){}$\1\1\6
+\&{octa} \|y${},{}$ \|z;\2\2\6
+${}\{{}$\1\6
+\&{octa} \\{yy}${},{}$ \\{zz}${},{}$ \|q;\6
+\&{register} \&{int} \\{sy}${},{}$ \\{sz};\7
+\&{if} ${}(\|y.\|h\AND\\{sign\_bit}){}$\1\5
+${}\\{sy}\K\T{2},\39\\{yy}\K\\{ominus}(\\{zero\_octa},\39\|y);{}$\2\6
+\&{else}\1\5
+${}\\{sy}\K\T{0},\39\\{yy}\K\|y;{}$\2\6
+\&{if} ${}(\|z.\|h\AND\\{sign\_bit}){}$\1\5
+${}\\{sz}\K\T{1},\39\\{zz}\K\\{ominus}(\\{zero\_octa},\39\|z);{}$\2\6
+\&{else}\1\5
+${}\\{sz}\K\T{0},\39\\{zz}\K\|z;{}$\2\6
+${}\|q\K\\{odiv}(\\{zero\_octa},\39\\{yy},\39\\{zz});{}$\6
+${}\\{overflow}\K\\{false};{}$\6
+\&{switch} ${}(\\{sy}+\\{sz}){}$\5
+${}\{{}$\1\6
+\4\&{case} \T{2}${}+\T{1}{}$:\5
+${}\\{aux}\K\\{ominus}(\\{zero\_octa},\39\\{aux});{}$\6
+\&{if} ${}(\|q.\|h\E\\{sign\_bit}){}$\1\5
+${}\\{overflow}\K\\{true};{}$\2\6
+\4\&{case} \T{0}${}+\T{0}{}$:\5
+\&{return} \|q;\6
+\4\&{case} \T{2}${}+\T{0}{}$:\5
+\&{if} ${}(\\{aux}.\|h\V\\{aux}.\|l){}$\1\5
+${}\\{aux}\K\\{ominus}(\\{zz},\39\\{aux});{}$\2\6
+\&{goto} \\{negate\_q};\6
+\4\&{case} \T{0}${}+\T{1}{}$:\5
+\&{if} ${}(\\{aux}.\|h\V\\{aux}.\|l){}$\1\5
+${}\\{aux}\K\\{ominus}(\\{aux},\39\\{zz});{}$\2\6
+\4\\{negate\_q}:\5
+\&{if} ${}(\\{aux}.\|h\V\\{aux}.\|l){}$\1\5
+\&{return} \\{ominus}${}(\\{neg\_one},\39\|q);{}$\2\6
+\&{else}\1\5
+\&{return} \\{ominus}${}(\\{zero\_octa},\39\|q);{}$\2\6
+\4${}\}{}$\2\6
+\4${}\}{}$\2\par
+\fi
+
+\N{1}{25}Bit fiddling. The bitwise operators of \MMIX\ are fairly easy to
+implement directly, but three of them occur often enough to deserve
+packaging as subroutines.
+
+\Y\B\4\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{octa} \\{oand}\,\,${}\.{ARGS}((\&{octa},\39\&{octa})){}$;\5
+\hbox{}\6{}\&{octa} ${}\\{oand}(\|y,\39\|z{}$)\C{ compute $y\land z$ }\1\1\6
+\&{octa} \|y${},{}$ \|z;\2\2\6
+${}\{{}$\5
+\1\&{octa} \|x;\7
+${}\|x.\|h\K\|y.\|h\AND\|z.\|h{}$;\5
+${}\|x.\|l\K\|y.\|l\AND\|z.\|l;{}$\6
+\&{return} \|x;\6
+\4${}\}{}$\2\7
+\&{octa} \\{oandn}\,\,${}\.{ARGS}((\&{octa},\39\&{octa})){}$;\5
+\hbox{}\6{}\&{octa} ${}\\{oandn}(\|y,\39\|z{}$)\C{ compute $y\land\bar z$ }\1\1%
+\6
+\&{octa} \|y${},{}$ \|z;\2\2\6
+${}\{{}$\5
+\1\&{octa} \|x;\7
+${}\|x.\|h\K\|y.\|h\AND\CM\|z.\|h{}$;\5
+${}\|x.\|l\K\|y.\|l\AND\CM\|z.\|l;{}$\6
+\&{return} \|x;\6
+\4${}\}{}$\2\7
+\&{octa} \\{oxor}\,\,${}\.{ARGS}((\&{octa},\39\&{octa})){}$;\5
+\hbox{}\6{}\&{octa} ${}\\{oxor}(\|y,\39\|z{}$)\C{ compute $y\oplus z$ }\1\1\6
+\&{octa} \|y${},{}$ \|z;\2\2\6
+${}\{{}$\5
+\1\&{octa} \|x;\7
+${}\|x.\|h\K\|y.\|h\XOR\|z.\|h{}$;\5
+${}\|x.\|l\K\|y.\|l\XOR\|z.\|l;{}$\6
+\&{return} \|x;\6
+\4${}\}{}$\2\par
+\fi
+
+\M{26}Here's a fun way to count the number of bits in a tetrabyte.
+[This classical trick is called the ``Gillies--Miller method
+for sideways addition'' in {\sl The Preparation of Programs
+for an Electronic Digital Computer\/} by Wilkes, Wheeler, and
+Gill, second edition (Reading, Mass.:\ Addison--Wesley, 1957),
+191--193. Some of the tricks used here were suggested by
+Balbir Singh, Peter Rossmanith, and Stefan Schwoon.]
+
+\Y\B\4\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{int} \\{count\_bits}\,\,\.{ARGS}((\&{tetra}));\5
+\hbox{}\6{}\&{int} \\{count\_bits}(\|x)\1\1\6
+\&{tetra} \|x;\2\2\6
+${}\{{}$\1\6
+\&{register} \&{int} \\{xx}${}\K\|x;{}$\7
+${}\\{xx}\K\\{xx}-((\\{xx}\GG\T{1})\AND\T{\^55555555});{}$\6
+${}\\{xx}\K(\\{xx}\AND\T{\^33333333})+((\\{xx}\GG\T{2})\AND\T{\^33333333});{}$\6
+${}\\{xx}\K(\\{xx}+(\\{xx}\GG\T{4}))\AND\T{\^0f0f0f0f};{}$\6
+${}\\{xx}\K\\{xx}+(\\{xx}\GG\T{8});{}$\6
+\&{return} ${}(\\{xx}+(\\{xx}\GG\T{16}))\AND\T{\^ff};{}$\6
+\4${}\}{}$\2\par
+\fi
+
+\M{27}To compute the nonnegative byte differences of two given tetrabytes,
+we can carry out the following 20-step branchless computation:
+
+\Y\B\4\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{tetra} \\{byte\_diff}\,\,${}\.{ARGS}((\&{tetra},\39\&{tetra})){}$;\5
+\hbox{}\6{}\&{tetra} ${}\\{byte\_diff}(\|y,\39\|z){}$\1\1\6
+\&{tetra} \|y${},{}$ \|z;\2\2\6
+${}\{{}$\1\6
+\&{register} \&{tetra} \|d${}\K(\|y\AND\T{\^00ff00ff})+\T{\^01000100}-(\|z\AND%
+\T{\^00ff00ff});{}$\6
+\&{register} \&{tetra} \|m${}\K\|d\AND\T{\^01000100};{}$\6
+\&{register} \&{tetra} \|x${}\K\|d\AND(\|m-(\|m\GG\T{8}));{}$\7
+${}\|d\K((\|y\GG\T{8})\AND\T{\^00ff00ff})+\T{\^01000100}-((\|z\GG\T{8})\AND\T{%
+\^00ff00ff});{}$\6
+${}\|m\K\|d\AND\T{\^01000100};{}$\6
+\&{return} \|x${}+((\|d\AND(\|m-(\|m\GG\T{8})))\LL\T{8});{}$\6
+\4${}\}{}$\2\par
+\fi
+
+\M{28}To compute the nonnegative wyde differences of two tetrabytes,
+another trick leads to a 15-step branchless computation.
+(Research problem: Can \PB{\\{count\_bits}}, \PB{\\{byte\_diff}}, or \PB{%
+\\{wyde\_diff}} be done
+with fewer operations?)
+
+\Y\B\4\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{tetra} \\{wyde\_diff}\,\,${}\.{ARGS}((\&{tetra},\39\&{tetra})){}$;\5
+\hbox{}\6{}\&{tetra} ${}\\{wyde\_diff}(\|y,\39\|z){}$\1\1\6
+\&{tetra} \|y${},{}$ \|z;\2\2\6
+${}\{{}$\1\6
+\&{register} \&{tetra} \|a${}\K((\|y\GG\T{16})-(\|z\GG\T{16}))\AND\T{%
+\^10000};{}$\6
+\&{register} \&{tetra} \|b${}\K((\|y\AND\T{\^ffff})-(\|z\AND\T{\^ffff}))\AND\T{%
+\^10000};{}$\7
+\&{return} \|y${}-(\|z\XOR((\|y\XOR\|z)\AND(\|b-\|a-(\|b\GG\T{16}))));{}$\6
+\4${}\}{}$\2\par
+\fi
+
+\M{29}The last bitwise subroutine we need is the most interesting:
+It implements \MMIX's \.{MOR} and \.{MXOR} operations.
+
+\Y\B\4\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{octa} \\{bool\_mult}\,\,${}\.{ARGS}((\&{octa},\39\&{octa},\39\&{bool})){}$;\5
+\hbox{}\6{}\&{octa} ${}\\{bool\_mult}(\|y,\39\|z,\39\\{xor}){}$\1\1\6
+\&{octa} \|y${},{}$ \|z;\C{ the operands }\6
+\&{bool} \\{xor};\C{ do we do xor instead of or? }\2\2\6
+${}\{{}$\1\6
+\&{octa} \|o${},{}$ \|x;\6
+\&{register} \&{tetra} \|a${},{}$ \|b${},{}$ \|c;\6
+\&{register} \&{int} \|k;\7
+\&{for} ${}(\|k\K\T{0},\39\|o\K\|y,\39\|x\K\\{zero\_octa};{}$ ${}\|o.\|h\V\|o.%
+\|l;{}$ ${}\|k\PP,\39\|o\K\\{shift\_right}(\|o,\39\T{8},\39\T{1})){}$\1\6
+\&{if} ${}(\|o.\|l\AND\T{\^ff}){}$\5
+${}\{{}$\1\6
+${}\|a\K((\|z.\|h\GG\|k)\AND\T{\^01010101})*\T{\^ff};{}$\6
+${}\|b\K((\|z.\|l\GG\|k)\AND\T{\^01010101})*\T{\^ff};{}$\6
+${}\|c\K(\|o.\|l\AND\T{\^ff})*\T{\^01010101};{}$\6
+\&{if} (\\{xor})\1\5
+${}\|x.\|h\MRL{{\XOR}{\K}}\|a\AND\|c,\39\|x.\|l\MRL{{\XOR}{\K}}\|b\AND\|c;{}$\2%
+\6
+\&{else}\1\5
+${}\|x.\|h\MRL{{\OR}{\K}}\|a\AND\|c,\39\|x.\|l\MRL{{\OR}{\K}}\|b\AND\|c;{}$\2\6
+\4${}\}{}$\2\2\6
+\&{return} \|x;\6
+\4${}\}{}$\2\par
+\fi
+
+\N{1}{30}Floating point packing and unpacking. Standard IEEE floating binary
+numbers pack a sign, exponent, and fraction into a tetrabyte
+or octabyte. In this section we consider basic subroutines that
+convert between IEEE format and the separate unpacked components.
+
+\Y\B\4\D$\.{ROUND\_OFF}$ \5
+\T{1}\par
+\B\4\D$\.{ROUND\_UP}$ \5
+\T{2}\par
+\B\4\D$\.{ROUND\_DOWN}$ \5
+\T{3}\par
+\B\4\D$\.{ROUND\_NEAR}$ \5
+\T{4}\par
+\Y\B\4\X4:Global variables\X${}\mathrel+\E{}$\6
+\&{int} \\{cur\_round};\C{ the current rounding mode }\par
+\fi
+
+\M{31}The \PB{\\{fpack}} routine takes an octabyte $f$, a raw exponent~$e$,
+and a sign~\PB{\|s}, and packs them
+into the floating binary number that corresponds to
+$\pm2^{e-1076}f$, using a given rounding mode.
+The value of $f$ should satisfy $2^{54}\le f\le 2^{55}$.
+
+Thus, for example, the floating binary number $+1.0=\Hex{3ff0000000000000}$
+is obtained when $f=2^{54}$, $e=\Hex{3fe}$, and \PB{$\|s\K\.{'+'}$}.
+The raw exponent~$e$ is usually one less than
+the final exponent value; the leading bit of~$f$ is essentially added
+to the exponent. (This trick works nicely for subnormal numbers, when
+$e<0$, or in cases where the value of $f$ is rounded upwards to $2^{55}$.)
+
+Exceptional events are noted by oring appropriate bits into
+the global variable \PB{\\{exceptions}}. Special considerations apply to
+underflow, which is not fully specified by Section 7.4 of the IEEE standard:
+Implementations of the standard are free to choose between two definitions
+of ``tininess'' and two definitions of ``accuracy loss.''
+\MMIX\ determines tininess {\it after\/} rounding, hence a result with
+$e<0$ is not necessarily tiny; \MMIX\ treats accuracy loss as equivalent
+to inexactness. Thus, a result underflows if and only if
+it is tiny and either (i)~it is inexact or (ii)~the underflow trap is enabled.
+The \PB{\\{fpack}} routine sets \PB{\.{U\_BIT}} in \PB{\\{exceptions}} if and
+only if the result is
+tiny, \PB{\.{X\_BIT}} if and only if the result is inexact.
+
+\Y\B\4\D$\.{X\_BIT}$ \5
+$(\T{1}\LL\T{8}{}$)\C{ floating inexact }\par
+\B\4\D$\.{Z\_BIT}$ \5
+$(\T{1}\LL\T{9}{}$)\C{ floating division by zero }\par
+\B\4\D$\.{U\_BIT}$ \5
+$(\T{1}\LL\T{10}{}$)\C{ floating underflow }\par
+\B\4\D$\.{O\_BIT}$ \5
+$(\T{1}\LL\T{11}{}$)\C{ floating overflow }\par
+\B\4\D$\.{I\_BIT}$ \5
+$(\T{1}\LL\T{12}{}$)\C{ floating invalid operation }\par
+\B\4\D$\.{W\_BIT}$ \5
+$(\T{1}\LL\T{13}{}$)\C{ float-to-fix overflow }\par
+\B\4\D$\.{V\_BIT}$ \5
+$(\T{1}\LL\T{14}{}$)\C{ integer overflow }\par
+\B\4\D$\.{D\_BIT}$ \5
+$(\T{1}\LL\T{15}{}$)\C{ integer divide check }\par
+\B\4\D$\.{E\_BIT}$ \5
+$(\T{1}\LL\T{18}{}$)\C{ external (dynamic) trap bit }\par
+\Y\B\4\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{octa} \\{fpack}\,\,${}\.{ARGS}((\&{octa},\39\&{int},\39\&{char},\39%
+\&{int})){}$;\5
+\hbox{}\6{}\&{octa} ${}\\{fpack}(\|f,\39\|e,\39\|s,\39\|r){}$\1\1\6
+\&{octa} \|f;\C{ the normalized fraction part }\6
+\&{int} \|e;\C{ the raw exponent }\6
+\&{char} \|s;\C{ the sign }\6
+\&{int} \|r;\C{ the rounding mode }\2\2\6
+${}\{{}$\1\6
+\&{octa} \|o;\7
+\&{if} ${}(\|e>\T{\^7fd}){}$\1\5
+${}\|e\K\T{\^7ff},\39\|o\K\\{zero\_octa};{}$\2\6
+\&{else}\5
+${}\{{}$\1\6
+\&{if} ${}(\|e<\T{0}){}$\5
+${}\{{}$\1\6
+\&{if} ${}(\|e<{-}\T{54}){}$\1\5
+${}\|o.\|h\K\T{0},\39\|o.\|l\K\T{1};{}$\2\6
+\&{else}\5
+${}\{{}$\5
+\1\&{octa} \\{oo};\7
+${}\|o\K\\{shift\_right}(\|f,\39{-}\|e,\39\T{1});{}$\6
+${}\\{oo}\K\\{shift\_left}(\|o,\39{-}\|e);{}$\6
+\&{if} ${}(\\{oo}.\|l\I\|f.\|l\V\\{oo}.\|h\I\|f.\|h){}$\1\5
+${}\|o.\|l\MRL{{\OR}{\K}}\T{1}{}$;\C{ sticky bit }\2\6
+\4${}\}{}$\2\6
+${}\|e\K\T{0};{}$\6
+\4${}\}{}$\5
+\2\&{else}\1\5
+${}\|o\K\|f;{}$\2\6
+\4${}\}{}$\2\6
+\X33:Round and return the result\X;\6
+\4${}\}{}$\2\par
+\fi
+
+\M{32}\B\X4:Global variables\X${}\mathrel+\E{}$\6
+\&{int} \\{exceptions};\C{ bits possibly destined for rA }\par
+\fi
+
+\M{33}Everything falls together so nicely here, it's almost too good to be
+true!
+
+\Y\B\4\X33:Round and return the result\X${}\E{}$\6
+\&{if} ${}(\|o.\|l\AND\T{3}){}$\1\5
+${}\\{exceptions}\MRL{{\OR}{\K}}\.{X\_BIT};{}$\2\6
+\&{switch} (\|r)\5
+${}\{{}$\1\6
+\4\&{case} \.{ROUND\_DOWN}:\5
+\&{if} ${}(\|s\E\.{'-'}){}$\1\5
+${}\|o\K\\{incr}(\|o,\39\T{3}){}$;\5
+\2\&{break};\6
+\4\&{case} \.{ROUND\_UP}:\5
+\&{if} ${}(\|s\I\.{'-'}){}$\1\5
+${}\|o\K\\{incr}(\|o,\39\T{3});{}$\2\6
+\4\&{case} \.{ROUND\_OFF}:\5
+\&{break};\6
+\4\&{case} \.{ROUND\_NEAR}:\5
+${}\|o\K\\{incr}(\|o,\39\|o.\|l\AND\T{4}\?\T{2}:\T{1}){}$;\5
+\&{break};\6
+\4${}\}{}$\2\6
+${}\|o\K\\{shift\_right}(\|o,\39\T{2},\39\T{1});{}$\6
+${}\|o.\|h\MRL{+{\K}}\|e\LL\T{20};{}$\6
+\&{if} ${}(\|o.\|h\G\T{\^7ff00000}){}$\1\5
+${}\\{exceptions}\MRL{{\OR}{\K}}\.{O\_BIT}+\.{X\_BIT}{}$;\C{ overflow }\2\6
+\&{else} \&{if} ${}(\|o.\|h<\T{\^100000}){}$\1\5
+${}\\{exceptions}\MRL{{\OR}{\K}}\.{U\_BIT}{}$;\C{ tininess }\2\6
+\&{if} ${}(\|s\E\.{'-'}){}$\1\5
+${}\|o.\|h\MRL{{\OR}{\K}}\\{sign\_bit};{}$\2\6
+\&{return} \|o;\par
+\U31.\fi
+
+\M{34}Similarly, \PB{\\{sfpack}} packs a short float, from inputs
+having the same conventions as \PB{\\{fpack}}.
+
+\Y\B\4\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{tetra} \\{sfpack}\,\,${}\.{ARGS}((\&{octa},\39\&{int},\39\&{char},\39%
+\&{int})){}$;\5
+\hbox{}\6{}\&{tetra} ${}\\{sfpack}(\|f,\39\|e,\39\|s,\39\|r){}$\1\1\6
+\&{octa} \|f;\C{ the fraction part }\6
+\&{int} \|e;\C{ the raw exponent }\6
+\&{char} \|s;\C{ the sign }\6
+\&{int} \|r;\C{ the rounding mode }\2\2\6
+${}\{{}$\1\6
+\&{register} \&{tetra} \|o;\7
+\&{if} ${}(\|e>\T{\^47d}){}$\1\5
+${}\|e\K\T{\^47f},\39\|o\K\T{0};{}$\2\6
+\&{else}\5
+${}\{{}$\1\6
+${}\|o\K\\{shift\_left}(\|f,\39\T{3}).\|h;{}$\6
+\&{if} ${}(\|f.\|l\AND\T{\^1fffffff}){}$\1\5
+${}\|o\MRL{{\OR}{\K}}\T{1};{}$\2\6
+\&{if} ${}(\|e<\T{\^380}){}$\5
+${}\{{}$\1\6
+\&{if} ${}(\|e<\T{\^380}-\T{25}){}$\1\5
+${}\|o\K\T{1};{}$\2\6
+\&{else}\5
+${}\{{}$\5
+\1\&{register} \&{tetra} \\{o0}${},{}$ \\{oo};\7
+${}\\{o0}\K\|o;{}$\6
+${}\|o\K\|o\GG(\T{\^380}-\|e);{}$\6
+${}\\{oo}\K\|o\LL(\T{\^380}-\|e);{}$\6
+\&{if} ${}(\\{oo}\I\\{o0}){}$\1\5
+${}\|o\MRL{{\OR}{\K}}\T{1}{}$;\C{ sticky bit }\2\6
+\4${}\}{}$\2\6
+${}\|e\K\T{\^380};{}$\6
+\4${}\}{}$\2\6
+\4${}\}{}$\2\6
+\X35:Round and return the short result\X;\6
+\4${}\}{}$\2\par
+\fi
+
+\M{35}\B\X35:Round and return the short result\X${}\E{}$\6
+\&{if} ${}(\|o\AND\T{3}){}$\1\5
+${}\\{exceptions}\MRL{{\OR}{\K}}\.{X\_BIT};{}$\2\6
+\&{switch} (\|r)\5
+${}\{{}$\1\6
+\4\&{case} \.{ROUND\_DOWN}:\5
+\&{if} ${}(\|s\E\.{'-'}){}$\1\5
+${}\|o\MRL{+{\K}}\T{3}{}$;\5
+\2\&{break};\6
+\4\&{case} \.{ROUND\_UP}:\5
+\&{if} ${}(\|s\I\.{'-'}){}$\1\5
+${}\|o\MRL{+{\K}}\T{3};{}$\2\6
+\4\&{case} \.{ROUND\_OFF}:\5
+\&{break};\6
+\4\&{case} \.{ROUND\_NEAR}:\5
+${}\|o\MRL{+{\K}}(\|o\AND\T{4}\?\T{2}:\T{1}){}$;\5
+\&{break};\6
+\4${}\}{}$\2\6
+${}\|o\K\|o\GG\T{2};{}$\6
+${}\|o\MRL{+{\K}}(\|e-\T{\^380})\LL\T{23};{}$\6
+\&{if} ${}(\|o\G\T{\^7f800000}){}$\1\5
+${}\\{exceptions}\MRL{{\OR}{\K}}\.{O\_BIT}+\.{X\_BIT}{}$;\C{ overflow }\2\6
+\&{else} \&{if} ${}(\|o<\T{\^100000}){}$\1\5
+${}\\{exceptions}\MRL{{\OR}{\K}}\.{U\_BIT}{}$;\C{ tininess }\2\6
+\&{if} ${}(\|s\E\.{'-'}){}$\1\5
+${}\|o\MRL{{\OR}{\K}}\\{sign\_bit};{}$\2\6
+\&{return} \|o;\par
+\U34.\fi
+
+\M{36}The \PB{\\{funpack}} routine is, roughly speaking, the opposite of \PB{%
+\\{fpack}}.
+It takes a given floating point number~$x$ and separates out its
+fraction part~$f$, exponent~$e$, and sign~$s$. It clears \PB{\\{exceptions}}
+to zero. It returns the type of value found: \PB{\\{zro}}, \PB{\\{num}}, \PB{%
+\\{inf}},
+or \PB{\\{nan}}. When it returns \PB{\\{num}},
+it will have set $f$, $e$, and~$s$
+to the values from which \PB{\\{fpack}} would produce the original number~$x$
+without exceptions.
+
+\Y\B\4\D$\\{zero\_exponent}$ \5
+$({-}\T{1000}{}$)\C{ zero is assumed to have this exponent }\par
+\Y\B\4\X36:Other type definitions\X${}\E{}$\6
+\&{typedef} \&{enum} ${}\{{}$\1\6
+${}\\{zro},\39\\{num},\39\\{inf},\39\\{nan}{}$\2\6
+${}\}{}$\5
+\&{ftype};\par
+\A59.
+\U1.\fi
+
+\M{37}\B\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{ftype} \\{funpack}\,\,${}\.{ARGS}((\&{octa},\39{}$\&{octa} ${}{*},\39{}$%
+\&{int} ${}{*},\39{}$\&{char} ${}{*})){}$;\5
+\hbox{}\6{}\&{ftype} ${}\\{funpack}(\|x,\39\|f,\39\|e,\39\|s){}$\1\1\6
+\&{octa} \|x;\C{ the given floating point value }\6
+\&{octa} ${}{*}\|f{}$;\C{ address where the fraction part should be stored }\6
+\&{int} ${}{*}\|e{}$;\C{ address where the exponent part should be stored }\6
+\&{char} ${}{*}\|s{}$;\C{ address where the sign should be stored }\2\2\6
+${}\{{}$\1\6
+\&{register} \&{int} \\{ee};\7
+${}\\{exceptions}\K\T{0};{}$\6
+${}{*}\|s\K(\|x.\|h\AND\\{sign\_bit}\?\.{'-'}:\.{'+'});{}$\6
+${}{*}\|f\K\\{shift\_left}(\|x,\39\T{2});{}$\6
+${}\|f\MG\|h\MRL{\AND{\K}}\T{\^3fffff};{}$\6
+${}\\{ee}\K(\|x.\|h\GG\T{20})\AND\T{\^7ff};{}$\6
+\&{if} (\\{ee})\5
+${}\{{}$\1\6
+${}{*}\|e\K\\{ee}-\T{1};{}$\6
+${}\|f\MG\|h\MRL{{\OR}{\K}}\T{\^400000};{}$\6
+\&{return} ${}(\\{ee}<\T{\^7ff}\?\\{num}:\|f\MG\|h\E\T{\^400000}\W\R\|f\MG\|l\?%
+\\{inf}:\\{nan});{}$\6
+\4${}\}{}$\2\6
+\&{if} ${}(\R\|x.\|l\W\R\|f\MG\|h){}$\5
+${}\{{}$\1\6
+${}{*}\|e\K\\{zero\_exponent}{}$;\5
+\&{return} \\{zro};\6
+\4${}\}{}$\2\6
+\&{do}\5
+${}\{{}$\5
+\1${}\\{ee}\MM{}$;\5
+${}{*}\|f\K\\{shift\_left}({*}\|f,\39\T{1}){}$;\5
+${}\}{}$\2\5
+\&{while} ${}(\R(\|f\MG\|h\AND\T{\^400000}));{}$\6
+${}{*}\|e\K\\{ee}{}$;\5
+\&{return} \\{num};\6
+\4${}\}{}$\2\par
+\fi
+
+\M{38}\B\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{ftype} \\{sfunpack}\,\,${}\.{ARGS}((\&{tetra},\39{}$\&{octa} ${}{*},\39{}$%
+\&{int} ${}{*},\39{}$\&{char} ${}{*})){}$;\5
+\hbox{}\6{}\&{ftype} ${}\\{sfunpack}(\|x,\39\|f,\39\|e,\39\|s){}$\1\1\6
+\&{tetra} \|x;\C{ the given floating point value }\6
+\&{octa} ${}{*}\|f{}$;\C{ address where the fraction part should be stored }\6
+\&{int} ${}{*}\|e{}$;\C{ address where the exponent part should be stored }\6
+\&{char} ${}{*}\|s{}$;\C{ address where the sign should be stored }\2\2\6
+${}\{{}$\1\6
+\&{register} \&{int} \\{ee};\7
+${}\\{exceptions}\K\T{0};{}$\6
+${}{*}\|s\K(\|x\AND\\{sign\_bit}\?\.{'-'}:\.{'+'});{}$\6
+${}\|f\MG\|h\K(\|x\GG\T{1})\AND\T{\^3fffff},\39\|f\MG\|l\K\|x\LL\T{31};{}$\6
+${}\\{ee}\K(\|x\GG\T{23})\AND\T{\^ff};{}$\6
+\&{if} (\\{ee})\5
+${}\{{}$\1\6
+${}{*}\|e\K\\{ee}+\T{\^380}-\T{1};{}$\6
+${}\|f\MG\|h\MRL{{\OR}{\K}}\T{\^400000};{}$\6
+\&{return} ${}(\\{ee}<\T{\^ff}\?\\{num}:(\|x\AND\T{\^7fffffff})\E\T{\^7f800000}%
+\?\\{inf}:\\{nan});{}$\6
+\4${}\}{}$\2\6
+\&{if} ${}(\R(\|x\AND\T{\^7fffffff})){}$\5
+${}\{{}$\1\6
+${}{*}\|e\K\\{zero\_exponent}{}$;\5
+\&{return} \\{zro};\6
+\4${}\}{}$\2\6
+\&{do}\5
+${}\{{}$\5
+\1${}\\{ee}\MM{}$;\5
+${}{*}\|f\K\\{shift\_left}({*}\|f,\39\T{1}){}$;\5
+${}\}{}$\2\5
+\&{while} ${}(\R(\|f\MG\|h\AND\T{\^400000}));{}$\6
+${}{*}\|e\K\\{ee}+\T{\^380}{}$;\5
+\&{return} \\{num};\6
+\4${}\}{}$\2\par
+\fi
+
+\M{39}Since \MMIX\ downplays 32-bit operations, it uses \PB{\\{sfpack}} and %
+\PB{\\{sfunpack}}
+only when loading and storing short floats, or when converting
+from fixed point to floating point.
+
+\Y\B\4\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{octa} \\{load\_sf}\,\,\.{ARGS}((\&{tetra}));\5
+\hbox{}\6{}\&{octa} \\{load\_sf}(\|z)\1\1\6
+\&{tetra} \|z;\C{ 32 bits to be loaded into a 64-bit register }\2\2\6
+${}\{{}$\1\6
+\&{octa} \|f${},{}$ \|x;\5
+\&{int} \|e;\5
+\&{char} \|s;\5
+\&{ftype} \|t;\7
+${}\|t\K\\{sfunpack}(\|z,\39{\AND}\|f,\39{\AND}\|e,\39{\AND}\|s);{}$\6
+\&{switch} (\|t)\5
+${}\{{}$\1\6
+\4\&{case} \\{zro}:\5
+${}\|x\K\\{zero\_octa}{}$;\5
+\&{break};\6
+\4\&{case} \\{num}:\5
+\&{return} \\{fpack}${}(\|f,\39\|e,\39\|s,\39\.{ROUND\_OFF});{}$\6
+\4\&{case} \\{inf}:\5
+${}\|x\K\\{inf\_octa}{}$;\5
+\&{break};\6
+\4\&{case} \\{nan}:\5
+${}\|x\K\\{shift\_right}(\|f,\39\T{2},\39\T{1}){}$;\5
+${}\|x.\|h\MRL{{\OR}{\K}}\T{\^7ff00000}{}$;\5
+\&{break};\6
+\4${}\}{}$\2\6
+\&{if} ${}(\|s\E\.{'-'}){}$\1\5
+${}\|x.\|h\MRL{{\OR}{\K}}\\{sign\_bit};{}$\2\6
+\&{return} \|x;\6
+\4${}\}{}$\2\par
+\fi
+
+\M{40}\B\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{tetra} \\{store\_sf}\,\,\.{ARGS}((\&{octa}));\5
+\hbox{}\6{}\&{tetra} \\{store\_sf}(\|x)\1\1\6
+\&{octa} \|x;\C{ 64 bits to be loaded into a 32-bit word }\2\2\6
+${}\{{}$\1\6
+\&{octa} \|f;\5
+\&{tetra} \|z;\5
+\&{int} \|e;\5
+\&{char} \|s;\5
+\&{ftype} \|t;\7
+${}\|t\K\\{funpack}(\|x,\39{\AND}\|f,\39{\AND}\|e,\39{\AND}\|s);{}$\6
+\&{switch} (\|t)\5
+${}\{{}$\1\6
+\4\&{case} \\{zro}:\5
+${}\|z\K\T{0}{}$;\5
+\&{break};\6
+\4\&{case} \\{num}:\5
+\&{return} \\{sfpack}${}(\|f,\39\|e,\39\|s,\39\\{cur\_round});{}$\6
+\4\&{case} \\{inf}:\5
+${}\|z\K\T{\^7f800000}{}$;\5
+\&{break};\6
+\4\&{case} \\{nan}:\5
+\&{if} ${}(\R(\|f.\|h\AND\T{\^200000})){}$\5
+${}\{{}$\1\6
+${}\|f.\|h\MRL{{\OR}{\K}}\T{\^200000}{}$;\5
+${}\\{exceptions}\MRL{{\OR}{\K}}\.{I\_BIT}{}$;\C{ NaN was signaling }\6
+\4${}\}{}$\2\6
+${}\|z\K\T{\^7f800000}\OR(\|f.\|h\LL\T{1})\OR(\|f.\|l\GG\T{31}){}$;\5
+\&{break};\6
+\4${}\}{}$\2\6
+\&{if} ${}(\|s\E\.{'-'}){}$\1\5
+${}\|z\MRL{{\OR}{\K}}\\{sign\_bit};{}$\2\6
+\&{return} \|z;\6
+\4${}\}{}$\2\par
+\fi
+
+\N{1}{41}Floating multiplication and division.
+The hardest fixed point operations were multiplication and division;
+but these two operations are the {\it easiest\/} to implement in floating point
+arithmetic, once their fixed point counterparts are available.
+
+\Y\B\4\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{octa} \\{fmult}\,\,${}\.{ARGS}((\&{octa},\39\&{octa})){}$;\5
+\hbox{}\6{}\&{octa} ${}\\{fmult}(\|y,\39\|z){}$\1\1\6
+\&{octa} \|y${},{}$ \|z;\2\2\6
+${}\{{}$\1\6
+\&{ftype} \\{yt}${},{}$ \\{zt};\6
+\&{int} \\{ye}${},{}$ \\{ze};\6
+\&{char} \\{ys}${},{}$ \\{zs};\6
+\&{octa} \|x${},{}$ \\{xf}${},{}$ \\{yf}${},{}$ \\{zf};\6
+\&{register} \&{int} \\{xe};\6
+\&{register} \&{char} \\{xs};\7
+${}\\{yt}\K\\{funpack}(\|y,\39{\AND}\\{yf},\39{\AND}\\{ye},\39{\AND}\\{ys});{}$%
+\6
+${}\\{zt}\K\\{funpack}(\|z,\39{\AND}\\{zf},\39{\AND}\\{ze},\39{\AND}\\{zs});{}$%
+\6
+${}\\{xs}\K\\{ys}+\\{zs}-\.{'+'}{}$;\C{ will be \PB{\.{'-'}} when the result is
+negative }\6
+\&{switch} ${}(\T{4}*\\{yt}+\\{zt}){}$\5
+${}\{{}$\1\6
+\hbox{\4}\X42:The usual NaN cases\X;\6
+\4\&{case} \T{4}${}*\\{zro}+\\{zro}{}$:\5
+\&{case} \T{4}${}*\\{zro}+\\{num}{}$:\5
+\&{case} \T{4}${}*\\{num}+\\{zro}{}$:\5
+${}\|x\K\\{zero\_octa}{}$;\5
+\&{break};\6
+\4\&{case} \T{4}${}*\\{num}+\\{inf}{}$:\5
+\&{case} \T{4}${}*\\{inf}+\\{num}{}$:\5
+\&{case} \T{4}${}*\\{inf}+\\{inf}{}$:\5
+${}\|x\K\\{inf\_octa}{}$;\5
+\&{break};\6
+\4\&{case} \T{4}${}*\\{zro}+\\{inf}{}$:\5
+\&{case} \T{4}${}*\\{inf}+\\{zro}{}$:\5
+${}\|x\K\\{standard\_NaN};{}$\6
+${}\\{exceptions}\MRL{{\OR}{\K}}\.{I\_BIT}{}$;\5
+\&{break};\6
+\4\&{case} \T{4}${}*\\{num}+\\{num}{}$:\5
+\X43:Multiply nonzero numbers and \PB{\&{return}}\X;\6
+\4${}\}{}$\2\6
+\&{if} ${}(\\{xs}\E\.{'-'}){}$\1\5
+${}\|x.\|h\MRL{{\OR}{\K}}\\{sign\_bit};{}$\2\6
+\&{return} \|x;\6
+\4${}\}{}$\2\par
+\fi
+
+\M{42}\B\X42:The usual NaN cases\X${}\E{}$\6
+\4\&{case} \T{4}${}*\\{nan}+\\{nan}{}$:\5
+\&{if} ${}(\R(\|y.\|h\AND\T{\^80000})){}$\1\5
+${}\\{exceptions}\MRL{{\OR}{\K}}\.{I\_BIT}{}$;\C{ \PB{\|y} is signaling }\2\6
+\4\&{case} \T{4}${}*\\{zro}+\\{nan}{}$:\5
+\&{case} \T{4}${}*\\{num}+\\{nan}{}$:\5
+\&{case} \T{4}${}*\\{inf}+\\{nan}{}$:\6
+\&{if} ${}(\R(\|z.\|h\AND\T{\^80000})){}$\1\5
+${}\\{exceptions}\MRL{{\OR}{\K}}\.{I\_BIT},\39\|z.\|h\MRL{{\OR}{\K}}\T{%
+\^80000};{}$\2\6
+\&{return} \|z;\6
+\4\&{case} \T{4}${}*\\{nan}+\\{zro}{}$:\5
+\&{case} \T{4}${}*\\{nan}+\\{num}{}$:\5
+\&{case} \T{4}${}*\\{nan}+\\{inf}{}$:\6
+\&{if} ${}(\R(\|y.\|h\AND\T{\^80000})){}$\1\5
+${}\\{exceptions}\MRL{{\OR}{\K}}\.{I\_BIT},\39\|y.\|h\MRL{{\OR}{\K}}\T{%
+\^80000};{}$\2\6
+\&{return} \|y;\par
+\Us41, 44, 46\ETs93.\fi
+
+\M{43}\B\X43:Multiply nonzero numbers and \PB{\&{return}}\X${}\E{}$\6
+$\\{xe}\K\\{ye}+\\{ze}-\T{\^3fd}{}$;\C{ the raw exponent }\6
+${}\|x\K\\{omult}(\\{yf},\39\\{shift\_left}(\\{zf},\39\T{9}));{}$\6
+\&{if} ${}(\\{aux}.\|h\G\T{\^400000}){}$\1\5
+${}\\{xf}\K\\{aux};{}$\2\6
+\&{else}\1\5
+${}\\{xf}\K\\{shift\_left}(\\{aux},\39\T{1}),\39\\{xe}\MM;{}$\2\6
+\&{if} ${}(\|x.\|h\V\|x.\|l){}$\1\5
+${}\\{xf}.\|l\MRL{{\OR}{\K}}\T{1}{}$;\C{ adjust the sticky bit }\2\6
+\&{return} \\{fpack}${}(\\{xf},\39\\{xe},\39\\{xs},\39\\{cur\_round}){}$;\par
+\U41.\fi
+
+\M{44}\B\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{octa} \\{fdivide}\,\,${}\.{ARGS}((\&{octa},\39\&{octa})){}$;\5
+\hbox{}\6{}\&{octa} ${}\\{fdivide}(\|y,\39\|z){}$\1\1\6
+\&{octa} \|y${},{}$ \|z;\2\2\6
+${}\{{}$\1\6
+\&{ftype} \\{yt}${},{}$ \\{zt};\6
+\&{int} \\{ye}${},{}$ \\{ze};\6
+\&{char} \\{ys}${},{}$ \\{zs};\6
+\&{octa} \|x${},{}$ \\{xf}${},{}$ \\{yf}${},{}$ \\{zf};\6
+\&{register} \&{int} \\{xe};\6
+\&{register} \&{char} \\{xs};\7
+${}\\{yt}\K\\{funpack}(\|y,\39{\AND}\\{yf},\39{\AND}\\{ye},\39{\AND}\\{ys});{}$%
+\6
+${}\\{zt}\K\\{funpack}(\|z,\39{\AND}\\{zf},\39{\AND}\\{ze},\39{\AND}\\{zs});{}$%
+\6
+${}\\{xs}\K\\{ys}+\\{zs}-\.{'+'}{}$;\C{ will be \PB{\.{'-'}} when the result is
+negative }\6
+\&{switch} ${}(\T{4}*\\{yt}+\\{zt}){}$\5
+${}\{{}$\1\6
+\hbox{\4}\X42:The usual NaN cases\X;\6
+\4\&{case} \T{4}${}*\\{zro}+\\{inf}{}$:\5
+\&{case} \T{4}${}*\\{zro}+\\{num}{}$:\5
+\&{case} \T{4}${}*\\{num}+\\{inf}{}$:\5
+${}\|x\K\\{zero\_octa}{}$;\5
+\&{break};\6
+\4\&{case} \T{4}${}*\\{num}+\\{zro}{}$:\5
+${}\\{exceptions}\MRL{{\OR}{\K}}\.{Z\_BIT};{}$\6
+\4\&{case} \T{4}${}*\\{inf}+\\{num}{}$:\5
+\&{case} \T{4}${}*\\{inf}+\\{zro}{}$:\5
+${}\|x\K\\{inf\_octa}{}$;\5
+\&{break};\6
+\4\&{case} \T{4}${}*\\{zro}+\\{zro}{}$:\5
+\&{case} \T{4}${}*\\{inf}+\\{inf}{}$:\5
+${}\|x\K\\{standard\_NaN};{}$\6
+${}\\{exceptions}\MRL{{\OR}{\K}}\.{I\_BIT}{}$;\5
+\&{break};\6
+\4\&{case} \T{4}${}*\\{num}+\\{num}{}$:\5
+\X45:Divide nonzero numbers and \PB{\&{return}}\X;\6
+\4${}\}{}$\2\6
+\&{if} ${}(\\{xs}\E\.{'-'}){}$\1\5
+${}\|x.\|h\MRL{{\OR}{\K}}\\{sign\_bit};{}$\2\6
+\&{return} \|x;\6
+\4${}\}{}$\2\par
+\fi
+
+\M{45}\B\X45:Divide nonzero numbers and \PB{\&{return}}\X${}\E{}$\6
+$\\{xe}\K\\{ye}-\\{ze}+\T{\^3fd}{}$;\C{ the raw exponent }\6
+${}\\{xf}\K\\{odiv}(\\{yf},\39\\{zero\_octa},\39\\{shift\_left}(\\{zf},\39%
+\T{9}));{}$\6
+\&{if} ${}(\\{xf}.\|h\G\T{\^800000}){}$\5
+${}\{{}$\1\6
+${}\\{aux}.\|l\MRL{{\OR}{\K}}\\{xf}.\|l\AND\T{1};{}$\6
+${}\\{xf}\K\\{shift\_right}(\\{xf},\39\T{1},\39\T{1});{}$\6
+${}\\{xe}\PP;{}$\6
+\4${}\}{}$\2\6
+\&{if} ${}(\\{aux}.\|h\V\\{aux}.\|l){}$\1\5
+${}\\{xf}.\|l\MRL{{\OR}{\K}}\T{1}{}$;\C{ adjust the sticky bit }\2\6
+\&{return} \\{fpack}${}(\\{xf},\39\\{xe},\39\\{xs},\39\\{cur\_round}){}$;\par
+\U44.\fi
+
+\N{1}{46}Floating addition and subtraction. Now for the bread-and-butter
+operation, the sum of two floating point numbers.
+It is not terribly difficult, but many cases need to be handled carefully.
+
+\Y\B\4\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{octa} \\{fplus}\,\,${}\.{ARGS}((\&{octa},\39\&{octa})){}$;\5
+\hbox{}\6{}\&{octa} ${}\\{fplus}(\|y,\39\|z){}$\1\1\6
+\&{octa} \|y${},{}$ \|z;\2\2\6
+${}\{{}$\1\6
+\&{ftype} \\{yt}${},{}$ \\{zt};\6
+\&{int} \\{ye}${},{}$ \\{ze};\6
+\&{char} \\{ys}${},{}$ \\{zs};\6
+\&{octa} \|x${},{}$ \\{xf}${},{}$ \\{yf}${},{}$ \\{zf};\6
+\&{register} \&{int} \\{xe}${},{}$ \|d;\6
+\&{register} \&{char} \\{xs};\7
+${}\\{yt}\K\\{funpack}(\|y,\39{\AND}\\{yf},\39{\AND}\\{ye},\39{\AND}\\{ys});{}$%
+\6
+${}\\{zt}\K\\{funpack}(\|z,\39{\AND}\\{zf},\39{\AND}\\{ze},\39{\AND}\\{zs});{}$%
+\6
+\&{switch} ${}(\T{4}*\\{yt}+\\{zt}){}$\5
+${}\{{}$\1\6
+\hbox{\4}\X42:The usual NaN cases\X;\6
+\4\&{case} \T{4}${}*\\{zro}+\\{num}{}$:\5
+\&{return} \\{fpack}${}(\\{zf},\39\\{ze},\39\\{zs},\39\.{ROUND\_OFF}){}$;\5
+\&{break};\C{ may underflow }\6
+\4\&{case} \T{4}${}*\\{num}+\\{zro}{}$:\5
+\&{return} \\{fpack}${}(\\{yf},\39\\{ye},\39\\{ys},\39\.{ROUND\_OFF}){}$;\5
+\&{break};\C{ may underflow }\6
+\4\&{case} \T{4}${}*\\{inf}+\\{inf}{}$:\5
+\&{if} ${}(\\{ys}\I\\{zs}){}$\5
+${}\{{}$\1\6
+${}\\{exceptions}\MRL{{\OR}{\K}}\.{I\_BIT}{}$;\5
+${}\|x\K\\{standard\_NaN}{}$;\5
+${}\\{xs}\K\\{zs}{}$;\5
+\&{break};\6
+\4${}\}{}$\2\6
+\4\&{case} \T{4}${}*\\{num}+\\{inf}{}$:\5
+\&{case} \T{4}${}*\\{zro}+\\{inf}{}$:\5
+${}\|x\K\\{inf\_octa}{}$;\5
+${}\\{xs}\K\\{zs}{}$;\5
+\&{break};\6
+\4\&{case} \T{4}${}*\\{inf}+\\{num}{}$:\5
+\&{case} \T{4}${}*\\{inf}+\\{zro}{}$:\5
+${}\|x\K\\{inf\_octa}{}$;\5
+${}\\{xs}\K\\{ys}{}$;\5
+\&{break};\6
+\4\&{case} \T{4}${}*\\{num}+\\{num}{}$:\5
+\&{if} ${}(\|y.\|h\I(\|z.\|h\XOR\T{\^80000000})\V\|y.\|l\I\|z.\|l){}$\1\5
+\X47:Add nonzero numbers and \PB{\&{return}}\X;\2\6
+\4\&{case} \T{4}${}*\\{zro}+\\{zro}{}$:\5
+${}\|x\K\\{zero\_octa};{}$\6
+${}\\{xs}\K(\\{ys}\E\\{zs}\?\\{ys}:\\{cur\_round}\E\.{ROUND\_DOWN}\?\.{'-'}:%
+\.{'+'}){}$;\5
+\&{break};\6
+\4${}\}{}$\2\6
+\&{if} ${}(\\{xs}\E\.{'-'}){}$\1\5
+${}\|x.\|h\MRL{{\OR}{\K}}\\{sign\_bit};{}$\2\6
+\&{return} \|x;\6
+\4${}\}{}$\2\par
+\fi
+
+\M{47}\B\X47:Add nonzero numbers and \PB{\&{return}}\X${}\E{}$\6
+${}\{{}$\5
+\1\&{octa} \|o${},{}$ \\{oo};\7
+\&{if} ${}(\\{ye}<\\{ze}\V(\\{ye}\E\\{ze}\W(\\{yf}.\|h<\\{zf}.\|h\V(\\{yf}.\|h%
+\E\\{zf}.\|h\W\\{yf}.\|l<\\{zf}.\|l)))){}$\1\5
+\X48:Exchange \PB{\|y} with \PB{\|z}\X;\2\6
+${}\|d\K\\{ye}-\\{ze};{}$\6
+${}\\{xs}\K\\{ys},\39\\{xe}\K\\{ye};{}$\6
+\&{if} (\|d)\1\5
+\X49:Adjust for difference in exponents\X;\2\6
+\&{if} ${}(\\{ys}\E\\{zs}){}$\5
+${}\{{}$\1\6
+${}\\{xf}\K\\{oplus}(\\{yf},\39\\{zf});{}$\6
+\&{if} ${}(\\{xf}.\|h\G\T{\^800000}){}$\1\5
+${}\\{xe}\PP,\39\|d\K\\{xf}.\|l\AND\T{1},\39\\{xf}\K\\{shift\_right}(\\{xf},\39%
+\T{1},\39\T{1}),\39\\{xf}.\|l\MRL{{\OR}{\K}}\|d;{}$\2\6
+\4${}\}{}$\5
+\2\&{else}\5
+${}\{{}$\1\6
+${}\\{xf}\K\\{ominus}(\\{yf},\39\\{zf});{}$\6
+\&{if} ${}(\\{xf}.\|h\G\T{\^800000}){}$\1\5
+${}\\{xe}\PP,\39\|d\K\\{xf}.\|l\AND\T{1},\39\\{xf}\K\\{shift\_right}(\\{xf},\39%
+\T{1},\39\T{1}),\39\\{xf}.\|l\MRL{{\OR}{\K}}\|d;{}$\2\6
+\&{else}\5
+\1\&{while} ${}(\\{xf}.\|h<\T{\^400000}){}$\1\5
+${}\\{xe}\MM,\39\\{xf}\K\\{shift\_left}(\\{xf},\39\T{1});{}$\2\2\6
+\4${}\}{}$\2\6
+\&{return} \\{fpack}${}(\\{xf},\39\\{xe},\39\\{xs},\39\\{cur\_round});{}$\6
+\4${}\}{}$\2\par
+\U46.\fi
+
+\M{48}\B\X48:Exchange \PB{\|y} with \PB{\|z}\X${}\E{}$\6
+${}\{{}$\1\6
+${}\|o\K\\{yf},\39\\{yf}\K\\{zf},\39\\{zf}\K\|o;{}$\6
+${}\|d\K\\{ye},\39\\{ye}\K\\{ze},\39\\{ze}\K\|d;{}$\6
+${}\|d\K\\{ys},\39\\{ys}\K\\{zs},\39\\{zs}\K\|d;{}$\6
+\4${}\}{}$\2\par
+\Us47\ET51.\fi
+
+\M{49}Proper rounding requires two bits to the right of the fraction delivered
+to~\PB{\\{fpack}}. The first is the true next bit of the result;
+the other is a ``sticky'' bit, which is nonzero if any further bits of the
+true result are nonzero. Sticky rounding to an integer takes
+$x$ into the number $\lfloor x/2\rfloor+\lceil x/2\rceil$.
+
+Some subtleties need to be observed here, in order to
+prevent the sticky bit from being shifted left. If we did not
+shift \PB{\\{yf}} left~1 before shifting \PB{\\{zf}} to the right, an incorrect
+answer would be obtained in certain cases---for example, if
+$\PB{\\{yf}}=2^{54}$, $\PB{\\{zf}}=2^{54}+2^{53}-1$, $d=52$.
+
+\Y\B\4\X49:Adjust for difference in exponents\X${}\E{}$\6
+${}\{{}$\1\6
+\&{if} ${}(\|d\Z\T{2}){}$\1\5
+${}\\{zf}\K\\{shift\_right}(\\{zf},\39\|d,\39\T{1}){}$;\C{ exact result }\2\6
+\&{else} \&{if} ${}(\|d>\T{53}){}$\1\5
+${}\\{zf}.\|h\K\T{0},\39\\{zf}.\|l\K\T{1}{}$;\C{ tricky but OK }\2\6
+\&{else}\5
+${}\{{}$\1\6
+\&{if} ${}(\\{ys}\I\\{zs}){}$\1\5
+${}\|d\MM,\39\\{xe}\MM,\39\\{yf}\K\\{shift\_left}(\\{yf},\39\T{1});{}$\2\6
+${}\|o\K\\{zf};{}$\6
+${}\\{zf}\K\\{shift\_right}(\|o,\39\|d,\39\T{1});{}$\6
+${}\\{oo}\K\\{shift\_left}(\\{zf},\39\|d);{}$\6
+\&{if} ${}(\\{oo}.\|l\I\|o.\|l\V\\{oo}.\|h\I\|o.\|h){}$\1\5
+${}\\{zf}.\|l\MRL{{\OR}{\K}}\T{1};{}$\2\6
+\4${}\}{}$\2\6
+\4${}\}{}$\2\par
+\U47.\fi
+
+\M{50}The comparison of floating point numbers with respect to $\epsilon$
+shares some of the characteristics of floating point addition/subtraction.
+In some ways it is simpler, and in other ways it is more difficult;
+we might as well deal with it now. % anyways
+
+Subroutine \PB{$\\{fepscomp}(\|y,\|z,\|e,\|s)$} returns 2 if \PB{\|y}, \PB{%
+\|z}, or \PB{\|e} is a NaN
+or \PB{\|e} is negative. It returns 1 if \PB{$\|s\K\T{0}$} and $y\approx z\
+(e)$ or if
+\PB{$\|s\I\T{0}$} and $y\sim z\ (e)$,
+as defined in Section~4.2.2 of {\sl Seminumerical Algorithms\/};
+otherwise it returns~0.
+
+\Y\B\4\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{int} \\{fepscomp}\,\,${}\.{ARGS}((\&{octa},\39\&{octa},\39\&{octa},\39%
+\&{int})){}$;\5
+\hbox{}\6{}\&{int} ${}\\{fepscomp}(\|y,\39\|z,\39\|e,\39\|s){}$\1\1\6
+\&{octa} \|y${},{}$ \|z${},{}$ \|e;\C{ the operands }\6
+\&{int} \|s;\C{ test similarity? }\2\2\6
+${}\{{}$\1\6
+\&{octa} \\{yf}${},{}$ \\{zf}${},{}$ \\{ef}${},{}$ \|o${},{}$ \\{oo};\6
+\&{int} \\{ye}${},{}$ \\{ze}${},{}$ \\{ee};\6
+\&{char} \\{ys}${},{}$ \\{zs}${},{}$ \\{es};\6
+\&{register} \&{int} \\{yt}${},{}$ \\{zt}${},{}$ \\{et}${},{}$ \|d;\7
+${}\\{et}\K\\{funpack}(\|e,\39{\AND}\\{ef},\39{\AND}\\{ee},\39{\AND}\\{es});{}$%
+\6
+\&{if} ${}(\\{es}\E\.{'-'}){}$\1\5
+\&{return} \T{2};\2\6
+\&{switch} (\\{et})\5
+${}\{{}$\1\6
+\4\&{case} \\{nan}:\5
+\&{return} \T{2};\6
+\4\&{case} \\{inf}:\5
+${}\\{ee}\K\T{10000};{}$\6
+\4\&{case} \\{num}:\5
+\&{case} \\{zro}:\5
+\&{break};\6
+\4${}\}{}$\2\6
+${}\\{yt}\K\\{funpack}(\|y,\39{\AND}\\{yf},\39{\AND}\\{ye},\39{\AND}\\{ys});{}$%
+\6
+${}\\{zt}\K\\{funpack}(\|z,\39{\AND}\\{zf},\39{\AND}\\{ze},\39{\AND}\\{zs});{}$%
+\6
+\&{switch} ${}(\T{4}*\\{yt}+\\{zt}){}$\5
+${}\{{}$\1\6
+\4\&{case} \T{4}${}*\\{nan}+\\{nan}{}$:\5
+\&{case} \T{4}${}*\\{nan}+\\{inf}{}$:\5
+\&{case} \T{4}${}*\\{nan}+\\{num}{}$:\5
+\&{case} \T{4}${}*\\{nan}+\\{zro}{}$:\5
+\&{case} \T{4}${}*\\{inf}+\\{nan}{}$:\5
+\&{case} \T{4}${}*\\{num}+\\{nan}{}$:\5
+\&{case} \T{4}${}*\\{zro}+\\{nan}{}$:\5
+\&{return} \T{2};\6
+\4\&{case} \T{4}${}*\\{inf}+\\{inf}{}$:\5
+\&{return} ${}(\\{ys}\E\\{zs}\V\\{ee}\G\T{1023});{}$\6
+\4\&{case} \T{4}${}*\\{inf}+\\{num}{}$:\5
+\&{case} \T{4}${}*\\{inf}+\\{zro}{}$:\5
+\&{case} \T{4}${}*\\{num}+\\{inf}{}$:\5
+\&{case} \T{4}${}*\\{zro}+\\{inf}{}$:\5
+\&{return} ${}(\|s\W\\{ee}\G\T{1022});{}$\6
+\4\&{case} \T{4}${}*\\{zro}+\\{zro}{}$:\5
+\&{return} \T{1};\6
+\4\&{case} \T{4}${}*\\{zro}+\\{num}{}$:\5
+\&{case} \T{4}${}*\\{num}+\\{zro}{}$:\5
+\&{if} ${}(\R\|s){}$\1\5
+\&{return} \T{0};\2\6
+\4\&{case} \T{4}${}*\\{num}+\\{num}{}$:\5
+\&{break};\6
+\4${}\}{}$\2\6
+\X51:Compare two numbers with respect to epsilon and \PB{\&{return}}\X;\6
+\4${}\}{}$\2\par
+\fi
+
+\M{51}The relation $y\approx z\ (\epsilon)$ reduces to
+$y\sim z\ (\epsilon/2^d)$, if $d$~is the difference between the
+larger and smaller exponents of $y$ and~$z$.
+
+\Y\B\4\X51:Compare two numbers with respect to epsilon and \PB{\&{return}}\X${}%
+\E{}$\6
+\X52:Unsubnormalize \PB{\|y} and \PB{\|z}, if they are subnormal\X;\6
+\&{if} ${}(\\{ye}<\\{ze}\V(\\{ye}\E\\{ze}\W(\\{yf}.\|h<\\{zf}.\|h\V(\\{yf}.\|h%
+\E\\{zf}.\|h\W\\{yf}.\|l<\\{zf}.\|l)))){}$\1\5
+\X48:Exchange \PB{\|y} with \PB{\|z}\X;\2\6
+\&{if} ${}(\\{ze}\E\\{zero\_exponent}){}$\1\5
+${}\\{ze}\K\\{ye};{}$\2\6
+${}\|d\K\\{ye}-\\{ze};{}$\6
+\&{if} ${}(\R\|s){}$\1\5
+${}\\{ee}\MRL{-{\K}}\|d;{}$\2\6
+\&{if} ${}(\\{ee}\G\T{1023}){}$\1\5
+\&{return} \T{1};\C{ if $\epsilon\ge2$, $z\in N_\epsilon(y)$ }\2\6
+\X53:Compute the difference of fraction parts, \PB{\|o}\X;\6
+\&{if} ${}(\R\|o.\|h\W\R\|o.\|l){}$\1\5
+\&{return} \T{1};\2\6
+\&{if} ${}(\\{ee}<\T{968}){}$\1\5
+\&{return} \T{0};\C{ if $y\ne z$ and $\epsilon<2^{-54}$, $y\not\sim z$ }\2\6
+\&{if} ${}(\\{ee}\G\T{1021}){}$\1\5
+${}\\{ef}\K\\{shift\_left}(\\{ef},\39\\{ee}-\T{1021});{}$\2\6
+\&{else}\1\5
+${}\\{ef}\K\\{shift\_right}(\\{ef},\39\T{1021}-\\{ee},\39\T{1});{}$\2\6
+\&{return} \|o${}.\|h<\\{ef}.\|h\V(\|o.\|h\E\\{ef}.\|h\W\|o.\|l\Z\\{ef}.%
+\|l){}$;\par
+\U50.\fi
+
+\M{52}\B\X52:Unsubnormalize \PB{\|y} and \PB{\|z}, if they are subnormal\X${}%
+\E{}$\6
+\&{if} ${}(\\{ye}<\T{0}\W\\{yt}\I\\{zro}){}$\1\5
+${}\\{yf}\K\\{shift\_left}(\|y,\39\T{2}),\39\\{ye}\K\T{0};{}$\2\6
+\&{if} ${}(\\{ze}<\T{0}\W\\{zt}\I\\{zro}){}$\1\5
+${}\\{zf}\K\\{shift\_left}(\|z,\39\T{2}),\39\\{ze}\K\T{0}{}$;\2\par
+\U51.\fi
+
+\M{53}At this point $y\sim z$ if and only if
+$$\PB{\\{yf}}+(-1)^{[ys=zs]}\PB{\\{zf}}/2^d\le 2^{ee-1021}\PB{\\{ef}}=2^{55}%
+\epsilon.$$
+We need to evaluate this relation without overstepping the bounds of
+our simulated 64-bit registers.
+
+When $d>2$, the difference of fraction parts might not fit exactly
+in an octabyte;
+in that case the numbers are not similar unless $\epsilon>3/8$,
+and we replace the difference by the ceiling of the
+true result. When $\epsilon<1/8$, our program essentially replaces
+$2^{55}\epsilon$ by $\lfloor2^{55}\epsilon\rfloor$. These
+truncations are not needed simultaneously. Therefore the logic
+is justified by the facts that, if $n$ is an integer, we have
+$x\le n$ if and only if $\lceil x\rceil\le n$;
+$n\le x$ if and only if $n\le\lfloor x\rfloor$. (Notice that the
+concept of ``sticky bit'' is {\it not\/} appropriate here.)
+
+\Y\B\4\X53:Compute the difference of fraction parts, \PB{\|o}\X${}\E{}$\6
+\&{if} ${}(\|d>\T{54}){}$\1\5
+${}\|o\K\\{zero\_octa},\39\\{oo}\K\\{zf};{}$\2\6
+\&{else}\1\5
+${}\|o\K\\{shift\_right}(\\{zf},\39\|d,\39\T{1}),\39\\{oo}\K\\{shift\_left}(%
+\|o,\39\|d);{}$\2\6
+\&{if} ${}(\\{oo}.\|h\I\\{zf}.\|h\V\\{oo}.\|l\I\\{zf}.\|l){}$\5
+${}\{{}$\C{ truncated result, hence $d>2$ }\1\6
+\&{if} ${}(\\{ee}<\T{1020}){}$\1\5
+\&{return} \T{0};\C{ difference is too large for similarity }\2\6
+${}\|o\K\\{incr}(\|o,\39\\{ys}\E\\{zs}\?\T{0}:\T{1}){}$;\C{ adjust for ceiling
+}\6
+\4${}\}{}$\2\6
+${}\|o\K(\\{ys}\E\\{zs}\?\\{ominus}(\\{yf},\39\|o):\\{oplus}(\\{yf},\39%
+\|o)){}$;\par
+\U51.\fi
+
+\N{1}{54}Floating point output conversion.
+The \PB{\\{print\_float}} routine converts an octabyte to a floating decimal
+representation that will be input as precisely the same value.
+
+\Y\B\4\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{static} \&{void} \\{bignum\_times\_ten}\,\,${}\.{ARGS}((\\{bignum}*));{}$\6
+\&{static} \&{void} \\{bignum\_dec}\,\,${}\.{ARGS}((\\{bignum}*,\\{bignum}*,%
+\&{tetra}));{}$\6
+\&{static} \&{int} \\{bignum\_compare}\,\,${}\.{ARGS}((\\{bignum}*,%
+\\{bignum}*));{}$\6
+\&{void} \\{print\_float}\,\,\.{ARGS}((\&{octa}));\5
+\hbox{}\6{}\&{void} \\{print\_float}(\|x)\1\1\6
+\&{octa} \|x;\2\2\6
+${}\{{}$\1\6
+\X56:Local variables for \PB{\\{print\_float}}\X;\6
+\&{if} ${}(\|x.\|h\AND\\{sign\_bit}){}$\1\5
+\\{printf}(\.{"-"});\2\6
+\X55:Extract the exponent \PB{\|e} and determine the fraction interval $[f\dts
+g]$ or $(f\dts g)$\X;\6
+\X63:Store $f$ and $g$ as multiprecise integers\X;\6
+\X64:Compute the significant digits \PB{\|s} and decimal exponent \PB{\|e}\X;\6
+\X67:Print the significant digits with proper context\X;\6
+\4${}\}{}$\2\par
+\fi
+
+\M{55}One way to visualize the problem being solved here is to consider
+the vastly simpler case in which there are only 2-bit exponents
+and 2-bit fractions. Then the sixteen possible 4-bit combinations
+have the following interpretations:
+$$\def\\{\;\dts\;}
+\vbox{\halign{#\qquad&$#$\hfil\cr
+0000&[0\\0.125]\cr
+0001&(0.125\\0.375)\cr
+0010&[0.375\\0.625]\cr
+0011&(0.625\\0.875)\cr
+0100&[0.875\\1.125]\cr
+0101&(1.125\\1.375)\cr
+0110&[1.375\\1.625]\cr
+0111&(1.625\\1.875)\cr
+1000&[1.875\\2.25]\cr
+1001&(2.25\\2.75)\cr
+1010&[2.75\\3.25]\cr
+1011&(3.25\\3.75)\cr
+1100&[3.75\\\infty]\cr
+1101&\rm NaN(0\\0.375)\cr
+1110&\rm NaN[0.375\\0.625]\cr
+1111&\rm NaN(0.625\\1)\cr}}$$
+Notice that the interval is closed, $[f\dts g]$, when the fraction part
+is even; it is open, $(f\dts g)$, when the fraction part is odd.
+The printed outputs for these sixteen values, if we actually were
+dealing with such short exponents and fractions, would be
+\.{0.}, \.{.2}, \.{.5}, \.{.7}, \.{1.}, \.{1.2}, \.{1.5}, \.{1.7},
+\.{2.}, \.{2.5}, \.{3.}, \.{3.5}, \.{Inf}, \.{NaN.2}, \.{NaN}, \.{NaN.8},
+respectively.
+
+\Y\B\4\X55:Extract the exponent \PB{\|e} and determine the fraction interval
+$[f\dts g]$ or $(f\dts g)$\X${}\E{}$\6
+$\|f\K\\{shift\_left}(\|x,\39\T{1});{}$\6
+${}\|e\K\|f.\|h\GG\T{21};{}$\6
+${}\|f.\|h\MRL{\AND{\K}}\T{\^1fffff};{}$\6
+\&{if} ${}(\R\|f.\|h\W\R\|f.\|l){}$\1\5
+\X57:Handle the special case when the fraction part is zero\X\2\6
+\&{else}\5
+${}\{{}$\1\6
+${}\|g\K\\{incr}(\|f,\39\T{1});{}$\6
+${}\|f\K\\{incr}(\|f,\39{-}\T{1});{}$\6
+\&{if} ${}(\R\|e){}$\1\5
+${}\|e\K\T{1}{}$;\C{ subnormal }\2\6
+\&{else} \&{if} ${}(\|e\E\T{\^7ff}){}$\5
+${}\{{}$\1\6
+\\{printf}(\.{"NaN"});\6
+\&{if} ${}(\|g.\|h\E\T{\^100000}\W\|g.\|l\E\T{1}){}$\1\5
+\&{return};\C{ the ``standard'' NaN }\2\6
+${}\|e\K\T{\^3ff}{}$;\C{ extreme NaNs come out OK even without adjusting \PB{%
+\|f} or \PB{\|g} }\6
+\4${}\}{}$\5
+\2\&{else}\1\5
+${}\|f.\|h\MRL{{\OR}{\K}}\T{\^200000},\39\|g.\|h\MRL{{\OR}{\K}}\T{\^200000};{}$%
+\2\6
+\4${}\}{}$\2\par
+\U54.\fi
+
+\M{56}\B\X56:Local variables for \PB{\\{print\_float}}\X${}\E{}$\6
+\&{octa} \|f${},{}$ \|g;\C{ lower and upper bounds on the fraction part }\6
+\&{register} \&{int} \|e;\C{ exponent part }\6
+\&{register} \&{int} \|j${},{}$ \|k;\C{ all purpose indices }\par
+\A66.
+\U54.\fi
+
+\M{57}The transition points between exponents correspond to powers of~2. At
+such points the interval extends only half as far to the left of that
+power of~2 as it does to the right. For example, in the 4-bit minifloat numbers
+considered above, case 1000 corresponds to the interval $[1.875\;\dts\;2.25]$.
+
+\Y\B\4\X57:Handle the special case when the fraction part is zero\X${}\E{}$\6
+${}\{{}$\1\6
+\&{if} ${}(\R\|e){}$\5
+${}\{{}$\1\6
+\\{printf}(\.{"0."});\5
+\&{return};\6
+\4${}\}{}$\2\6
+\&{if} ${}(\|e\E\T{\^7ff}){}$\5
+${}\{{}$\1\6
+\\{printf}(\.{"Inf"});\5
+\&{return};\6
+\4${}\}{}$\2\6
+${}\|e\MM;{}$\6
+${}\|f.\|h\K\T{\^3fffff},\39\|f.\|l\K\T{\^ffffffff};{}$\6
+${}\|g.\|h\K\T{\^400000},\39\|g.\|l\K\T{2};{}$\6
+\4${}\}{}$\2\par
+\U55.\fi
+
+\M{58}We want to find the ``simplest'' value in the interval corresponding
+to the given number, in the sense that it has fewest significant
+digits when expressed in decimal notation. Thus, for example,
+if the floating point number can be described by a relatively
+short string such as `\.{.1}' or `\.{37e100}', we want to discover that
+representation.
+
+The basic idea is to generate the decimal representations of the
+two endpoints of the interval, outputting the leading digits where
+both endpoints agree, then making a final decision at the first place where
+they disagree.
+
+The ``simplest'' value is not always unique. For example, in the
+case of 4-bit minifloat numbers we could represent the bit pattern 0001 as
+either \.{.2} or \.{.3}, and we could represent 1001 in five equally short
+ways: \.{2.3} or \.{2.4} or \.{2.5} or \.{2.6} or \.{2.7}. The
+algorithm below tries to choose the middle possibility in such cases.
+
+[A solution to the analogous problem for fixed-point representations,
+without the additional complication of round-to-even, was used by
+the author in the program for \TeX; see {\sl Beauty is Our Business\/}
+(Springer, 1990), 233--242.]
+
+Suppose we are given two fractions $f$ and $g$, where $0\le f<g<1$, and
+we want to compute the shortest decimal in the closed interval $[f\dts g]$.
+If $f=0$, we are done. Otherwise let $10f=d+f'$ and $10g=e+g'$, where
+$0\le f'<1$ and $0\le g'<1$. If $d<e$, we can terminate by outputting
+any of the digits $d+1$, \dots,~$e$; otherwise we output the
+common digit $d=e$, and repeat the process on the fractions $0\le f'<g'<1$.
+A similar procedure works with respect to the open interval $(f\dts g)$.
+
+\fi
+
+\M{59}The program below carries out the stated algorithm by using
+multiprecision
+arithmetic on 77-place integers with 28 bits each. This choice
+facilitates multiplication by~10, and allows us to deal with the whole range of
+floating binary numbers using fixed point arithmetic. We keep track of
+the leading and trailing digit positions so that trivial operations on
+zeros are avoided.
+
+If \PB{\|f} points to a \&{bignum}, its radix-$2^{28}$ digits are
+\PB{$\|f\MG\\{dat}[\T{0}]$} through \PB{$\|f\MG\\{dat}[\T{76}]$}, from most
+significant to least significant.
+We assume that all digit positions are zero unless they lie in the
+subarray between indices \PB{$\|f\MG\|a$} and \PB{$\|f\MG\|b$}, inclusive.
+Furthermore, both \PB{$\|f\MG\\{dat}[\|f\MG\|a]$} and \PB{$\|f\MG\\{dat}[\|f\MG%
+\|b]$} are nonzero,
+unless \PB{$\|f\MG\|a\K\|f\MG\|b\K\\{bignum\_prec}-\T{1}$}.
+
+The \&{bignum} data type can be used with any radix less than
+$2^{32}$; we will use it later with radix~$10^9$. The \PB{\\{dat}} array
+is made large enough to accommodate both applications.
+
+\Y\B\4\D$\\{bignum\_prec}$ \5
+\T{157}\C{ would be 77 if we cared only about \PB{\\{print\_float}} }\par
+\Y\B\4\X36:Other type definitions\X${}\mathrel+\E{}$\6
+\&{typedef} \&{struct} ${}\{{}$\1\6
+\&{int} \|a;\C{ index of the most significant digit }\6
+\&{int} \|b;\C{ index of the least significant digit; must be $\ge a$ }\6
+\&{tetra} \\{dat}[\\{bignum\_prec}];\C{ the digits; undefined except between %
+\PB{\|a} and \PB{\|b} }\2\6
+${}\}{}$ \&{bignum};\par
+\fi
+
+\M{60}Here, for example, is how we go from $f$ to $10f$, assuming that
+overflow will not occur and that the radix is $2^{28}$:
+
+\Y\B\4\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{static} \&{void} \\{bignum\_times\_ten}(\|f)\1\1\6
+\&{bignum} ${}{*}\|f;\2\2{}$\6
+${}\{{}$\1\6
+\&{register} \&{tetra} ${}{*}\|p,{}$ ${}{*}\|q;{}$\6
+\&{register} \&{tetra} \|x${},{}$ \\{carry};\7
+\&{for} ${}(\|p\K{\AND}\|f\MG\\{dat}[\|f\MG\|b],\39\|q\K{\AND}\|f\MG\\{dat}[\|f%
+\MG\|a],\39\\{carry}\K\T{0};{}$ ${}\|p\G\|q;{}$ ${}\|p\MM){}$\5
+${}\{{}$\1\6
+${}\|x\K{*}\|p*\T{10}+\\{carry};{}$\6
+${}{*}\|p\K\|x\AND\T{\^fffffff};{}$\6
+${}\\{carry}\K\|x\GG\T{28};{}$\6
+\4${}\}{}$\2\6
+${}{*}\|p\K\\{carry};{}$\6
+\&{if} (\\{carry})\1\5
+${}\|f\MG\|a\MM;{}$\2\6
+\&{if} ${}(\|f\MG\\{dat}[\|f\MG\|b]\E\T{0}\W\|f\MG\|b>\|f\MG\|a){}$\1\5
+${}\|f\MG\|b\MM;{}$\2\6
+\4${}\}{}$\2\par
+\fi
+
+\M{61}And here is how we test whether $f<g$, $f=g$, or $f>g$, using any
+radix whatever:
+
+\Y\B\4\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{static} \&{int} ${}\\{bignum\_compare}(\|f,\39\|g){}$\1\1\6
+\&{bignum} ${}{*}\|f,{}$ ${}{*}\|g;\2\2{}$\6
+${}\{{}$\1\6
+\&{register} \&{tetra} ${}{*}\|p,{}$ ${}{*}\\{pp},{}$ ${}{*}\|q,{}$ ${}{*}%
+\\{qq};{}$\7
+\&{if} ${}(\|f\MG\|a\I\|g\MG\|a){}$\1\5
+\&{return} \|f${}\MG\|a>\|g\MG\|a\?{-}\T{1}:\T{1};{}$\2\6
+${}\\{pp}\K{\AND}\|f\MG\\{dat}[\|f\MG\|b],\39\\{qq}\K{\AND}\|g\MG\\{dat}[\|g\MG%
+\|b];{}$\6
+\&{for} ${}(\|p\K{\AND}\|f\MG\\{dat}[\|f\MG\|a],\39\|q\K{\AND}\|g\MG\\{dat}[\|g%
+\MG\|a];{}$ ${}\|p\Z\\{pp};{}$ ${}\|p\PP,\39\|q\PP){}$\5
+${}\{{}$\1\6
+\&{if} ${}({*}\|p\I{*}\|q){}$\1\5
+\&{return} ${}{*}\|p<{*}\|q\?{-}\T{1}:\T{1};{}$\2\6
+\&{if} ${}(\|q\E\\{qq}){}$\1\5
+\&{return} \|p${}<\\{pp};{}$\2\6
+\4${}\}{}$\2\6
+\&{return} ${}{-}\T{1};{}$\6
+\4${}\}{}$\2\par
+\fi
+
+\M{62}The following subroutine subtracts $g$ from~$f$, assuming that
+$f\ge g>0$ and using a given radix.
+
+\Y\B\4\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{static} \&{void} ${}\\{bignum\_dec}(\|f,\39\|g,\39\|r){}$\1\1\6
+\&{bignum} ${}{*}\|f,{}$ ${}{*}\|g;{}$\6
+\&{tetra} \|r;\C{ the radix }\2\2\6
+${}\{{}$\1\6
+\&{register} \&{tetra} ${}{*}\|p,{}$ ${}{*}\|q,{}$ ${}{*}\\{qq};{}$\6
+\&{register} \&{int} \|x${},{}$ \\{borrow};\7
+\&{while} ${}(\|g\MG\|b>\|f\MG\|b){}$\1\5
+${}\|f\MG\\{dat}[\PP\|f\MG\|b]\K\T{0};{}$\2\6
+${}\\{qq}\K{\AND}\|g\MG\\{dat}[\|g\MG\|a];{}$\6
+\&{for} ${}(\|p\K{\AND}\|f\MG\\{dat}[\|g\MG\|b],\39\|q\K{\AND}\|g\MG\\{dat}[\|g%
+\MG\|b],\39\\{borrow}\K\T{0};{}$ ${}\|q\G\\{qq};{}$ ${}\|p\MM,\39\|q\MM){}$\5
+${}\{{}$\1\6
+${}\|x\K{*}\|p-{*}\|q-\\{borrow};{}$\6
+\&{if} ${}(\|x\G\T{0}){}$\1\5
+${}\\{borrow}\K\T{0},\39{*}\|p\K\|x;{}$\2\6
+\&{else}\1\5
+${}\\{borrow}\K\T{1},\39{*}\|p\K\|x+\|r;{}$\2\6
+\4${}\}{}$\2\6
+\&{for} ( ; \\{borrow}; ${}\|p\MM){}$\1\6
+\&{if} ${}({*}\|p){}$\1\5
+${}\\{borrow}\K\T{0},\39{*}\|p\K{*}\|p-\T{1};{}$\2\6
+\&{else}\1\5
+${}{*}\|p\K\|r-\T{1};{}$\2\2\6
+\&{while} ${}(\|f\MG\\{dat}[\|f\MG\|a]\E\T{0}){}$\5
+${}\{{}$\1\6
+\&{if} ${}(\|f\MG\|a\E\|f\MG\|b){}$\5
+${}\{{}$\C{ the result is zero }\1\6
+${}\|f\MG\|a\K\|f\MG\|b\K\\{bignum\_prec}-\T{1},\39\|f\MG\\{dat}[\\{bignum%
+\_prec}-\T{1}]\K\T{0};{}$\6
+\&{return};\6
+\4${}\}{}$\2\6
+${}\|f\MG\|a\PP;{}$\6
+\4${}\}{}$\2\6
+\&{while} ${}(\|f\MG\\{dat}[\|f\MG\|b]\E\T{0}){}$\1\5
+${}\|f\MG\|b\MM;{}$\2\6
+\4${}\}{}$\2\par
+\fi
+
+\M{63}Armed with these subroutines, we are ready to solve the problem.
+The first task is to put the numbers into \&{bignum} form.
+If the exponent is \PB{\|e}, the number destined for digit \PB{\\{dat}[\|k]}
+will
+consist of the rightmost 28 bits of the given fraction after it has
+been shifted right $c-e-28k$ bits, for some constant~$c$.
+We choose $c$ so that,
+when $e$ has its maximum value \Hex{7ff}, the leading digit will
+go into position \PB{\\{dat}[\T{1}]}, and so that when the number to be printed
+is exactly~1 the integer part of~$g$ will also be exactly~1.
+
+\Y\B\4\D$\\{magic\_offset}$ \5
+\T{2112}\C{ the constant $c$ that makes it work }\par
+\B\4\D$\\{origin}$ \5
+\T{37}\C{ the radix point follows \PB{\\{dat}[\T{37}]} }\par
+\Y\B\4\X63:Store $f$ and $g$ as multiprecise integers\X${}\E{}$\6
+$\|k\K(\\{magic\_offset}-\|e)/\T{28};{}$\6
+${}\ff.\\{dat}[\|k-\T{1}]\K\\{shift\_right}(\|f,\39\\{magic\_offset}+\T{28}-%
+\|e-\T{28}*\|k,\39\T{1}).\|l\AND\T{\^fffffff};{}$\6
+${}\\{gg}.\\{dat}[\|k-\T{1}]\K\\{shift\_right}(\|g,\39\\{magic\_offset}+\T{28}-%
+\|e-\T{28}*\|k,\39\T{1}).\|l\AND\T{\^fffffff};{}$\6
+${}\ff.\\{dat}[\|k]\K\\{shift\_right}(\|f,\39\\{magic\_offset}-\|e-\T{28}*\|k,%
+\39\T{1}).\|l\AND\T{\^fffffff};{}$\6
+${}\\{gg}.\\{dat}[\|k]\K\\{shift\_right}(\|g,\39\\{magic\_offset}-\|e-\T{28}*%
+\|k,\39\T{1}).\|l\AND\T{\^fffffff};{}$\6
+${}\ff.\\{dat}[\|k+\T{1}]\K\\{shift\_left}(\|f,\39\|e+\T{28}*\|k-(\\{magic%
+\_offset}-\T{28})).\|l\AND\T{\^fffffff};{}$\6
+${}\\{gg}.\\{dat}[\|k+\T{1}]\K\\{shift\_left}(\|g,\39\|e+\T{28}*\|k-(\\{magic%
+\_offset}-\T{28})).\|l\AND\T{\^fffffff};{}$\6
+${}\ff.\|a\K(\ff.\\{dat}[\|k-\T{1}]\?\|k-\T{1}:\|k);{}$\6
+${}\ff.\|b\K(\ff.\\{dat}[\|k+\T{1}]\?\|k+\T{1}:\|k);{}$\6
+${}\\{gg}.\|a\K(\\{gg}.\\{dat}[\|k-\T{1}]\?\|k-\T{1}:\|k);{}$\6
+${}\\{gg}.\|b\K(\\{gg}.\\{dat}[\|k+\T{1}]\?\|k+\T{1}:\|k){}$;\par
+\U54.\fi
+
+\M{64}If $e$ is sufficiently small, the fractions $f$ and $g$ will be less
+than~1,
+and we can use the stated algorithm directly. Of course, if $e$ is
+extremely small, a lot of leading zeros need to be lopped off; in the
+worst case, we may have to multiply $f$ and~$g$ by~10 more than 300 times.
+But hey, we don't need to do that extremely often, and computers are
+pretty fast nowadays.
+
+In the small-exponent case, the computation always terminates before
+$f$ becomes zero, because the interval endpoints are fractions with
+denominator $2^t$ for some $t>50$.
+
+The invariant relations \PB{$\ff.\\{dat}[\ff.\|a]\I\T{0}$} and \PB{$\\{gg}.%
+\\{dat}[\\{gg}.\|a]\I\T{0}$} are
+not maintained by the computation here, when \PB{$\ff.\|a\K\\{origin}$} or %
+\PB{$\\{gg}.\|a\K\\{origin}$}.
+But no harm is done, because \PB{\\{bignum\_compare}} is not used.
+
+\Y\B\4\X64:Compute the significant digits \PB{\|s} and decimal exponent \PB{%
+\|e}\X${}\E{}$\6
+\&{if} ${}(\|e>\T{\^401}){}$\1\5
+\X65:Compute the significant digits in the large-exponent case\X\2\6
+\&{else}\5
+${}\{{}$\C{ if \PB{$\|e\Z\T{\^401}$} we have \PB{$\\{gg}.\|a\G\\{origin}$} and %
+\PB{$\\{gg}.\\{dat}[\\{origin}]\Z\T{8}$} }\1\6
+\&{if} ${}(\ff.\|a>\\{origin}){}$\1\5
+${}\ff.\\{dat}[\\{origin}]\K\T{0};{}$\2\6
+\&{for} ${}(\|e\K\T{1},\39\|p\K\|s;{}$ ${}\\{gg}.\|a>\\{origin}\V\ff.\\{dat}[%
+\\{origin}]\E\\{gg}.\\{dat}[\\{origin}];{}$ \,)\5
+${}\{{}$\1\6
+\&{if} ${}(\\{gg}.\|a>\\{origin}){}$\1\5
+${}\|e\MM;{}$\2\6
+\&{else}\1\5
+${}{*}\|p\PP\K\ff.\\{dat}[\\{origin}]+\.{'0'},\39\ff.\\{dat}[\\{origin}]\K%
+\T{0},\39\\{gg}.\\{dat}[\\{origin}]\K\T{0};{}$\2\6
+${}\\{bignum\_times\_ten}({\AND}\ff);{}$\6
+${}\\{bignum\_times\_ten}({\AND}\\{gg});{}$\6
+\4${}\}{}$\2\6
+${}{*}\|p\PP\K((\ff.\\{dat}[\\{origin}]+\T{1}+\\{gg}.\\{dat}[\\{origin}])\GG%
+\T{1})+\.{'0'}{}$;\C{ the middle digit }\6
+\4${}\}{}$\2\6
+${}{*}\|p\K\.{'\\0'}{}$;\C{ terminate the string \PB{\|s} }\par
+\U54.\fi
+
+\M{65}When \PB{\|e} is large, we use the stated algorithm by considering $f$
+and
+$g$ to be fractions whose denominator is a power of~10.
+
+An interesting case arises when the number to be converted is
+\Hex{44ada56a4b0835bf}, since the interval turns out to be
+$$ (69999999999999991611392\ \ \dts\ \ 70000000000000000000000).$$
+If this were a closed interval, we could simply give the answer
+\.{7e22}; but the number \.{7e22} actually corresponds to
+\Hex{44ada56a4b0835c0}
+because of the round-to-even rule. Therefore the correct answer is, say,
+\.{6.9999999999999995e22}. This example shows that we need a slightly
+different strategy in the case of open intervals; we cannot simply
+look at the first position in which the endpoints have different
+decimal digits. Therefore we change the invariant relation to $0\le f<g\le 1$,
+when open intervals are involved,
+and we do not terminate the process when $f=0$ or $g=1$.
+
+\Y\B\4\X65:Compute the significant digits in the large-exponent case\X${}\E{}$\6
+${}\{{}$\5
+\1\&{register} \&{int} \\{open}${}\K\|x.\|l\AND\T{1};{}$\7
+${}\\{tt}.\\{dat}[\\{origin}]\K\T{10};{}$\6
+${}\\{tt}.\|a\K\\{tt}.\|b\K\\{origin};{}$\6
+\&{for} ${}(\|e\K\T{1};{}$ ${}\\{bignum\_compare}({\AND}\\{gg},\39{\AND}\\{tt})%
+\G\\{open};{}$ ${}\|e\PP){}$\1\5
+${}\\{bignum\_times\_ten}({\AND}\\{tt});{}$\2\6
+${}\|p\K\|s;{}$\6
+\&{while} (\T{1})\5
+${}\{{}$\1\6
+${}\\{bignum\_times\_ten}({\AND}\ff);{}$\6
+${}\\{bignum\_times\_ten}({\AND}\\{gg});{}$\6
+\&{for} ${}(\|j\K\.{'0'};{}$ ${}\\{bignum\_compare}({\AND}\ff,\39{\AND}\\{tt})%
+\G\T{0};{}$ ${}\|j\PP){}$\1\5
+${}\\{bignum\_dec}({\AND}\ff,\39{\AND}\\{tt},\39\T{\^10000000}),\39\\{bignum%
+\_dec}({\AND}\\{gg},\39{\AND}\\{tt},\39\T{\^10000000});{}$\2\6
+\&{if} ${}(\\{bignum\_compare}({\AND}\\{gg},\39{\AND}\\{tt})\G\\{open}){}$\1\5
+\&{break};\2\6
+${}{*}\|p\PP\K\|j;{}$\6
+\&{if} ${}(\ff.\|a\E\\{bignum\_prec}-\T{1}\W\R\\{open}){}$\1\5
+\&{goto} \\{done};\C{ $f=0$ in a closed interval }\2\6
+\4${}\}{}$\2\6
+\&{for} ${}(\|k\K\|j;{}$ ${}\\{bignum\_compare}({\AND}\\{gg},\39{\AND}\\{tt})\G%
+\\{open};{}$ ${}\|k\PP){}$\1\5
+${}\\{bignum\_dec}({\AND}\\{gg},\39{\AND}\\{tt},\39\T{\^10000000});{}$\2\6
+${}{*}\|p\PP\K(\|j+\T{1}+\|k)\GG\T{1}{}$;\C{ the middle digit }\6
+\4\\{done}:\5
+;\6
+\4${}\}{}$\2\par
+\U64.\fi
+
+\M{66}The length of string~\PB{\|s} will be at most 17. For if $f$ and $g$
+agree to 17 places, we have $g/f<1+10^{-16}$; but the
+ratio $g/f$ is always $\ge(1+2^{-52}+2^{-53})/(1+2^{-52}-2^{-53})
+>1+2\times10^{-16}$.
+
+\Y\B\4\X56:Local variables for \PB{\\{print\_float}}\X${}\mathrel+\E{}$\6
+\&{bignum} ${}\ff,{}$ \\{gg};\C{ fractions or numerators of fractions }\6
+\&{bignum} \\{tt};\C{ power of ten (used as the denominator) }\6
+\&{char} \|s[\T{18}];\6
+\&{register} \&{char} ${}{*}\|p{}$;\par
+\fi
+
+\M{67}At this point the significant digits are in string \PB{\|s}, and \PB{$%
+\|s[\T{0}]\I\.{'0'}$}.
+If we put a decimal point at the left of~\PB{\|s}, the result should
+be multiplied by $10^e$.
+
+We prefer the output `\.{300.}' to the form `\.{3e2}', and we prefer
+`\.{.03}' to `\.{3e-2}'. In general, the output will use an
+explicit exponent only if the alternative would take more than
+18~characters.
+
+\Y\B\4\X67:Print the significant digits with proper context\X${}\E{}$\6
+\&{if} ${}(\|e>\T{17}\V\|e<{}$(\&{int}) \\{strlen}(\|s)${}-\T{17}){}$\1\5
+${}\\{printf}(\.{"\%c\%s\%se\%d"},\39\|s[\T{0}],\39(\|s[\T{1}]\?\.{"."}:%
+\.{""}),\39\|s+\T{1},\39\|e-\T{1});{}$\2\6
+\&{else} \&{if} ${}(\|e<\T{0}){}$\1\5
+${}\\{printf}(\.{".\%0*d\%s"},\39{-}\|e,\39\T{0},\39\|s);{}$\2\6
+\&{else} \&{if} ${}(\\{strlen}(\|s)\G\|e){}$\1\5
+${}\\{printf}(\.{"\%.*s.\%s"},\39\|e,\39\|s,\39\|s+\|e);{}$\2\6
+\&{else}\1\5
+${}\\{printf}(\.{"\%s\%0*d."},\39\|s,\39\|e-{}$(\&{int}) \\{strlen}(\|s)${},\39%
+\T{0}){}$;\2\par
+\U54.\fi
+
+\N{1}{68}Floating point input conversion. Going the other way, we want to
+be able to convert a given decimal number into its floating binary
+equivalent. The following syntax is supported:
+$$\vbox{\halign{$#$\hfil\cr
+\<digit>\is\.0\mid\.1\mid\.2\mid\.3\mid\.4\mid
+\.5\mid\.6\mid\.7\mid\.8\mid\.9\cr
+\<digit string>\is\<digit>\mid\<digit string>\<digit>\cr
+\<decimal string>\is\<digit string>\..\mid\..\<digit string>\mid
+\<digit string>\..\<digit string>\cr
+\<optional sign>\is\<empty>\mid\.+\mid\.-\cr
+\<exponent>\is\.e\<optional sign>\<digit string>\cr
+\<optional exponent>\is\<empty>\mid\<exponent>\cr
+\<floating magnitude>\is\<digit string>\<exponent>\mid
+\<decimal string>\<optional exponent>\mid\cr
+\hskip12em          \.{Inf}\mid\.{NaN}\mid\.{NaN.}\<digit string>\cr
+\<floating constant>\is\<optional sign>\<floating magnitude>\cr
+\<decimal constant>\is\<optional sign>\<digit string>\cr
+}}$$
+For example, `\.{-3.}' is the floating constant \Hex{c008000000000000}%
+\thinspace;
+`\.{1e3}' and `\.{1000}' are both equivalent to \Hex{408f400000000000}%
+\thinspace;
+`\.{NaN}' and `\.{+NaN.5}' are both equivalent to \Hex{7ff8000000000000}.
+
+The \PB{\\{scan\_const}} routine looks at a given string and finds the
+longest initial substring that matches the syntax of either \<decimal
+constant> or \<floating constant>. It puts the corresponding value
+into the global octabyte variable~\PB{\\{val}}; it also puts the position of
+the first
+unscanned character in the global pointer variable \PB{\\{next\_char}}.
+It returns 1 if a floating constant was found, 0~if a decimal constant
+was found, $-1$ if nothing was found. A decimal constant that doesn't
+fit in an octabyte is computed modulo~$2^{64}$.
+
+The value of \PB{\\{exceptions}} set by \PB{\\{scan\_const}} is not necessarily
+correct.
+
+\Y\B\4\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{static} \&{void} \\{bignum\_double}\,\,\.{ARGS}((\&{bignum} ${}{*}));{}$\6
+\&{int} \\{scan\_const}\,\,\.{ARGS}((\&{char} ${}{*})){}$;\5
+\hbox{}\6{}\&{int} \\{scan\_const}(\|s)\1\1\6
+\&{char} ${}{*}\|s;\2\2{}$\6
+${}\{{}$\1\6
+\X70:Local variables for \PB{\\{scan\_const}}\X;\6
+${}\\{val}.\|h\K\\{val}.\|l\K\T{0};{}$\6
+${}\|p\K\|s;{}$\6
+\&{if} ${}({*}\|p\E\.{'+'}\V{*}\|p\E\.{'-'}){}$\1\5
+${}\\{sign}\K{*}\|p\PP{}$;\5
+\2\&{else}\1\5
+${}\\{sign}\K\.{'+'};{}$\2\6
+\&{if} ${}(\\{strncmp}(\|p,\39\.{"NaN"},\39\T{3})\E\T{0}){}$\1\5
+${}\\{NaN}\K\\{true},\39\|p\MRL{+{\K}}\T{3};{}$\2\6
+\&{else}\1\5
+${}\\{NaN}\K\\{false};{}$\2\6
+\&{if} ${}((\\{isdigit}({*}\|p)\W\R\\{NaN})\V({*}\|p\E\.{'.'}\W\\{isdigit}({*}(%
+\|p+\T{1})))){}$\1\5
+\X73:Scan a number and \PB{\&{return}}\X;\2\6
+\&{if} (\\{NaN})\1\5
+\X71:Return the standard NaN\X;\2\6
+\&{if} ${}(\\{strncmp}(\|p,\39\.{"Inf"},\39\T{3})\E\T{0}){}$\1\5
+\X72:Return infinity\X;\2\6
+\4\\{no\_const\_found}:\5
+${}\\{next\_char}\K\|s{}$;\5
+\&{return} ${}{-}\T{1};{}$\6
+\4${}\}{}$\2\par
+\fi
+
+\M{69}\B\X4:Global variables\X${}\mathrel+\E{}$\6
+\&{octa} \\{val};\C{ value returned by \PB{\\{scan\_const}} }\6
+\&{char} ${}{*}\\{next\_char}{}$;\C{ pointer returned by \PB{\\{scan\_const}} }%
+\par
+\fi
+
+\M{70}\B\X70:Local variables for \PB{\\{scan\_const}}\X${}\E{}$\6
+\&{register} \&{char} ${}{*}\|p,{}$ ${}{*}\|q{}$;\C{ for string manipulations }%
+\6
+\&{register} \&{bool} \\{NaN};\C{ are we processing a NaN? }\6
+\&{int} \\{sign};\C{ \PB{\.{'+'}} or \PB{\.{'-'}} }\par
+\As76\ET81.
+\U68.\fi
+
+\M{71}\B\X71:Return the standard NaN\X${}\E{}$\6
+${}\{{}$\1\6
+${}\\{next\_char}\K\|p;{}$\6
+${}\\{val}.\|h\K\T{\^600000},\39\\{exp}\K\T{\^3fe};{}$\6
+\&{goto} \\{packit};\6
+\4${}\}{}$\2\par
+\U68.\fi
+
+\M{72}\B\X72:Return infinity\X${}\E{}$\6
+${}\{{}$\1\6
+${}\\{next\_char}\K\|p+\T{3};{}$\6
+\&{goto} \\{make\_it\_infinite};\6
+\4${}\}{}$\2\par
+\U68.\fi
+
+\M{73}We saw above that a string of at most 17 digits is enough to characterize
+a floating point number, for purposes of output. But a much longer buffer
+for digits is needed when we're doing input. For example, consider the
+borderline quantity $(1+2^{-53})/2^{1022}$; its decimal expansion, when
+written out exactly, is a number with more than 750 significant digits:
+\.{2.2250738585...8125e-308}.
+If {\it any one\/} of those digits is increased, or if
+additional nonzero digits are added as in
+\.{2.2250738585...81250000001e-308},
+the rounded value is supposed to change from \Hex{0010000000000000}
+to \Hex{0010000000000001}.
+
+We assume here that the user prefers a perfectly correct answer to
+a speedy almost-correct one, so we implement the most general case.
+
+\Y\B\4\X73:Scan a number and \PB{\&{return}}\X${}\E{}$\6
+${}\{{}$\1\6
+\&{for} ${}(\|q\K\\{buf0},\39\\{dec\_pt}\K{}$(\&{char} ${}{*}){}$ \T{0}; ${}%
+\\{isdigit}({*}\|p);{}$ ${}\|p\PP){}$\5
+${}\{{}$\1\6
+${}\\{val}\K\\{oplus}(\\{val},\39\\{shift\_left}(\\{val},\39\T{2})){}$;\C{
+multiply by 5 }\6
+${}\\{val}\K\\{incr}(\\{shift\_left}(\\{val},\39\T{1}),\39{*}\|p-\.{'0'});{}$\6
+\&{if} ${}(\|q>\\{buf0}\V{*}\|p\I\.{'0'}){}$\1\6
+\&{if} ${}(\|q<\\{buf\_max}){}$\1\5
+${}{*}\|q\PP\K{*}\|p;{}$\2\6
+\&{else} \&{if} ${}({*}(\|q-\T{1})\E\.{'0'}){}$\1\5
+${}{*}(\|q-\T{1})\K{*}\|p;{}$\2\2\6
+\4${}\}{}$\2\6
+\&{if} (\\{NaN})\1\5
+${}{*}\|q\PP\K\.{'1'};{}$\2\6
+\&{if} ${}({*}\|p\E\.{'.'}){}$\1\5
+\X74:Scan a fraction part\X;\2\6
+${}\\{next\_char}\K\|p;{}$\6
+\&{if} ${}({*}\|p\E\.{'e'}\W\R\\{NaN}){}$\1\5
+\X77:Scan an exponent\X\2\6
+\&{else}\1\5
+${}\\{exp}\K\T{0};{}$\2\6
+\&{if} (\\{dec\_pt})\1\5
+\X78:Return a floating point constant\X;\2\6
+\&{if} ${}(\\{sign}\E\.{'-'}){}$\1\5
+${}\\{val}\K\\{ominus}(\\{zero\_octa},\39\\{val});{}$\2\6
+\&{return} \T{0};\6
+\4${}\}{}$\2\par
+\U68.\fi
+
+\M{74}\B\X74:Scan a fraction part\X${}\E{}$\6
+${}\{{}$\1\6
+${}\\{dec\_pt}\K\|q;{}$\6
+${}\|p\PP;{}$\6
+\&{for} ${}(\\{zeros}\K\T{0};{}$ ${}\\{isdigit}({*}\|p);{}$ ${}\|p\PP){}$\1\6
+\&{if} ${}({*}\|p\E\.{'0'}\W\|q\E\\{buf0}){}$\1\5
+${}\\{zeros}\PP;{}$\2\6
+\&{else} \&{if} ${}(\|q<\\{buf\_max}){}$\1\5
+${}{*}\|q\PP\K{*}\|p;{}$\2\6
+\&{else} \&{if} ${}({*}(\|q-\T{1})\E\.{'0'}){}$\1\5
+${}{*}(\|q-\T{1})\K{*}\|p;{}$\2\2\6
+\4${}\}{}$\2\par
+\U73.\fi
+
+\M{75}The buffer needs room for eight digits of padding at the left, followed
+by up to $1022+53-307$ significant digits, followed by a ``sticky'' digit
+at position \PB{$\\{buf\_max}-\T{1}$}, and eight more digits of padding.
+
+\Y\B\4\D$\\{buf0}$ \5
+$(\\{buf}+\T{8}{}$)\par
+\B\4\D$\\{buf\_max}$ \5
+$(\\{buf}+\T{777}{}$)\par
+\Y\B\4\X4:Global variables\X${}\mathrel+\E{}$\6
+\&{static} \&{char} \\{buf}[\T{785}]${}\K\.{"00000000"}{}$;\C{ where we put
+significant input digits }\par
+\fi
+
+\M{76}\B\X70:Local variables for \PB{\\{scan\_const}}\X${}\mathrel+\E{}$\6
+\&{register} \&{char} ${}{*}\\{dec\_pt}{}$;\C{ position of decimal point in %
+\PB{\\{buf}} }\6
+\&{register} \&{int} \\{exp};\C{ scanned exponent; later used for raw binary
+exponent }\6
+\&{register} \&{int} \\{zeros};\C{ leading zeros removed after decimal point }%
+\par
+\fi
+
+\M{77}Here we don't advance \PB{\\{next\_char}} and force a decimal point until
+we
+know that a syntactically correct exponent exists.
+
+The code here will convert extra-large inputs like
+`\.{9e+9999999999999999}' into $\infty$ and extra-small inputs into zero.
+Strange inputs like `\.{-00.0e9999999}' must also be accommodated.
+
+\Y\B\4\X77:Scan an exponent\X${}\E{}$\6
+${}\{{}$\5
+\1\&{register} \&{char} \\{exp\_sign};\7
+${}\|p\PP;{}$\6
+\&{if} ${}({*}\|p\E\.{'+'}\V{*}\|p\E\.{'-'}){}$\1\5
+${}\\{exp\_sign}\K{*}\|p\PP{}$;\5
+\2\&{else}\1\5
+${}\\{exp\_sign}\K\.{'+'};{}$\2\6
+\&{if} ${}(\\{isdigit}({*}\|p)){}$\5
+${}\{{}$\1\6
+\&{for} ${}(\\{exp}\K{*}\|p\PP-\.{'0'};{}$ ${}\\{isdigit}({*}\|p);{}$ ${}\|p%
+\PP){}$\1\6
+\&{if} ${}(\\{exp}<\T{1000}){}$\1\5
+${}\\{exp}\K\T{10}*\\{exp}+{*}\|p-\.{'0'};{}$\2\2\6
+\&{if} ${}(\R\\{dec\_pt}){}$\1\5
+${}\\{dec\_pt}\K\|q,\39\\{zeros}\K\T{0};{}$\2\6
+\&{if} ${}(\\{exp\_sign}\E\.{'-'}){}$\1\5
+${}\\{exp}\K{-}\\{exp};{}$\2\6
+${}\\{next\_char}\K\|p;{}$\6
+\4${}\}{}$\2\6
+\4${}\}{}$\2\par
+\U73.\fi
+
+\M{78}\B\X78:Return a floating point constant\X${}\E{}$\6
+${}\{{}$\1\6
+\X79:Move the digits from \PB{\\{buf}} to \PB{$\ff$}\X;\6
+\X83:Determine the binary fraction and binary exponent\X;\6
+\4\\{packit}:\5
+\X84:Pack and round the answer\X;\6
+\&{return} \T{1};\6
+\4${}\}{}$\2\par
+\U73.\fi
+
+\M{79}Now we get ready to compute the binary fraction bits, by putting the
+scanned input digits into a multiprecision fixed-point
+accumulator \PB{$\ff$} that spans the full necessary range.
+After this step, the number that we want to convert to floating binary
+will appear in \PB{$\ff.\\{dat}[\ff.\|a]$}, \PB{$\ff.\\{dat}[\ff.\|a+\T{1}]$}, %
+\dots,
+\PB{$\ff.\\{dat}[\ff.\|b]$}.
+The radix-$10^9$ digit in ${\it ff}[36-k]$ is understood to be multiplied
+by $10^{9k}$, for $36\ge k\ge-120$.
+
+\Y\B\4\X79:Move the digits from \PB{\\{buf}} to \PB{$\ff$}\X${}\E{}$\6
+$\|x\K\\{buf}+\T{341}+\\{zeros}-\\{dec\_pt}-\\{exp};{}$\6
+\&{if} ${}(\|q\E\\{buf0}\V\|x\G\T{1413}){}$\5
+${}\{{}$\1\6
+\4\\{make\_it\_zero}:\5
+${}\\{exp}\K{-}\T{99999}{}$;\5
+\&{goto} \\{packit};\6
+\4${}\}{}$\2\6
+\&{if} ${}(\|x<\T{0}){}$\5
+${}\{{}$\1\6
+\4\\{make\_it\_infinite}:\5
+${}\\{exp}\K\T{99999}{}$;\5
+\&{goto} \\{packit};\6
+\4${}\}{}$\2\6
+${}\ff.\|a\K\|x/\T{9};{}$\6
+\&{for} ${}(\|p\K\|q;{}$ ${}\|p<\|q+\T{8};{}$ ${}\|p\PP){}$\1\5
+${}{*}\|p\K\.{'0'}{}$;\C{ pad with trailing zeros }\2\6
+${}\|q\K\|q-\T{1}-(\|q+\T{341}+\\{zeros}-\\{dec\_pt}-\\{exp})\MOD\T{9}{}$;\C{
+compute stopping place in \PB{\\{buf}} }\6
+\&{for} ${}(\|p\K\\{buf0}-\|x\MOD\T{9},\39\|k\K\ff.\|a;{}$ ${}\|p\Z\|q\W\|k\Z%
+\T{156};{}$ ${}\|p\MRL{+{\K}}\T{9},\39\|k\PP){}$\1\5
+\X80:Put the 9-digit number \PB{${*}\|p$}\thinspace\dots\thinspace\PB{${*}(\|p+%
+\T{8})$} into \PB{$\ff.\\{dat}[\|k]$}\X;\2\6
+${}\ff.\|b\K\|k-\T{1};{}$\6
+\&{for} ${}(\|x\K\T{0};{}$ ${}\|p\Z\|q;{}$ ${}\|p\MRL{+{\K}}\T{9}){}$\1\6
+\&{if} ${}(\\{strncmp}(\|p,\39\.{"000000000"},\39\T{9})\I\T{0}){}$\1\5
+${}\|x\K\T{1};{}$\2\2\6
+${}\ff.\\{dat}[\T{156}]\MRL{+{\K}}\|x{}$;\C{ nonzero digits that fall off the
+right are sticky }\6
+\&{while} ${}(\ff.\\{dat}[\ff.\|b]\E\T{0}){}$\1\5
+${}\ff.\|b\MM{}$;\2\par
+\U78.\fi
+
+\M{80}\B\X80:Put the 9-digit number \PB{${*}\|p$}\thinspace\dots\thinspace%
+\PB{${*}(\|p+\T{8})$} into \PB{$\ff.\\{dat}[\|k]$}\X${}\E{}$\6
+${}\{{}$\1\6
+\&{for} ${}(\|x\K{*}\|p-\.{'0'},\39\\{pp}\K\|p+\T{1};{}$ ${}\\{pp}<\|p+%
+\T{9};{}$ ${}\\{pp}\PP){}$\1\5
+${}\|x\K\T{10}*\|x+{*}\\{pp}-\.{'0'};{}$\2\6
+${}\ff.\\{dat}[\|k]\K\|x;{}$\6
+\4${}\}{}$\2\par
+\U79.\fi
+
+\M{81}\B\X70:Local variables for \PB{\\{scan\_const}}\X${}\mathrel+\E{}$\6
+\&{register} \&{int} \|k${},{}$ \|x;\6
+\&{register} \&{char} ${}{*}\\{pp};{}$\6
+\&{bignum} ${}\ff,{}$ \\{tt};\par
+\fi
+
+\M{82}Here's a subroutine that is dual to \PB{\\{bignum\_times\_ten}}. It
+changes $f$
+to~$2f$, assuming that overflow will not occur and that the radix is $10^9$.
+
+\Y\B\4\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{static} \&{void} \\{bignum\_double}(\|f)\1\1\6
+\&{bignum} ${}{*}\|f;\2\2{}$\6
+${}\{{}$\1\6
+\&{register} \&{tetra} ${}{*}\|p,{}$ ${}{*}\|q;{}$\6
+\&{register} \&{int} \|x${},{}$ \\{carry};\7
+\&{for} ${}(\|p\K{\AND}\|f\MG\\{dat}[\|f\MG\|b],\39\|q\K{\AND}\|f\MG\\{dat}[\|f%
+\MG\|a],\39\\{carry}\K\T{0};{}$ ${}\|p\G\|q;{}$ ${}\|p\MM){}$\5
+${}\{{}$\1\6
+${}\|x\K{*}\|p+{*}\|p+\\{carry};{}$\6
+\&{if} ${}(\|x\G\T{1000000000}){}$\1\5
+${}\\{carry}\K\T{1},\39{*}\|p\K\|x-\T{1000000000};{}$\2\6
+\&{else}\1\5
+${}\\{carry}\K\T{0},\39{*}\|p\K\|x;{}$\2\6
+\4${}\}{}$\2\6
+${}{*}\|p\K\\{carry};{}$\6
+\&{if} (\\{carry})\1\5
+${}\|f\MG\|a\MM;{}$\2\6
+\&{if} ${}(\|f\MG\\{dat}[\|f\MG\|b]\E\T{0}\W\|f\MG\|b>\|f\MG\|a){}$\1\5
+${}\|f\MG\|b\MM;{}$\2\6
+\4${}\}{}$\2\par
+\fi
+
+\M{83}\B\X83:Determine the binary fraction and binary exponent\X${}\E{}$\6
+$\\{val}\K\\{zero\_octa};{}$\6
+\&{if} ${}(\ff.\|a>\T{36}){}$\5
+${}\{{}$\1\6
+\&{for} ${}(\\{exp}\K\T{\^3fe};{}$ ${}\ff.\|a>\T{36};{}$ ${}\\{exp}\MM){}$\1\5
+${}\\{bignum\_double}({\AND}\ff);{}$\2\6
+\&{for} ${}(\|k\K\T{54};{}$ \|k; ${}\|k\MM){}$\5
+${}\{{}$\1\6
+\&{if} ${}(\ff.\\{dat}[\T{36}]){}$\5
+${}\{{}$\1\6
+\&{if} ${}(\|k\G\T{32}){}$\1\5
+${}\\{val}.\|h\MRL{{\OR}{\K}}\T{1}\LL(\|k-\T{32}){}$;\5
+\2\&{else}\1\5
+${}\\{val}.\|l\MRL{{\OR}{\K}}\T{1}\LL\|k;{}$\2\6
+${}\ff.\\{dat}[\T{36}]\K\T{0};{}$\6
+\&{if} ${}(\ff.\|b\E\T{36}){}$\1\5
+\&{break};\C{ break if \PB{$\ff$} now zero }\2\6
+\4${}\}{}$\2\6
+${}\\{bignum\_double}({\AND}\ff);{}$\6
+\4${}\}{}$\2\6
+\4${}\}{}$\5
+\2\&{else}\5
+${}\{{}$\1\6
+${}\\{tt}.\|a\K\\{tt}.\|b\K\T{36},\39\\{tt}.\\{dat}[\T{36}]\K\T{2};{}$\6
+\&{for} ${}(\\{exp}\K\T{\^3fe};{}$ ${}\\{bignum\_compare}({\AND}\ff,\39{\AND}%
+\\{tt})\G\T{0};{}$ ${}\\{exp}\PP){}$\1\5
+${}\\{bignum\_double}({\AND}\\{tt});{}$\2\6
+\&{for} ${}(\|k\K\T{54};{}$ \|k; ${}\|k\MM){}$\5
+${}\{{}$\1\6
+${}\\{bignum\_double}({\AND}\ff);{}$\6
+\&{if} ${}(\\{bignum\_compare}({\AND}\ff,\39{\AND}\\{tt})\G\T{0}){}$\5
+${}\{{}$\1\6
+\&{if} ${}(\|k\G\T{32}){}$\1\5
+${}\\{val}.\|h\MRL{{\OR}{\K}}\T{1}\LL(\|k-\T{32}){}$;\5
+\2\&{else}\1\5
+${}\\{val}.\|l\MRL{{\OR}{\K}}\T{1}\LL\|k;{}$\2\6
+${}\\{bignum\_dec}({\AND}\ff,\39{\AND}\\{tt},\39\T{1000000000});{}$\6
+\&{if} ${}(\ff.\|a\E\\{bignum\_prec}-\T{1}){}$\1\5
+\&{break};\C{ break if \PB{$\ff$} now zero }\2\6
+\4${}\}{}$\2\6
+\4${}\}{}$\2\6
+\4${}\}{}$\2\6
+\&{if} ${}(\|k\E\T{0}){}$\1\5
+${}\\{val}.\|l\MRL{{\OR}{\K}}\T{1}{}$;\C{ add sticky bit if \PB{$\ff$} nonzero
+}\2\par
+\U78.\fi
+
+\M{84}We need to be careful that the input `\.{NaN.999999999999999999999}'
+doesn't
+get rounded up; it is supposed to yield \Hex{7fffffffffffffff}.
+
+Although the input `\.{NaN.0}' is illegal, strictly speaking, we silently
+convert it to \Hex{7ff0000000000001}---a number that would be
+output as `\.{NaN.0000000000000002}'.
+
+\Y\B\4\X84:Pack and round the answer\X${}\E{}$\6
+$\\{val}\K\\{fpack}(\\{val},\39\\{exp},\39\\{sign},\39\.{ROUND\_NEAR});{}$\6
+\&{if} (\\{NaN})\5
+${}\{{}$\1\6
+\&{if} ${}((\\{val}.\|h\AND\T{\^7fffffff})\E\T{\^40000000}){}$\1\5
+${}\\{val}.\|h\MRL{{\OR}{\K}}\T{\^7fffffff},\39\\{val}.\|l\K\T{\^ffffffff};{}$%
+\2\6
+\&{else} \&{if} ${}((\\{val}.\|h\AND\T{\^7fffffff})\E\T{\^3ff00000}\W\R\\{val}.%
+\|l){}$\1\5
+${}\\{val}.\|h\MRL{{\OR}{\K}}\T{\^40000000},\39\\{val}.\|l\K\T{1};{}$\2\6
+\&{else}\1\5
+${}\\{val}.\|h\MRL{{\OR}{\K}}\T{\^40000000};{}$\2\6
+\4${}\}{}$\2\par
+\U78.\fi
+
+\N{1}{85}Floating point remainders. In this section we implement the remainder
+of the floating point operations---one of which happens to be the
+operation of taking the remainder.
+
+The easiest task remaining is to compare two floating point quantities.
+Routine \PB{\\{fcomp}} returns $-1$~if~$y<z$, 0~if~$y=z$, $+1$~if~$y>z$, and
+$+2$~if $y$ and~$z$ are unordered.
+
+\Y\B\4\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{int} \\{fcomp}\,\,${}\.{ARGS}((\&{octa},\39\&{octa})){}$;\5
+\hbox{}\6{}\&{int} ${}\\{fcomp}(\|y,\39\|z){}$\1\1\6
+\&{octa} \|y${},{}$ \|z;\2\2\6
+${}\{{}$\1\6
+\&{ftype} \\{yt}${},{}$ \\{zt};\6
+\&{int} \\{ye}${},{}$ \\{ze};\6
+\&{char} \\{ys}${},{}$ \\{zs};\6
+\&{octa} \\{yf}${},{}$ \\{zf};\6
+\&{register} \&{int} \|x;\7
+${}\\{yt}\K\\{funpack}(\|y,\39{\AND}\\{yf},\39{\AND}\\{ye},\39{\AND}\\{ys});{}$%
+\6
+${}\\{zt}\K\\{funpack}(\|z,\39{\AND}\\{zf},\39{\AND}\\{ze},\39{\AND}\\{zs});{}$%
+\6
+\&{switch} ${}(\T{4}*\\{yt}+\\{zt}){}$\5
+${}\{{}$\1\6
+\4\&{case} \T{4}${}*\\{nan}+\\{nan}{}$:\5
+\&{case} \T{4}${}*\\{zro}+\\{nan}{}$:\5
+\&{case} \T{4}${}*\\{num}+\\{nan}{}$:\5
+\&{case} \T{4}${}*\\{inf}+\\{nan}{}$:\5
+\&{case} \T{4}${}*\\{nan}+\\{zro}{}$:\5
+\&{case} \T{4}${}*\\{nan}+\\{num}{}$:\5
+\&{case} \T{4}${}*\\{nan}+\\{inf}{}$:\5
+\&{return} \T{2};\6
+\4\&{case} \T{4}${}*\\{zro}+\\{zro}{}$:\5
+\&{return} \T{0};\6
+\4\&{case} \T{4}${}*\\{zro}+\\{num}{}$:\5
+\&{case} \T{4}${}*\\{num}+\\{zro}{}$:\5
+\&{case} \T{4}${}*\\{zro}+\\{inf}{}$:\5
+\&{case} \T{4}${}*\\{inf}+\\{zro}{}$:\5
+\&{case} \T{4}${}*\\{num}+\\{num}{}$:\5
+\&{case} \T{4}${}*\\{num}+\\{inf}{}$:\5
+\&{case} \T{4}${}*\\{inf}+\\{num}{}$:\5
+\&{case} \T{4}${}*\\{inf}+\\{inf}{}$:\6
+\&{if} ${}(\\{ys}\I\\{zs}){}$\1\5
+${}\|x\K\T{1};{}$\2\6
+\&{else} \&{if} ${}(\|y.\|h>\|z.\|h){}$\1\5
+${}\|x\K\T{1};{}$\2\6
+\&{else} \&{if} ${}(\|y.\|h<\|z.\|h){}$\1\5
+${}\|x\K{-}\T{1};{}$\2\6
+\&{else} \&{if} ${}(\|y.\|l>\|z.\|l){}$\1\5
+${}\|x\K\T{1};{}$\2\6
+\&{else} \&{if} ${}(\|y.\|l<\|z.\|l){}$\1\5
+${}\|x\K{-}\T{1};{}$\2\6
+\&{else}\1\5
+\&{return} \T{0};\2\6
+\&{break};\6
+\4${}\}{}$\2\6
+\&{return} ${}(\\{ys}\E\.{'-'}\?{-}\|x:\|x);{}$\6
+\4${}\}{}$\2\par
+\fi
+
+\M{86}Several \MMIX\ operations act on a single floating point number and
+accept an arbitrary rounding mode. For example, consider the
+operation of rounding to the nearest floating point integer:
+
+\Y\B\4\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{octa} \\{fintegerize}\,\,${}\.{ARGS}((\&{octa},\39\&{int})){}$;\5
+\hbox{}\6{}\&{octa} ${}\\{fintegerize}(\|z,\39\|r){}$\1\1\6
+\&{octa} \|z;\C{ the operand }\6
+\&{int} \|r;\C{ the rounding mode }\2\2\6
+${}\{{}$\1\6
+\&{ftype} \\{zt};\6
+\&{int} \\{ze};\6
+\&{char} \\{zs};\6
+\&{octa} \\{xf}${},{}$ \\{zf};\7
+${}\\{zt}\K\\{funpack}(\|z,\39{\AND}\\{zf},\39{\AND}\\{ze},\39{\AND}\\{zs});{}$%
+\6
+\&{if} ${}(\R\|r){}$\1\5
+${}\|r\K\\{cur\_round};{}$\2\6
+\&{switch} (\\{zt})\5
+${}\{{}$\1\6
+\4\&{case} \\{nan}:\5
+\&{if} ${}(\R(\|z.\|h\AND\T{\^80000})){}$\5
+${}\{{}$\5
+\1${}\\{exceptions}\MRL{{\OR}{\K}}\.{I\_BIT}{}$;\5
+${}\|z.\|h\MRL{{\OR}{\K}}\T{\^80000}{}$;\5
+${}\}{}$\2\6
+\4\&{case} \\{inf}:\5
+\&{case} \\{zro}:\5
+\&{return} \|z;\6
+\4\&{case} \\{num}:\5
+\X87:Integerize and \PB{\&{return}}\X;\6
+\4${}\}{}$\2\6
+\4${}\}{}$\2\par
+\fi
+
+\M{87}\B\X87:Integerize and \PB{\&{return}}\X${}\E{}$\6
+\&{if} ${}(\\{ze}\G\T{1074}){}$\1\5
+\&{return} \\{fpack}${}(\\{zf},\39\\{ze},\39\\{zs},\39\.{ROUND\_OFF}){}$;\C{
+already an integer }\2\6
+\&{if} ${}(\\{ze}\Z\T{1020}){}$\1\5
+${}\\{xf}.\|h\K\T{0},\39\\{xf}.\|l\K\T{1};{}$\2\6
+\&{else}\5
+${}\{{}$\5
+\1\&{octa} \\{oo};\7
+${}\\{xf}\K\\{shift\_right}(\\{zf},\39\T{1074}-\\{ze},\39\T{1});{}$\6
+${}\\{oo}\K\\{shift\_left}(\\{xf},\39\T{1074}-\\{ze});{}$\6
+\&{if} ${}(\\{oo}.\|l\I\\{zf}.\|l\V\\{oo}.\|h\I\\{zf}.\|h){}$\1\5
+${}\\{xf}.\|l\MRL{{\OR}{\K}}\T{1}{}$;\C{ sticky bit }\2\6
+\4${}\}{}$\2\6
+\&{switch} (\|r)\5
+${}\{{}$\1\6
+\4\&{case} \.{ROUND\_DOWN}:\5
+\&{if} ${}(\\{zs}\E\.{'-'}){}$\1\5
+${}\\{xf}\K\\{incr}(\\{xf},\39\T{3}){}$;\5
+\2\&{break};\6
+\4\&{case} \.{ROUND\_UP}:\5
+\&{if} ${}(\\{zs}\I\.{'-'}){}$\1\5
+${}\\{xf}\K\\{incr}(\\{xf},\39\T{3});{}$\2\6
+\4\&{case} \.{ROUND\_OFF}:\5
+\&{break};\6
+\4\&{case} \.{ROUND\_NEAR}:\5
+${}\\{xf}\K\\{incr}(\\{xf},\39\\{xf}.\|l\AND\T{4}\?\T{2}:\T{1}){}$;\5
+\&{break};\6
+\4${}\}{}$\2\6
+${}\\{xf}.\|l\MRL{\AND{\K}}\T{\^fffffffc};{}$\6
+\&{if} ${}(\\{ze}\G\T{1022}){}$\1\5
+\&{return} \\{fpack}${}(\\{shift\_left}(\\{xf},\39\T{1074}-\\{ze}),\39\\{ze},%
+\39\\{zs},\39\.{ROUND\_OFF});{}$\2\6
+\&{if} ${}(\\{xf}.\|l){}$\1\5
+${}\\{xf}.\|h\K\T{\^3ff00000},\39\\{xf}.\|l\K\T{0};{}$\2\6
+\&{if} ${}(\\{zs}\E\.{'-'}){}$\1\5
+${}\\{xf}.\|h\MRL{{\OR}{\K}}\\{sign\_bit};{}$\2\6
+\&{return} \\{xf};\par
+\U86.\fi
+
+\M{88}To convert floating point to fixed point, we use \PB{\\{fixit}}.
+
+\Y\B\4\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{octa} \\{fixit}\,\,${}\.{ARGS}((\&{octa},\39\&{int})){}$;\5
+\hbox{}\6{}\&{octa} ${}\\{fixit}(\|z,\39\|r){}$\1\1\6
+\&{octa} \|z;\C{ the operand }\6
+\&{int} \|r;\C{ the rounding mode }\2\2\6
+${}\{{}$\1\6
+\&{ftype} \\{zt};\6
+\&{int} \\{ze};\6
+\&{char} \\{zs};\6
+\&{octa} \\{zf}${},{}$ \|o;\7
+${}\\{zt}\K\\{funpack}(\|z,\39{\AND}\\{zf},\39{\AND}\\{ze},\39{\AND}\\{zs});{}$%
+\6
+\&{if} ${}(\R\|r){}$\1\5
+${}\|r\K\\{cur\_round};{}$\2\6
+\&{switch} (\\{zt})\5
+${}\{{}$\1\6
+\4\&{case} \\{nan}:\5
+\&{case} \\{inf}:\5
+${}\\{exceptions}\MRL{{\OR}{\K}}\.{I\_BIT}{}$;\5
+\&{return} \|z;\6
+\4\&{case} \\{zro}:\5
+\&{return} \\{zero\_octa};\6
+\4\&{case} \\{num}:\5
+\&{if} ${}(\\{funpack}(\\{fintegerize}(\|z,\39\|r),\39{\AND}\\{zf},\39{\AND}%
+\\{ze},\39{\AND}\\{zs})\E\\{zro}){}$\1\5
+\&{return} \\{zero\_octa};\2\6
+\&{if} ${}(\\{ze}\Z\T{1076}){}$\1\5
+${}\|o\K\\{shift\_right}(\\{zf},\39\T{1076}-\\{ze},\39\T{1});{}$\2\6
+\&{else}\5
+${}\{{}$\1\6
+\&{if} ${}(\\{ze}>\T{1085}\V(\\{ze}\E\T{1085}\W(\\{zf}.\|h>\T{\^400000}\V%
+\3{-1}(\\{zf}.\|h\E\T{\^400000}\W(\\{zf}.\|l\V\\{zs}\I\.{'-'}))))){}$\1\5
+${}\\{exceptions}\MRL{{\OR}{\K}}\.{W\_BIT};{}$\2\6
+\&{if} ${}(\\{ze}\G\T{1140}){}$\1\5
+\&{return} \\{zero\_octa};\2\6
+${}\|o\K\\{shift\_left}(\\{zf},\39\\{ze}-\T{1076});{}$\6
+\4${}\}{}$\2\6
+\&{return} ${}(\\{zs}\E\.{'-'}\?\\{ominus}(\\{zero\_octa},\39\|o):\|o);{}$\6
+\4${}\}{}$\2\6
+\4${}\}{}$\2\par
+\fi
+
+\M{89}Going the other way, we can specify not only a rounding mode but whether
+the given fixed point octabyte is signed or unsigned, and whether the
+result should be rounded to short precision.
+
+\Y\B\4\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{octa} \\{floatit}\,\,${}\.{ARGS}((\&{octa},\39\&{int},\39\&{int},\39%
+\&{int})){}$;\5
+\hbox{}\6{}\&{octa} ${}\\{floatit}(\|z,\39\|r,\39\|u,\39\|p){}$\1\1\6
+\&{octa} \|z;\C{ octabyte to float }\6
+\&{int} \|r;\C{ rounding mode }\6
+\&{int} \|u;\C{ unsigned? }\6
+\&{int} \|p;\C{ short precision? }\2\2\6
+${}\{{}$\1\6
+\&{int} \|e;\5
+\&{char} \|s;\6
+\&{register} \&{int} \|t;\7
+${}\\{exceptions}\K\T{0};{}$\6
+\&{if} ${}(\R\|z.\|h\W\R\|z.\|l){}$\1\5
+\&{return} \\{zero\_octa};\2\6
+\&{if} ${}(\R\|r){}$\1\5
+${}\|r\K\\{cur\_round};{}$\2\6
+\&{if} ${}(\R\|u\W(\|z.\|h\AND\\{sign\_bit})){}$\1\5
+${}\|s\K\.{'-'},\39\|z\K\\{ominus}(\\{zero\_octa},\39\|z){}$;\5
+\2\&{else}\1\5
+${}\|s\K\.{'+'};{}$\2\6
+${}\|e\K\T{1076};{}$\6
+\&{while} ${}(\|z.\|h<\T{\^400000}){}$\1\5
+${}\|e\MM,\39\|z\K\\{shift\_left}(\|z,\39\T{1});{}$\2\6
+\&{while} ${}(\|z.\|h\G\T{\^800000}){}$\5
+${}\{{}$\1\6
+${}\|e\PP;{}$\6
+${}\|t\K\|z.\|l\AND\T{1};{}$\6
+${}\|z\K\\{shift\_right}(\|z,\39\T{1},\39\T{1});{}$\6
+${}\|z.\|l\MRL{{\OR}{\K}}\|t;{}$\6
+\4${}\}{}$\2\6
+\&{if} (\|p)\1\5
+\X90:Convert to short float\X;\2\6
+\&{return} \\{fpack}${}(\|z,\39\|e,\39\|s,\39\|r);{}$\6
+\4${}\}{}$\2\par
+\fi
+
+\M{90}\B\X90:Convert to short float\X${}\E{}$\6
+${}\{{}$\1\6
+\&{register} \&{int} \\{ex};\5
+\&{register} \&{tetra} \|t;\7
+${}\|t\K\\{sfpack}(\|z,\39\|e,\39\|s,\39\|r);{}$\6
+${}\\{ex}\K\\{exceptions};{}$\6
+${}\\{sfunpack}(\|t,\39{\AND}\|z,\39{\AND}\|e,\39{\AND}\|s);{}$\6
+${}\\{exceptions}\K\\{ex};{}$\6
+\4${}\}{}$\2\par
+\U89.\fi
+
+\M{91}The square root operation is more interesting.
+
+\Y\B\4\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{octa} \\{froot}\,\,${}\.{ARGS}((\&{octa},\39\&{int})){}$;\5
+\hbox{}\6{}\&{octa} ${}\\{froot}(\|z,\39\|r){}$\1\1\6
+\&{octa} \|z;\C{ the operand }\6
+\&{int} \|r;\C{ the rounding mode }\2\2\6
+${}\{{}$\1\6
+\&{ftype} \\{zt};\6
+\&{int} \\{ze};\6
+\&{char} \\{zs};\6
+\&{octa} \|x${},{}$ \\{xf}${},{}$ \\{rf}${},{}$ \\{zf};\6
+\&{register} \&{int} \\{xe}${},{}$ \|k;\7
+\&{if} ${}(\R\|r){}$\1\5
+${}\|r\K\\{cur\_round};{}$\2\6
+${}\\{zt}\K\\{funpack}(\|z,\39{\AND}\\{zf},\39{\AND}\\{ze},\39{\AND}\\{zs});{}$%
+\6
+\&{if} ${}(\\{zs}\E\.{'-'}\W\\{zt}\I\\{zro}){}$\1\5
+${}\\{exceptions}\MRL{{\OR}{\K}}\.{I\_BIT},\39\|x\K\\{standard\_NaN};{}$\2\6
+\&{else}\5
+\1\&{switch} (\\{zt})\5
+${}\{{}$\1\6
+\4\&{case} \\{nan}:\5
+\&{if} ${}(\R(\|z.\|h\AND\T{\^80000})){}$\1\5
+${}\\{exceptions}\MRL{{\OR}{\K}}\.{I\_BIT},\39\|z.\|h\MRL{{\OR}{\K}}\T{%
+\^80000};{}$\2\6
+\&{return} \|z;\6
+\4\&{case} \\{inf}:\5
+\&{case} \\{zro}:\5
+${}\|x\K\|z{}$;\5
+\&{break};\6
+\4\&{case} \\{num}:\5
+\X92:Take the square root and \PB{\&{return}}\X;\6
+\4${}\}{}$\2\2\6
+\&{if} ${}(\\{zs}\E\.{'-'}){}$\1\5
+${}\|x.\|h\MRL{{\OR}{\K}}\\{sign\_bit};{}$\2\6
+\&{return} \|x;\6
+\4${}\}{}$\2\par
+\fi
+
+\M{92}The square root can be found by an adaptation of the old pencil-and-paper
+method. If $n=\lfloor\sqrt s\rfloor$, where $s$ is an integer,
+we have $s=n^2+r$ where $0\le r\le2n$;
+this invariant can be maintained if we replace $s$ by $4s+(0,1,2,3)$
+and $n$ by $2n+(0,1)$. The following code implements this idea with
+$2n$ in~\PB{\\{xf}} and $r$ in~\PB{\\{rf}}. (It could easily be made to run
+about
+twice as fast.)
+
+\Y\B\4\X92:Take the square root and \PB{\&{return}}\X${}\E{}$\6
+$\\{xf}.\|h\K\T{0},\39\\{xf}.\|l\K\T{2};{}$\6
+${}\\{xe}\K(\\{ze}+\T{\^3fe})\GG\T{1};{}$\6
+\&{if} ${}(\\{ze}\AND\T{1}){}$\1\5
+${}\\{zf}\K\\{shift\_left}(\\{zf},\39\T{1});{}$\2\6
+${}\\{rf}.\|h\K\T{0},\39\\{rf}.\|l\K(\\{zf}.\|h\GG\T{22})-\T{1};{}$\6
+\&{for} ${}(\|k\K\T{53};{}$ \|k; ${}\|k\MM){}$\5
+${}\{{}$\1\6
+${}\\{rf}\K\\{shift\_left}(\\{rf},\39\T{2}){}$;\5
+${}\\{xf}\K\\{shift\_left}(\\{xf},\39\T{1});{}$\6
+\&{if} ${}(\|k\G\T{43}){}$\1\5
+${}\\{rf}\K\\{incr}(\\{rf},\39(\\{zf}.\|h\GG(\T{2}*(\|k-\T{43})))\AND\T{3});{}$%
+\2\6
+\&{else} \&{if} ${}(\|k\G\T{27}){}$\1\5
+${}\\{rf}\K\\{incr}(\\{rf},\39(\\{zf}.\|l\GG(\T{2}*(\|k-\T{27})))\AND\T{3});{}$%
+\2\6
+\&{if} ${}((\\{rf}.\|l>\\{xf}.\|l\W\\{rf}.\|h\G\\{xf}.\|h)\V\\{rf}.\|h>\\{xf}.%
+\|h){}$\5
+${}\{{}$\1\6
+${}\\{xf}.\|l\PP{}$;\5
+${}\\{rf}\K\\{ominus}(\\{rf},\39\\{xf}){}$;\5
+${}\\{xf}.\|l\PP;{}$\6
+\4${}\}{}$\2\6
+\4${}\}{}$\2\6
+\&{if} ${}(\\{rf}.\|h\V\\{rf}.\|l){}$\1\5
+${}\\{xf}.\|l\PP{}$;\C{ sticky bit }\2\6
+\&{return} \\{fpack}${}(\\{xf},\39\\{xe},\39\.{'+'},\39\|r){}$;\par
+\U91.\fi
+
+\M{93}And finally, the genuine floating point remainder. Subroutine \PB{%
+\\{fremstep}}
+either calculates $y\,{\rm rem}\,z$ or reduces $y$ to a smaller number
+having the same remainder with respect to~$z$. In the latter case
+the \PB{\.{E\_BIT}} is set in \PB{\\{exceptions}}. A third parameter, \PB{%
+\\{delta}},
+gives a decrease in exponent that is acceptable for incomplete results;
+if \PB{\\{delta}} is sufficiently large, say 2500, the correct result will
+always be obtained in one step of \PB{\\{fremstep}}.
+
+\Y\B\4\X5:Subroutines\X${}\mathrel+\E{}$\6
+\&{octa} \\{fremstep}\,\,${}\.{ARGS}((\&{octa},\39\&{octa},\39\&{int})){}$;\5
+\hbox{}\6{}\&{octa} ${}\\{fremstep}(\|y,\39\|z,\39\\{delta}){}$\1\1\6
+\&{octa} \|y${},{}$ \|z;\6
+\&{int} \\{delta};\2\2\6
+${}\{{}$\1\6
+\&{ftype} \\{yt}${},{}$ \\{zt};\6
+\&{int} \\{ye}${},{}$ \\{ze};\6
+\&{char} \\{xs}${},{}$ \\{ys}${},{}$ \\{zs};\6
+\&{octa} \|x${},{}$ \\{xf}${},{}$ \\{yf}${},{}$ \\{zf};\6
+\&{register} \&{int} \\{xe}${},{}$ \\{thresh}${},{}$ \\{odd};\7
+${}\\{yt}\K\\{funpack}(\|y,\39{\AND}\\{yf},\39{\AND}\\{ye},\39{\AND}\\{ys});{}$%
+\6
+${}\\{zt}\K\\{funpack}(\|z,\39{\AND}\\{zf},\39{\AND}\\{ze},\39{\AND}\\{zs});{}$%
+\6
+\&{switch} ${}(\T{4}*\\{yt}+\\{zt}){}$\5
+${}\{{}$\1\6
+\hbox{\4}\X42:The usual NaN cases\X;\6
+\4\&{case} \T{4}${}*\\{zro}+\\{zro}{}$:\5
+\&{case} \T{4}${}*\\{num}+\\{zro}{}$:\5
+\&{case} \T{4}${}*\\{inf}+\\{zro}{}$:\5
+\&{case} \T{4}${}*\\{inf}+\\{num}{}$:\5
+\&{case} \T{4}${}*\\{inf}+\\{inf}{}$:\5
+${}\|x\K\\{standard\_NaN};{}$\6
+${}\\{exceptions}\MRL{{\OR}{\K}}\.{I\_BIT}{}$;\5
+\&{break};\6
+\4\&{case} \T{4}${}*\\{zro}+\\{num}{}$:\5
+\&{case} \T{4}${}*\\{zro}+\\{inf}{}$:\5
+\&{case} \T{4}${}*\\{num}+\\{inf}{}$:\5
+\&{return} \|y;\6
+\4\&{case} \T{4}${}*\\{num}+\\{num}{}$:\5
+\X94:Remainderize nonzero numbers and \PB{\&{return}}\X;\6
+\4\\{zero\_out}:\5
+${}\|x\K\\{zero\_octa};{}$\6
+\4${}\}{}$\2\6
+\&{if} ${}(\\{ys}\E\.{'-'}){}$\1\5
+${}\|x.\|h\MRL{{\OR}{\K}}\\{sign\_bit};{}$\2\6
+\&{return} \|x;\6
+\4${}\}{}$\2\par
+\fi
+
+\M{94}If there's a huge difference in exponents and the remainder is nonzero,
+this computation will take a long time. One could compute
+$(2^ny)\,{\rm rem}\,z$ much more quickly for large~$n$ by using $O(\log n)$
+multiplications modulo~$z$, but the floating remainder operation isn't
+important enough to justify such expensive hardware.
+
+Results of floating remainder are always exact, so the rounding mode
+is immaterial.
+
+\Y\B\4\X94:Remainderize nonzero numbers and \PB{\&{return}}\X${}\E{}$\6
+$\\{odd}\K\T{0}{}$;\C{ will be 1 if we've subtracted an odd multiple of~$z$
+from $y$ }\6
+${}\\{thresh}\K\\{ye}-\\{delta};{}$\6
+\&{if} ${}(\\{thresh}<\\{ze}){}$\1\5
+${}\\{thresh}\K\\{ze};{}$\2\6
+\&{while} ${}(\\{ye}\G\\{thresh}){}$\1\5
+\X95:Reduce \PB{$(\\{ye},\\{yf})$} by a multiple of \PB{\\{zf}}; \PB{\&{goto} %
+\\{zero\_out}} if the remainder is zero, \PB{\&{goto} \\{try\_complement}} if
+appropriate\X;\2\6
+\&{if} ${}(\\{ye}\G\\{ze}){}$\5
+${}\{{}$\1\6
+${}\\{exceptions}\MRL{{\OR}{\K}}\.{E\_BIT}{}$;\5
+\&{return} \\{fpack}${}(\\{yf},\39\\{ye},\39\\{ys},\39\.{ROUND\_OFF});{}$\6
+\4${}\}{}$\2\6
+\&{if} ${}(\\{ye}<\\{ze}-\T{1}){}$\1\5
+\&{return} \\{fpack}${}(\\{yf},\39\\{ye},\39\\{ys},\39\.{ROUND\_OFF});{}$\2\6
+${}\\{yf}\K\\{shift\_right}(\\{yf},\39\T{1},\39\T{1});{}$\6
+\4\\{try\_complement}:\5
+${}\\{xf}\K\\{ominus}(\\{zf},\39\\{yf}),\39\\{xe}\K\\{ze},\39\\{xs}\K\.{'+'}+%
+\.{'-'}-\\{ys};{}$\6
+\&{if} ${}(\\{xf}.\|h>\\{yf}.\|h\V(\\{xf}.\|h\E\\{yf}.\|h\W(\\{xf}.\|l>\\{yf}.%
+\|l\V(\\{xf}.\|l\E\\{yf}.\|l\W\R\\{odd})))){}$\1\5
+${}\\{xf}\K\\{yf},\39\\{xs}\K\\{ys};{}$\2\6
+\&{while} ${}(\\{xf}.\|h<\T{\^400000}){}$\1\5
+${}\\{xe}\MM,\39\\{xf}\K\\{shift\_left}(\\{xf},\39\T{1});{}$\2\6
+\&{return} \\{fpack}${}(\\{xf},\39\\{xe},\39\\{xs},\39\.{ROUND\_OFF}){}$;\par
+\U93.\fi
+
+\M{95}Here we are careful not to change the sign of \PB{\|y}, because a
+remainder
+of~0 is supposed to inherit the original sign of~\PB{\|y}.
+
+\Y\B\4\X95:Reduce \PB{$(\\{ye},\\{yf})$} by a multiple of \PB{\\{zf}}; \PB{%
+\&{goto} \\{zero\_out}} if the remainder is zero, \PB{\&{goto} \\{try%
+\_complement}} if appropriate\X${}\E{}$\6
+${}\{{}$\1\6
+\&{if} ${}(\\{yf}.\|h\E\\{zf}.\|h\W\\{yf}.\|l\E\\{zf}.\|l){}$\1\5
+\&{goto} \\{zero\_out};\2\6
+\&{if} ${}(\\{yf}.\|h<\\{zf}.\|h\V(\\{yf}.\|h\E\\{zf}.\|h\W\\{yf}.\|l<\\{zf}.%
+\|l)){}$\5
+${}\{{}$\1\6
+\&{if} ${}(\\{ye}\E\\{ze}){}$\1\5
+\&{goto} \\{try\_complement};\2\6
+${}\\{ye}\MM,\39\\{yf}\K\\{shift\_left}(\\{yf},\39\T{1});{}$\6
+\4${}\}{}$\2\6
+${}\\{yf}\K\\{ominus}(\\{yf},\39\\{zf});{}$\6
+\&{if} ${}(\\{ye}\E\\{ze}){}$\1\5
+${}\\{odd}\K\T{1};{}$\2\6
+\&{while} ${}(\\{yf}.\|h<\T{\^400000}){}$\1\5
+${}\\{ye}\MM,\39\\{yf}\K\\{shift\_left}(\\{yf},\39\T{1});{}$\2\6
+\4${}\}{}$\2\par
+\U94.\fi
+
+\N{1}{96}Index.
+
+\fi
+
+
+\inx
+\fin
+\con

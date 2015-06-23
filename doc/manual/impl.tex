@@ -1,0 +1,59 @@
+\chapter{Implementation Notes}
+
+\section{XSA-3S1000 SDRAM Controller}
+
+\subsection{Refresh}
+
+SDRAM cells must be refreshed repeatedly to keep their value. The SDRAM knows three methods of refreshing cells:
+\begin{itemize}
+\item {\it Self-Refresh}: The SDRAM is detached from the FPGA and refreshes all cells periodically. No other functions can be used while self-refresh is in progress. This mode is not used by the current controller.
+\item {\it Auto-Refresh}: The SDRAM keeps an internal row counter purely for refreshing. The {\it auto-refresh} command refreshes the current row and increases the counter. This mode is used by the current controller to refresh all rows periodically. The refresh circuit is independent from the RAM access interface and refreshes all rows periodically regardless of the memory access pattern of the client.
+\item {\it Manual Refresh}: Manual refresh of a row occurs when that row is activated. Implicit manual access occurs when a row is activated for reading or writing, and may occur depending on the access pattern of the client. It is not exploited though. Explicit manual refresh occurs when a row is opened purely to refresh it, and is not used by the current controller.
+\end{itemize}
+
+An access arbiter is required to interleave access to the SDRAM by the refresh circuit and by the actual memory access interface. In the current implementation, an access burst in progress is allowed to finish, then refreshing gets absolute priority. The actual implementation keeps a counter of pending rows to refresh and a timer. Whenever the timer runs out, the number of rows to refresh is increased by one. Whenever the number of rows to refresh is greater than zero {\it and} the memory access interface does not actually access the SDRAM, a row is refreshed and the number of rows to refresh is decreased by one. This scheme allows ``alarms'' from the refresh timer to accumulate while a burst is in progress, and perform them all in sequence when the burst is completed.
+
+\subsection{States}
+
+After initialization, the SDRAM has three persistent states:
+\begin{itemize}
+\item Idle (pre-charged): The row data register of the SDRAM is pre-charged and ready to activate a row. This state can also be used to set the mode register or to activate auto-refresh.
+\item Row Active: A row has been loaded into the row data register. Either a transfer of data to or from this row can be started, or the row data register can be pre-charged to activate another row. Minimum delays must be obeyed to ensure that the value from the row data register can be written back to the DRAM array, either unchanged (for manual refresh) or changed (for actually writing data to the DRAM array).
+\item Transfer: Reading or writing data to or from the row data register. The SDRAM supports an auto-precharge mode (???).
+\end{itemize}
+
+It also has transitional states to represent the non-immediate transition between the persistent states:
+\begin{itemize}
+\item Mode Register Accessing: A transition from {\it Idle} to {\it Idle}. Represents the time to store a new value in the mode register.
+\item Activating: A transition from {\it Idle} to {\it Active}. Represents the time to load a row from the DRAM array. The time to complete this transition is $t_{RCD}$, the RAS-to-CAS delay (so called because the activation of a row is signalled by $\overline{RAS}$ going low, and access to a memory cell is signalled by $\overline{CAS}$ going low.)
+\item Precharging: A transition from {\it Active} to {\it Idle}. Represents the time to pre-charge the row data register of the SDRAM.
+\end{itemize}
+
+\subsection{Clocking}
+
+Based on current knowledge (!!!)
+
+The explanation in this section assumes that the SDRAM controller uses registers for all data signals both at the input and output pins, without any logic in between, clocked by the internal FPGA clock.
+
+The FPGA uses a DCM to generate the clock for the SDRAM. The input clock to the DCM is the global clock of the FPGA circuits. The output clock is fed through an output buffer to the SDRAM. The SDRAM feedback clock is fed to an IBUFG and to the feedback input of the DCM.
+
+How this works: The path from the DCM output to the SDRAM serves two purposes. The first purpose is to act as a clock source at the SDRAM clk pin. The SDRAM works synchronous to this clock source: It samples its inputs when a clock edge occurs at the clk pin, and changes its outputs in such a way that setup and hold timing is not violated with respect to the clk pin.
+
+When the SDRAM tries to send data to the FPGA, it asserts the data signals between two clock edges, such that the data is stable on each clock edge. Data and (feedback) clock signals have comparable delays between their source at SDRAM pins and their destination inside the FPGA. These delays consist of PCB trace delays, input buffer delays, and FPGA-internal delays. Sicne the delays are comparable, the FPGA could in theory use the clock signal coming from the SDRAM to clock registers which sample the data signals coming from the SDRAM without violating setup/hold timing.
+
+This is where the second purpose of the DCM comes in: The feedback clock from the SDRAM is kept in phase with the FPGA-internal clock, meaning that the FPGA can as well use the internal clock to sample the data signals from the SDRAM. The DCM therefore ensures that reading data from the SDRAM works without problems using the internal clock.
+
+Writing data to the SDRAM works by keeping the clock frequency low enough: The internal FPGA registers load their new values when a clock edge occurs inside the FPGA, i.e. one SDRAM-to-FPGA signal delay after the clock edge occurs at the SDRAM. The new values are available after the clock-to-out delay of the FPGA registers. They arrive at the SDRAM one FPGA-to-SDRAM delay later, and must respect the setup timing of the SDRAM. The sum of all these delays must be less than the clock period.
+
+The net effect is that clock edges occur in an alternating fashion in the FPGA and in the SDRAM. This leaves roughly half a clock period to transfer a signal to or from the SDRAM. For example, a read command with a CAS latency of 3 is explained as the data being available three clock periods after the CAS. Executing this command works as follows (timing measured in clock periods):
+\begin{itemize}
+\item 0: a CAS command is loaded into the FPGA output registers with an FPGA clock edge
+\item 0.5: The SDRAM samples its inputs at an SDRAM clock edge and recognizes the command
+\item 1.5: ... working ...
+\item 2.5: ... working ...
+\item 3.3: The SDRAM asserts data outputs roughly here
+\item 3.5: The SDRAM guarantees valid data at this SDRAM clock edge
+\item 4.0: The FPGA samples the data signals at this FPGA clock edge
+\end{itemize}
+
+Depending on the clock frequency, the distance between clock edges may shift: The delay from an SDRAM clock edge to the next FPGA clock edge is determined by the signal delay, and is therefore independent from the clock frequency. The delay from an FPGA clock edge to the next FPGA clock edge is simply the remainder of the clock period. With the clock period long enough, the delay from an FPGA clock edge to the next SDRAM clock edge is long enough for signals to be transmitted. Signals back to the FPGA experience the same delay as the feedback clock and therefore always arrive early enough.

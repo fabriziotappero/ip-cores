@@ -1,0 +1,277 @@
+\chapter{Using the ECO32 in an FPGA Design}
+
+While the \eco is a main component of the demonstration project, it is also a re-usable softcore processor that can be used in arbitrary projects. This chapter explains the necessary steps to use the \eco your next project.
+
+
+
+The \eco must also be connected to a RAM to perform any meaningful function. Although it is possible to use the \eco without an attached RAM, such designs would allow only the general-purpose registers to be used for data storage. Typically, the \eco is overkill for such projects, and a smaller processor should be used instead. The RAM can again be implemented as a controller for an off-chip RAM (like in the demonstration project), a block RAM, distributed RAM, or any other kind of memory that satisfies the expectations of a RAM.
+
+The \eco is typically also connected to other on-chip devices to perform its task, such as co-processors, communication controllers, or controllers for off-chip devices. They are connected to the \eco by the SoC bus as well as dedicated interrupt lines. Using the \eco in a custom design implies the design and implementation of such controllers.
+
+Finally, software must be written that is executed by the \ecox. This software is then stored in ROM, pre-loaded into RAM, or stored on an external device and loaded into RAM at run-time. The \eco comes with a tool chain to write such software, comprising an assembler, C compiler, and hardware simulator.
+
+\section{Instantiating the ECO32}
+
+The \eco itself is defined as a synthesizable Verilog module that can be loaded into a project and instantiated as part of a larger design. This larger design must also contain the SoC bus, RAM, ROM, and peripheral devices.
+
+\subsection{Verilog}
+
+The following code instantiates the \eco as part of a surrounding Verilog module:
+
+\begin{verbatim}
+cpu mycpu(
+  .clk(clk),
+  .reset(reset),
+  .bus_en(cpu_en),
+  .bus_wr(cpu_wr),
+  .bus_size(cpu_size[1:0]),
+  .bus_addr(cpu_addr[31:0]),
+  .bus_data_in(cpu_data_in[31:0]),
+  .bus_data_out(cpu_data_out[31:0]),
+  .bus_wt(cpu_wt),
+  .irq(cpu_irq[15:0])
+);
+\end{verbatim}
+
+Note how all signals of the enclosing module are prefixed with {\tt cpu\_} to distinguish them from the corresponding signals of other entities on the bus.
+
+\subsection{VHDL}
+
+The following code declares the \eco component in a surrounding VHDL architecture:
+
+\begin{verbatim}
+component cpu is
+  port (
+    clk : in std_logic;
+    reset : in std_logic;
+    bus_en : out std_logic;
+    bus_wr : out std_logic;
+    bus_size : out std_logic_vector (1 downto 0);
+    bus_addr : out std_logic_vector (31 downto 0);
+    bus_data_in : in std_logic_vector (31 downto 0);
+    bus_data_out : ou std_logic_vector (31 downto 0);
+    bus_wt : in std_logic;
+    irq : in std_logic_vector (15 downto 0)
+  );
+end component;
+\end{verbatim}
+
+The following code instantiates that component:
+
+\begin{verbatim}
+mycpu : cpu port map (
+  clk => clk,
+  reset => reset,
+  bus_en => cpu_en,
+  bus_wr => cpu_wr,
+  bus_size => cpu_size,
+  bus_addr => cpu_addr,
+  bus_data_in => cpu_data_in,
+  bus_data_out => cpu_data_out,
+  bus_wt => cpu_wt,
+  irq => cpu_irq
+);
+\end{verbatim}
+
+Note how all signals of the enclosing module are prefixed with {\tt cpu\_} to distinguish them from the corresponding signals of other entities on the bus.
+
+\section{SoC Bus}
+
+Using the \eco in a larger design implies connecting it to devices using the SoC bus architecture. This bus must interpret the bus signals from the \eco and transform them to bus signals for the devices. The general bus architecture is explained in \myref{4}{bus}.
+
+\subsection{Instantiation}
+
+Building the bus is easier than it sounds. First, the cpu must be instantiated as explained above. All devices must also be instantiated. Note that a single hardware module may be instantiated multiple times to create multiple similar devices on the bus. For example, the demonstration project instantiates two RS232 serial port controllers from the same Verilog description.
+
+\subsection{Non-Bus Signals}
+
+The {\it clk} and {\it reset} signals must be routed to all instances that need them, including the cpu. All externally available signals must be routed between the ports of the enclosing module and the device instances. For example, in the demonstration project, the {\it r}, {\it g}, {\it b}, {\it hsync}, and {\it vsync} signals must be routed between the ports of the enclosing module and the instance of the character display controller. Finally, the local {\it cpu\_irq} must be assigned individual interrupt signals from the devices.
+
+\subsection{Direct-Routed Bus Signals}
+
+The {\it cpu\_wr} signal is directly routed from the cpu to all peripheral devices. Devices whose enable signal stays de-asserted would ignore the {\it cpu\_wr} signal.
+
+Similarly, {\it cpu\_size} is directly routed to both RAM and ROM. Again, if not selected, these controllers ignore the {\it cpu\_size} signal. Other devices than RAM and ROM implicitly assume word-sized transfers and do not need the {\it cpu\_size} signal.
+
+The write-data lines, {\it cpu\_data\_out}, are directly routed to all devices. However, some devices may need only a subset of these lines if, for example, all acessible device registers are only 8 bits wide. The remaining lines of {\it cpu\_data\_out} are ignored for such devices.
+
+\subsection{Address Decoder}
+
+The {\it cpu\_addr} signal is compared with bit patterns to determine which device is selected (\myref{4}{bus}). This decoder creates one signal per device that is asserted if the device is selected. An example address decoder is shown here that uses 20 device-local address bits (of which the lowest 2 are not routed) for all peripheral devices other than RAM and ROM, a RAM size of 32 MB, and a ROM size of 2 MB.
+
+The address decoder written in Verilog looks like this:
+\begin{verbatim}
+  wire ram_selected;
+  wire rom_selected;
+  wire io_selected;
+  
+  wire device1_selected;
+  wire device2_selected;
+  
+  ...
+  
+  assign ram_selected =
+    (cpu_en == 1 && cpu_addr[31:25] == 7'b0000000) ? 1 : 0;
+  assign rom_selected =
+    (cpu_en == 1 && cpu_addr[31:21] == 7'b00100000000) ? 1 : 0;
+  assign io_selected =
+    (cpu_en == 1 && cpu_addr[31:28] == 7'b0011) ? 1 : 0;
+    
+  assign device1_selected =
+    (io_selected == 1 && cpu_addr[27:20] == 7'b00000000) ? 1 : 0;
+  assign device2_selected =
+    (io_selected == 1 && cpu_addr[27:20] == 7'b00000001) ? 1 : 0;
+    
+  ...
+\end{verbatim}
+
+The address decoder written in VHDL looks like this:
+\begin{verbatim}
+  signal ram_selected : std_logic;
+  signal rom_selected : std_logic;
+  signal io_selected : std_logic;
+  
+  signal device1_selected : std_logic;
+  signal device2_selected : std_logic;
+  
+  ...
+  
+  ram_selected <=
+    cpu_en when cpu_addr(31 downto 25) = "0000000" else '0';
+  rom_selected <=
+    cpu_en when cpu_addr(31 downto 21) = "00100000000" else '0';
+  io_selected <=
+    cpu_en when cpu_addr(31 downto 28) = "0011" else '0';
+    
+  device1_selected <=
+    io_selected when cpu_addr(27 downto 20) = "00000000" else '0';
+  device2_selected <=
+    io_selected when cpu_addr(27 downto 20) = "00000001" else '0';
+    
+  ...
+\end{verbatim}
+
+The {\it \_selected} lines for the individual devices are directly routed to the enable ports of the corresponding devices. The local address ports of each device are connected with the remaining address bits. For example, the local address ports of device1 are connected with cpu\_addr$_{19..0}$. A subset of those address lines may be used if the device ignores the remaining lines.
+
+\subsection{Response Signal Multiplexer}
+
+The response signals from the devices, {\it device$^*$\_wt} and {\it device$^*$\_data\_out}, are multiplexed by the {\it cpu\_addr} before delivered to the \eco as {\it cpu\_wt} and {\it cpu\_data\_in}. This way, the \eco always sees the response signal of the selected device.
+
+The response signal multiplexer written in Verilog looks like this:
+\begin{verbatim}
+  assign cpu_wt =
+    (ram_selected == 1) ? ram_wt :
+    (rom_selected == 1) ? rom_wt :
+    (device1_selected == 1) ? device1_wt :
+    (device2_selected == 1) ? device2_wt :
+    1;
+  assign cpu_data_in =
+    (ram_selected == 1) ? ram_data_out :
+    (rom_selected == 1) ? rom_data_out :
+    (device1_selected == 1) ? device1_data_out :
+    (device2_selected == 1) ? device2_data_out :
+    32'h00000000;
+\end{verbatim}
+
+The response signal multiplexer written in VHDL looks like this:
+\begin{verbatim}
+  cpu_wt <=
+    ram_wt when ram_selected = '1' else
+    rom_wt when rom_selected = '1' else
+    device1_wt when device1_selected = '1' else
+    device2_wt when device2_selected = '1' else
+    '1';
+  cpu_data_in <=
+    ram_data_in when ram_selected = '1' else
+    rom_data_in when rom_selected = '1' else
+    device1_data_in when device1_selected = '1' else
+    device2_data_in when device2_selected = '1' else
+    "00000000000000000000000000000000";
+\end{verbatim}
+
+\section{RAM and ROM Controllers}
+
+After reset, the \pc is set to virtual address E0000000$_h$ (physical address 20000000$_h$) and therefore points to the first location in ROM. There are several ways to connect a ROM to this address, for example:
+\begin{itemize}
+\item implement a controller for an off-chip ROM. For example, the demonstration project connects an address range starting at physical address 20000000$_h$ to a controller for the flash ROM on the development board.
+\item connect a range of addresses starting at physical address 20000000$_h$ to one or more block RAMs configured as ROMs
+\item connect a range of addresses starting at physical address 20000000$_h$ to distributed ROM
+\item implement logic that emits a jump instruction to virtual address C0000000$_h$ which is direct-mapped to RAM. This solution requires that RAM is pre-initialized with a program to jump to.
+\end{itemize}
+
+The physical address range 00000000$_h$ through 1FFFFFFF$_h$ is associated with RAM. There are several ways to connect a RAM:
+\begin{itemize}
+\item implement a controller for an off-chip RAM. For example, the demonstration project connects an address range starting at physical address 00000000$_h$ to a controller for the SDRAM on the development board.
+\item connect a range of addresses starting at physical address 00000000$_h$ to one or more block RAMs.
+\item connect a range of addresses starting at physical address 00000000$_h$ to distributed RAM
+\end{itemize}
+
+\section{Peripheral Controllers}
+
+The \eco can be connected to arbitrary FPGA designs to control the operation of these designs or perform computations on behalf of a larger design. For example, it can be connected to an RS232 transceiver to communicate with other physical devices. The range of possible FPGA designs that can cooperate with the \eco shall not be discussed here. Instead, this section explains {\it how} to make the connection.
+
+The primary means of communication between the \eco and other devices is the SoC bus. The bus provides means for basic {\it read} and {\it write} operations, but does not define the meaning of these operations. This section gives some suggestions how to use these operations as part of a larger design.
+
+\subsection{Device Address Map}
+
+Peripheral controllers must be connected to physical addresses in the range 30000000$_h$ through 3FFFFFFF$_h$ (virtual addresses in the range F0000000$_h$ through FFFFFFFF$_h$). The subdivision of this range across different devices is not specified and can be chosen freely. This allows the use of both many devices with a small address range and few devices with a large address range in the same design.
+
+\subsection{Device-Local Addresses}
+
+The device-local address contains those address bits of the 32 bus address lines that have not been decoded to select a specific device. The meaning of the device-local address was clear in the context of a RAM or ROM. For peripheral controllers, there is more freedom. A device-local address in such a controller can select a device register, or a location in a device-specific RAM, or even a location that does not actually store values.
+
+In general, the device-local address is a piece of information that is always transferred to the target device, whether in read operations or write operations. For read operations, it specifies what kind of data is requested. For write operations, it tells the device what to do with the data.
+
+A typical way to interpret a device-local address is by building an address decoder. Much like the coarse address decoder found in the bus itself, it compares the device-local address with bit patterns to generate enable signals for individual components in a device, and to multiplex response data from individual components.
+
+\subsection{Device Registers}
+
+The most common construct to connect to the bus is a register. Such registers keep control values and data for the operation of a device. Registers can have any size from 1 to 32 bits. Larger registers cannot be fully accessed in a single bus operation and must be wired to the bus as multiple separate registers, typically at different device-local addresses.
+
+Write data coming from the \eco is wired to the data-in port of the register. Read data is generated directly from the data-out port of the register. The device-local address decoder then multiplexes between read data from different registers. Finally, the device-local address decoder asserts the clock enable signal for the register if both the device-specific bus enable signal is asserted and the device-local address selects this specific register. The {\it wait} signal of the bus can be tied low for registers, since they do not introduce any delays.
+
+The current value of the register is not only delivered as read data to the \ecox, but is also used by the device itself. In some cases, the value of the register is modified by the device such that the new value can be read by the \ecox. There are various ways in which a register value can influence the operation of a device, which cannot all be described here. For example, the value can consist of control fields that determine the operation mode of the device. Registers can also contain data to be sent to external targets by the device, or data that was received from external sources.
+
+\subsection{Device RAM}
+
+Some devices may use the device-local address to access a RAM, just like the main RAM does. Device RAM is different from regular RAM in the sense that it must be accessed only by word-sized transfers. Typically, device RAM is accessed by the \eco only in block transfers to and from regular RAM.
+
+Device RAM is typically used for large data blocks to be sent or received by a device. For example, the disk controller of the demonstration project uses a 4kB RAM for data that is transferred to and from disk. The bus architecture demands that this RAM be accessed as 1k words, and never as 2k half-words or 4k bytes. Another use for device RAM would be the storage of program and data of a co-processor.
+
+Device RAM can be easily implemented by connecting the data-in, data-out, and device-local address to a block RAM of the FPGA. The wiring of the {\it wait} and {\it enable} signals is slightly more complex due to the block RAM being only synchronously readable. A read operation requires two clock cycles, so the bus {\it wait} signal must be asserted in the first of those cycles, and de-asserted in the second one. Write operations take only a single clock cycle, and the {\it wait} signal must stay de-asserted.
+
+This behaviour can be implemented easily. First, the bus enable signal is connected directly to the clock enable port of the block RAM. This causes the block RAM to finish writing in one clock cycle, and to read data at the edge between the first and second clock cycle of a read operation. Since the bus enable signal stays asserted until the bus cycle is complete, it also causes the block RAM to read again at the end of the second clock cycle, but from the same address, and the resulting value is ignored anyway. Only the value read after the first clock cycle is used.
+
+The behaviour of the wait signal is also simple. For write operations, it must stay de-asserted. For read cycles, it must be asserted for one clock cycle, then de-asserted for one clock cycle. A simple state machine with two states takes care of this.
+
+\subsection{FIFO Queues}
+
+A device-local address can select a FIFO queue that delivers or consumes data. Typically, a single device-local address selects either a read queue or a write queue, although it is possible to connect one queue of either type to the same address (and distinguish between them by the bus {\it write} signal).
+
+FIFO queues have the special property that successive values are read from or written to the same device-local address. When writing data to a FIFO queue, the order in which values are written determines the order in which they are handled. When reading data from a FIFO queue, the order in which values arrive is the order in which the \eco should handle them. FIFO queues are typically associated with a communication stream.
+
+\subsection{Address Registers}
+
+It is possible to associate a single device-local address with multiple target registers. In such designs, a separate source for address bits is needed besides those coming from the bus. These additional address bits are decoded to generate enable signals for the target registers and to multiplex data read from them.
+
+A separate register at another device-local address, called an \definition{address register}, is used to store these additional address bits. First, the program running on the \eco writes the address of the intended target register into the address register. Then, it writes to or reads from the multiplexed device-local address to access the target register itself.
+
+\subsection{Trigger Signals}
+
+A device sometimes needs a signal telling it to start some action. For example, the disk controller in the demonstration project is first configured by writing appropriate values into its control registers, then triggering the start of the configured operation. Such a trigger need not store any values, and thus need not be backed by a physical register. Instead, the trigger signal causes a transition in the state machine of the device that begins the operation.
+
+A simple design would take the enable signal of that device local address as the trigger signal. This enable signal is in turn asserted if both the bus {\it enable} signal is asserted and the correct device-local address is supplied. The \eco starts the operation by reading from or writing to that address. More sophisticated designs could take the value of the {\it write} signal into account, such that only writing starts the operation, or even look for writing a 1 bit to a specific bit position. This is important if the trigger signal is grouped together with other values at the same device-local address.
+
+\subsection{Bus-Mapped Logic}
+
+It is possible to implement an often-used boolean function in hardware and connect it directly to the bus, with no intermediate registers. This function can have as many input bits as it has device-local address bits, and up to 32 output bits which it connects to its data-out port. The \eco can access the boolean function block by encoding both the base address of the function block device and the input bits for the function in a 32-bit physical address, then reading from that address. The resulting value is the result of the function.
+
+\section{Interrupts}
+
+Some devices need to signal to the \eco that some event has occurred without the \eco specifically asking for it. For example, the RS232 controller of the demonstration project must signal to the eco when a character has been received, without the \eco constantly asking the RS232 controller if characters are available. {\it Interrupts} are used for this.
+
+The \eco supports up to 16 level-triggered interrupt signals. A device asserts its interrupt signal when it needs attention from the \ecox. The \eco then performs whatever action is needed for the device. Specifically, it performs some action that causes the device to de-assert its interrupt signal. Interrupt handling from the perspective of the \eco has been described before. This section explains interrupts from the perspective of the peripheral devices.
+
+A straightforward way to implement interrupts in a device is to use a 1-bit register that can be set or reset both by the device and the \eco (via the bus). The value of this register is taken as the interrupt signal. When the device detects an event that is worth an interrupt, it sets the register to 1. This causes the \eco to enter its interrupt service routine, where it deals with the event. The service routine also writes a 0 to the register via the bus to de-assert the interrupt signal, such that it can leave the service routine without generating another interrupt.
+
+A more sophisticated design is used in the demonstration project. This uses another 1-bit register that acts as an {\it interrupt enable} and is written to solely by the \ecox. The demonstration project groups both 1-bit registers into a 2-bit register at a single device-local address. The interrupt signal is generated by ANDing both registers. This allows to disable interrupt generation in the device itself. Normally, the \eco does not need such a design because it can disable each interrupt channel individually through the $IEN$ field of the \pswx. However, more complex designs may involve more than 16 interrupt-capable devices and require that multiple devices share a single interrupt signal. In that case, disabling interrupts per-device, and not per-channel, is a useful feature.

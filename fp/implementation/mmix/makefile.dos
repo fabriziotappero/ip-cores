@@ -1,0 +1,117 @@
+#
+#   Makefile for MMIXware under DOS
+#
+#   Comments to andreas.scherer@pobox.com
+#
+#   If you're using nmake, you'll need to save the Unix makefile and 
+#   rename this file to makefile, as in:
+#
+#		ren Makefile Makefile.unix
+#		ren Makefile.dos Makefile
+#
+#	Then use nmake normally.
+
+#   Be sure that CWEB version 3.0 or greater is installed before proceeding!
+#   In fact, CWEB 3.6 is recommended for making hardcopy or PDF documentation.
+
+#   If you prefer optimization to debugging, change /Zi to something like /GB:
+MAKE   = $(MAKE) /$(MAKEFLAGS)
+CFLAGS = /Zi
+
+.SUFFIXES: .dvi .tex .w .ps .pdf
+
+.tex.dvi:
+	tex $*.tex
+
+.tex.pdf:
+	pdftex $*.tex
+
+.dvi.ps:
+	dvips $* -o $*.ps
+
+.w.c:
+    if exist $*.ch ctangle $*.w $*.ch
+    if not exist $*.ch ctangle $*.w
+
+.w.tex:
+    if exist $*.ch cweave $*.w $*.ch
+    if not exist $*.ch cweave $*.w
+
+.w.obj:
+	$(MAKE)  $*.c
+	$(MAKE)  $*.obj
+
+.w.exe:
+	$(MAKE)  $*.c
+	$(MAKE)  $*.exe
+
+.w.dvi:
+	$(MAKE)  $*.tex
+	$(MAKE)  $*.dvi
+
+.w.ps:
+	$(MAKE)  $*.dvi
+	$(MAKE)  $*.ps
+
+.w.pdf:
+	$(MAKE)  $*.tex
+	$(MAKE)  $*.pdf
+
+WEBFILES = mmix-def.w mmixal.w "mmix-arith.w" mmix-sim.w mmix-io.w mmix-mem.w \
+	mmotype.w abstime.w mmix-doc.w "mmix-config.w" mmix-pipe.w mmmix.w
+CHANGEFILES =
+TESTFILES = *.mms silly.run silly.out *.mmconfig *.mmix
+MISCFILES = Makefile makefile.dos README mmix.mp mmix.1
+ALL = $(WEBFILES) $(TESTFILES) $(MISCFILES)
+
+basic:  mmixal.exe mmix.exe
+
+doc:    mmix-doc.ps mmixal.ps mmix-sim.ps abstime.ps
+
+all:    mmixal.exe mmix.exe mmotype.exe mmmix.exe
+
+clean:
+	del *~
+	del *.obj
+	del *.c
+	del *.h
+	del *.tex
+	del *.log
+	del *.dvi 
+	del *.toc
+	del *.idx
+	del *.scn
+	del *.ps
+	del *.pdf
+	del *.ilk
+	del *.pdb
+
+abstime.exe: abstime.obj
+    $(CC) $(CFLAGS) abstime.obj /Feabstime.exe
+
+"mmix-pipe.obj": "mmix-pipe.c" abstime.exe
+	.\abstime >abstime.h
+	$(CC) $(CFLAGS) -c mmix-pipe.c
+
+mmmix.exe:  "mmix-arith.obj" "mmix-pipe.obj" "mmix-config.obj" \
+            "mmix-mem.obj" "mmix-io.obj" mmmix.c
+	$(CC) $(CFLAGS) mmmix.c \
+	  "mmix-arith.obj" "mmix-pipe.obj" "mmix-config.obj" "mmix-mem.obj" \
+      "mmix-io.obj" /Femmmix.exe
+
+mmixal.exe: "mmix-arith.obj" mmixal.c
+	$(CC) $(CFLAGS) mmixal.c "mmix-arith.obj" /Femmixal.exe
+
+mmix.exe:  "mmix-arith.obj" mmix-io.obj mmix-sim.c abstime.exe
+	.\abstime >abstime.h
+	$(CC) $(CFLAGS) mmix-sim.c \
+	             "mmix-arith.obj" mmix-io.obj /Femmix.exe
+
+mmotype.exe: mmotype.obj
+	$(CC) $(CFLAGS) mmotype.obj /Femmotype.exe
+
+tarfile: $(ALL)
+	tar cvf /tmp/mmix.tar $(ALL)
+	gzip -9 /tmp/mmix.tar
+
+

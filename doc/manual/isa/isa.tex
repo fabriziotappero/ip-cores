@@ -1,0 +1,133 @@
+\newenvironment{effectize}{Effect: \begin{itemize}}{\end{itemize}}
+\newcommand{\effect}{\item[]}
+\newenvironment{effectblock}{\begin{itemize}}{\end{itemize}}
+
+\newcommand{\regeffect}[1]{\effect $R_r \leftarrow #1$}
+\newcommand{\regeffects}[1]{\begin{effectize}\regeffect{#1}\end{effectize}}
+
+\newcommand{\bitregeffect}[1]{\effect $R_{r,i} \leftarrow #1$}
+\newcommand{\bitregeffects}[1]{\begin{effectize}\bitregeffect{#1}\end{effectize}}
+
+\newcommand{\priveffect}{\effect if $U_C = 1$ then trigger a \name{Privileged Instruction Fault}}
+
+\newcommand{\rrrformat}[1]{
+Format:
+\begin{tabular}{|c|c|c|c|c|c|}
+\hline
+Bits & 31..26 & 25..21 & 20..16 & 15..11 & 10..0\\
+\hline
+Value & #1 & x & y & r & (ignored)\\
+\hline
+\end{tabular}
+}
+
+\newcommand{\rriformat}[1]{
+Format:
+\begin{tabular}{|c|c|c|c|c|}
+\hline
+Bits & 31..26 & 25..21 & 20..16 & 15..0\\
+\hline
+Value & #1 & x & r & y\\
+\hline
+\end{tabular}
+}
+
+\newcommand{\jformat}[1]{
+Format:
+\begin{tabular}{|c|c|c|}
+\hline
+Bits & 31..26 & 25..0\\
+\hline
+Value & #1 & offset\\
+\hline
+\end{tabular}
+}
+
+\newcommand{\jrformat}[1]{
+Format:
+\begin{tabular}{|c|c|c|c|}
+\hline
+Bits & 31..26 & 25..21 & 20..0\\
+\hline
+Value & #1 & dest & (ignored)\\
+\hline
+\end{tabular}
+}
+
+\newcommand{\brformat}[1]{
+Format:
+\begin{tabular}{|c|c|c|c|c|}
+\hline
+Bits & 31..26 & 25..21 & 20..16 & 15..0\\
+\hline
+Value & #1 & x & y & offset\\
+\hline
+\end{tabular}
+}
+
+\newcommand{\ldstformat}[1]{
+Format:
+\begin{tabular}{|c|c|c|c|c|}
+\hline
+Bits & 31..26 & 25..21 & 20..16 & 15..0\\
+\hline
+Value & #1 & x & r & y\\
+\hline
+\end{tabular}
+}
+
+\newcommand{\noargformat}[1]{
+Format:
+\begin{tabular}{|c|c|c|}
+\hline
+Bits & 31..26 & 25..0\\
+\hline
+Value & #1 & (ignored)\\
+\hline
+\end{tabular}
+}
+
+\newcommand{\mvspformat}[1]{
+Format:
+\begin{tabular}{|c|c|c|c|c|}
+\hline
+Bits & 31..26 & 25..21 & 20..16 & 15..0\\
+\hline
+Value & #1 & (ignored) & r & z\\
+\hline
+\end{tabular}
+}
+
+\chapter{Instruction Set}
+
+The instructions of the \eco operate directly on the functional components described in the previous chapter. They can be subdivided into groups of instructions that work in a similar way:
+\begin{itemize}
+\item {\it Computation}: These instructions compute a function of values stored in general-purpose registers or encoded directly into the instruction and store the result in a general-purpose register.
+\item {\it Control Flow}: These instructions affect the \pc in various ways.
+\item {\it Load/Store}: These instructions transfer data from or to RAM locations or peripheral device registers.
+\item {\it System}: Special instructions for \pswx, \mmux, or exception operation.
+\end{itemize}
+
+\section{Definitions}
+
+Some definitions are useful when explaining the effect of an instruction: An \definition{immediate} value is a value encoded directly into the instruction. A \definition{register value} is a 32-bit value taken from a general-purpose register. The interpretation of such values is up to the instruction.
+
+A register value is referred to by an instruction by an immediate value that denotes the register number. If $x$ is a 5-bit immediate value, then $R_x$ shall denote the corresponding register value, and $R_x \leftarrow ...$ shall denote an assignment to this register. Similarly, $S_i$ denotes special purpose register \#i. $R_{i,j}$ and $S_{i,j}$ denote specific bits of a register. As a special rule, an assignment to $R_0$ has no effect since that register is not writeable.
+
+\section{General Execution Loop}
+
+The \eco executes the following loop to perform its task:
+\begin{itemize}
+\item Remember the current value of the \pc register. If any exception occurs before the instruction is finished, this value is placed in register \#30 such that the current instruction can be restarted.
+\item Load the current instruction from the virtual address stored in the \pcx. If that address is not word-aligned, then an \name{Invalid Address Exception} occurs. Otherwise, if it is a privileged address and the CPU is in user mode, then a \name{Privileged Address Exception} occurs. Otherwise, it is mapped to a physical address by the \mmux, which may trigger a \name{TLB Miss Exception} or a \name{TLB Invalid Exception}. All these exceptions cause the faulting \pc value to be stored in the \name{TLB Bad Address Register}. Note that a \name{TLB Write Exception} cannot occur since the instruction fetch is a read access.
+\item Increase the \pc by 4.
+\item If the opcode in the instruction word does not denote a valid instruction, then an \name{Illegal Instruction Fault} is triggered.
+\item Decode and execute the instruction. Any fault triggered during this step immediately stops execution of the current instruction and transfers control to the fault service routine.
+\item Remember the new value of the \pc register. If any interrupt occurs in the next step, this value is placed in register \#30 such that control can return to the next instruction.
+\item Test for interrupts. If an interrupt is signalled and admitted (\myref{2}{ien}), then control is transferred to the service routine (\myref{2}{accept_exception}).
+\end{itemize}
+
+\input{isa/comp}
+\input{isa/jump}
+\input{isa/ldst}
+\input{isa/system}
