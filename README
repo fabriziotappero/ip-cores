@@ -1,0 +1,14 @@
+OpenCPU32 Project
+
+Directory structure
+docs/gen: 	Doxygen generated documentation
+hdl:		Location of ISE project (VHDL)
+simulator:	CPU Simulator source code
+tools		Some tools used on the project
+
+Bibliography:
+http://vhdlguru.blogspot.com.br/
+http://opensource.zylin.com/zpu.htm
+http://www.amazon.com/Digital-Logic-Microprocessor-Design-VHDL/dp/0534465935/ref=sr_1_4?ie=UTF8&qid=1333221524&sr=8-4
+http://en.wikipedia.org/wiki/CPU_design
+http://en.wikipedia.org/wiki/Computer_architecture
