@@ -1,0 +1,149 @@
+EESchema Schematic File Version 2  date Sat 17 Dec 2011 02:52:46 PM CET
+LIBS:power
+LIBS:device
+LIBS:transistors
+LIBS:conn
+LIBS:linear
+LIBS:regul
+LIBS:74xx
+LIBS:cmos4000
+LIBS:adc-dac
+LIBS:memory
+LIBS:xilinx
+LIBS:special
+LIBS:microcontrollers
+LIBS:dsp
+LIBS:microchip
+LIBS:analog_switches
+LIBS:motorola
+LIBS:texas
+LIBS:intel
+LIBS:audio
+LIBS:interface
+LIBS:digital-audio
+LIBS:philips
+LIBS:display
+LIBS:cypress
+LIBS:siliconi
+LIBS:opto
+LIBS:atmel
+LIBS:contrib
+LIBS:valves
+LIBS:gpibComponents
+LIBS:usbToGpib-cache
+EELAYER 25  0
+EELAYER END
+$Descr A4 11700 8267
+encoding utf-8
+Sheet 4 21
+Title ""
+Date "15 dec 2011"
+Rev ""
+Comp ""
+Comment1 ""
+Comment2 ""
+Comment3 ""
+Comment4 ""
+$EndDescr
+Text HLabel 4450 4000 0    60   Input ~ 0
+IN
+Text HLabel 6300 4650 2    60   Input ~ 0
+GND
+Text HLabel 6300 3800 2    60   Input ~ 0
+OUT
+Text HLabel 6300 3000 2    60   Input ~ 0
+VCC
+Wire Wire Line
+	4950 4000 4450 4000
+Wire Wire Line
+	6300 3800 5250 3800
+Wire Wire Line
+	6300 3000 5750 3000
+Wire Wire Line
+	5750 3000 5750 3100
+Wire Wire Line
+	5250 4200 5250 4650
+Wire Wire Line
+	5750 4650 5750 4450
+Wire Wire Line
+	5750 3600 5750 3950
+Connection ~ 5750 3800
+Wire Wire Line
+	5250 4650 6300 4650
+Connection ~ 5750 4650
+$Comp
+L R R39
+U 1 1 4EE3DF3C
+P 5750 4200
+AR Path="/4EE3CA25/4EE3C33E/4EE3DF3C" Ref="R39"  Part="1" 
+AR Path="/4EE3CA25/4EE3C320/4EE3DF3C" Ref="R37"  Part="1" 
+AR Path="/4EE3CA25/4EE3C2D8/4EE3DF3C" Ref="R35"  Part="1" 
+AR Path="/4EE3CA25/4EE3C2B3/4EE3DF3C" Ref="R33"  Part="1" 
+AR Path="/4EE3CA25/4EE3DF45/4EE3DF3C" Ref="R41"  Part="1" 
+AR Path="/4EE3CA25/4EE3C22A/4EE3DF3C" Ref="R31"  Part="1" 
+AR Path="/4EE3CA25/4EE3C0EB/4EE3DF3C" Ref="R29"  Part="1" 
+AR Path="/4EE3CA25/4EE3BBD0/4EE3DF3C" Ref="R27"  Part="1" 
+AR Path="/4EE3C9F8/4EE3DF49/4EE3DF3C" Ref="R25"  Part="1" 
+AR Path="/4EE3C9F8/4EE3DF48/4EE3DF3C" Ref="R23"  Part="1" 
+AR Path="/4EE3C9F8/4EE3DF47/4EE3DF3C" Ref="R21"  Part="1" 
+AR Path="/4EE3C9F8/4EE3DF46/4EE3DF3C" Ref="R19"  Part="1" 
+AR Path="/4EE3C9F8/4EE3C2A0/4EE3DF3C" Ref="R11"  Part="1" 
+AR Path="/4EE3C9F8/4EE3DF44/4EE3DF3C" Ref="R17"  Part="1" 
+AR Path="/4EE3C9F8/4EE3DF43/4EE3DF3C" Ref="R15"  Part="1" 
+AR Path="/4EE3C9F8/4EE3DF2D/4EE3DF3C" Ref="R13"  Part="1" 
+F 0 "R27" V 5830 4200 50  0000 C CNN
+F 1 "6k2" V 5750 4200 50  0000 C CNN
+	1    5750 4200
+	1    0    0    -1  
+$EndComp
+$Comp
+L R R38
+U 1 1 4EE3DF35
+P 5750 3350
+AR Path="/4EE3CA25/4EE3C33E/4EE3DF35" Ref="R38"  Part="1" 
+AR Path="/4EE3CA25/4EE3C320/4EE3DF35" Ref="R36"  Part="1" 
+AR Path="/4EE3CA25/4EE3C2D8/4EE3DF35" Ref="R34"  Part="1" 
+AR Path="/4EE3CA25/4EE3C2B3/4EE3DF35" Ref="R32"  Part="1" 
+AR Path="/4EE3CA25/4EE3DF45/4EE3DF35" Ref="R40"  Part="1" 
+AR Path="/4EE3CA25/4EE3C22A/4EE3DF35" Ref="R30"  Part="1" 
+AR Path="/4EE3CA25/4EE3C0EB/4EE3DF35" Ref="R28"  Part="1" 
+AR Path="/4EE3CA25/4EE3BBD0/4EE3DF35" Ref="R26"  Part="1" 
+AR Path="/4EE3C9F8/4EE3DF49/4EE3DF35" Ref="R24"  Part="1" 
+AR Path="/4EE3C9F8/4EE3DF48/4EE3DF35" Ref="R22"  Part="1" 
+AR Path="/4EE3C9F8/4EE3DF47/4EE3DF35" Ref="R20"  Part="1" 
+AR Path="/4EE3C9F8/4EE3DF46/4EE3DF35" Ref="R18"  Part="1" 
+AR Path="/4EE3C9F8/4EE3C2A0/4EE3DF35" Ref="R10"  Part="1" 
+AR Path="/4EE3C9F8/4EE3DF44/4EE3DF35" Ref="R16"  Part="1" 
+AR Path="/4EE3C9F8/4EE3DF43/4EE3DF35" Ref="R14"  Part="1" 
+AR Path="/4EE3C9F8/4EE3DF2D/4EE3DF35" Ref="R12"  Part="1" 
+F 0 "R26" V 5830 3350 50  0000 C CNN
+F 1 "3k" V 5750 3350 50  0000 C CNN
+	1    5750 3350
+	1    0    0    -1  
+$EndComp
+$Comp
+L MOS_N Q15
+U 1 1 4EE3DF2E
+P 5150 4000
+AR Path="/4EE3CA25/4EE3C33E/4EE3DF2E" Ref="Q15"  Part="1" 
+AR Path="/4EE3CA25/4EE3C320/4EE3DF2E" Ref="Q14"  Part="1" 
+AR Path="/4EE3CA25/4EE3C2D8/4EE3DF2E" Ref="Q13"  Part="1" 
+AR Path="/4EE3CA25/4EE3C2B3/4EE3DF2E" Ref="Q12"  Part="1" 
+AR Path="/4EE3CA25/4EE3DF45/4EE3DF2E" Ref="Q16"  Part="1" 
+AR Path="/4EE3CA25/4EE3C22A/4EE3DF2E" Ref="Q11"  Part="1" 
+AR Path="/4EE3CA25/4EE3C0EB/4EE3DF2E" Ref="Q10"  Part="1" 
+AR Path="/4EE3CA25/4EE3BBD0/4EE3DF2E" Ref="Q9"  Part="1" 
+AR Path="/4EE3C9F8/4EE3DF49/4EE3DF2E" Ref="Q8"  Part="1" 
+AR Path="/4EE3C9F8/4EE3DF48/4EE3DF2E" Ref="Q7"  Part="1" 
+AR Path="/4EE3C9F8/4EE3DF47/4EE3DF2E" Ref="Q6"  Part="1" 
+AR Path="/4EE3C9F8/4EE3DF46/4EE3DF2E" Ref="Q5"  Part="1" 
+AR Path="/4EE3C9F8/4EE3C2A0/4EE3DF2E" Ref="Q1"  Part="1" 
+AR Path="/4EE3C9F8/4EE3DF44/4EE3DF2E" Ref="Q4"  Part="1" 
+AR Path="/4EE3C9F8/4EE3DF43/4EE3DF2E" Ref="Q3"  Part="1" 
+AR Path="/4EE3C9F8/4EE3DF2D/4EE3DF2E" Ref="Q2"  Part="1" 
+F 0 "Q9" H 5160 4170 60  0000 R CNN
+F 1 "MOS_N" H 5160 3850 60  0000 R CNN
+	1    5150 4000
+	1    0    0    -1  
+$EndComp
+$EndSCHEMATC
