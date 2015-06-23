@@ -1,0 +1,110 @@
+#!/usr/bin/php
+<?php
+  // 
+  //  Script which fetches the contents of the microinstruction definitions
+  //  and translates them into a verilog ROM module.
+  //  Possible upgrade: Take into account the "DON'T CARE" values in the
+  //  micro-instructions, so the micro instruction ROM can be smaller
+  //
+
+  // Read all the instruction definitions
+  //
+  $f1 = fopen("http://zet.aluzina.org/index.php/8086_instructions", "r");
+
+  if (!$f1) 
+    {
+      echo "Error with the URL\n";
+      exit(1);      
+    }
+
+  while(!feof($f1)) $str .= fread($f1, 1024);
+  fclose($f1);
+
+  // 1. Get the array of pairs (NAME, instr)
+  $arr1 = explode("######", $str);
+  for($i=1, $seq=0; $i<count($arr1); $i++)
+    {
+      $arr2 = explode("\n", $arr1[$i]);
+      for($j=1; $j<count($arr2); $j++)
+        {
+          if($arr2[$j]=="</pre>") break;
+          $arr3 = split("[ ]+", $arr2[$j]);
+          $instr[$arr3[0]]['micro'][]['code'] = $arr3[1];
+
+          if(isset($instr[$arr3[0]]['seq'])) $seq++;
+          else $instr[$arr3[0]]['seq'] = $seq++;
+        }
+    }
+  
+  // 2. Replace x/d/m/s by zeros and remove _ from instr
+  $micros = Array();
+
+  foreach ($instr as $key => $value)
+    {
+      for($i=0; $i<count($value['micro']); $i++)
+        {
+          $microi = ereg_replace ("_", "", ereg_replace( "[xdms]", "0", 
+                                  $value['micro'][$i]['code']));
+          if (isset($micro_data_width)) { 
+            if ($micro_data_width!=strlen($microi)) 
+              die ("Instruction $key does not have the same length\n");
+          } else $micro_data_width = strlen($microi);
+
+          $instr[$key]['micro'][$i]['code'] = $microi;
+
+          for ($j=0; $j<count($micros); $j++)
+              if (!strcmp($micros[$j], $microi)) break;
+
+          if ($j == count($micros)) $micros[] = $microi;
+          $instr[$key]['micro'][$i]['order'] = $j;
+        }
+    }
+
+  // 3. Export the micro rom rounded to the next power of 2
+  $fm = fopen ("micro_rom.dat", "w");
+  for ($i=0, $j=0; $i<count($micros); $i++)
+    {
+      fwrite($fm, $micros[$i] . "\n");
+      if ($i == pow(2, $j)) $j++;
+    }
+
+  for ($k=0; $k<$micro_data_width; $k++) $str_zero .= "0";
+  while ($i++ < pow(2, $j)) fwrite($fm, $str_zero . "\n");
+  fclose($fm);
+
+  $micro_addr_width = $j;
+
+  // 4. Export the sequencer rom rounded to the next power of 2
+  $seq_data_width = $micro_addr_width + 1;
+
+  $fs = fopen ("seq_rom.dat", "w");
+  $l=0; $j=0;
+  foreach ($instr as $key => $value)
+    for($i=0; $i<count($value['micro']); $i++, $l++)
+      {
+        $last = ($i == count($value['micro'])-1);
+        $last = $last << $micro_addr_width;
+        fprintf($fs, "%0${seq_data_width}b\n", 
+                     $value['micro'][$i][order] | $last);
+        if($l == pow(2, $j)) $j++;
+      }
+
+  for ($k=0; $k<$seq_data_width; $k++) $str1_zero .= "0";
+  while ($l++ < pow(2, $j)) fwrite($fs, $str1_zero . "\n");  
+  fclose($fs);
+
+  $seq_addr_width = $j;
+
+  // 5. Export the instruction sequencer code
+  $fi = fopen ("rom_def.v", "w");
+  fwrite($fi, "`define MICRO_DATA_WIDTH $micro_data_width\n");
+  fwrite($fi, "`define MICRO_ADDR_WIDTH $micro_addr_width\n");
+  fwrite($fi, "`define SEQ_DATA_WIDTH $seq_data_width\n");
+  fwrite($fi, "`define SEQ_ADDR_WIDTH $seq_addr_width\n");
+  fwrite($fi, "\n");
+
+  foreach ($instr as $key => $value)
+    fprintf ($fi, "`define $key\t$seq_addr_width'b%0${seq_addr_width}b\n", 
+             $value['seq']);
+  fclose($fi);
+?>
