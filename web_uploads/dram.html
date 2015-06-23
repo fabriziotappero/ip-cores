@@ -1,0 +1,392 @@
+<HTML>
+<body bgcolor="#C0C0C0">
+<PRE>
+<FONT COLOR=red><I>-------------------------------------------------------------------------------
+</FONT></I><FONT COLOR=red><I>-- 
+</FONT></I><FONT COLOR=red><I>-- This VHDL design file is an open design; you can redistribute it and/or
+</FONT></I><FONT COLOR=red><I>-- modify it and/or implement it under the terms of the Openip General Public
+</FONT></I><FONT COLOR=red><I>-- License as it is going to be published by the OpenIP Organization and any
+</FONT></I><FONT COLOR=red><I>-- coming versions of this license.
+</FONT></I><FONT COLOR=red><I>-- You can check the draft license at
+</FONT></I><FONT COLOR=red><I>-- http://www.opencores.org/OIPC/license.shtml
+</FONT></I><FONT COLOR=red><I>--
+</FONT></I>
+ <FONT COLOR=red><I>------------------------------------------------------------------------
+</FONT></I> <FONT COLOR=red><I>-------------------------------------------------------------------------------
+</FONT></I> <FONT COLOR=red><I>-- Title       : Parameterisable DRAM model
+</FONT></I> <FONT COLOR=red><I>-- Project     : Versatile Soft-Core Framework (VSCF)
+</FONT></I> <FONT COLOR=red><I>-------------------------------------------------------------------------------
+</FONT></I> <FONT COLOR=red><I>-- File        : d01bhv01.vhdl
+</FONT></I> <FONT COLOR=red><I>-- Author      : Damon P Thompson  <dpt@ee.ed.ac.uk>
+</FONT></I> <FONT COLOR=red><I>-- Company     : The University of Edinburgh
+</FONT></I> <FONT COLOR=red><I>-- Last update : 1999/08/23
+</FONT></I> <FONT COLOR=red><I>-- Platform    : GENERIC
+</FONT></I> <FONT COLOR=red><I>-------------------------------------------------------------------------------
+</FONT></I> <FONT COLOR=red><I>-- Description :
+</FONT></I> <FONT COLOR=red><I>--      Parameterisable DRAM model, i.e. scalable data and address widths.
+</FONT></I> <FONT COLOR=red><I>--      Simulation assertions can be toggled on/off.
+</FONT></I> <FONT COLOR=red><I>--      Uses !RAS/!CAS control sequence for modelling DRAM activity.
+</FONT></I> <FONT COLOR=red><I>--      Refresh is monitored with data corrupted to "UU ... "
+</FONT></I> <FONT COLOR=red><I>--
+</FONT></I> <FONT COLOR=red><I>-------------------------------------------------------------------------------
+</FONT></I> <FONT COLOR=red><I>-- Modification history :
+</FONT></I> <FONT COLOR=red><I>--      Created about 2 years ago, and I can't really remember
+</FONT></I> <FONT COLOR=red><I>--
+</FONT></I> <FONT COLOR=red><I>-------------------------------------+-----------------------------------------
+</FONT></I>                                   <FONT COLOR=red><I>-- |
+</FONT></I> <FONT COLOR=brown><EM>LIBRARY IEEE, ARITH_LIB, VSCF;    -- |</FONT></EM>
+ <FONT COLOR=brown><EM>USE IEEE.std_logic_1164.ALL;      -- |</FONT></EM>
+                                   <FONT COLOR=red><I>-- |
+</FONT></I> <FONT COLOR=red><I>-------------------------------------+-----------------------------------------
+</FONT></I>
+ <FONT COLOR=blue><EM>ENTITY dram_cfg IS</FONT></EM>
+
+    <FONT COLOR=yellow>generic</FONT> (
+       assertions : <FONT COLOR=green>boolean</FONT> := <FONT COLOR=green>true</FONT>;     <FONT COLOR=red><I>-- Toggle assertions ON/OFF
+</FONT></I>       data_width : <FONT COLOR=green>integer</FONT> := 8;        <FONT COLOR=red><I>-- Data I/O bus width
+</FONT></I>       adrs_width : <FONT COLOR=green>integer</FONT> := 20        <FONT COLOR=red><I>-- Address " " - must be EVEN
+</FONT></I>       );
+
+    <FONT COLOR=yellow>port</FONT> (
+       ras,
+       cas,
+       wrt      : <FONT COLOR=yellow>in</FONT>    <FONT COLOR=green>std_logic</FONT>;
+       adrs_bus : <FONT COLOR=yellow>in</FONT>    <FONT COLOR=green>std_logic_vector</FONT>((((adrs_width)/2)-1) <FONT COLOR=yellow>downto</FONT> 0);
+       data_bus : <FONT COLOR=yellow>inout</FONT> <FONT COLOR=green>std_logic_vector</FONT>((data_width-1) <FONT COLOR=yellow>downto</FONT> 0)
+       );
+
+ <FONT COLOR=yellow>end</FONT> dram_cfg;
+
+ <FONT COLOR=blue><EM>ARCHITECTURE simulate OF dram_cfg IS</FONT></EM>
+
+    <FONT COLOR=red><I>-- DRAM timing specification
+</FONT></I>    <FONT COLOR=yellow>constant</FONT> t_ref_max : <FONT COLOR=green>time</FONT> := 7.5 uS;  <FONT COLOR=red><I>-- max. refresh cycle time
+</FONT></I>    <FONT COLOR=yellow>constant</FONT> t_cac_max : <FONT COLOR=green>time</FONT> := 30 nS;   <FONT COLOR=red><I>-- max. access time after !CAS
+</FONT></I>    <FONT COLOR=yellow>constant</FONT> t_rac_max : <FONT COLOR=green>time</FONT> := 120 nS;  <FONT COLOR=red><I>-- max. access time after !RAS
+</FONT></I>    <FONT COLOR=yellow>constant</FONT> t_off_max : <FONT COLOR=green>time</FONT> := 30 nS;   <FONT COLOR=red><I>-- max. o/p diable after !CAS
+</FONT></I>    <FONT COLOR=yellow>constant</FONT> t_ras_min : <FONT COLOR=green>time</FONT> := 120 nS;  <FONT COLOR=red><I>-- min. !RAS low pulse width
+</FONT></I>    <FONT COLOR=yellow>constant</FONT> t_ras_max : <FONT COLOR=green>time</FONT> := 10 uS;   <FONT COLOR=red><I>-- max. !RAS low pulse width
+</FONT></I>    <FONT COLOR=yellow>constant</FONT> t_cas_min : <FONT COLOR=green>time</FONT> := 30 nS;   <FONT COLOR=red><I>-- min. !CAS low pulse width
+</FONT></I>    <FONT COLOR=yellow>constant</FONT> t_cas_max : <FONT COLOR=green>time</FONT> := 10 uS;   <FONT COLOR=red><I>-- max. !CAS low pulse width
+</FONT></I>    <FONT COLOR=yellow>constant</FONT> t_rps_min : <FONT COLOR=green>time</FONT> := 90 nS;   <FONT COLOR=red><I>-- min. !RAS high pulse width
+</FONT></I>    <FONT COLOR=yellow>constant</FONT> t_cps_min : <FONT COLOR=green>time</FONT> := 35 nS;   <FONT COLOR=red><I>-- min. !CAS high pulse width
+</FONT></I>    <FONT COLOR=yellow>constant</FONT> t_rcd_min : <FONT COLOR=green>time</FONT> := 25 nS;   <FONT COLOR=red><I>-- min. !RAS low to !CAS low
+</FONT></I>    <FONT COLOR=yellow>constant</FONT> t_rcd_max : <FONT COLOR=green>time</FONT> := 90 nS;   <FONT COLOR=red><I>-- max. !RAS low to !CAS low
+</FONT></I>    <FONT COLOR=yellow>constant</FONT> t_crp_min : <FONT COLOR=green>time</FONT> := 10 nS;   <FONT COLOR=red><I>-- min. !CAS high to !RAS low
+</FONT></I>    <FONT COLOR=yellow>constant</FONT> t_csr_min : <FONT COLOR=green>time</FONT> := 10 nS;   <FONT COLOR=red><I>-- min. !CAS low to !RAS low
+</FONT></I>    <FONT COLOR=yellow>constant</FONT> t_chr_min : <FONT COLOR=green>time</FONT> := 25 nS;   <FONT COLOR=red><I>-- min. !RAS low to !CAS high
+</FONT></I>
+    <FONT COLOR=red><I>-- Define memory array according to the 'adrs_width' GENERIC parameter
+</FONT></I>    <FONT COLOR=yellow>type</FONT> memory <FONT COLOR=yellow>is</FONT> <FONT COLOR=yellow>array</FONT> (0 <FONT COLOR=yellow>to</FONT> ((2**adrs_width)-1)) <FONT COLOR=yellow>of</FONT> <FONT COLOR=green>std_logic_vector</FONT>((data_width-1) <FONT COLOR=yellow>downto</FONT> 0);
+
+    <FONT COLOR=red><I>-- Define states for !RAS/!CAS DRAM model
+</FONT></I>    <FONT COLOR=yellow>type</FONT> dram_states <FONT COLOR=yellow>is</FONT> (
+       idle_11,
+       r_01,
+       rc_00,
+       rcc_01,
+       c_10,
+       cr_00,
+       crc_01,
+       crr_10
+       );
+
+    <FONT COLOR=red><I>-- Some required type conversion procedures
+</FONT></I>    <FONT COLOR=blue><EM>PROCEDURE int_to_vec( int_arg : IN INTEGER; vec_rslt : OUT STD_LOGIC_VECTOR) IS</FONT></EM>
+       <FONT COLOR=yellow>variable</FONT> tmp_int           : <FONT COLOR=green>integer</FONT>;
+       <FONT COLOR=yellow>variable</FONT> tmp_vec           : <FONT COLOR=green>std_logic_vector</FONT>(vec_rslt'<FONT COLOR=yellow>range</FONT>);
+    <FONT COLOR=yellow>begin</FONT>
+       tmp_int          := int_arg;
+       <FONT COLOR=yellow>for</FONT> i <FONT COLOR=yellow>in</FONT> 0 <FONT COLOR=yellow>to</FONT> (vec_rslt'LENGTH - 1) <FONT COLOR=yellow>loop</FONT>
+          <FONT COLOR=yellow>if</FONT>(tmp_int <FONT COLOR=yellow>mod</FONT> 2 = 1)
+          <FONT COLOR=yellow>then</FONT>
+             tmp_vec(i) := '1';
+          <FONT COLOR=yellow>else</FONT>
+             tmp_vec(i) := '0';
+          <FONT COLOR=yellow>end</FONT> <FONT COLOR=yellow>if</FONT>;
+          tmp_int       := tmp_int / 2;
+       <FONT COLOR=yellow>end</FONT> <FONT COLOR=yellow>loop</FONT>;
+       vec_rslt         := tmp_vec;
+    <FONT COLOR=yellow>end</FONT> int_to_vec;
+
+    <FONT COLOR=blue><EM>PROCEDURE vec_to_int( vec_arg : IN STD_LOGIC_VECTOR; int_rslt : OUT INTEGER) IS</FONT></EM>
+       <FONT COLOR=yellow>variable</FONT> tmp_int           : <FONT COLOR=green>integer</FONT> := 0;
+    <FONT COLOR=yellow>begin</FONT>
+       <FONT COLOR=yellow>for</FONT> i <FONT COLOR=yellow>in</FONT> vec_arg'<FONT COLOR=yellow>range</FONT> <FONT COLOR=yellow>loop</FONT>
+          <FONT COLOR=yellow>if</FONT>(vec_arg(i) = '1')
+          <FONT COLOR=yellow>then</FONT>
+             tmp_int                        := tmp_int + 2**i;
+          <FONT COLOR=yellow>end</FONT> <FONT COLOR=yellow>if</FONT>;
+       <FONT COLOR=yellow>end</FONT> <FONT COLOR=yellow>loop</FONT>;
+       int_rslt                             := tmp_int;
+    <FONT COLOR=yellow>end</FONT> vec_to_int;
+
+ <FONT COLOR=yellow>begin</FONT>
+
+    ras_cas_control :
+    <FONT COLOR=yellow>process</FONT>(ras, cas)
+
+       <FONT COLOR=yellow>variable</FONT> dram_state    : dram_states;
+       <FONT COLOR=yellow>variable</FONT> dram          : memory;
+       <FONT COLOR=yellow>variable</FONT> refresh_adrs  : <FONT COLOR=green>integer</FONT> <FONT COLOR=yellow>range</FONT> 0 <FONT COLOR=yellow>to</FONT> ((2**adrs_width)-1) := 0;
+       <FONT COLOR=yellow>variable</FONT> dram_vec_adrs : <FONT COLOR=green>std_logic_vector</FONT>((adrs_width-1) <FONT COLOR=yellow>downto</FONT> 0);
+       <FONT COLOR=yellow>variable</FONT> dram_int_adrs : <FONT COLOR=green>integer</FONT> <FONT COLOR=yellow>range</FONT> 0 <FONT COLOR=yellow>to</FONT> ((2**adrs_width)-1) := 0;
+       <FONT COLOR=yellow>variable</FONT> last_refresh,
+          t_rh, t_rl,
+          t_ch, t_cl          : <FONT COLOR=green>time</FONT>                                   := 0 ns;
+
+    <FONT COLOR=yellow>begin</FONT>
+
+       <FONT COLOR=yellow>case</FONT> dram_state <FONT COLOR=yellow>is</FONT>
+
+          <FONT COLOR=yellow>when</FONT> idle_11 =>
+             <FONT COLOR=yellow>if</FONT>(ras'EVENT <FONT COLOR=yellow>and</FONT> ras = '0' <FONT COLOR=yellow>and</FONT> cas = '1')
+             <FONT COLOR=yellow>then</FONT>
+                t_rl       := NOW;
+                <FONT COLOR=red><I>-- following read|write operation expected
+</FONT></I>                <FONT COLOR=red><I>-- read row address from address bus
+</FONT></I>                <FONT COLOR=yellow>if</FONT> assertions <FONT COLOR=yellow>then</FONT>
+                   <FONT COLOR=yellow>assert</FONT>(NOW - t_rh >= t_rps_min)
+                      <FONT COLOR=yellow>report</FONT> <FONT COLOR=brown>"[idle_11] !RAS low too soon after !RAS high"</FONT>
+                      <FONT COLOR=yellow>severity</FONT> <FONT COLOR=green>error</FONT>;
+                   <FONT COLOR=yellow>assert</FONT>(NOW - t_ch >= t_crp_min)
+                      <FONT COLOR=yellow>report</FONT> <FONT COLOR=brown>"[idle_11] !RAS low too soon after !CAS high"</FONT>
+                      <FONT COLOR=yellow>severity</FONT> <FONT COLOR=green>warning</FONT>;
+                <FONT COLOR=yellow>end</FONT> <FONT COLOR=yellow>if</FONT>;  <FONT COLOR=red><I>-- assertions
+</FONT></I>                dram_vec_adrs((adrs_width-1) <FONT COLOR=yellow>downto</FONT> (adrs_width/2))
+                           := adrs_bus;
+                dram_state := r_01;
+             <FONT COLOR=yellow>elsif</FONT>(cas'EVENT <FONT COLOR=yellow>and</FONT> ras = '1' <FONT COLOR=yellow>and</FONT> cas = '0')
+             <FONT COLOR=yellow>then</FONT>
+                t_cl       := NOW;
+                <FONT COLOR=red><I>-- following !CAS before !RAS refresh expected
+</FONT></I>                <FONT COLOR=yellow>if</FONT> assertions <FONT COLOR=yellow>then</FONT>
+                   <FONT COLOR=yellow>assert</FONT>(NOW - t_ch >= t_cps_min)
+                      <FONT COLOR=yellow>report</FONT> <FONT COLOR=brown>"[idle_11] !CAS low too soon after !CAS high"</FONT>
+                      <FONT COLOR=yellow>severity</FONT> <FONT COLOR=green>warning</FONT>;
+                <FONT COLOR=yellow>end</FONT> <FONT COLOR=yellow>if</FONT>;  <FONT COLOR=red><I>-- assertions
+</FONT></I>                dram_state := c_10;
+             <FONT COLOR=yellow>end</FONT> <FONT COLOR=yellow>if</FONT>;
+
+          <FONT COLOR=yellow>when</FONT> r_01 =>
+             <FONT COLOR=yellow>if</FONT>(ras'EVENT <FONT COLOR=yellow>and</FONT> ras = '1' <FONT COLOR=yellow>and</FONT> cas = '1')
+             <FONT COLOR=yellow>then</FONT>
+                t_rh       := NOW;
+                <FONT COLOR=red><I>-- possible !CAS DRAM multiplexing occurred
+</FONT></I>                <FONT COLOR=yellow>if</FONT> assertions <FONT COLOR=yellow>then</FONT>
+                   <FONT COLOR=yellow>assert</FONT>(NOW - t_rl >= t_ras_min)
+                      <FONT COLOR=yellow>report</FONT> <FONT COLOR=brown>"[r_01] !RAS high too soon after !RAS low"</FONT>
+                      <FONT COLOR=yellow>severity</FONT> <FONT COLOR=green>warning</FONT>;
+                   <FONT COLOR=yellow>assert</FONT>(NOW - t_rl <= t_ras_max)
+                      <FONT COLOR=yellow>report</FONT> <FONT COLOR=brown>"[r_01] !RAS high too late after !RAS low"</FONT>
+                      <FONT COLOR=yellow>severity</FONT> <FONT COLOR=green>warning</FONT>;
+                <FONT COLOR=yellow>end</FONT> <FONT COLOR=yellow>if</FONT>;  <FONT COLOR=red><I>-- assertions
+</FONT></I>                dram_state := idle_11;
+             <FONT COLOR=yellow>elsif</FONT>(cas'EVENT <FONT COLOR=yellow>and</FONT> ras = '0' <FONT COLOR=yellow>and</FONT> cas = '0')
+             <FONT COLOR=yellow>then</FONT>
+                t_cl       := NOW;
+                <FONT COLOR=red><I>-- read clomn address from address bus
+</FONT></I>                <FONT COLOR=red><I>-- perform read|write operation
+</FONT></I>                <FONT COLOR=yellow>if</FONT> assertions <FONT COLOR=yellow>then</FONT>
+                   <FONT COLOR=yellow>assert</FONT>(NOW - t_rl >= t_rcd_min)
+                      <FONT COLOR=yellow>report</FONT> <FONT COLOR=brown>"[r_01] !CAS low too soon  after !RAS low"</FONT>
+                      <FONT COLOR=yellow>severity</FONT> <FONT COLOR=green>warning</FONT>;
+                   <FONT COLOR=yellow>assert</FONT>(NOW - t_rl <= t_rcd_max)
+                      <FONT COLOR=yellow>report</FONT> <FONT COLOR=brown>"[r_01] !CAS low too late  after !RAS low"</FONT>
+                      <FONT COLOR=yellow>severity</FONT> <FONT COLOR=green>warning</FONT>;
+                <FONT COLOR=yellow>end</FONT> <FONT COLOR=yellow>if</FONT>;  <FONT COLOR=red><I>-- assertions
+</FONT></I>                dram_vec_adrs(((adrs_width/2)-1) <FONT COLOR=yellow>downto</FONT> 0)
+                           := adrs_bus;
+                vec_to_int(dram_vec_adrs, dram_int_adrs);
+
+                <FONT COLOR=yellow>case</FONT> wrt <FONT COLOR=yellow>is</FONT>
+
+                   <FONT COLOR=yellow>when</FONT> '0' =>           <FONT COLOR=red><I>-- perform write operation
+</FONT></I>                      dram(dram_int_adrs) := data_bus;
+
+                   <FONT COLOR=yellow>when</FONT> '1' =>           <FONT COLOR=red><I>-- perform read operation
+</FONT></I>                      data_bus <= dram(dram_int_adrs) <FONT COLOR=yellow>after</FONT> t_cac_max;
+
+                   <FONT COLOR=yellow>when</FONT> <FONT COLOR=yellow>others</FONT> =>        <FONT COLOR=red><I>-- !WRT input is undefined...!
+</FONT></I>                      <FONT COLOR=yellow>if</FONT> assertions <FONT COLOR=yellow>then</FONT>
+                         <FONT COLOR=yellow>assert</FONT> <FONT COLOR=green>false</FONT>
+                            <FONT COLOR=yellow>report</FONT> <FONT COLOR=brown>"[r_01] !WRT is undefined...!"</FONT>
+                            <FONT COLOR=yellow>severity</FONT> <FONT COLOR=green>warning</FONT>;
+                      <FONT COLOR=yellow>end</FONT> <FONT COLOR=yellow>if</FONT>;  <FONT COLOR=red><I>-- assertions
+</FONT></I>
+                <FONT COLOR=yellow>end</FONT> <FONT COLOR=yellow>case</FONT>;
+
+                dram_state := rc_00;
+             <FONT COLOR=yellow>end</FONT> <FONT COLOR=yellow>if</FONT>;
+
+          <FONT COLOR=yellow>when</FONT> rc_00                =>
+             <FONT COLOR=yellow>if</FONT>(ras'EVENT <FONT COLOR=yellow>and</FONT> ras = '1' <FONT COLOR=yellow>and</FONT> cas = '0')
+             <FONT COLOR=yellow>then</FONT>
+                <FONT COLOR=red><I>-- ERROR...! Illegal !RAS event
+</FONT></I>                <FONT COLOR=yellow>assert</FONT> <FONT COLOR=green>false</FONT>
+                   <FONT COLOR=yellow>report</FONT> <FONT COLOR=brown>"[rc_00] Illegal !RAS event...! STOP...!"</FONT>
+                   <FONT COLOR=yellow>severity</FONT> <FONT COLOR=green>error</FONT>;
+             <FONT COLOR=yellow>elsif</FONT>(cas'EVENT <FONT COLOR=yellow>and</FONT> ras = '0' <FONT COLOR=yellow>and</FONT> cas = '1')
+             <FONT COLOR=yellow>then</FONT>
+                t_ch       := NOW;
+                data_bus             <= (<FONT COLOR=yellow>others</FONT> => 'Z')  <FONT COLOR=yellow>after</FONT> t_off_max;
+                <FONT COLOR=yellow>if</FONT> assertions <FONT COLOR=yellow>then</FONT>
+                   <FONT COLOR=yellow>assert</FONT>(NOW - t_cl >= t_cas_min)
+                      <FONT COLOR=yellow>report</FONT> <FONT COLOR=brown>"[rc_00] !CAS high too soon after !CAS low"</FONT>
+                      <FONT COLOR=yellow>severity</FONT> <FONT COLOR=green>warning</FONT>;
+                   <FONT COLOR=yellow>assert</FONT>(NOW - t_cl <= t_cas_max)
+                      <FONT COLOR=yellow>report</FONT> <FONT COLOR=brown>"[rc_00] !CAS high too late after !CAS low"</FONT>
+                      <FONT COLOR=yellow>severity</FONT> <FONT COLOR=green>warning</FONT>;
+                <FONT COLOR=yellow>end</FONT> <FONT COLOR=yellow>if</FONT>;  <FONT COLOR=red><I>-- assertions
+</FONT></I>                dram_state := rcc_01;
+             <FONT COLOR=yellow>end</FONT> <FONT COLOR=yellow>if</FONT>;
+
+          <FONT COLOR=yellow>when</FONT> rcc_01 =>
+             <FONT COLOR=yellow>if</FONT>(ras'EVENT <FONT COLOR=yellow>and</FONT> ras = '1' <FONT COLOR=yellow>and</FONT> cas = '1')
+             <FONT COLOR=yellow>then</FONT>
+                t_rh       := NOW;
+                <FONT COLOR=yellow>if</FONT> assertions <FONT COLOR=yellow>then</FONT>
+                   <FONT COLOR=yellow>assert</FONT>(NOW - t_rl >= t_ras_min)
+                      <FONT COLOR=yellow>report</FONT> <FONT COLOR=brown>"[rcc_01] !RAS high too soon after !RAS low"</FONT>
+                      <FONT COLOR=yellow>severity</FONT> <FONT COLOR=green>warning</FONT>;
+                   <FONT COLOR=yellow>assert</FONT>(NOW - t_rl <= t_ras_max)
+                      <FONT COLOR=yellow>report</FONT> <FONT COLOR=brown>"[rcc_01] !RAS high too late after !RAS low"</FONT>
+                      <FONT COLOR=yellow>severity</FONT> <FONT COLOR=green>warning</FONT>;
+                <FONT COLOR=yellow>end</FONT> <FONT COLOR=yellow>if</FONT>;  <FONT COLOR=red><I>-- assertions
+</FONT></I>                dram_state := idle_11;
+             <FONT COLOR=yellow>elsif</FONT>(cas'EVENT <FONT COLOR=yellow>and</FONT> ras = '0' <FONT COLOR=yellow>and</FONT> cas = '0')
+             <FONT COLOR=yellow>then</FONT>
+                <FONT COLOR=red><I>-- ERROR...! Illegal !CAS event
+</FONT></I>                <FONT COLOR=yellow>assert</FONT> <FONT COLOR=green>false</FONT>
+                   <FONT COLOR=yellow>report</FONT> <FONT COLOR=brown>"[rcc_01] Illegal !CAS event...! STOP...!"</FONT>
+                   <FONT COLOR=yellow>severity</FONT> <FONT COLOR=green>error</FONT>;
+             <FONT COLOR=yellow>end</FONT> <FONT COLOR=yellow>if</FONT>;
+
+          <FONT COLOR=yellow>when</FONT> c_10 =>
+             <FONT COLOR=yellow>if</FONT>(ras'EVENT <FONT COLOR=yellow>and</FONT> ras = '0' <FONT COLOR=yellow>and</FONT> cas = '0')
+             <FONT COLOR=yellow>then</FONT>
+                t_rl         := NOW;
+                <FONT COLOR=red><I>-- perform !CAS before !RAS refresh operation
+</FONT></I>                refresh_adrs := refresh_adrs + 1;
+                <FONT COLOR=yellow>if</FONT> assertions <FONT COLOR=yellow>then</FONT>
+                   <FONT COLOR=yellow>assert</FONT>(NOW - t_cl >= t_csr_min)
+                      <FONT COLOR=yellow>report</FONT> <FONT COLOR=brown>"[c_10] !RAS low too soon  after !CAS low"</FONT>
+                      <FONT COLOR=yellow>severity</FONT> <FONT COLOR=green>warning</FONT>;
+                   <FONT COLOR=yellow>assert</FONT>(NOW - t_rh >= t_rps_min)
+                      <FONT COLOR=yellow>report</FONT> <FONT COLOR=brown>"[c_10] !RAS low too soon  after !RAS high"</FONT>
+                      <FONT COLOR=yellow>severity</FONT> <FONT COLOR=green>warning</FONT>;
+                <FONT COLOR=yellow>end</FONT> <FONT COLOR=yellow>if</FONT>;  <FONT COLOR=red><I>-- assertions
+</FONT></I>                refresh_adrs := (refresh_adrs + 1) <FONT COLOR=yellow>mod</FONT> ((2**adrs_width)-1);
+                dram_state   := cr_00;
+             <FONT COLOR=yellow>elsif</FONT>(cas'EVENT <FONT COLOR=yellow>and</FONT> ras = '1' <FONT COLOR=yellow>and</FONT> cas = '1')
+             <FONT COLOR=yellow>then</FONT>
+                <FONT COLOR=red><I>-- possible !RAS DRAM multiplexing occurred
+</FONT></I>                <FONT COLOR=yellow>if</FONT> assertions <FONT COLOR=yellow>then</FONT>
+                   <FONT COLOR=yellow>assert</FONT>(NOW - t_cl >= t_cas_min)
+                      <FONT COLOR=yellow>report</FONT> <FONT COLOR=brown>"[c_10] !CAS high too soon after !CAS low"</FONT>
+                      <FONT COLOR=yellow>severity</FONT> <FONT COLOR=green>warning</FONT>;
+                   <FONT COLOR=yellow>assert</FONT>(NOW - t_cl <= t_cas_max)
+                      <FONT COLOR=yellow>report</FONT> <FONT COLOR=brown>"[c_10]!CAS high too late  after !CAS low"</FONT>
+                      <FONT COLOR=yellow>severity</FONT> <FONT COLOR=green>warning</FONT>;
+                <FONT COLOR=yellow>end</FONT> <FONT COLOR=yellow>if</FONT>;  <FONT COLOR=red><I>-- assertions
+</FONT></I>                dram_state   := idle_11;
+             <FONT COLOR=yellow>end</FONT> <FONT COLOR=yellow>if</FONT>;
+
+          <FONT COLOR=yellow>when</FONT> cr_00 =>
+             <FONT COLOR=yellow>if</FONT>(ras'EVENT <FONT COLOR=yellow>and</FONT> ras = '1' <FONT COLOR=yellow>and</FONT> cas = '0')
+             <FONT COLOR=yellow>then</FONT>
+                t_rh       := NOW;
+                <FONT COLOR=yellow>if</FONT> assertions <FONT COLOR=yellow>then</FONT>
+                   <FONT COLOR=yellow>assert</FONT>(NOW - t_rl >= t_ras_min)
+                      <FONT COLOR=yellow>report</FONT> <FONT COLOR=brown>"[cr_00] !RAS high too soon after !RAS low"</FONT>
+                      <FONT COLOR=yellow>severity</FONT> <FONT COLOR=green>warning</FONT>;
+                   <FONT COLOR=yellow>assert</FONT>(NOW - t_rl <= t_ras_max)
+                      <FONT COLOR=yellow>report</FONT> <FONT COLOR=brown>"[cr_00] !RAS high too late after !RAS low"</FONT>
+                      <FONT COLOR=yellow>severity</FONT> <FONT COLOR=green>warning</FONT>;
+                <FONT COLOR=yellow>end</FONT> <FONT COLOR=yellow>if</FONT>;  <FONT COLOR=red><I>-- assertions
+</FONT></I>                dram_state := crr_10;
+             <FONT COLOR=yellow>elsif</FONT>(cas'EVENT <FONT COLOR=yellow>and</FONT> ras = '0' <FONT COLOR=yellow>and</FONT> cas = '1')
+             <FONT COLOR=yellow>then</FONT>
+                t_ch       := NOW;
+                <FONT COLOR=yellow>if</FONT> assertions <FONT COLOR=yellow>then</FONT>
+                   <FONT COLOR=yellow>assert</FONT>(NOW - t_cl >= t_cas_min)
+                      <FONT COLOR=yellow>report</FONT> <FONT COLOR=brown>"[cr_00] !CAS high too soon after !CAS low"</FONT>
+                      <FONT COLOR=yellow>severity</FONT> <FONT COLOR=green>warning</FONT>;
+                   <FONT COLOR=yellow>assert</FONT>(NOW - t_cl <= t_cas_max)
+                      <FONT COLOR=yellow>report</FONT> <FONT COLOR=brown>"[cr_00] !CAS high too late after !CAS low"</FONT>
+                      <FONT COLOR=yellow>severity</FONT> <FONT COLOR=green>warning</FONT>;
+                   <FONT COLOR=yellow>assert</FONT>(NOW - t_rl >= t_chr_min)
+                      <FONT COLOR=yellow>report</FONT> <FONT COLOR=brown>"[cr_00] !CAS high too soon after !RAS low"</FONT>
+                      <FONT COLOR=yellow>severity</FONT> <FONT COLOR=green>warning</FONT>;
+                <FONT COLOR=yellow>end</FONT> <FONT COLOR=yellow>if</FONT>;  <FONT COLOR=red><I>-- assertions
+</FONT></I>                dram_state := crc_01;
+             <FONT COLOR=yellow>end</FONT> <FONT COLOR=yellow>if</FONT>;
+
+          <FONT COLOR=yellow>when</FONT> crr_10 =>
+             <FONT COLOR=yellow>if</FONT>(ras'EVENT <FONT COLOR=yellow>and</FONT> ras = '0' <FONT COLOR=yellow>and</FONT> cas = '0')
+             <FONT COLOR=yellow>then</FONT>
+                <FONT COLOR=red><I>-- ERROR...! Illegal !RAS event
+</FONT></I>                <FONT COLOR=yellow>assert</FONT> <FONT COLOR=green>false</FONT>
+                   <FONT COLOR=yellow>report</FONT> <FONT COLOR=brown>"[crr_01] Illegal !RAS event...! STOP...!"</FONT>
+                   <FONT COLOR=yellow>severity</FONT> <FONT COLOR=green>error</FONT>;
+             <FONT COLOR=yellow>elsif</FONT>(cas'EVENT <FONT COLOR=yellow>and</FONT> ras = '1' <FONT COLOR=yellow>and</FONT> cas = '1')
+             <FONT COLOR=yellow>then</FONT>
+                t_ch       := NOW;
+                <FONT COLOR=yellow>if</FONT> assertions <FONT COLOR=yellow>then</FONT>
+                   <FONT COLOR=yellow>assert</FONT>(NOW - t_cl >= t_cas_min)
+                      <FONT COLOR=yellow>report</FONT> <FONT COLOR=brown>"[crr_10] !CAS high too soon after !CAS low"</FONT>
+                      <FONT COLOR=yellow>severity</FONT> <FONT COLOR=green>warning</FONT>;
+                   <FONT COLOR=yellow>assert</FONT>(NOW - t_cl <= t_cas_max)
+                      <FONT COLOR=yellow>report</FONT> <FONT COLOR=brown>"[crr_10] !CAS high too late after !CAS low"</FONT>
+                      <FONT COLOR=yellow>severity</FONT> <FONT COLOR=green>warning</FONT>;
+                <FONT COLOR=yellow>end</FONT> <FONT COLOR=yellow>if</FONT>;  <FONT COLOR=red><I>-- assertions
+</FONT></I>                dram_state := idle_11;
+             <FONT COLOR=yellow>end</FONT> <FONT COLOR=yellow>if</FONT>;
+
+          <FONT COLOR=yellow>when</FONT> crc_01 =>
+             <FONT COLOR=yellow>if</FONT>(ras'EVENT <FONT COLOR=yellow>and</FONT> ras = '1' <FONT COLOR=yellow>and</FONT> cas = '1')
+             <FONT COLOR=yellow>then</FONT>
+                t_rh       := NOW;
+                <FONT COLOR=yellow>if</FONT> assertions <FONT COLOR=yellow>then</FONT>
+                   <FONT COLOR=yellow>assert</FONT>(NOW - t_rl >= t_ras_min)
+                      <FONT COLOR=yellow>report</FONT> <FONT COLOR=brown>"[crc_01] !RAS high too soon after !RAS low"</FONT>
+                      <FONT COLOR=yellow>severity</FONT> <FONT COLOR=green>warning</FONT>;
+                   <FONT COLOR=yellow>assert</FONT>(NOW - t_rl <= t_ras_max)
+                      <FONT COLOR=yellow>report</FONT> <FONT COLOR=brown>"[crc_01] !RAS high too late after !RAS low"</FONT>
+                      <FONT COLOR=yellow>severity</FONT> <FONT COLOR=green>warning</FONT>;
+                <FONT COLOR=yellow>end</FONT> <FONT COLOR=yellow>if</FONT>;  <FONT COLOR=red><I>-- assertions
+</FONT></I>                dram_state := idle_11;
+             <FONT COLOR=yellow>elsif</FONT>(cas'EVENT <FONT COLOR=yellow>and</FONT> ras = '0' <FONT COLOR=yellow>and</FONT> cas = '0')
+             <FONT COLOR=yellow>then</FONT>
+                <FONT COLOR=red><I>-- ERROR...! Illegal !CAS event
+</FONT></I>                <FONT COLOR=yellow>assert</FONT> <FONT COLOR=green>false</FONT>
+                   <FONT COLOR=yellow>report</FONT> <FONT COLOR=brown>"[crc_01] Illegal !CAS event...! STOP...!"</FONT>
+                   <FONT COLOR=yellow>severity</FONT> <FONT COLOR=green>warning</FONT>;
+             <FONT COLOR=yellow>end</FONT> <FONT COLOR=yellow>if</FONT>;
+
+          <FONT COLOR=yellow>when</FONT> <FONT COLOR=yellow>others</FONT> =>
+             <FONT COLOR=yellow>null</FONT>;
+
+       <FONT COLOR=yellow>end</FONT> <FONT COLOR=yellow>case</FONT>;  <FONT COLOR=red><I>-- dram_state
+</FONT></I>
+       <FONT COLOR=red><I>-- refresh monitor
+</FONT></I>       <FONT COLOR=yellow>if</FONT>(NOW - last_refresh > t_ref_max)
+       <FONT COLOR=yellow>then</FONT>
+          dram(refresh_adrs) := (<FONT COLOR=yellow>others</FONT> => 'U');
+          refresh_adrs       := refresh_adrs + 1;
+          <FONT COLOR=yellow>if</FONT> assertions <FONT COLOR=yellow>then</FONT>
+             <FONT COLOR=yellow>assert</FONT> <FONT COLOR=green>false</FONT>
+                <FONT COLOR=yellow>report</FONT> <FONT COLOR=brown>"[ref_mon] Too long since last refresh...! Amnesia...!"</FONT>
+                <FONT COLOR=yellow>severity</FONT> <FONT COLOR=green>warning</FONT>;
+          <FONT COLOR=yellow>end</FONT> <FONT COLOR=yellow>if</FONT>;  <FONT COLOR=red><I>-- assertions
+</FONT></I>          last_refresh       := NOW;     <FONT COLOR=red><I>-- or at least it should have been
+</FONT></I>       <FONT COLOR=yellow>end</FONT> <FONT COLOR=yellow>if</FONT>;  <FONT COLOR=red><I>-- refresh monitor
+</FONT></I>
+    <FONT COLOR=yellow>end</FONT> <FONT COLOR=yellow>process</FONT> ras_cas_control;
+
+ <FONT COLOR=yellow>end</FONT> simulate;
+</PRE>
+</BODY>
+</HTML>
+
+ 
