@@ -1,0 +1,96 @@
+
+# cd to or1200_soc/sw/Meansoffreedom
+
+export WORK_ROOT=$PWD
+
+# build binutils
+tar -xf binutils-2.16.1.tar.bz2
+cd binutils-2.16.1
+bzip2 -dc ../binutils_2.16.1_unified.diff_rgd_fixed.bz2 |patch -p1
+cd ..
+mkdir b-b
+mkdir tools
+cd b-b
+../binutils-2.16.1/configure --target=or32-uclinux --prefix=$WORK_ROOT/tools/or32-uclinux
+make all install
+ls $WORK_ROOT/tools/or32-uclinux/bin
+export PATH=$WORK_ROOT/tools/or32-uclinux/bin:$PATH
+cd ..
+
+# first build gcc 
+tar -xf linux-2.6.19.tar.bz2
+cd linux-2.6.19
+bzip2 -dc ../linux_2.6.19_or32_unified_simtested.bz2 |patch -p1
+cd ..
+mkdir tools/or32-uclinux/include
+mkdir tools/or32-uclinux/include/asm
+mkdir tools/or32-uclinux/include/linux
+cp -f -dR linux-2.6.19/include/linux/* $WORK_ROOT/tools/or32-uclinux/include/linux
+cp -f -dR linux-2.6.19/include/asm-or32/* $WORK_ROOT/tools/or32-uclinux/include/asm
+cd $WORK_ROOT/tools/or32-uclinux
+ln -s include sys-include
+cd ../../
+mkdir b-gcc
+cd gcc-3.4.4
+bzip2 -dc ../gcc-3.4.4-or32-unified.diff.bz2 |patch -p1
+cd ../b-gcc
+../gcc-3.4.4/configure --target=or32-uclinux --prefix=$WORK_ROOT/tools/or32-uclinux --with-localprefix=$WORK_ROOT/tools/or32-uclinux/or32-uclinux --with-gnu-as --with-gnu-ld --verbose --enable-languages=c
+make all install
+cd ../linux-2.6.19
+make vmlinux ARCH=or32 CROSS_COMPILE=$WORK_ROOT/tools/or32-uclinux/bin/or32-uclinux-
+cd ..
+
+
+# build uClibc
+tar -xf uClibc-0.9.28.3.tar.bz2
+cd uClibc-0.9.28.3
+bzip2 -dc ../uClibc-0.9.28-or32-unified.bz2 |patch -p1
+cd libc
+bzip2 -dc ../../uClibc-0.9.28-or32-libc-support.bz2 |patch -p1
+cd ..
+ln -s extra/Configs/Config.or32 Config
+export CC=or32-uclinux-gcc
+cp ../.config ./
+make all install
+cd ../
+unset CC
+
+# second build gcc with C++ hack
+cd $WORK_ROOT/tools/or32-uclinux/or32-uclinux/
+ln -s ../include sys-include
+cd $WORK_ROOT/tools/or32-uclinux/or32-uclinux/lib
+cp ../../lib/*.* .
+cp $WORK_ROOT/C_plus_hack/configure.ac $WORK_ROOT/gcc-3.4.4/libstdc++-v3/
+cp $WORK_ROOT/C_plus_hack/strsignal.c $WORK_ROOT/gcc-3.4.4/libiberty/
+
+cd $WORK_ROOT/b-gcc
+../gcc-3.4.4/configure --target=or32-uclinux --prefix=$WORK_ROOT/tools/or32-uclinux --with-localprefix=$WORK_ROOT/tools/or32-uclinux/or32-uclinux --with-gnu-as --with-gnu-ld --verbose --with-newlib --enable-languages=c,c++
+make all install
+# wait for the build to fail
+
+cp $WORK_ROOT/C_plus_hack/ctype_base.h $WORK_ROOT/b-gcc/or32-uclinux/libstdc++-v3/include/or32-uclinux/bits/
+cp $WORK_ROOT/C_plus_hack/ctype_noninline.h $WORK_ROOT/b-gcc/or32-uclinux/libstdc++-v3/include/or32-uclinux/bits/
+make all install
+# wait for the build to fail
+
+cp $WORK_ROOT/C_plus_hack/c++locale.cc $WORK_ROOT/b-gcc/or32-uclinux/libstdc++-v3/src/
+make all install
+# wait for the build to fail
+
+cp /lib/gcc/i686-pc-cygwin/3.4.4/include/c++/i686-pc-cygwin/bits/stdc++.h.gch/* $WORK_ROOT/b-gcc/or32-uclinux/libstdc++-v3/include/or32-uclinux/bits/stdc++.h.gch
+make all install
+
+cd $WORK_ROOT/tools/or32-uclinux/or32-uclinux
+ln -s ../include sys-include
+cd lib
+cp ../../lib/*.* .
+
+# done. test it.
+cd $WORK_ROOT/../ecos_debug
+export PATH=$WORK_ROOT/tools/or32-uclinux/bin:$WORK_ROOT/../ecos-3.0/tools/bin:$PATH
+export ECOS_REPOSITORY=$WORK_ROOT/../ecos-3.0/packages
+ecosconfig new OR1200_SOC redboot
+ecosconfig import ./ecos_debug.ecm
+ecosconfig tree
+make
+

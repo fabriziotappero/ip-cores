@@ -1,0 +1,10 @@
+SET sdffile_suffix .sdf
+SET use_global_timing_dir false
+SET timingfile_dir /user/USERNAME/CreateSDF
+SET timingfile_suffix .ftm
+SET time_scale 1ns
+SET local_path .
+SET vendor MODELSIM_HOME
+SET diagnostics on
+SET vhdl_file testbench.vhd
+SET lwb false
