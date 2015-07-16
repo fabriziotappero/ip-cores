@@ -4,7 +4,7 @@ This repository contains approximately 900 free and open-source VHDL/Verilog IP 
 Cores can be fetched idependently by downloading ony the branch
 you are interested in.
 
-A cool searchable index of the whole repo is available from www.freerangefactory.org.
+A cool searchable index of the whole repo is available from http://freerangefactory.org/cores.html
 
 These are the available branches:
 
