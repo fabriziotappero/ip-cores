@@ -3,7 +3,7 @@
 We love open-source code and we love VHDL/Verilog.
 
 This repository contains approximately 860 free and open-source VHDL/Verilog IP cores. All these 
-cores have been carefully "scraped" from opencores.org using [this open-source Python script script](https://github.com/fabriziotappero/opencores-scraper).
+cores have been carefully "scraped" from opencores.org using [this open-source Python script](https://github.com/fabriziotappero/opencores-scraper).
 
 A cool searchable index of the whole repo is available from www.freerangefactory.org/cores.html
 
