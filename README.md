@@ -890,14 +890,22 @@ These are the available branches:
 
 ### License
 
-This code of each IP core was taken "as is" from the website opencores.org.
-The copyright owner of each IP code is the author of the code itself. For
-more information refer to the index.html or go to the website opencores.org
+The code of each IP core was taken "as is" from the website opencores.org.
+The copyright owner of each IP core is the author of the code itself. For
+more information refer to the website opencores.org
 
-This code is free software; you can redistribute it and/or modify it under the
-terms of the http://www.gnu.org/licenses/gpl.html (GNU General Public License)
-as published by the Free Software Foundation; either version 2 of the License,
-or (at your option) any later version.
+Each branch of this repository is a SEPARATE and DISTINCT project. 
+Although each project is licensed under one of the various open-source 
+licenses, it is necessary to examine the project files to determine the specific 
+terms of that project's license.
+
+#### DISCLAIMER
+
+I am not a lawyer and I do not represent this as something meeting any 
+specific legal requirements. 
+
+IF YOU BELIEVE THAT ANYTHING STORED IN THIS REPOSITORY IS INCORRECT OR IS THE CAUSE
+OF ANY PROBLEM, DO NO HESITATE TO CONTACT ME AND I WILL DO ALL I CAN TO FIX IT.
 
 This code is distributed in the hope that it will be useful, but
 WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
