@@ -18,4 +18,4 @@ A cool searchable index of the whole repo is available from www.freerangefactory
 
 ### License
 
-Please refer to the file index.html and/or to the license notice in the source code files.
+Please refer to the file index.html and/or to the license notice inside any folder.
