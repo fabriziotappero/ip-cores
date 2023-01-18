@@ -1,4 +1,4 @@
-# VHDL/Verilog IP Cores Repository
+# 860 VHDL/Verilog Free IP Cores
 
 Who does not like open-source code and VHDL/Verilog.
 
