@@ -1,14 +1,14 @@
-## VHDL/Verilog IP Cores Repository
+# VHDL/Verilog IP Cores Repository
 
 Who does not like open-source code and VHDL/Verilog.
 
-This repository contains approximately 860 free and open-source VHDL/Verilog IP cores. All these cores have been carefully "scraped" from opencores.org using [this open-source Python script](https://github.com/fabriziotappero/opencores-scraper).
+This repository contains approximately **860 free and open-source VHDL/Verilog IP cores**. All these cores have been carefully "scraped" from *opencores.org* using a quite long python script available [here](https://github.com/fabriziotappero/opencores-scraper).
 
-A cool javascript searchable index of the whole repo is available from:
+A cool javascript searchable index of the whole IP repository is available from:
 
 https://fabriziotappero.github.io/opencores-scraper/cores.html
 
-Cores can be fetched idependently by conveniently downloading only the branch you are interested in. 
+Cores are organized in git branches (there is no master brnach) and can be fetched idependently by conveniently downloading only the branch you are interested in. 
 These are the available branches:
 
     library_random_number_generator_library
